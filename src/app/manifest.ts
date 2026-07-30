@@ -2,13 +2,13 @@ import type { MetadataRoute } from "next";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "Behaviour Hive",
+    name: "The Behaviour Hive",
     short_name: "Behaviour Hive",
-    description: "Behaviour Hive",
+    description: "The Behaviour Hive",
     start_url: "/",
     display: "standalone",
-    background_color: "#ffffff",
-    theme_color: "#4f46e5",
+    background_color: "#E5E1E6",
+    theme_color: "#004F71",
     icons: [
       {
         src: "/icons/icon-192.png",
@@ -21,7 +21,7 @@ export default function manifest(): MetadataRoute.Manifest {
         type: "image/png",
       },
       {
-        src: "/icons/icon-512.png",
+        src: "/icons/icon-512-maskable.png",
         sizes: "512x512",
         type: "image/png",
         purpose: "maskable",

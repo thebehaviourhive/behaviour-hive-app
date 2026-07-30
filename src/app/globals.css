@@ -2,25 +2,35 @@
 
 :root {
   --background: #ffffff;
-  --foreground: #171717;
+  --foreground: #222223;
+
+  /* The Behaviour Hive — brand palette */
+  --color-prussian-blue: #004f71;
+  --color-pastel-blue: #bad9eb;
+  --color-golden-brown: #d78825;
+  --color-safe-ivory: #f1e6b2;
+  --color-neutral-black: #222223;
+  --color-off-white: #e5e1e6;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --color-brand-prussian-blue: var(--color-prussian-blue);
+  --color-brand-pastel-blue: var(--color-pastel-blue);
+  --color-brand-golden-brown: var(--color-golden-brown);
+  --color-brand-safe-ivory: var(--color-safe-ivory);
+  --color-brand-neutral-black: var(--color-neutral-black);
+  --color-brand-off-white: var(--color-off-white);
+
+  --font-heading: var(--font-baloo-2);
+  --font-sans: var(--font-nunito-sans);
+  --font-accent: var(--font-quicksand);
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-nunito-sans), Arial, Helvetica, sans-serif;
 }
