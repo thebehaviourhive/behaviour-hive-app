@@ -7,9 +7,8 @@ import { Button } from "@/components/ui/Button";
 import { TextField } from "@/components/ui/TextField";
 import { createClient } from "@/lib/supabase/client";
 
-export default function RegisterPage() {
+export default function LoginPage() {
   const router = useRouter();
-  const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -21,22 +20,19 @@ export default function RegisterPage() {
     setIsSubmitting(true);
 
     const supabase = createClient();
-    const { error: signUpError } = await supabase.auth.signUp({
+    const { error: signInError } = await supabase.auth.signInWithPassword({
       email,
       password,
-      options: {
-        data: { full_name: fullName },
-      },
     });
 
     setIsSubmitting(false);
 
-    if (signUpError) {
-      setError(signUpError.message);
+    if (signInError) {
+      setError(signInError.message);
       return;
     }
 
-    router.push(`/verify-email?email=${encodeURIComponent(email)}`);
+    router.push("/");
   }
 
   return (
@@ -45,21 +41,12 @@ export default function RegisterPage() {
         <div className="mb-6 flex flex-col items-center gap-3 text-center">
           <BrandMark />
           <h1 className="font-heading text-2xl font-semibold text-brand-neutral-black">
-            Create your account
+            Welcome back
           </h1>
         </div>
 
         <div className="rounded-3xl border border-black/5 bg-white p-6 shadow-sm">
           <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-            <TextField
-              label="Full name"
-              type="text"
-              placeholder="Sarah Murphy"
-              autoComplete="name"
-              required
-              value={fullName}
-              onChange={(e) => setFullName(e.target.value)}
-            />
             <TextField
               label="Email address"
               type="email"
@@ -69,16 +56,23 @@ export default function RegisterPage() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
             />
-            <TextField
-              label="Password"
-              type="password"
-              placeholder="••••••••••"
-              autoComplete="new-password"
-              minLength={8}
-              required
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
+            <div className="flex flex-col gap-1.5">
+              <TextField
+                label="Password"
+                type="password"
+                placeholder="••••••••••"
+                autoComplete="current-password"
+                required
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+              <a
+                href="#"
+                className="self-end text-xs font-semibold text-brand-prussian-blue"
+              >
+                Forgot password?
+              </a>
+            </div>
 
             {error && (
               <p role="alert" className="text-sm font-medium text-red-600">
@@ -87,7 +81,7 @@ export default function RegisterPage() {
             )}
 
             <Button type="submit" disabled={isSubmitting} className="mt-2">
-              {isSubmitting ? "Creating account…" : "Create account"}
+              {isSubmitting ? "Signing in…" : "Sign in"}
             </Button>
           </form>
 
@@ -116,9 +110,9 @@ export default function RegisterPage() {
           </div>
 
           <p className="mt-5 text-center text-sm text-black/60">
-            Already have an account?{" "}
-            <a href="/login" className="font-semibold text-brand-prussian-blue">
-              Sign in
+            Don&apos;t have an account?{" "}
+            <a href="/register" className="font-semibold text-brand-prussian-blue">
+              Register
             </a>
           </p>
         </div>
