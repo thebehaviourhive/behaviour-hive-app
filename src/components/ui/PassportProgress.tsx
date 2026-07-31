@@ -14,7 +14,7 @@ export function PassportProgress({
       <div className="mb-1.5 flex items-center justify-between">
         <span className="text-xs font-semibold text-black/50">
           {sectionLabel}
-          {stepLabel ? ` — ${stepLabel}` : ""}
+          {stepLabel ? ` · ${stepLabel}` : ""}
         </span>
         <span className="text-xs font-semibold text-brand-prussian-blue">
           {percent}%

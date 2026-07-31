@@ -8,6 +8,7 @@ import { TextField } from "@/components/ui/TextField";
 import { PillMultiSelect } from "@/components/ui/PillMultiSelect";
 import { PassportProgress } from "@/components/ui/PassportProgress";
 import { usePassportSectionB } from "@/hooks/usePassportSectionB";
+import { getPassportProgressPercent } from "@/lib/passportProgress";
 
 const HARD_SIGNAL_OPTIONS = [
   { value: "Becoming Quiet" },
@@ -116,7 +117,7 @@ export default function PassportSectionBPage2() {
         <div className="mb-6 flex flex-col items-center gap-3 text-center">
           <BrandMark />
           <h1 className="font-heading text-2xl font-semibold text-brand-neutral-black">
-            How I show I am finding things hard
+            How my child shows they are finding things hard
           </h1>
         </div>
 
@@ -124,10 +125,12 @@ export default function PassportSectionBPage2() {
           <PassportProgress
             sectionLabel="Section 2 of 4"
             stepLabel="Step 2 of 3"
-            percent={42}
+            percent={getPassportProgressPercent(3)}
           />
 
-          <p className="mb-3 text-sm text-black/60">You might see me...</p>
+          <p className="mb-3 text-sm text-black/60">
+            You might see your child...
+          </p>
 
           <PillMultiSelect
             options={HARD_SIGNAL_OPTIONS}

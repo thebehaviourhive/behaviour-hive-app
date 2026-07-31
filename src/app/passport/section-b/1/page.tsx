@@ -8,14 +8,20 @@ import { TextField } from "@/components/ui/TextField";
 import { PillMultiSelect } from "@/components/ui/PillMultiSelect";
 import { PassportProgress } from "@/components/ui/PassportProgress";
 import { usePassportSectionB } from "@/hooks/usePassportSectionB";
+import { getPassportProgressPercent } from "@/lib/passportProgress";
 
 const OKAY_SIGNAL_OPTIONS = [
-  { value: "Calm body" },
+  { value: "Calm Body Language" },
   { value: "Chatting" },
+  { value: "Deep Focus" },
   { value: "Engaged" },
-  { value: "Focused" },
-  { value: "Joining in" },
+  { value: "Eye Contact" },
+  { value: "Interacting" },
+  { value: "Joining in group play" },
+  { value: "Laughing" },
   { value: "Playful" },
+  { value: "Quiet" },
+  { value: "Relaxed Breathing" },
   { value: "Smiling" },
   { value: "Other" },
 ];
@@ -88,7 +94,7 @@ export default function PassportSectionBPage1() {
         <div className="mb-6 flex flex-col items-center gap-3 text-center">
           <BrandMark />
           <h1 className="font-heading text-2xl font-semibold text-brand-neutral-black">
-            How I show I am okay
+            How my child shows they are okay
           </h1>
         </div>
 
@@ -96,10 +102,12 @@ export default function PassportSectionBPage1() {
           <PassportProgress
             sectionLabel="Section 2 of 4"
             stepLabel="Step 1 of 3"
-            percent={33}
+            percent={getPassportProgressPercent(2)}
           />
 
-          <p className="mb-3 text-sm text-black/60">You might see me...</p>
+          <p className="mb-3 text-sm text-black/60">
+            You might see your child...
+          </p>
 
           <PillMultiSelect
             options={OKAY_SIGNAL_OPTIONS}

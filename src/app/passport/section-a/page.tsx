@@ -9,6 +9,7 @@ import { PillMultiSelect } from "@/components/ui/PillMultiSelect";
 import { PassportProgress } from "@/components/ui/PassportProgress";
 import { createClient } from "@/lib/supabase/client";
 import { useRequireRole } from "@/hooks/useRequireRole";
+import { getPassportProgressPercent } from "@/lib/passportProgress";
 
 const DIAGNOSIS_OPTIONS: { value: string; fullName: string | null }[] = [
   { value: "ADHD", fullName: "Attention Deficit Hyperactivity Disorder" },
@@ -162,7 +163,10 @@ export default function PassportSectionAPage() {
         </div>
 
         <div className="rounded-3xl border border-black/5 bg-white p-6 shadow-sm">
-          <PassportProgress sectionLabel="Section 1 of 4" percent={25} />
+          <PassportProgress
+            sectionLabel="Section 1 of 4"
+            percent={getPassportProgressPercent(1)}
+          />
 
           <form onSubmit={handleSaveAndContinue} className="flex flex-col gap-4">
             <TextField

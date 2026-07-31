@@ -8,6 +8,7 @@ import { TextField } from "@/components/ui/TextField";
 import { PillMultiSelect } from "@/components/ui/PillMultiSelect";
 import { PassportProgress } from "@/components/ui/PassportProgress";
 import { usePassportSectionB } from "@/hooks/usePassportSectionB";
+import { getPassportProgressPercent } from "@/lib/passportProgress";
 
 const HARD_TRIGGER_OPTIONS = [
   { value: "Crowds" },
@@ -120,7 +121,7 @@ export default function PassportSectionBPage3() {
         <div className="mb-6 flex flex-col items-center gap-3 text-center">
           <BrandMark />
           <h1 className="font-heading text-2xl font-semibold text-brand-neutral-black">
-            What can make things hard
+            What can make things hard for my child
           </h1>
         </div>
 
@@ -128,7 +129,7 @@ export default function PassportSectionBPage3() {
           <PassportProgress
             sectionLabel="Section 2 of 4"
             stepLabel="Step 3 of 3"
-            percent={50}
+            percent={getPassportProgressPercent(4)}
           />
 
           <p className="mb-3 text-sm text-black/60">
