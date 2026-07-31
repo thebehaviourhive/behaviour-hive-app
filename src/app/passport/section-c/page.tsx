@@ -1,21 +1,21 @@
 import Link from "next/link";
 import { BrandMark } from "@/components/ui/BrandMark";
 
-export default function PassportSectionBPage() {
+export default function PassportSectionCPage() {
   return (
     <main className="flex min-h-full flex-1 items-center justify-center bg-brand-off-white/40 px-4 py-10">
       <div className="w-full max-w-sm text-center">
         <div className="mb-6 flex flex-col items-center gap-3">
           <BrandMark />
           <h1 className="font-heading text-2xl font-semibold text-brand-neutral-black">
-            Section 2: Sensory Profile
+            Section 3: Communication
           </h1>
         </div>
 
         <div className="rounded-3xl border border-black/5 bg-white p-6 shadow-sm">
           <p className="text-sm leading-relaxed text-black/60">
             This section hasn&apos;t been built yet — this is a placeholder
-            landing page. Section A has already been saved.
+            landing page. Sections A and B have already been saved.
           </p>
 
           <Link

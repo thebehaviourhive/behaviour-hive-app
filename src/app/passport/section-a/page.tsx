@@ -5,6 +5,8 @@ import { useEffect, useState, type FormEvent } from "react";
 import { BrandMark } from "@/components/ui/BrandMark";
 import { Button } from "@/components/ui/Button";
 import { TextField } from "@/components/ui/TextField";
+import { PillMultiSelect } from "@/components/ui/PillMultiSelect";
+import { PassportProgress } from "@/components/ui/PassportProgress";
 import { createClient } from "@/lib/supabase/client";
 import { useRequireRole } from "@/hooks/useRequireRole";
 
@@ -121,7 +123,7 @@ export default function PassportSectionAPage() {
       return;
     }
 
-    router.push("/passport/section-b");
+    router.push("/passport/section-b/1");
   }
 
   async function handleSaveAndExit() {
@@ -160,19 +162,7 @@ export default function PassportSectionAPage() {
         </div>
 
         <div className="rounded-3xl border border-black/5 bg-white p-6 shadow-sm">
-          <div className="mb-5">
-            <div className="mb-1.5 flex items-center justify-between">
-              <span className="text-xs font-semibold text-black/50">
-                Section 1 of 4
-              </span>
-              <span className="text-xs font-semibold text-brand-prussian-blue">
-                25%
-              </span>
-            </div>
-            <div className="h-1.5 w-full overflow-hidden rounded-full bg-black/10">
-              <div className="h-full w-1/4 rounded-full bg-brand-prussian-blue" />
-            </div>
-          </div>
+          <PassportProgress sectionLabel="Section 1 of 4" percent={25} />
 
           <form onSubmit={handleSaveAndContinue} className="flex flex-col gap-4">
             <TextField
@@ -218,26 +208,11 @@ export default function PassportSectionAPage() {
               <label className="text-sm font-semibold text-brand-neutral-black">
                 Diagnosis
               </label>
-              <div className="flex flex-wrap gap-2">
-                {DIAGNOSIS_OPTIONS.map((option) => {
-                  const isSelected = diagnoses.includes(option.value);
-                  return (
-                    <button
-                      key={option.value}
-                      type="button"
-                      title={option.fullName ?? option.value}
-                      onClick={() => toggleDiagnosis(option.value)}
-                      className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors ${
-                        isSelected
-                          ? "border-brand-prussian-blue bg-brand-pastel-blue/30 text-brand-prussian-blue"
-                          : "border-black/10 bg-white text-black/60 hover:bg-black/[0.02]"
-                      }`}
-                    >
-                      {option.value}
-                    </button>
-                  );
-                })}
-              </div>
+              <PillMultiSelect
+                options={DIAGNOSIS_OPTIONS}
+                selected={diagnoses}
+                onToggle={toggleDiagnosis}
+              />
 
               {diagnoses.includes("Other") && (
                 <TextField
