@@ -1,11 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { BottomNav } from "@/components/ui/BottomNav";
 import { createClient } from "@/lib/supabase/client";
-import { getPostAuthRedirect } from "@/lib/roleRedirect";
+import { useRequireRole } from "@/hooks/useRequireRole";
 
 interface PassportSummary {
   childName: string;
@@ -14,55 +13,64 @@ interface PassportSummary {
   completionPercent: number;
 }
 
-export default function ParentDashboardPage() {
-  const router = useRouter();
-  const [isReady, setIsReady] = useState(false);
-  const [firstName, setFirstName] = useState("there");
+type PassportStatus = "not_started" | "in_progress" | "complete";
 
-  // No passport creation flow exists yet, so there is nowhere to fetch a
-  // real passport from — this always reflects the "not started" state
-  // until that flow and its data source are built.
+export default function ParentDashboardPage() {
+  const { user, isReady } = useRequireRole("parent");
+  const [firstName, setFirstName] = useState("there");
+  const [passportStatus, setPassportStatus] =
+    useState<PassportStatus>("not_started");
+  const [isLoadingPassport, setIsLoadingPassport] = useState(true);
+
+  // Sections B-D (and therefore age/diagnosis display + real completion %)
+  // don't exist yet, so a fully "complete" passport can't be reached yet —
+  // this stays null until that's built, regardless of passportStatus.
   const [passport] = useState<PassportSummary | null>(null);
 
   useEffect(() => {
+    if (!user) return;
+
+    const fullName = user.user_metadata?.full_name as string | undefined;
+    if (fullName) {
+      setFirstName(fullName.split(" ")[0]);
+    }
+
     let isMounted = true;
 
-    async function checkAccess() {
+    async function loadPassportStatus() {
       const supabase = createClient();
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+      const { data } = await supabase
+        .from("passports")
+        .select("passport_status")
+        .eq("user_id", user!.id)
+        .maybeSingle();
 
       if (!isMounted) return;
 
-      if (!user) {
-        router.replace("/login");
-        return;
-      }
-
-      const role = user.user_metadata?.role;
-      if (role !== "parent") {
-        router.replace(getPostAuthRedirect(role));
-        return;
-      }
-
-      const fullName = user.user_metadata?.full_name as string | undefined;
-      if (fullName) {
-        setFirstName(fullName.split(" ")[0]);
-      }
-
-      setIsReady(true);
+      setPassportStatus((data?.passport_status as PassportStatus) ?? "not_started");
+      setIsLoadingPassport(false);
     }
 
-    checkAccess();
+    loadPassportStatus();
     return () => {
       isMounted = false;
     };
-  }, [router]);
+  }, [user]);
 
-  if (!isReady) {
+  if (!isReady || isLoadingPassport) {
     return null;
   }
+
+  const resumeHref =
+    passportStatus === "not_started" ? "/passport/welcome" : "/passport/section-a";
+  const morningCardText =
+    passportStatus === "not_started"
+      ? "Complete your child's passport first"
+      : "Resume passport creation";
+  const passportCardText =
+    passportStatus === "not_started"
+      ? "Build your child's passport"
+      : "Resume passport creation";
 
   return (
     <div className="flex min-h-full flex-1 flex-col bg-brand-off-white/40 pb-24">
@@ -98,7 +106,7 @@ export default function ParentDashboardPage() {
           </div>
         ) : (
           <Link
-            href="/passport/section-a"
+            href={resumeHref}
             className="flex items-center gap-3 rounded-2xl border border-black/5 bg-white p-4 shadow-sm transition-colors hover:bg-black/[0.02]"
           >
             <span
@@ -109,7 +117,7 @@ export default function ParentDashboardPage() {
             </span>
             <div className="flex-1">
               <p className="text-sm font-semibold text-brand-neutral-black">
-                Complete your child&apos;s passport first
+                {morningCardText}
               </p>
               <p className="text-xs text-black/50">
                 We&apos;ll use it to power the morning check-in
@@ -154,7 +162,7 @@ export default function ParentDashboardPage() {
             </div>
           ) : (
             <Link
-              href="/passport/section-a"
+              href={resumeHref}
               className="flex items-center gap-3 rounded-2xl border border-dashed border-black/15 bg-white p-4 transition-colors hover:bg-black/[0.02]"
             >
               <span
@@ -165,7 +173,7 @@ export default function ParentDashboardPage() {
               </span>
               <div className="flex-1">
                 <p className="text-sm font-semibold text-brand-neutral-black">
-                  Build your child&apos;s passport
+                  {passportCardText}
                 </p>
                 <p className="text-xs text-black/50">
                   Takes about 10 minutes, save and return anytime
