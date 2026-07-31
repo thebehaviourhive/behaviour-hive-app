@@ -69,7 +69,7 @@ export default function ConsentPage() {
       return;
     }
 
-    router.push("/welcome");
+    router.push("/parent-dashboard");
   }
 
   if (!isReady) {

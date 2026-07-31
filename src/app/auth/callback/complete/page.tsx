@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { getPostAuthRedirect } from "@/lib/roleRedirect";
 
 function redirectToLoginWithError(
   router: ReturnType<typeof useRouter>,
@@ -54,8 +55,7 @@ export default function AuthCallbackCompletePage() {
         return;
       }
 
-      const hasRole = Boolean(data.user.user_metadata?.role);
-      router.replace(hasRole ? "/dashboard" : "/role-select");
+      router.replace(getPostAuthRedirect(data.user.user_metadata?.role));
     }
 
     handleHashTokens();

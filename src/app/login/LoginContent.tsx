@@ -6,6 +6,7 @@ import { BrandMark } from "@/components/ui/BrandMark";
 import { Button } from "@/components/ui/Button";
 import { TextField } from "@/components/ui/TextField";
 import { createClient } from "@/lib/supabase/client";
+import { getPostAuthRedirect } from "@/lib/roleRedirect";
 
 export function LoginContent() {
   const router = useRouter();
@@ -24,7 +25,7 @@ export function LoginContent() {
     setIsSubmitting(true);
 
     const supabase = createClient();
-    const { error: signInError } = await supabase.auth.signInWithPassword({
+    const { data, error: signInError } = await supabase.auth.signInWithPassword({
       email,
       password,
     });
@@ -36,7 +37,7 @@ export function LoginContent() {
       return;
     }
 
-    router.push("/");
+    router.push(getPostAuthRedirect(data.user?.user_metadata?.role));
   }
 
   return (

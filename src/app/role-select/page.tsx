@@ -5,6 +5,7 @@ import { useState } from "react";
 import { BrandMark } from "@/components/ui/BrandMark";
 import { Button } from "@/components/ui/Button";
 import { createClient } from "@/lib/supabase/client";
+import { getPostAuthRedirect } from "@/lib/roleRedirect";
 
 type Role = "parent" | "class_teacher" | "institution_admin" | "clinician";
 
@@ -76,16 +77,10 @@ export default function RoleSelectPage() {
       return;
     }
 
-    if (selectedRole === "clinician") {
-      // Clinician onboarding flow isn't built yet — placeholder landing.
-      router.push("/dashboard");
-      return;
-    }
-
-    // Class teacher and institution admin have their own dedicated
-    // onboarding entry points (invite acceptance / institution
-    // registration) not yet built — send to home for now.
-    router.push("/");
+    // Class teacher, institution admin, and clinician have their own
+    // dedicated onboarding entry points not yet built — land on the
+    // same placeholder dashboard a returning login would send them to.
+    router.push(getPostAuthRedirect(selectedRole));
   }
 
   return (
