@@ -60,6 +60,14 @@ function getGreeting(): string {
   return "Welcome back";
 }
 
+function formatTime(isoString: string): string {
+  return new Date(isoString).toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  });
+}
+
 export default function ParentDashboardPage() {
   const { user, isReady } = useRequireRole("parent");
   const [firstName, setFirstName] = useState("there");
@@ -68,6 +76,7 @@ export default function ParentDashboardPage() {
   const [resumeHref, setResumeHref] = useState("/passport/welcome");
   const [isLoadingPassport, setIsLoadingPassport] = useState(true);
   const [hasCheckedInToday, setHasCheckedInToday] = useState(false);
+  const [checkedInAt, setCheckedInAt] = useState<string | null>(null);
   const [isPassportCardDismissed, setIsPassportCardDismissed] = useState(false);
 
   useEffect(() => {
@@ -121,9 +130,10 @@ export default function ParentDashboardPage() {
           .maybeSingle(),
         supabase
           .from("morning_checkins")
-          .select("id")
+          .select("submitted_at")
           .eq("user_id", user!.id)
           .gte("checked_in_at", startOfToday.toISOString())
+          .order("checked_in_at", { ascending: false })
           .limit(1)
           .maybeSingle(),
       ]);
@@ -136,6 +146,7 @@ export default function ParentDashboardPage() {
       setChildName(passportRow?.child_name || "your child");
       setPassportStatus(status);
       setHasCheckedInToday(Boolean(todaysCheckin));
+      setCheckedInAt(todaysCheckin?.submitted_at ?? null);
       setResumeHref(
         getPassportResumeHref({
           passportStatus: status,
@@ -193,6 +204,7 @@ export default function ParentDashboardPage() {
           childName={childName}
           isBefore1pm={isBefore1pm}
           hasCheckedInToday={hasCheckedInToday}
+          checkedInAt={checkedInAt}
           hasTeacherUpdateToday={HAS_TEACHER_UPDATE_TODAY}
           teacherUpdate={DUMMY_TEACHER_UPDATE}
         />
@@ -284,21 +296,26 @@ function CheckInCard({
   childName,
   isBefore1pm,
   hasCheckedInToday,
+  checkedInAt,
   hasTeacherUpdateToday,
   teacherUpdate,
 }: {
   childName: string;
   isBefore1pm: boolean;
   hasCheckedInToday: boolean;
+  checkedInAt: string | null;
   hasTeacherUpdateToday: boolean;
   teacherUpdate: TeacherUpdateData;
 }) {
   if (isBefore1pm && !hasCheckedInToday) {
     return (
-      <div className="flex items-center gap-3 rounded-2xl border-l-4 border-brand-golden-brown bg-brand-safe-ivory/20 p-4 shadow-sm">
+      <Link
+        href="/morning-checkin"
+        className="flex items-center gap-3 rounded-2xl border-l-4 border-brand-golden-brown bg-brand-safe-ivory/30 p-4 shadow-md transition-transform active:scale-[0.99]"
+      >
         <span
           aria-hidden
-          className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-brand-golden-brown/15 text-lg"
+          className="flex h-10 w-10 flex-shrink-0 animate-pulse items-center justify-center rounded-full bg-brand-golden-brown/20 text-lg"
         >
           ☀️
         </span>
@@ -310,13 +327,13 @@ function CheckInCard({
             Takes 15 seconds — let the teacher know before the day begins
           </p>
         </div>
-        <Link
-          href="/morning-checkin"
+        <span
+          aria-hidden
           className="flex-shrink-0 rounded-full bg-brand-golden-brown px-4 py-2 text-xs font-semibold text-white"
         >
           Check in now
-        </Link>
-      </div>
+        </span>
+      </Link>
     );
   }
 
@@ -333,7 +350,11 @@ function CheckInCard({
           <p className="text-sm font-semibold text-brand-neutral-black">
             Morning check-in sent
           </p>
-          <p className="text-xs text-black/50">Your teacher has been updated for today</p>
+          <p className="text-xs text-black/50">
+            {checkedInAt
+              ? `Sent to your teacher at ${formatTime(checkedInAt)}`
+              : "Your teacher has been updated for today"}
+          </p>
         </div>
       </div>
     );
