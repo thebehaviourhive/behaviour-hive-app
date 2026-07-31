@@ -113,7 +113,7 @@ export default function PassportSectionCPage() {
       return;
     }
 
-    router.push("/passport/section-d");
+    router.push("/passport/section-d/1");
   }
 
   async function handleSaveAndExit() {
