@@ -3,7 +3,7 @@
 import { useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { BrandMark } from "@/components/ui/BrandMark";
-import { createClient } from "@/lib/supabase/client";
+import { createSignUpClient } from "@/lib/supabase/signup-client";
 
 export function VerifyEmailContent() {
   const searchParams = useSearchParams();
@@ -17,7 +17,7 @@ export function VerifyEmailContent() {
     if (resendState === "sending") return;
     setResendState("sending");
 
-    const supabase = createClient();
+    const supabase = createSignUpClient();
     const { error } = await supabase.auth.resend({
       type: "signup",
       email,
