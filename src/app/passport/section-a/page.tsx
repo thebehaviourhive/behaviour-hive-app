@@ -13,8 +13,8 @@ import { getPassportProgressPercent } from "@/lib/passportProgress";
 
 const DIAGNOSIS_OPTIONS: { value: string; fullName: string | null }[] = [
   { value: "ADHD", fullName: "Attention Deficit Hyperactivity Disorder" },
+  { value: "Anxiety", fullName: null },
   { value: "ASD", fullName: "Autism Spectrum Disorder" },
-  { value: "Autism", fullName: null },
   { value: "Apraxia", fullName: null },
   { value: "DLD", fullName: "Developmental Language Disorder" },
   { value: "DMDD", fullName: "Disruptive Mood Dysregulation Disorder" },
@@ -25,6 +25,7 @@ const DIAGNOSIS_OPTIONS: { value: string; fullName: string | null }[] = [
   { value: "FASD", fullName: "Foetal Alcohol Spectrum Disorder" },
   { value: "GDD", fullName: "Global Developmental Delay" },
   { value: "Intellectual Disability", fullName: null },
+  { value: "No Formal Diagnosis", fullName: null },
   { value: "ODD", fullName: "Oppositional Defiant Disorder" },
   { value: "PDA", fullName: "Pathological Demand Avoidance" },
   { value: "Physical Disability", fullName: null },
