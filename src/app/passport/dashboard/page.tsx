@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { BottomNav } from "@/components/ui/BottomNav";
+import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { createClient } from "@/lib/supabase/client";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { getPassportResumeHref } from "@/lib/getPassportResumeHref";
@@ -29,9 +30,10 @@ interface PassportSummaryData {
   sensoryAvoids: string[] | null;
 }
 
-function calculateAge(dateOfBirth: string | null): number | null {
+function calculateAge(dateOfBirth: string | null | undefined): number | null {
   if (!dateOfBirth) return null;
   const dob = new Date(dateOfBirth);
+  if (Number.isNaN(dob.getTime())) return null;
   const today = new Date();
   let age = today.getFullYear() - dob.getFullYear();
   const monthDiff = today.getMonth() - dob.getMonth();
@@ -41,15 +43,33 @@ function calculateAge(dateOfBirth: string | null): number | null {
   return age;
 }
 
-function joinList(items: string[] | null | undefined, max = 3): string {
-  if (!items || items.length === 0) return "Not specified";
+// Defensive against non-array/empty values — Supabase should always return
+// either an array or null for these columns, but a missing field should
+// never be able to crash the summary render.
+function joinList(items: unknown, max = 3): string {
+  if (!Array.isArray(items) || items.length === 0) return "Not specified";
   const shown = items.slice(0, max).join(", ");
   return items.length > max ? `${shown} +${items.length - max} more` : shown;
 }
 
-function truncateText(text: string | null | undefined, max = 90): string {
-  if (!text) return "Not specified";
+function truncateText(text: unknown, max = 90): string {
+  if (typeof text !== "string" || text.length === 0) return "Not specified";
   return text.length > max ? `${text.slice(0, max)}…` : text;
+}
+
+function formatDiagnosisText(
+  diagnoses: unknown,
+  diagnosisOther: unknown
+): string {
+  if (!Array.isArray(diagnoses) || diagnoses.length === 0) {
+    return "Not specified";
+  }
+  const hasOther = diagnoses.includes("Other") && typeof diagnosisOther === "string" && diagnosisOther;
+  if (!hasOther) {
+    return joinList(diagnoses);
+  }
+  const rest = diagnoses.filter((d) => d !== "Other");
+  return rest.length > 0 ? `${joinList(rest)}, ${diagnosisOther}` : String(diagnosisOther);
 }
 
 export default function PassportDashboardPage() {
@@ -57,15 +77,21 @@ export default function PassportDashboardPage() {
   const { user, isReady: isRoleReady } = useRequireRole("parent");
   const [summary, setSummary] = useState<PassportSummaryData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!user) return;
     let isMounted = true;
 
     async function load() {
-      const supabase = createClient();
-      const [{ data: passport }, { data: sectionB }, { data: sectionC }, { data: sectionD }] =
-        await Promise.all([
+      try {
+        const supabase = createClient();
+        const [
+          { data: passport },
+          { data: sectionB },
+          { data: sectionC },
+          { data: sectionD },
+        ] = await Promise.all([
           supabase
             .from("passports")
             .select(
@@ -94,78 +120,128 @@ export default function PassportDashboardPage() {
             .maybeSingle(),
         ]);
 
-      if (!isMounted) return;
+        if (!isMounted) return;
 
-      const resumeHref = getPassportResumeHref({
-        passportStatus:
-          (passport?.passport_status as "not_started" | "in_progress" | "complete" | null) ??
-          null,
-        sectionAComplete: Boolean(passport?.section_a_complete),
-        sectionB: sectionB
-          ? {
-              okaySignals: sectionB.okay_signals,
-              hardSignals: sectionB.hard_signals,
-              hardTriggers: sectionB.hard_triggers,
-              complete: sectionB.section_b_complete,
-            }
-          : null,
-        sectionCComplete: Boolean(sectionC?.section_c_complete),
-        sectionD: sectionD
-          ? {
-              beforeBehaviour: sectionD.before_behaviour,
-              duringDistress: sectionD.during_distress,
-              afterDistress: sectionD.after_distress,
-              complete: sectionD.section_d_complete,
-            }
-          : null,
-      });
+        const resumeHref = getPassportResumeHref({
+          passportStatus:
+            (passport?.passport_status as "not_started" | "in_progress" | "complete" | null) ??
+            null,
+          sectionAComplete: Boolean(passport?.section_a_complete),
+          sectionB: sectionB
+            ? {
+                okaySignals: sectionB.okay_signals,
+                hardSignals: sectionB.hard_signals,
+                hardTriggers: sectionB.hard_triggers,
+                complete: sectionB.section_b_complete,
+              }
+            : null,
+          sectionCComplete: Boolean(sectionC?.section_c_complete),
+          sectionD: sectionD
+            ? {
+                beforeBehaviour: sectionD.before_behaviour,
+                duringDistress: sectionD.during_distress,
+                afterDistress: sectionD.after_distress,
+                complete: sectionD.section_d_complete,
+              }
+            : null,
+        });
 
-      if (passport?.passport_status !== "complete") {
-        router.replace(resumeHref);
-        return;
+        // Compare against the SAME resume calculation used everywhere else,
+        // rather than the raw passport_status flag in isolation. If every
+        // section is actually complete, resumeHref already resolves back to
+        // this page — redirecting there in that case would just replace
+        // this route with itself and never render, leaving a blank screen
+        // that persists across reloads (the flag and the real per-section
+        // completion state can disagree, e.g. right after editing a
+        // completed section).
+        if (resumeHref !== "/passport/dashboard") {
+          router.replace(resumeHref);
+          return;
+        }
+
+        setSummary({
+          childName: (passport?.child_name as string | null) || "Your child",
+          age: calculateAge(passport?.date_of_birth),
+          school: (passport?.school as string | null) ?? null,
+          importantPeople: (passport?.important_people as string | null) ?? null,
+          diagnoses: Array.isArray(passport?.diagnoses) ? passport.diagnoses : null,
+          diagnosisOther: (passport?.diagnosis_other as string | null) ?? null,
+          okaySignals: Array.isArray(sectionB?.okay_signals) ? sectionB.okay_signals : null,
+          hardSignals: Array.isArray(sectionB?.hard_signals) ? sectionB.hard_signals : null,
+          hardTriggers: Array.isArray(sectionB?.hard_triggers) ? sectionB.hard_triggers : null,
+          communicationMethods: Array.isArray(sectionC?.communication_methods)
+            ? sectionC.communication_methods
+            : null,
+          showsHappy: (sectionC?.shows_happy as string | null) ?? null,
+          showsAnxious: (sectionC?.shows_anxious as string | null) ?? null,
+          phrasesToAvoid: (sectionC?.phrases_to_avoid as string | null) ?? null,
+          beforeBehaviour: Array.isArray(sectionD?.before_behaviour)
+            ? sectionD.before_behaviour
+            : null,
+          duringDistress: Array.isArray(sectionD?.during_distress)
+            ? sectionD.during_distress
+            : null,
+          afterDistress: Array.isArray(sectionD?.after_distress)
+            ? sectionD.after_distress
+            : null,
+          sensorySeeks: Array.isArray(sectionD?.sensory_seeks) ? sectionD.sensory_seeks : null,
+          sensoryAvoids: Array.isArray(sectionD?.sensory_avoids)
+            ? sectionD.sensory_avoids
+            : null,
+        });
+        setIsLoading(false);
+      } catch (err) {
+        if (!isMounted) return;
+        console.error("Failed to load passport dashboard:", err);
+        setLoadError(
+          "We couldn't load your child's passport. Please check your connection and try again."
+        );
+        setIsLoading(false);
       }
-
-      setSummary({
-        childName: passport.child_name ?? "Your child",
-        age: calculateAge(passport.date_of_birth),
-        school: passport.school,
-        importantPeople: passport.important_people,
-        diagnoses: passport.diagnoses,
-        diagnosisOther: passport.diagnosis_other,
-        okaySignals: sectionB?.okay_signals ?? null,
-        hardSignals: sectionB?.hard_signals ?? null,
-        hardTriggers: sectionB?.hard_triggers ?? null,
-        communicationMethods: sectionC?.communication_methods ?? null,
-        showsHappy: sectionC?.shows_happy ?? null,
-        showsAnxious: sectionC?.shows_anxious ?? null,
-        phrasesToAvoid: sectionC?.phrases_to_avoid ?? null,
-        beforeBehaviour: sectionD?.before_behaviour ?? null,
-        duringDistress: sectionD?.during_distress ?? null,
-        afterDistress: sectionD?.after_distress ?? null,
-        sensorySeeks: sectionD?.sensory_seeks ?? null,
-        sensoryAvoids: sectionD?.sensory_avoids ?? null,
-      });
-      setIsLoading(false);
     }
 
     load();
     return () => {
       isMounted = false;
     };
+    // Re-fetches fresh on every mount — this page is always reached via a
+    // real navigation (bottom nav / edit-and-return), never kept alive
+    // across visits, so there is no stale-data path to guard against here.
   }, [user, router]);
 
-  if (!isRoleReady || isLoading || !summary) {
+  if (!isRoleReady || isLoading) {
     return null;
   }
 
-  const diagnosisText =
-    summary.diagnoses && summary.diagnoses.length > 0
-      ? summary.diagnoses.includes("Other") && summary.diagnosisOther
-        ? joinList(summary.diagnoses.filter((d) => d !== "Other")) +
-          (summary.diagnoses.length > 1 ? ", " : "") +
-          summary.diagnosisOther
-        : joinList(summary.diagnoses)
-      : "Not specified";
+  if (loadError) {
+    return (
+      <div className="flex min-h-full flex-1 flex-col items-center justify-center gap-4 bg-brand-off-white/40 px-4 text-center">
+        <p className="text-sm text-black/60">{loadError}</p>
+        <button
+          type="button"
+          onClick={() => window.location.reload()}
+          className="rounded-full bg-brand-prussian-blue px-5 py-2.5 text-sm font-semibold text-white"
+        >
+          Try again
+        </button>
+      </div>
+    );
+  }
+
+  if (!summary) {
+    return null;
+  }
+
+  const diagnosisText = formatDiagnosisText(summary.diagnoses, summary.diagnosisOther);
+
+  const fallbackCard = (
+    <section className="rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
+      <p className="text-sm text-black/60">
+        This section couldn&apos;t be displayed. Your saved answers are safe —
+        try reloading the page.
+      </p>
+    </section>
+  );
 
   return (
     <div className="flex min-h-full flex-1 flex-col bg-brand-off-white/40 pb-24">
@@ -182,39 +258,50 @@ export default function PassportDashboardPage() {
       </header>
 
       <main className="flex flex-col gap-4 px-4 pt-4">
-        <SummaryCard title="About Your Child" editHref="/passport/section-a">
-          <SummaryLine label="Age" value={summary.age !== null ? `${summary.age}` : "Not specified"} />
-          <SummaryLine label="School" value={summary.school || "Not specified"} />
-          <SummaryLine label="Diagnosis" value={diagnosisText} />
-          <SummaryLine
-            label="Important people"
-            value={summary.importantPeople || "Not specified"}
-          />
-        </SummaryCard>
+        <ErrorBoundary fallback={fallbackCard}>
+          <SummaryCard title="About Your Child" editHref="/passport/section-a">
+            <SummaryLine
+              label="Age"
+              value={summary.age !== null ? `${summary.age}` : "Not specified"}
+            />
+            <SummaryLine label="School" value={summary.school || "Not specified"} />
+            <SummaryLine label="Diagnosis" value={diagnosisText} />
+            <SummaryLine
+              label="Important people"
+              value={summary.importantPeople || "Not specified"}
+            />
+          </SummaryCard>
+        </ErrorBoundary>
 
-        <SummaryCard title="Understanding My Child" editHref="/passport/section-b/1">
-          <SummaryLine label="Shows they're okay" value={joinList(summary.okaySignals)} />
-          <SummaryLine label="Finds it hard when" value={joinList(summary.hardSignals)} />
-          <SummaryLine label="Common triggers" value={joinList(summary.hardTriggers)} />
-        </SummaryCard>
+        <ErrorBoundary fallback={fallbackCard}>
+          <SummaryCard title="Understanding My Child" editHref="/passport/section-b/1">
+            <SummaryLine label="Shows they're okay" value={joinList(summary.okaySignals)} />
+            <SummaryLine label="Finds it hard when" value={joinList(summary.hardSignals)} />
+            <SummaryLine label="Common triggers" value={joinList(summary.hardTriggers)} />
+          </SummaryCard>
+        </ErrorBoundary>
 
-        <SummaryCard title="How my Child Communicates" editHref="/passport/section-c">
-          <SummaryLine
-            label="Communication methods"
-            value={joinList(summary.communicationMethods)}
-          />
-          <SummaryLine label="Shows happy" value={truncateText(summary.showsHappy)} />
-          <SummaryLine label="Shows anxious" value={truncateText(summary.showsAnxious)} />
-          <SummaryLine label="Avoid" value={truncateText(summary.phrasesToAvoid)} />
-        </SummaryCard>
+        <ErrorBoundary fallback={fallbackCard}>
+          <SummaryCard title="How my Child Communicates" editHref="/passport/section-c">
+            <SummaryLine
+              label="Communication methods"
+              value={joinList(summary.communicationMethods)}
+            />
+            <SummaryLine label="Shows happy" value={truncateText(summary.showsHappy)} />
+            <SummaryLine label="Shows anxious" value={truncateText(summary.showsAnxious)} />
+            <SummaryLine label="Avoid" value={truncateText(summary.phrasesToAvoid)} />
+          </SummaryCard>
+        </ErrorBoundary>
 
-        <SummaryCard title="How I Support my Child" editHref="/passport/section-d/1">
-          <SummaryLine label="Helps before" value={joinList(summary.beforeBehaviour)} />
-          <SummaryLine label="Helps during" value={joinList(summary.duringDistress)} />
-          <SummaryLine label="Helps after" value={joinList(summary.afterDistress)} />
-          <SummaryLine label="Sensory seeks" value={joinList(summary.sensorySeeks)} />
-          <SummaryLine label="Sensory avoids" value={joinList(summary.sensoryAvoids)} />
-        </SummaryCard>
+        <ErrorBoundary fallback={fallbackCard}>
+          <SummaryCard title="How I Support my Child" editHref="/passport/section-d/1">
+            <SummaryLine label="Helps before" value={joinList(summary.beforeBehaviour)} />
+            <SummaryLine label="Helps during" value={joinList(summary.duringDistress)} />
+            <SummaryLine label="Helps after" value={joinList(summary.afterDistress)} />
+            <SummaryLine label="Sensory seeks" value={joinList(summary.sensorySeeks)} />
+            <SummaryLine label="Sensory avoids" value={joinList(summary.sensoryAvoids)} />
+          </SummaryCard>
+        </ErrorBoundary>
       </main>
 
       <BottomNav active="passport" passportHref="/passport/dashboard" />

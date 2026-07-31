@@ -48,6 +48,13 @@ export default function PassportSectionAPage() {
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
+  // Tracks the passport's CURRENT status so saving this section never
+  // downgrades an already-complete passport back to "in_progress" — see
+  // buildPayload().
+  const [currentPassportStatus, setCurrentPassportStatus] = useState<
+    "not_started" | "in_progress" | "complete"
+  >("not_started");
+
   useEffect(() => {
     if (!user) return;
 
@@ -58,7 +65,7 @@ export default function PassportSectionAPage() {
       const { data } = await supabase
         .from("passports")
         .select(
-          "child_name, date_of_birth, school, important_people, diagnoses, diagnosis_other"
+          "child_name, date_of_birth, school, important_people, diagnoses, diagnosis_other, passport_status"
         )
         .eq("user_id", user!.id)
         .maybeSingle();
@@ -74,6 +81,10 @@ export default function PassportSectionAPage() {
       setImportantPeople(data.important_people ?? "");
       setDiagnoses(data.diagnoses ?? []);
       setDiagnosisOther(data.diagnosis_other ?? "");
+      setCurrentPassportStatus(
+        (data.passport_status as "not_started" | "in_progress" | "complete" | null) ??
+          "not_started"
+      );
       setIsLoadingExisting(false);
     }
 
@@ -98,7 +109,13 @@ export default function PassportSectionAPage() {
       important_people: importantPeople || null,
       diagnoses: diagnoses.length > 0 ? diagnoses : null,
       diagnosis_other: diagnoses.includes("Other") ? diagnosisOther || null : null,
-      passport_status: "in_progress" as const,
+      // Never downgrade an already-complete passport just because one
+      // section was edited afterwards — only "upgrade" not_started/
+      // in_progress to in_progress.
+      passport_status:
+        currentPassportStatus === "complete"
+          ? ("complete" as const)
+          : ("in_progress" as const),
     };
   }
 
