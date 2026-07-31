@@ -6,7 +6,7 @@ import { BrandMark } from "@/components/ui/BrandMark";
 import { Button } from "@/components/ui/Button";
 import { createClient } from "@/lib/supabase/client";
 
-type Role = "parent" | "class_teacher" | "institution_admin";
+type Role = "parent" | "class_teacher" | "institution_admin" | "clinician";
 
 const ROLES: {
   value: Role;
@@ -32,12 +32,19 @@ const ROLES: {
     title: "School or institution admin",
     subtitle: "Registering our organisation",
   },
+  {
+    value: "clinician",
+    icon: "🧠",
+    title: "Clinician",
+    subtitle: "BCBA, psychologist, OT, SLT or GP",
+  },
 ];
 
 const ROLE_LABELS: Record<Role, string> = {
   parent: "parent / carer",
   class_teacher: "class teacher",
   institution_admin: "institution admin",
+  clinician: "clinician",
 };
 
 export default function RoleSelectPage() {
@@ -66,6 +73,12 @@ export default function RoleSelectPage() {
 
     if (selectedRole === "parent") {
       router.push("/consent");
+      return;
+    }
+
+    if (selectedRole === "clinician") {
+      // Clinician onboarding flow isn't built yet — placeholder landing.
+      router.push("/dashboard");
       return;
     }
 
