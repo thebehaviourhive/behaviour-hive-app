@@ -31,22 +31,33 @@ const DUMMY_TEACHER_UPDATE: TeacherUpdateData = {
 };
 const HAS_TEACHER_UPDATE_TODAY = true;
 
-const SETTLED_PILL: Record<SettledState, { label: string; className: string }> = {
-  settled: { label: "Settled and Regulated", className: "bg-green-500 text-white" },
-  unsettled: { label: "Unsettled / Anxious", className: "bg-amber-500 text-white" },
-  dysregulated: { label: "Highly Dysregulated", className: "bg-red-500 text-white" },
-};
-
-const ENERGY_LABELS: Record<number, string> = {
-  5: "Full of energy today",
-  4: "Good energy levels",
-  3: "Moderate energy",
-  2: "Low energy — expect some fatigue at home",
-  1: "Very low energy today",
+const SETTLED_BADGE: Record<SettledState, { label: string; dotClassName: string; badgeClassName: string }> = {
+  settled: {
+    label: "Settled",
+    dotClassName: "bg-green-500",
+    badgeClassName: "bg-green-50 text-green-800",
+  },
+  unsettled: {
+    label: "Unsettled",
+    dotClassName: "bg-amber-500",
+    badgeClassName: "bg-amber-50 text-amber-800",
+  },
+  dysregulated: {
+    label: "Dysregulated",
+    dotClassName: "bg-red-500",
+    badgeClassName: "bg-red-50 text-red-800",
+  },
 };
 
 function getDismissKey(userId: string) {
   return `passportCardDismissed:${userId}`;
+}
+
+function getGreeting(): string {
+  const hour = new Date().getHours();
+  if (hour < 12) return "Good morning";
+  if (hour < 17) return "Good afternoon";
+  return "Welcome back";
 }
 
 export default function ParentDashboardPage() {
@@ -171,13 +182,13 @@ export default function ParentDashboardPage() {
 
   return (
     <div className="flex min-h-full flex-1 flex-col bg-brand-off-white/40 pb-24">
-      <header className="px-4 pt-8 pb-2">
+      <header className="px-4 pt-6 pb-2">
         <h1 className="font-heading text-2xl font-semibold text-brand-neutral-black">
-          Good morning, {firstName}
+          {getGreeting()}, {firstName}
         </h1>
       </header>
 
-      <main className="flex flex-col gap-4 px-4 pt-4">
+      <main className="flex flex-col gap-3 px-4 pt-3">
         <CheckInCard
           childName={childName}
           isBefore1pm={isBefore1pm}
@@ -349,56 +360,54 @@ function CheckInCard({
     );
   }
 
-  const pill = SETTLED_PILL[teacherUpdate.settledState];
-
   return (
-    <div className="rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
-      <p className="mb-3 text-sm font-semibold text-brand-neutral-black">
-        Afternoon Update from {teacherUpdate.teacherName}
-      </p>
-
-      <span
-        className={`mb-4 block w-full rounded-full px-4 py-2 text-center text-xs font-bold uppercase tracking-wide ${pill.className}`}
-      >
-        {pill.label}
-      </span>
-
-      <div className="mb-4">
-        <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-black/40">
-          Energy Level
+    <div className="rounded-2xl border border-black/5 bg-white p-3.5 shadow-sm">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-sm font-semibold text-brand-neutral-black">
+          Update from {teacherUpdate.teacherName}
         </p>
-        <EnergyBars level={teacherUpdate.energyLevel} />
-        <p className="mt-1.5 text-xs text-black/60">
-          <span className="font-semibold text-brand-neutral-black">
-            Energy {teacherUpdate.energyLevel}/5
-          </span>{" "}
-          — {ENERGY_LABELS[teacherUpdate.energyLevel]}
-        </p>
+        <SettledBadge state={teacherUpdate.settledState} />
       </div>
 
-      <div className={teacherUpdate.headsUp ? "mb-4" : ""}>
-        <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-black/40">
-          Flags Noticed
-        </p>
+      <div className="mt-2.5 flex items-center justify-between gap-3">
+        <div className="flex flex-shrink-0 items-center gap-2">
+          <span className="text-xs text-black/50">Energy</span>
+          <EnergySegments level={teacherUpdate.energyLevel} />
+        </div>
         <FlagChips flags={teacherUpdate.flags} />
       </div>
 
-      {teacherUpdate.headsUp && <HeadsUpNote text={teacherUpdate.headsUp} />}
+      {teacherUpdate.headsUp && (
+        <div className="mt-2.5">
+          <HeadsUpNote text={teacherUpdate.headsUp} />
+        </div>
+      )}
     </div>
   );
 }
 
-function EnergyBars({ level }: { level: number }) {
+function SettledBadge({ state }: { state: SettledState }) {
+  const badge = SETTLED_BADGE[state];
   return (
-    <div className="flex items-end gap-1">
-      {[1, 2, 3, 4, 5].map((bar) => (
+    <span
+      className={`inline-flex flex-shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${badge.badgeClassName}`}
+    >
+      <span aria-hidden className={`h-1.5 w-1.5 rounded-full ${badge.dotClassName}`} />
+      {badge.label}
+    </span>
+  );
+}
+
+function EnergySegments({ level }: { level: number }) {
+  return (
+    <div className="flex items-center gap-1">
+      {[1, 2, 3, 4, 5].map((segment) => (
         <span
-          key={bar}
+          key={segment}
           aria-hidden
-          className={`w-2.5 rounded-sm ${
-            bar <= level ? "bg-brand-prussian-blue" : "bg-black/10"
+          className={`h-2 w-4 rounded-full ${
+            segment <= level ? "bg-brand-prussian-blue" : "bg-black/10"
           }`}
-          style={{ height: `${8 + bar * 4}px` }}
         />
       ))}
     </div>
@@ -408,30 +417,41 @@ function EnergyBars({ level }: { level: number }) {
 function FlagChips({ flags }: { flags: string[] }) {
   if (flags.length === 0) {
     return (
-      <span className="inline-block rounded-full bg-black/5 px-3 py-1 text-xs font-semibold text-black/50">
-        No Flags Today
+      <span className="inline-block rounded-full bg-black/5 px-2.5 py-1 text-xs font-medium text-black/50">
+        All good today
       </span>
     );
   }
 
+  const shown = flags.slice(0, 3);
+  const remaining = flags.length - shown.length;
+
   return (
-    <div className="grid grid-cols-2 gap-2">
-      {flags.map((flag) => (
+    <div className="flex flex-wrap items-center justify-end gap-1.5">
+      {shown.map((flag) => (
         <span
           key={flag}
-          className="rounded-full border border-black/10 bg-white px-3 py-1 text-center text-xs font-semibold text-brand-neutral-black"
+          className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600"
         >
           {flag}
         </span>
       ))}
+      {remaining > 0 && (
+        <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-500">
+          +{remaining} more
+        </span>
+      )}
     </div>
   );
 }
 
 function HeadsUpNote({ text }: { text: string }) {
   return (
-    <div className="rounded-xl border-l-4 border-brand-golden-brown bg-brand-safe-ivory/30 p-3">
-      <p className="text-xs italic text-black/70">&ldquo;{text}&rdquo;</p>
+    <div className="relative rounded-xl bg-brand-prussian-blue/[0.06] py-2.5 pl-9 pr-3">
+      <span aria-hidden className="absolute left-2.5 top-2.5 text-sm leading-none">
+        💬
+      </span>
+      <p className="text-xs italic text-brand-neutral-black/80">{text}</p>
     </div>
   );
 }
