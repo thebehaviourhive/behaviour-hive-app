@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { BottomNav } from "@/components/ui/BottomNav";
 import { createClient } from "@/lib/supabase/client";
 import { useRequireRole } from "@/hooks/useRequireRole";
+import { getPassportResumeHref } from "@/lib/getPassportResumeHref";
 
 interface PassportSummary {
   childName: string;
@@ -20,11 +21,13 @@ export default function ParentDashboardPage() {
   const [firstName, setFirstName] = useState("there");
   const [passportStatus, setPassportStatus] =
     useState<PassportStatus>("not_started");
+  const [resumeHref, setResumeHref] = useState("/passport/welcome");
   const [isLoadingPassport, setIsLoadingPassport] = useState(true);
 
-  // Sections B-D (and therefore age/diagnosis display + real completion %)
-  // don't exist yet, so a fully "complete" passport can't be reached yet —
-  // this stays null until that's built, regardless of passportStatus.
+  // The full rich summary (name/age/diagnosis/completion %) lives on the
+  // dedicated /passport/dashboard view once complete — this stays null
+  // here regardless of status, so these cards always show the compact
+  // status-driven prompt instead of duplicating that summary.
   const [passport] = useState<PassportSummary | null>(null);
 
   useEffect(() => {
@@ -39,15 +42,59 @@ export default function ParentDashboardPage() {
 
     async function loadPassportStatus() {
       const supabase = createClient();
-      const { data } = await supabase
-        .from("passports")
-        .select("passport_status")
-        .eq("user_id", user!.id)
-        .maybeSingle();
+      const [{ data: passportRow }, { data: sectionB }, { data: sectionC }, { data: sectionD }] =
+        await Promise.all([
+          supabase
+            .from("passports")
+            .select("passport_status, section_a_complete")
+            .eq("user_id", user!.id)
+            .maybeSingle(),
+          supabase
+            .from("passport_section_b")
+            .select("okay_signals, hard_signals, hard_triggers, section_b_complete")
+            .eq("user_id", user!.id)
+            .maybeSingle(),
+          supabase
+            .from("passport_section_c")
+            .select("section_c_complete")
+            .eq("user_id", user!.id)
+            .maybeSingle(),
+          supabase
+            .from("passport_section_d")
+            .select("before_behaviour, during_distress, after_distress, section_d_complete")
+            .eq("user_id", user!.id)
+            .maybeSingle(),
+        ]);
 
       if (!isMounted) return;
 
-      setPassportStatus((data?.passport_status as PassportStatus) ?? "not_started");
+      const status =
+        (passportRow?.passport_status as PassportStatus | undefined) ?? "not_started";
+
+      setPassportStatus(status);
+      setResumeHref(
+        getPassportResumeHref({
+          passportStatus: status,
+          sectionAComplete: Boolean(passportRow?.section_a_complete),
+          sectionB: sectionB
+            ? {
+                okaySignals: sectionB.okay_signals,
+                hardSignals: sectionB.hard_signals,
+                hardTriggers: sectionB.hard_triggers,
+                complete: sectionB.section_b_complete,
+              }
+            : null,
+          sectionCComplete: Boolean(sectionC?.section_c_complete),
+          sectionD: sectionD
+            ? {
+                beforeBehaviour: sectionD.before_behaviour,
+                duringDistress: sectionD.during_distress,
+                afterDistress: sectionD.after_distress,
+                complete: sectionD.section_d_complete,
+              }
+            : null,
+        })
+      );
       setIsLoadingPassport(false);
     }
 
@@ -61,16 +108,18 @@ export default function ParentDashboardPage() {
     return null;
   }
 
-  const resumeHref =
-    passportStatus === "not_started" ? "/passport/welcome" : "/passport/section-a";
   const morningCardText =
     passportStatus === "not_started"
       ? "Complete your child's passport first"
-      : "Resume passport creation";
+      : passportStatus === "complete"
+        ? "View your child's passport"
+        : "Resume passport creation";
   const passportCardText =
     passportStatus === "not_started"
       ? "Build your child's passport"
-      : "Resume passport creation";
+      : passportStatus === "complete"
+        ? "View your child's passport"
+        : "Resume passport creation";
 
   return (
     <div className="flex min-h-full flex-1 flex-col bg-brand-off-white/40 pb-24">
@@ -199,7 +248,7 @@ export default function ParentDashboardPage() {
         </section>
       </main>
 
-      <BottomNav active="home" />
+      <BottomNav active="home" passportHref={resumeHref} />
     </div>
   );
 }

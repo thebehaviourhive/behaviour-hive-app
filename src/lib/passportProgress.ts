@@ -1,13 +1,12 @@
-// Sections C and D haven't been built yet, so their real page counts are
-// unknown — assumed at 1 page each (matching section A's shape) so the
-// overall progress bar has a concrete total to work against today. Update
-// these two values once those sections exist; every page's percentage
-// recalculates from this single source.
+// Real page counts for sections A-D, all now built. If further sections
+// are added beyond D, add them here too — every page's percentage
+// recalculates from this single source, so this is the only place that
+// needs updating.
 const SECTION_PAGE_COUNTS = {
   a: 1,
   b: 3,
   c: 1,
-  d: 1,
+  d: 4,
 } as const;
 
 const TOTAL_PAGES =
