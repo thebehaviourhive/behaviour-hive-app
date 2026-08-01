@@ -1,17 +1,54 @@
 "use client";
 
-import { useSearchParams } from "next/navigation";
-import { useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useEffect, useState } from "react";
 import { BrandMark } from "@/components/ui/BrandMark";
+import { createClient } from "@/lib/supabase/client";
 import { createSignUpClient } from "@/lib/supabase/signup-client";
+import { getPostAuthRedirect } from "@/lib/roleRedirect";
 
 export function VerifyEmailContent() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const email = searchParams.get("email") ?? "your email address";
 
   const [resendState, setResendState] = useState<
     "idle" | "sending" | "sent" | "error"
   >("idle");
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function checkIfConfirmed() {
+      const supabase = createClient();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (isMounted && user) {
+        router.replace(getPostAuthRedirect(user.app_metadata?.role));
+      }
+    }
+
+    // Confirming the link always happens away from this screen — the Mail
+    // app opens it in a separate browser context, never this one — so
+    // this screen only has a chance to find out once the user switches
+    // back to it, which is exactly what visibilitychange marks. Without
+    // this, the screen just sits on "check your inbox" forever even after
+    // the account is confirmed.
+    function handleVisibilityChange() {
+      if (document.visibilityState === "visible") {
+        checkIfConfirmed();
+      }
+    }
+
+    checkIfConfirmed();
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      isMounted = false;
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [router]);
 
   async function handleResend() {
     if (resendState === "sending") return;
