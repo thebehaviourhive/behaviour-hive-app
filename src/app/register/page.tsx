@@ -5,7 +5,7 @@ import { useState, type FormEvent } from "react";
 import { BrandMark } from "@/components/ui/BrandMark";
 import { Button } from "@/components/ui/Button";
 import { TextField } from "@/components/ui/TextField";
-import { createSignUpClient } from "@/lib/supabase/signup-client";
+import { createClient } from "@/lib/supabase/client";
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -20,13 +20,12 @@ export default function RegisterPage() {
     setError(null);
     setIsSubmitting(true);
 
-    const supabase = createSignUpClient();
+    const supabase = createClient();
     const { error: signUpError } = await supabase.auth.signUp({
       email,
       password,
       options: {
         data: { full_name: fullName },
-        emailRedirectTo: `${window.location.origin}/auth/callback`,
       },
     });
 
