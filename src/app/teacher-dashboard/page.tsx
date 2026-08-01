@@ -33,10 +33,12 @@ export default function TeacherDashboardPage() {
   const { user, isReady } = useRequireRole("class_teacher");
 
   const [firstName, setFirstName] = useState("there");
+  const [institutionId, setInstitutionId] = useState<string | null>(null);
   const [institutionCode, setInstitutionCode] = useState<string | null>(null);
   const [students, setStudents] = useState<StudentCardData[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isAddChildOpen, setIsAddChildOpen] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
     if (!user) return;
@@ -64,6 +66,8 @@ export default function TeacherDashboardPage() {
         return;
       }
 
+      setInstitutionId(staffRow.institution_id);
+
       const { data: institutionRow } = await supabase
         .from("institutions")
         .select("institution_code")
@@ -75,14 +79,40 @@ export default function TeacherDashboardPage() {
 
       const { data: accessRows } = await supabase
         .from("passport_access")
-        .select("passport_id")
-        .eq("teacher_id", user!.id);
+        .select("passport_id, institution_id")
+        .eq("teacher_id", user!.id)
+        .eq("is_active", true);
 
       if (!isMounted) return;
 
-      const passportIds = Array.from(
+      const candidatePassportIds = Array.from(
         new Set((accessRows ?? []).map((row) => row.passport_id))
       );
+
+      if (candidatePassportIds.length === 0) {
+        setStudents([]);
+        setIsLoading(false);
+        return;
+      }
+
+      // A passport_access row alone isn't enough — the parent's approval
+      // (passport_institution_links.approved_by_parent) must still be in
+      // place too. Revoking either side must drop the child from view.
+      const { data: linkRows } = await supabase
+        .from("passport_institution_links")
+        .select("passport_id, institution_id")
+        .in("passport_id", candidatePassportIds)
+        .eq("approved_by_parent", true);
+
+      if (!isMounted) return;
+
+      const approvedPairs = new Set(
+        (linkRows ?? []).map((row) => `${row.passport_id}|${row.institution_id}`)
+      );
+
+      const passportIds = (accessRows ?? [])
+        .filter((row) => approvedPairs.has(`${row.passport_id}|${row.institution_id}`))
+        .map((row) => row.passport_id);
 
       if (passportIds.length === 0) {
         setStudents([]);
@@ -159,7 +189,7 @@ export default function TeacherDashboardPage() {
     return () => {
       isMounted = false;
     };
-  }, [user, router]);
+  }, [user, router, refreshKey]);
 
   if (!isReady || isLoading) {
     return null;
@@ -213,7 +243,16 @@ export default function TeacherDashboardPage() {
         )}
       </main>
 
-      <AddChildSheet isOpen={isAddChildOpen} onClose={() => setIsAddChildOpen(false)} />
+      {institutionId && (
+        <AddChildSheet
+          isOpen={isAddChildOpen}
+          onClose={() => setIsAddChildOpen(false)}
+          teacherId={user!.id}
+          institutionId={institutionId}
+          institutionCode={institutionCode}
+          onAdded={() => setRefreshKey((k) => k + 1)}
+        />
+      )}
       <TeacherBottomNav active="dashboard" />
     </div>
   );

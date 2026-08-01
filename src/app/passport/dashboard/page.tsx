@@ -5,11 +5,20 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { BottomNav } from "@/components/ui/BottomNav";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
+import { ShareBottomSheet } from "@/components/parent/ShareBottomSheet";
 import { createClient } from "@/lib/supabase/client";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { getPassportResumeHref } from "@/lib/getPassportResumeHref";
 
+interface ApprovedInstitution {
+  institutionId: string;
+  institutionName: string;
+  approvedAt: string | null;
+}
+
 interface PassportSummaryData {
+  passportId: string;
+  passportCode: string | null;
   childName: string;
   age: number | null;
   school: string | null;
@@ -57,6 +66,14 @@ function truncateText(text: unknown, max = 90): string {
   return text.length > max ? `${text.slice(0, max)}…` : text;
 }
 
+function formatDate(isoString: string): string {
+  return new Date(isoString).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
 function formatDiagnosisText(
   diagnoses: unknown,
   diagnosisOther: unknown
@@ -78,6 +95,31 @@ export default function PassportDashboardPage() {
   const [summary, setSummary] = useState<PassportSummaryData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [approvedInstitutions, setApprovedInstitutions] = useState<ApprovedInstitution[]>([]);
+  const [isShareOpen, setIsShareOpen] = useState(false);
+  const [revokeConfirmation, setRevokeConfirmation] = useState<string | null>(null);
+  const [revokeError, setRevokeError] = useState<string | null>(null);
+
+  async function loadApprovedInstitutions(passportId: string) {
+    const supabase = createClient();
+    const { data: linkRows } = await supabase
+      .from("passport_institution_links")
+      .select("institution_id, parent_approved_at, institutions(name)")
+      .eq("passport_id", passportId)
+      .eq("approved_by_parent", true)
+      .order("parent_approved_at", { ascending: false });
+
+    setApprovedInstitutions(
+      (linkRows ?? []).map((row) => {
+        const institution = row.institutions as unknown as { name: string } | null;
+        return {
+          institutionId: row.institution_id,
+          institutionName: institution?.name ?? "Unknown school",
+          approvedAt: row.parent_approved_at,
+        };
+      })
+    );
+  }
 
   useEffect(() => {
     if (!user) return;
@@ -95,7 +137,7 @@ export default function PassportDashboardPage() {
           supabase
             .from("passports")
             .select(
-              "child_name, date_of_birth, school, important_people, diagnoses, diagnosis_other, passport_status, section_a_complete"
+              "id, passport_code, child_name, date_of_birth, school, important_people, diagnoses, diagnosis_other, passport_status, section_a_complete"
             )
             .eq("user_id", user!.id)
             .maybeSingle(),
@@ -160,6 +202,8 @@ export default function PassportDashboardPage() {
         }
 
         setSummary({
+          passportId: passport!.id,
+          passportCode: (passport?.passport_code as string | null) ?? null,
           childName: (passport?.child_name as string | null) || "Your child",
           age: calculateAge(passport?.date_of_birth),
           school: (passport?.school as string | null) ?? null,
@@ -190,6 +234,8 @@ export default function PassportDashboardPage() {
             : null,
         });
         setIsLoading(false);
+
+        await loadApprovedInstitutions(passport!.id);
       } catch (err) {
         if (!isMounted) return;
         console.error("Failed to load passport dashboard:", err);
@@ -232,6 +278,37 @@ export default function PassportDashboardPage() {
     return null;
   }
 
+  async function handleRevoke(institutionId: string, institutionName: string) {
+    if (!summary) return;
+
+    setRevokeError(null);
+    setRevokeConfirmation(null);
+
+    const supabase = createClient();
+    const [{ error: linkError }, { error: accessError }] = await Promise.all([
+      supabase
+        .from("passport_institution_links")
+        .update({ approved_by_parent: false })
+        .eq("passport_id", summary.passportId)
+        .eq("institution_id", institutionId),
+      supabase
+        .from("passport_access")
+        .update({ is_active: false })
+        .eq("passport_id", summary.passportId)
+        .eq("institution_id", institutionId),
+    ]);
+
+    if (linkError || accessError) {
+      setRevokeError((linkError ?? accessError)?.message ?? "Something went wrong. Please try again.");
+      return;
+    }
+
+    setRevokeConfirmation(
+      `Access for ${institutionName} has been removed. They can no longer see ${summary.childName}'s passport.`
+    );
+    await loadApprovedInstitutions(summary.passportId);
+  }
+
   const diagnosisText = formatDiagnosisText(summary.diagnoses, summary.diagnosisOther);
 
   const fallbackCard = (
@@ -251,6 +328,7 @@ export default function PassportDashboardPage() {
         </h1>
         <button
           type="button"
+          onClick={() => setIsShareOpen(true)}
           className="flex-shrink-0 rounded-full border border-black/10 bg-white px-4 py-2 text-xs font-semibold text-brand-neutral-black"
         >
           Download / Share
@@ -302,7 +380,79 @@ export default function PassportDashboardPage() {
             <SummaryLine label="Sensory avoids" value={joinList(summary.sensoryAvoids)} />
           </SummaryCard>
         </ErrorBoundary>
+
+        <ErrorBoundary fallback={fallbackCard}>
+          <section>
+            <h2 className="mb-2 font-heading text-base font-semibold text-brand-neutral-black">
+              Who can see this passport
+            </h2>
+
+            {approvedInstitutions.length === 0 ? (
+              <div className="rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-sm text-black/50">
+                No schools approved yet. Tap Share to approve your child&apos;s
+                school.
+              </div>
+            ) : (
+              <div className="flex flex-col gap-2">
+                {approvedInstitutions.map((institution) => (
+                  <div
+                    key={institution.institutionId}
+                    className="rounded-2xl border border-black/5 bg-white p-4 shadow-sm"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <p className="text-sm font-semibold text-brand-neutral-black">
+                          {institution.institutionName}
+                        </p>
+                        <p className="text-xs text-black/50">
+                          {institution.approvedAt
+                            ? `Approved ${formatDate(institution.approvedAt)}`
+                            : "Approved"}
+                        </p>
+                      </div>
+                      <span className="flex-shrink-0 rounded-full bg-green-50 px-2.5 py-1 text-xs font-semibold text-green-800">
+                        Active
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        handleRevoke(institution.institutionId, institution.institutionName)
+                      }
+                      className="mt-3 text-xs font-semibold text-red-600"
+                    >
+                      Revoke Access
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {revokeConfirmation && (
+              <p className="mt-3 rounded-xl bg-black/5 px-4 py-3 text-sm text-brand-neutral-black">
+                {revokeConfirmation}
+              </p>
+            )}
+            {revokeError && (
+              <p role="alert" className="mt-3 text-sm font-medium text-red-600">
+                {revokeError}
+              </p>
+            )}
+          </section>
+        </ErrorBoundary>
       </main>
+
+      <ShareBottomSheet
+        isOpen={isShareOpen}
+        onClose={() => setIsShareOpen(false)}
+        passportId={summary.passportId}
+        childName={summary.childName}
+        passportCode={summary.passportCode}
+        onCodeGenerated={(code) =>
+          setSummary((prev) => (prev ? { ...prev, passportCode: code } : prev))
+        }
+        onApproved={() => loadApprovedInstitutions(summary.passportId)}
+      />
 
       <BottomNav active="passport" passportHref="/passport/dashboard" />
     </div>
