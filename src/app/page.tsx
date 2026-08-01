@@ -12,5 +12,5 @@ export default async function RootPage() {
     redirect("/register");
   }
 
-  redirect(getPostAuthRedirect(user.user_metadata?.role));
+  redirect(getPostAuthRedirect(user.app_metadata?.role));
 }

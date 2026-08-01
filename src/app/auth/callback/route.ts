@@ -11,7 +11,7 @@ export async function GET(request: Request) {
     const { data, error } = await supabase.auth.exchangeCodeForSession(code);
 
     if (!error) {
-      const next = getPostAuthRedirect(data.user?.user_metadata?.role);
+      const next = getPostAuthRedirect(data.user?.app_metadata?.role);
       return NextResponse.redirect(`${origin}${next}`);
     }
 

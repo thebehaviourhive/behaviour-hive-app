@@ -27,7 +27,7 @@ export function useRequireRole(role: string) {
         return;
       }
 
-      const userRole = user.user_metadata?.role;
+      const userRole = user.app_metadata?.role;
       if (userRole !== role) {
         router.replace(getPostAuthRedirect(userRole));
         return;

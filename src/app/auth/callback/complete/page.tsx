@@ -55,7 +55,7 @@ export default function AuthCallbackCompletePage() {
         return;
       }
 
-      router.replace(getPostAuthRedirect(data.user.user_metadata?.role));
+      router.replace(getPostAuthRedirect(data.user.app_metadata?.role));
     }
 
     handleHashTokens();

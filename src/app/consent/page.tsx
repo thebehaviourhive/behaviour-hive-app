@@ -34,7 +34,7 @@ export default function ConsentPage() {
         return;
       }
 
-      if (user.user_metadata?.role !== "parent") {
+      if (user.app_metadata?.role !== "parent") {
         router.replace("/");
         return;
       }

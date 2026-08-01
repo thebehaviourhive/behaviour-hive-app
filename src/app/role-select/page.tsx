@@ -53,22 +53,27 @@ export default function RoleSelectPage() {
     setError(null);
     setIsSubmitting(true);
 
-    const supabase = createClient();
-    const { error: updateError } = await supabase.auth.updateUser({
-      data: { role: selectedRole },
+    const response = await fetch("/api/set-role", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ role: selectedRole }),
     });
 
-    if (updateError) {
+    if (!response.ok) {
+      const { error: responseError } = await response
+        .json()
+        .catch(() => ({ error: null }));
       setIsSubmitting(false);
-      setError(updateError.message);
+      setError(responseError ?? "Something went wrong. Please try again.");
       return;
     }
 
-    // updateUser() changes user_metadata in the database immediately, but
-    // the access token already held by the client keeps its old claims
-    // until refreshed — the institution_staff insert a teacher makes on
-    // the very next screen checks auth.jwt() ->> 'role', which would
-    // otherwise still read the pre-selection role.
+    // The role was just written server-side to app_metadata, but the
+    // access token already held by the client keeps its old claims until
+    // refreshed — the institution_staff insert a teacher makes on the
+    // very next screen checks it, which would otherwise still read the
+    // pre-selection role.
+    const supabase = createClient();
     await supabase.auth.refreshSession();
 
     setIsSubmitting(false);

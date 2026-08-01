@@ -37,7 +37,7 @@ export function LoginContent() {
       return;
     }
 
-    router.push(getPostAuthRedirect(data.user?.user_metadata?.role));
+    router.push(getPostAuthRedirect(data.user?.app_metadata?.role));
   }
 
   return (
