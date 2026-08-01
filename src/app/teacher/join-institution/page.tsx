@@ -54,7 +54,7 @@ export default function TeacherJoinInstitutionPage() {
     const { data: institution, error: lookupError } = await supabase
       .from("institutions")
       .select("id, status")
-      .eq("institution_code", code.trim().toUpperCase())
+      .ilike("institution_code", code.trim())
       .maybeSingle();
 
     if (lookupError) {
