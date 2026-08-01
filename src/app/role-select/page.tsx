@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/Button";
 import { createClient } from "@/lib/supabase/client";
 import { getPostAuthRedirect } from "@/lib/roleRedirect";
 
-type Role = "parent" | "class_teacher" | "institution_admin" | "clinician";
+type Role = "parent" | "class_teacher" | "clinician";
 
 const ROLES: {
   value: Role;
@@ -28,12 +28,6 @@ const ROLES: {
     subtitle: "Supporting children in school",
   },
   {
-    value: "institution_admin",
-    icon: "🏛",
-    title: "School or institution admin",
-    subtitle: "Registering our organisation",
-  },
-  {
     value: "clinician",
     icon: "🧠",
     title: "Clinician",
@@ -44,7 +38,6 @@ const ROLES: {
 const ROLE_LABELS: Record<Role, string> = {
   parent: "parent / carer",
   class_teacher: "class teacher",
-  institution_admin: "institution admin",
   clinician: "clinician",
 };
 
@@ -65,20 +58,32 @@ export default function RoleSelectPage() {
       data: { role: selectedRole },
     });
 
-    setIsSubmitting(false);
-
     if (updateError) {
+      setIsSubmitting(false);
       setError(updateError.message);
       return;
     }
+
+    // updateUser() changes user_metadata in the database immediately, but
+    // the access token already held by the client keeps its old claims
+    // until refreshed — the institution_staff insert a teacher makes on
+    // the very next screen checks auth.jwt() ->> 'role', which would
+    // otherwise still read the pre-selection role.
+    await supabase.auth.refreshSession();
+
+    setIsSubmitting(false);
 
     if (selectedRole === "parent") {
       router.push("/consent");
       return;
     }
 
-    // Class teacher, institution admin, and clinician have their own
-    // dedicated onboarding entry points not yet built — land on the
+    if (selectedRole === "class_teacher") {
+      router.push("/teacher/join-institution");
+      return;
+    }
+
+    // Clinician has no dedicated onboarding entry point yet — land on the
     // same placeholder dashboard a returning login would send them to.
     router.push(getPostAuthRedirect(selectedRole));
   }
