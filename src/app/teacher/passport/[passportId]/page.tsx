@@ -6,14 +6,17 @@ import { createClient } from "@/lib/supabase/client";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { getChildFirstName } from "@/lib/childDisplayName";
 import { StrategyLedgerSheet } from "@/components/teacher/StrategyLedgerSheet";
+import { ABCLogger } from "@/components/abc-logger/ABCLogger";
+import { ABCTimeline } from "@/components/abc-logger/ABCTimeline";
 
-type TabKey = "summary" | "behaviour" | "communication" | "supports";
+type TabKey = "summary" | "behaviour" | "communication" | "supports" | "incidents";
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: "summary", label: "Summary" },
   { key: "behaviour", label: "Behaviour Signals" },
   { key: "communication", label: "Communication" },
   { key: "supports", label: "Supports" },
+  { key: "incidents", label: "Incidents" },
 ];
 
 const SLEEP_LABELS: Record<string, string> = {
@@ -71,6 +74,8 @@ export default function TeacherPassportPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<TabKey>("summary");
   const [isLedgerOpen, setIsLedgerOpen] = useState(false);
+  const [isAbcLoggerOpen, setIsAbcLoggerOpen] = useState(false);
+  const [timelineRefreshKey, setTimelineRefreshKey] = useState(0);
 
   useEffect(() => {
     if (!isReady || !passportId) return;
@@ -364,16 +369,33 @@ export default function TeacherPassportPage() {
             />
           </>
         )}
+
+        {activeTab === "incidents" && (
+          <ABCTimeline
+            key={timelineRefreshKey}
+            passportId={passportId}
+            viewerRole="class_teacher"
+          />
+        )}
       </main>
 
       <div className="fixed inset-x-0 bottom-0 border-t border-black/5 bg-white p-4">
-        <button
-          type="button"
-          onClick={() => setIsLedgerOpen(true)}
-          className="mx-auto block w-full max-w-sm rounded-2xl bg-brand-prussian-blue py-3.5 text-base font-semibold text-white shadow-sm"
-        >
-          + Add to Ledger
-        </button>
+        <div className="mx-auto flex w-full max-w-sm gap-2">
+          <button
+            type="button"
+            onClick={() => setIsLedgerOpen(true)}
+            className="flex-1 rounded-2xl bg-brand-prussian-blue py-3.5 text-sm font-semibold text-white shadow-sm"
+          >
+            + Add to Ledger
+          </button>
+          <button
+            type="button"
+            onClick={() => setIsAbcLoggerOpen(true)}
+            className="flex-1 rounded-2xl bg-brand-golden-brown py-3.5 text-sm font-semibold text-white shadow-sm"
+          >
+            + Log ABC Incident
+          </button>
+        </div>
       </div>
 
       {user && (
@@ -382,6 +404,20 @@ export default function TeacherPassportPage() {
           onClose={() => setIsLedgerOpen(false)}
           passportId={passportId}
           userId={user.id}
+        />
+      )}
+
+      {isAbcLoggerOpen && (
+        <ABCLogger
+          passportId={passportId}
+          childName={profile.childFirstName}
+          role="class_teacher"
+          onComplete={() => {
+            setIsAbcLoggerOpen(false);
+            setTimelineRefreshKey((key) => key + 1);
+            setActiveTab("incidents");
+          }}
+          onDismiss={() => setIsAbcLoggerOpen(false)}
         />
       )}
     </div>

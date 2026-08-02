@@ -6,6 +6,8 @@ import { useEffect, useState } from "react";
 import { BottomNav } from "@/components/ui/BottomNav";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { ShareBottomSheet } from "@/components/parent/ShareBottomSheet";
+import { ABCLogger } from "@/components/abc-logger/ABCLogger";
+import { ABCTimeline } from "@/components/abc-logger/ABCTimeline";
 import { createClient } from "@/lib/supabase/client";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { getPassportResumeHref } from "@/lib/getPassportResumeHref";
@@ -86,6 +88,8 @@ export default function PassportDashboardPage() {
   const [isShareOpen, setIsShareOpen] = useState(false);
   const [revokeConfirmation, setRevokeConfirmation] = useState<string | null>(null);
   const [revokeError, setRevokeError] = useState<string | null>(null);
+  const [isAbcLoggerOpen, setIsAbcLoggerOpen] = useState(false);
+  const [timelineRefreshKey, setTimelineRefreshKey] = useState(0);
 
   async function loadApprovedInstitutions(passportId: string) {
     const supabase = createClient();
@@ -378,7 +382,17 @@ export default function PassportDashboardPage() {
         )}
       </header>
 
-      <main className="flex flex-col gap-6 px-4">
+      <div className="px-4">
+        <button
+          type="button"
+          onClick={() => setIsAbcLoggerOpen(true)}
+          className="w-full rounded-2xl border-2 border-brand-prussian-blue py-3.5 text-base font-semibold text-brand-prussian-blue"
+        >
+          + Log Incident
+        </button>
+      </div>
+
+      <main className="flex flex-col gap-6 px-4 pt-6">
         <ErrorBoundary fallback={fallbackCard}>
           <section className={CARD_CLASSNAME}>
             <div className="flex items-center justify-between">
@@ -598,6 +612,19 @@ export default function PassportDashboardPage() {
             )}
           </section>
         </ErrorBoundary>
+
+        <ErrorBoundary fallback={fallbackCard}>
+          <section className="mt-2 mb-6">
+            <h2 className="mb-4 font-heading text-xl font-bold text-brand-prussian-blue">
+              Incident Timeline
+            </h2>
+            <ABCTimeline
+              key={timelineRefreshKey}
+              passportId={summary.passportId}
+              viewerRole="parent"
+            />
+          </section>
+        </ErrorBoundary>
       </main>
 
       <ShareBottomSheet
@@ -611,6 +638,19 @@ export default function PassportDashboardPage() {
         }
         onApproved={() => loadApprovedInstitutions(summary.passportId)}
       />
+
+      {isAbcLoggerOpen && (
+        <ABCLogger
+          passportId={summary.passportId}
+          childName={summary.childName}
+          role="parent"
+          onComplete={() => {
+            setIsAbcLoggerOpen(false);
+            setTimelineRefreshKey((key) => key + 1);
+          }}
+          onDismiss={() => setIsAbcLoggerOpen(false)}
+        />
+      )}
 
       <BottomNav active="passport" passportHref="/passport/dashboard" />
     </div>
