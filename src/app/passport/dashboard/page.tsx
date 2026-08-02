@@ -39,6 +39,9 @@ interface PassportSummaryData {
   sensoryAvoids: string[] | null;
 }
 
+const CARD_CLASSNAME =
+  "rounded-2xl border border-brand-off-white/50 bg-white p-5 shadow-[0_4px_20px_rgba(0,79,113,0.05)]";
+
 function calculateAge(dateOfBirth: string | null | undefined): number | null {
   if (!dateOfBirth) return null;
   const dob = new Date(dateOfBirth);
@@ -52,41 +55,25 @@ function calculateAge(dateOfBirth: string | null | undefined): number | null {
   return age;
 }
 
-// Defensive against non-array/empty values — Supabase should always return
-// either an array or null for these columns, but a missing field should
-// never be able to crash the summary render.
-function joinList(items: unknown, max = 3): string {
-  if (!Array.isArray(items) || items.length === 0) return "Not specified";
-  const shown = items.slice(0, max).join(", ");
-  return items.length > max ? `${shown} +${items.length - max} more` : shown;
-}
-
-function truncateText(text: unknown, max = 90): string {
-  if (typeof text !== "string" || text.length === 0) return "Not specified";
-  return text.length > max ? `${text.slice(0, max)}…` : text;
-}
-
-function formatDate(isoString: string): string {
-  return new Date(isoString).toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
-}
-
-function formatDiagnosisText(
-  diagnoses: unknown,
-  diagnosisOther: unknown
-): string {
-  if (!Array.isArray(diagnoses) || diagnoses.length === 0) {
-    return "Not specified";
-  }
-  const hasOther = diagnoses.includes("Other") && typeof diagnosisOther === "string" && diagnosisOther;
-  if (!hasOther) {
-    return joinList(diagnoses);
-  }
+// "Other" is a placeholder value in the diagnoses array — when present
+// alongside real free-text in diagnosisOther, show that text as its own
+// pill instead of the literal word "Other".
+function getDiagnosisPills(
+  diagnoses: string[] | null,
+  diagnosisOther: string | null
+): string[] {
+  if (!diagnoses || diagnoses.length === 0) return [];
+  const hasOtherWithText = diagnoses.includes("Other") && Boolean(diagnosisOther);
+  if (!hasOtherWithText) return diagnoses;
   const rest = diagnoses.filter((d) => d !== "Other");
-  return rest.length > 0 ? `${joinList(rest)}, ${diagnosisOther}` : String(diagnosisOther);
+  return [...rest, diagnosisOther as string];
+}
+
+function buildSubInfoLine(age: number | null, school: string | null): string {
+  const parts: string[] = [];
+  if (age !== null) parts.push(`${age} years old`);
+  if (school) parts.push(school);
+  return parts.join(" • ");
 }
 
 export default function PassportDashboardPage() {
@@ -261,8 +248,8 @@ export default function PassportDashboardPage() {
 
   if (loadError) {
     return (
-      <div className="flex min-h-full flex-1 flex-col items-center justify-center gap-4 bg-brand-off-white/40 px-4 text-center">
-        <p className="text-sm text-black/60">{loadError}</p>
+      <div className="flex min-h-full flex-1 flex-col items-center justify-center gap-4 bg-brand-safe-ivory px-4 text-center">
+        <p className="text-sm text-brand-neutral-black/70">{loadError}</p>
         <button
           type="button"
           onClick={() => window.location.reload()}
@@ -309,11 +296,31 @@ export default function PassportDashboardPage() {
     await loadApprovedInstitutions(summary.passportId);
   }
 
-  const diagnosisText = formatDiagnosisText(summary.diagnoses, summary.diagnosisOther);
+  const diagnosisPills = getDiagnosisPills(summary.diagnoses, summary.diagnosisOther);
+  const subInfoLine = buildSubInfoLine(summary.age, summary.school);
+
+  const hasOkay = (summary.okaySignals?.length ?? 0) > 0;
+  const hasHard = (summary.hardSignals?.length ?? 0) > 0;
+  const hasTriggers = (summary.hardTriggers?.length ?? 0) > 0;
+  const sectionBEmpty = !hasOkay && !hasHard && !hasTriggers;
+
+  const hasCommMethods = (summary.communicationMethods?.length ?? 0) > 0;
+  const hasShowsHappy = Boolean(summary.showsHappy);
+  const hasShowsAnxious = Boolean(summary.showsAnxious);
+  const hasPhrasesToAvoid = Boolean(summary.phrasesToAvoid);
+  const sectionCEmpty =
+    !hasCommMethods && !hasShowsHappy && !hasShowsAnxious && !hasPhrasesToAvoid;
+
+  const hasBefore = (summary.beforeBehaviour?.length ?? 0) > 0;
+  const hasDuring = (summary.duringDistress?.length ?? 0) > 0;
+  const hasAfter = (summary.afterDistress?.length ?? 0) > 0;
+  const hasSeeks = (summary.sensorySeeks?.length ?? 0) > 0;
+  const hasAvoids = (summary.sensoryAvoids?.length ?? 0) > 0;
+  const sectionDEmpty = !hasBefore && !hasDuring && !hasAfter && !hasSeeks && !hasAvoids;
 
   const fallbackCard = (
-    <section className="rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
-      <p className="text-sm text-black/60">
+    <section className={CARD_CLASSNAME}>
+      <p className="text-sm text-brand-neutral-black/60">
         This section couldn&apos;t be displayed. Your saved answers are safe —
         try reloading the page.
       </p>
@@ -321,107 +328,253 @@ export default function PassportDashboardPage() {
   );
 
   return (
-    <div className="flex min-h-full flex-1 flex-col bg-brand-off-white/40 pb-24">
-      <header className="flex items-start justify-between gap-3 px-4 pt-8 pb-2">
-        <h1 className="font-heading text-2xl font-semibold text-brand-neutral-black">
-          {summary.childName}&apos;s Passport
+    <div className="flex min-h-full flex-1 flex-col bg-brand-safe-ivory pb-24">
+      <header className="px-4 pt-8 pb-6">
+        <div className="flex items-start justify-between gap-3">
+          <p className="font-accent text-sm uppercase tracking-wide text-brand-neutral-black">
+            The Behavioural Passport Of
+          </p>
+          <button
+            type="button"
+            onClick={() => setIsShareOpen(true)}
+            aria-label="Share passport"
+            className="flex-shrink-0 rounded-full bg-white p-2 text-brand-prussian-blue shadow-sm"
+          >
+            <ShareIcon />
+          </button>
+        </div>
+
+        <h1 className="mt-1 font-heading text-4xl font-bold leading-tight text-brand-prussian-blue">
+          {summary.childName}
         </h1>
-        <button
-          type="button"
-          onClick={() => setIsShareOpen(true)}
-          className="flex-shrink-0 rounded-full border border-black/10 bg-white px-4 py-2 text-xs font-semibold text-brand-neutral-black"
-        >
-          Download / Share
-        </button>
+
+        {subInfoLine && (
+          <p className="mt-1 text-base text-brand-neutral-black">{subInfoLine}</p>
+        )}
+
+        {diagnosisPills.length > 0 ? (
+          <div className="mt-4 flex flex-wrap gap-2">
+            {diagnosisPills.map((pill) => (
+              <span
+                key={pill}
+                className="rounded-full border border-brand-pastel-blue bg-brand-pastel-blue/40 px-4 py-1.5 font-accent text-sm font-semibold text-brand-prussian-blue"
+              >
+                {pill}
+              </span>
+            ))}
+          </div>
+        ) : (
+          <Link
+            href="/passport/section-a"
+            className="mt-4 inline-block font-accent text-xs font-bold text-brand-golden-brown underline"
+          >
+            + Add diagnoses or neurotype
+          </Link>
+        )}
       </header>
 
-      <main className="flex flex-col gap-4 px-4 pt-4">
+      <main className="flex flex-col gap-6 px-4">
         <ErrorBoundary fallback={fallbackCard}>
-          <SummaryCard title="About Your Child" editHref="/passport/section-a">
-            <SummaryLine
-              label="Age"
-              value={summary.age !== null ? `${summary.age}` : "Not specified"}
-            />
-            <SummaryLine label="School" value={summary.school || "Not specified"} />
-            <SummaryLine label="Diagnosis" value={diagnosisText} />
-            <SummaryLine
-              label="Important people"
-              value={summary.importantPeople || "Not specified"}
-            />
-          </SummaryCard>
+          <section className={CARD_CLASSNAME}>
+            <div className="flex items-center justify-between">
+              <h2 className="font-heading text-xl font-bold text-brand-prussian-blue">
+                Understanding My Child
+              </h2>
+              <Link href="/passport/section-b/1" className="text-sm text-brand-prussian-blue/50">
+                Edit
+              </Link>
+            </div>
+
+            {sectionBEmpty ? (
+              <EmptyStateBox
+                prompt={`Help teachers recognise when ${summary.childName} is feeling regulated, and spot the early signs when they are finding things hard.`}
+                ctaLabel="Add Signals and Triggers"
+                ctaHref="/passport/section-b/1"
+              />
+            ) : (
+              <div className="mt-5 flex flex-col gap-5">
+                {hasOkay && (
+                  <ChipGroup
+                    heading="When I am okay, you might see me..."
+                    items={summary.okaySignals!}
+                    variant="okay"
+                  />
+                )}
+                {hasHard && (
+                  <ChipGroup
+                    heading="When I am finding things hard..."
+                    items={summary.hardSignals!}
+                    variant="hard"
+                  />
+                )}
+                {hasTriggers && (
+                  <ChipGroup
+                    heading="What can make things hard for me..."
+                    items={summary.hardTriggers!}
+                    variant="hard"
+                  />
+                )}
+              </div>
+            )}
+          </section>
         </ErrorBoundary>
 
         <ErrorBoundary fallback={fallbackCard}>
-          <SummaryCard title="Understanding My Child" editHref="/passport/section-b/1">
-            <SummaryLine label="Shows they're okay" value={joinList(summary.okaySignals)} />
-            <SummaryLine label="Finds it hard when" value={joinList(summary.hardSignals)} />
-            <SummaryLine label="Common triggers" value={joinList(summary.hardTriggers)} />
-          </SummaryCard>
+          <section className={CARD_CLASSNAME}>
+            <div className="flex items-center justify-between">
+              <h2 className="font-heading text-xl font-bold text-brand-prussian-blue">
+                How My Child Communicates
+              </h2>
+              <Link href="/passport/section-c" className="text-sm text-brand-prussian-blue/50">
+                Edit
+              </Link>
+            </div>
+
+            {sectionCEmpty ? (
+              <EmptyStateBox
+                prompt={`Every child has a voice. Share ${summary.childName}'s unique communication style so others know exactly how to connect with them.`}
+                ctaLabel="Add Communication Profile"
+                ctaHref="/passport/section-c"
+              />
+            ) : (
+              <div className="mt-5 flex flex-col gap-5">
+                {hasCommMethods && (
+                  <ChipGroup
+                    heading="Communication methods"
+                    items={summary.communicationMethods!}
+                    variant="okay"
+                  />
+                )}
+                {hasShowsHappy && (
+                  <QuoteBox
+                    heading={`How ${summary.childName} shows they are happy`}
+                    text={summary.showsHappy!}
+                  />
+                )}
+                {hasShowsAnxious && (
+                  <QuoteBox
+                    heading={`How ${summary.childName} shows they are anxious`}
+                    text={summary.showsAnxious!}
+                  />
+                )}
+                {hasPhrasesToAvoid && (
+                  <QuoteBox heading="Phrases to avoid" text={summary.phrasesToAvoid!} />
+                )}
+              </div>
+            )}
+          </section>
         </ErrorBoundary>
 
         <ErrorBoundary fallback={fallbackCard}>
-          <SummaryCard title="How my Child Communicates" editHref="/passport/section-c">
-            <SummaryLine
-              label="Communication methods"
-              value={joinList(summary.communicationMethods)}
-            />
-            <SummaryLine label="Shows happy" value={truncateText(summary.showsHappy)} />
-            <SummaryLine label="Shows anxious" value={truncateText(summary.showsAnxious)} />
-            <SummaryLine label="Avoid" value={truncateText(summary.phrasesToAvoid)} />
-          </SummaryCard>
+          <section className={CARD_CLASSNAME}>
+            <div className="flex items-center justify-between">
+              <h2 className="font-heading text-xl font-bold text-brand-prussian-blue">
+                How I Support My Child
+              </h2>
+              <Link href="/passport/section-d/1" className="text-sm text-brand-prussian-blue/50">
+                Edit
+              </Link>
+            </div>
+
+            {sectionDEmpty ? (
+              <EmptyStateBox
+                prompt="What sensory tools and de-escalation strategies work best? Build a quick-reference toolkit for the classroom."
+                ctaLabel="Add Support Strategies"
+                ctaHref="/passport/section-d/1"
+              />
+            ) : (
+              <div className="mt-5 flex flex-col gap-5">
+                {hasBefore && (
+                  <VerticalChipList heading="What helps before a behaviour" items={summary.beforeBehaviour!} />
+                )}
+                {hasDuring && (
+                  <VerticalChipList heading="What helps during distress" items={summary.duringDistress!} />
+                )}
+                {hasAfter && (
+                  <VerticalChipList heading="What helps after distress" items={summary.afterDistress!} />
+                )}
+
+                {(hasSeeks || hasAvoids) && (
+                  <div>
+                    <h3 className="font-accent text-xs font-bold uppercase tracking-[0.1em] text-brand-neutral-black/60">
+                      Sensory Profile
+                    </h3>
+                    <div
+                      className={
+                        hasSeeks && hasAvoids ? "mt-2 grid grid-cols-2 gap-4" : "mt-2"
+                      }
+                    >
+                      {hasSeeks && (
+                        <div>
+                          <h4 className="font-accent text-xs font-bold uppercase tracking-[0.1em] text-brand-neutral-black/60">
+                            Sensory Seeks
+                          </h4>
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            {summary.sensorySeeks!.map((item, index) => (
+                              <span
+                                key={index}
+                                className="rounded-lg bg-brand-pastel-blue/20 px-3 py-1.5 text-sm font-semibold text-brand-prussian-blue"
+                              >
+                                + {item}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {hasAvoids && (
+                        <div>
+                          <h4 className="font-accent text-xs font-bold uppercase tracking-[0.1em] text-brand-neutral-black/60">
+                            Sensory Avoids
+                          </h4>
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            {summary.sensoryAvoids!.map((item, index) => (
+                              <span
+                                key={index}
+                                className="rounded-lg bg-brand-pastel-blue/20 px-3 py-1.5 text-sm font-semibold text-brand-prussian-blue"
+                              >
+                                − {item}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </section>
         </ErrorBoundary>
 
         <ErrorBoundary fallback={fallbackCard}>
-          <SummaryCard title="How I Support my Child" editHref="/passport/section-d/1">
-            <SummaryLine label="Helps before" value={joinList(summary.beforeBehaviour)} />
-            <SummaryLine label="Helps during" value={joinList(summary.duringDistress)} />
-            <SummaryLine label="Helps after" value={joinList(summary.afterDistress)} />
-            <SummaryLine label="Sensory seeks" value={joinList(summary.sensorySeeks)} />
-            <SummaryLine label="Sensory avoids" value={joinList(summary.sensoryAvoids)} />
-          </SummaryCard>
-        </ErrorBoundary>
-
-        <ErrorBoundary fallback={fallbackCard}>
-          <section>
-            <h2 className="mb-2 font-heading text-base font-semibold text-brand-neutral-black">
-              Who can see this passport
+          <section className="mt-2 mb-6">
+            <h2 className="mb-4 font-accent text-sm uppercase tracking-widest text-brand-neutral-black/60">
+              Manage Access
             </h2>
 
             {approvedInstitutions.length === 0 ? (
-              <div className="rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-sm text-black/50">
-                No schools approved yet. Tap Share to approve your child&apos;s
-                school.
-              </div>
+              <p className="text-center text-sm text-brand-neutral-black/60">
+                No schools approved yet. Tap the share button above to approve
+                your child&apos;s school.
+              </p>
             ) : (
-              <div className="flex flex-col gap-2">
+              <div>
                 {approvedInstitutions.map((institution) => (
                   <div
                     key={institution.institutionId}
-                    className="rounded-2xl border border-black/5 bg-white p-4 shadow-sm"
+                    className="mb-2 flex items-center justify-between rounded-xl bg-brand-off-white/50 p-4"
                   >
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <p className="text-sm font-semibold text-brand-neutral-black">
-                          {institution.institutionName}
-                        </p>
-                        <p className="text-xs text-black/50">
-                          {institution.approvedAt
-                            ? `Approved ${formatDate(institution.approvedAt)}`
-                            : "Approved"}
-                        </p>
-                      </div>
-                      <span className="flex-shrink-0 rounded-full bg-green-50 px-2.5 py-1 text-xs font-semibold text-green-800">
-                        Active
-                      </span>
-                    </div>
+                    <p className="font-bold text-brand-neutral-black">
+                      {institution.institutionName}
+                    </p>
                     <button
                       type="button"
                       onClick={() =>
                         handleRevoke(institution.institutionId, institution.institutionName)
                       }
-                      className="mt-3 text-xs font-semibold text-red-600"
+                      className="text-sm font-bold text-brand-golden-brown"
                     >
-                      Revoke Access
+                      Revoke
                     </button>
                   </div>
                 ))}
@@ -429,12 +582,12 @@ export default function PassportDashboardPage() {
             )}
 
             {revokeConfirmation && (
-              <p className="mt-3 rounded-xl bg-black/5 px-4 py-3 text-sm text-brand-neutral-black">
+              <p className="mt-3 rounded-xl bg-brand-off-white/50 px-4 py-3 text-sm text-brand-neutral-black">
                 {revokeConfirmation}
               </p>
             )}
             {revokeError && (
-              <p role="alert" className="mt-3 text-sm font-medium text-red-600">
+              <p role="alert" className="mt-3 text-sm font-medium text-brand-golden-brown">
                 {revokeError}
               </p>
             )}
@@ -459,38 +612,107 @@ export default function PassportDashboardPage() {
   );
 }
 
-function SummaryCard({
-  title,
-  editHref,
-  children,
-}: {
-  title: string;
-  editHref: string;
-  children: React.ReactNode;
-}) {
+function ShareIcon() {
   return (
-    <section className="rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
-      <div className="mb-3 flex items-center justify-between">
-        <h2 className="font-heading text-base font-semibold text-brand-neutral-black">
-          {title}
-        </h2>
-        <Link
-          href={editHref}
-          className="rounded-full border border-brand-prussian-blue px-3 py-1 text-xs font-semibold text-brand-prussian-blue"
-        >
-          Edit
-        </Link>
-      </div>
-      <div className="flex flex-col gap-1.5">{children}</div>
-    </section>
+    <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" aria-hidden>
+      <path
+        d="M12 3v12m0-12l4 4m-4-4l-4 4M5 12v7a1 1 0 001 1h12a1 1 0 001-1v-7"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
   );
 }
 
-function SummaryLine({ label, value }: { label: string; value: string }) {
+function EmptyStateBox({
+  prompt,
+  ctaLabel,
+  ctaHref,
+}: {
+  prompt: string;
+  ctaLabel: string;
+  ctaHref: string;
+}) {
   return (
-    <p className="text-xs text-black/70">
-      <span className="font-semibold text-black/50">{label}: </span>
-      {value}
-    </p>
+    <div className="mt-4 flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-brand-pastel-blue bg-brand-pastel-blue/10 p-6 text-center">
+      <span aria-hidden className="mb-3 text-2xl text-brand-prussian-blue opacity-60">
+        ✨
+      </span>
+      <p className="mb-4 text-sm text-brand-neutral-black">{prompt}</p>
+      <Link
+        href={ctaHref}
+        className="rounded-full bg-brand-prussian-blue px-5 py-2.5 text-sm font-bold text-white"
+      >
+        {ctaLabel}
+      </Link>
+    </div>
+  );
+}
+
+function ChipGroup({
+  heading,
+  items,
+  variant,
+}: {
+  heading: string;
+  items: string[];
+  variant: "okay" | "hard";
+}) {
+  const chipClassName =
+    variant === "okay"
+      ? "bg-brand-pastel-blue/20 text-brand-prussian-blue"
+      : "border border-brand-golden-brown/20 bg-brand-golden-brown/10 text-brand-golden-brown";
+
+  return (
+    <div>
+      <h3 className="font-accent text-xs font-bold uppercase tracking-[0.1em] text-brand-neutral-black/60">
+        {heading}
+      </h3>
+      <div className="mt-2 flex flex-wrap gap-2">
+        {items.map((item, index) => (
+          <span
+            key={index}
+            className={`rounded-lg px-3 py-1.5 text-sm font-semibold ${chipClassName}`}
+          >
+            {item}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function QuoteBox({ heading, text }: { heading: string; text: string }) {
+  return (
+    <div>
+      <h3 className="font-accent text-xs font-bold uppercase tracking-[0.1em] text-brand-neutral-black/60">
+        {heading}
+      </h3>
+      <div className="mt-2 rounded-r-xl border-l-4 border-brand-golden-brown bg-brand-safe-ivory/30 p-4">
+        <p className="text-base italic leading-relaxed text-brand-neutral-black">{text}</p>
+      </div>
+    </div>
+  );
+}
+
+function VerticalChipList({ heading, items }: { heading: string; items: string[] }) {
+  return (
+    <div>
+      <h3 className="font-accent text-xs font-bold uppercase tracking-[0.1em] text-brand-neutral-black/60">
+        {heading}
+      </h3>
+      <div className="mt-2">
+        {items.map((item, index) => (
+          <div
+            key={index}
+            className="mb-2 flex w-full items-center rounded-lg bg-brand-off-white/30 p-3 text-sm font-medium text-brand-prussian-blue"
+          >
+            {item}
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
