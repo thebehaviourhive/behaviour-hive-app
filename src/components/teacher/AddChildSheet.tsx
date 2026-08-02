@@ -4,11 +4,13 @@ import { useState } from "react";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 import { createClient } from "@/lib/supabase/client";
 import { getChildFirstName } from "@/lib/childDisplayName";
+import { logActivity } from "@/lib/logActivity";
 
 export function AddChildSheet({
   isOpen,
   onClose,
   teacherId,
+  teacherName,
   institutionId,
   institutionCode,
   onAdded,
@@ -16,6 +18,7 @@ export function AddChildSheet({
   isOpen: boolean;
   onClose: () => void;
   teacherId: string;
+  teacherName: string;
   institutionId: string;
   institutionCode: string | null;
   onAdded: () => void;
@@ -115,6 +118,13 @@ export function AddChildSheet({
       setError(saveError.message);
       return;
     }
+
+    logActivity({
+      passportId: passport.id,
+      actorId: teacherId,
+      eventType: "team_linked",
+      eventDescription: `${teacherName} linked to passport`,
+    });
 
     setPassportCode("");
     setSuccess(`${getChildFirstName(passport.child_name)} has been added to your dashboard.`);

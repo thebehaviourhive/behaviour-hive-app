@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/client";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { getChildFirstName } from "@/lib/childDisplayName";
 import { insertWithOfflineRetry } from "@/lib/waitForReconnect";
+import { logActivity } from "@/lib/logActivity";
 
 type SettledState = "settled" | "unsettled" | "dysregulated";
 
@@ -160,6 +161,14 @@ export default function TeacherEodPage() {
       setError(errorMessage);
       return;
     }
+
+    const teacherName = (user.user_metadata?.full_name as string | undefined) || "your teacher";
+    logActivity({
+      passportId,
+      actorId: user.id,
+      eventType: "afternoon_update",
+      eventDescription: `End of day update from ${teacherName}`,
+    });
 
     setShowSuccess(true);
     setTimeout(() => {

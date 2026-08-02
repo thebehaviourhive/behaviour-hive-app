@@ -6,6 +6,9 @@ import { BottomNav } from "@/components/ui/BottomNav";
 import { createClient } from "@/lib/supabase/client";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { getPassportResumeHref } from "@/lib/getPassportResumeHref";
+import { RecentUpdatesCard } from "@/components/parent/RecentUpdatesCard";
+import { QuickActionButtons } from "@/components/parent/QuickActionButtons";
+import { YourTeamCard } from "@/components/parent/YourTeamCard";
 
 type PassportStatus = "not_started" | "in_progress" | "complete";
 type SettledState = "settled" | "unsettled" | "dysregulated";
@@ -59,6 +62,7 @@ export default function ParentDashboardPage() {
   const { user, isReady } = useRequireRole("parent");
   const [firstName, setFirstName] = useState("there");
   const [childName, setChildName] = useState("your child");
+  const [passportId, setPassportId] = useState<string | null>(null);
   const [passportStatus, setPassportStatus] = useState<PassportStatus>("not_started");
   const [resumeHref, setResumeHref] = useState("/passport/welcome");
   const [isLoadingPassport, setIsLoadingPassport] = useState(true);
@@ -133,6 +137,7 @@ export default function ParentDashboardPage() {
         (passportRow?.passport_status as PassportStatus | undefined) ?? "not_started";
 
       setChildName(passportRow?.child_name || "your child");
+      setPassportId(passportRow?.id ?? null);
       setPassportStatus(status);
       setHasCheckedInToday(Boolean(todaysCheckin));
       setCheckedInAt(todaysCheckin?.submitted_at ?? null);
@@ -296,6 +301,10 @@ export default function ParentDashboardPage() {
           </section>
         )}
 
+        <RecentUpdatesCard passportId={passportId} />
+
+        <QuickActionButtons />
+
         <section>
           <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-black/40">
             Recommended for you
@@ -307,6 +316,8 @@ export default function ParentDashboardPage() {
             <p className="text-xs text-black/50">Course · 45 min</p>
           </div>
         </section>
+
+        <YourTeamCard passportId={passportId} />
       </main>
 
       <BottomNav active="home" passportHref={resumeHref} />

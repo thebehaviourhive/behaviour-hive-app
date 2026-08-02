@@ -4,10 +4,12 @@ import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import {
   ABC_ROLE_CONFIG,
+  ABC_ROLE_DISPLAY_LABEL,
   PERCEIVED_FUNCTION_OPTIONS,
   type ABCLoggerRole,
 } from "./roleConfig";
 import { loadDraft, saveDraft, clearDraft, type ABCDraft } from "./draftStorage";
+import { logActivity } from "@/lib/logActivity";
 
 const TOTAL_STEPS = 4;
 
@@ -271,6 +273,12 @@ export function ABCLogger({
       }
 
       clearDraft(passportId);
+      logActivity({
+        passportId,
+        actorId: user.id,
+        eventType: "abc_logged",
+        eventDescription: `ABC incident logged by ${ABC_ROLE_DISPLAY_LABEL[role]}`,
+      });
       setIsSubmitting(false);
       setShowSuccess(true);
       setTimeout(onComplete, 900);

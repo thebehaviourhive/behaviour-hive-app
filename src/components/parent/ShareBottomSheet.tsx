@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 import { createClient } from "@/lib/supabase/client";
 import { generateUniquePassportCode } from "@/lib/generatePassportCode";
+import { logActivity } from "@/lib/logActivity";
 
 export function ShareBottomSheet({
   isOpen,
@@ -59,6 +60,17 @@ export function ShareBottomSheet({
         if (!isMounted) return;
         if (!error) {
           onCodeGenerated(code);
+          const {
+            data: { user },
+          } = await supabase.auth.getUser();
+          if (user) {
+            logActivity({
+              passportId,
+              actorId: user.id,
+              eventType: "passport_shared",
+              eventDescription: "Passport code generated",
+            });
+          }
         }
       } finally {
         if (isMounted) setIsGeneratingCode(false);

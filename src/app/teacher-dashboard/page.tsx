@@ -248,6 +248,7 @@ export default function TeacherDashboardPage() {
           isOpen={isAddChildOpen}
           onClose={() => setIsAddChildOpen(false)}
           teacherId={user!.id}
+          teacherName={(user!.user_metadata?.full_name as string | undefined) ?? "A teacher"}
           institutionId={institutionId}
           institutionCode={institutionCode}
           onAdded={() => setRefreshKey((k) => k + 1)}
