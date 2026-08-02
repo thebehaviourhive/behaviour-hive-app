@@ -10,6 +10,7 @@ import { PassportProgress } from "@/components/ui/PassportProgress";
 import { usePassportSectionD } from "@/hooks/usePassportSectionD";
 import { getPassportProgressPercent } from "@/lib/passportProgress";
 import { createClient } from "@/lib/supabase/client";
+import { logActivity } from "@/lib/logActivity";
 
 const SENSORY_OPTIONS = [
   { value: "Touch" },
@@ -27,7 +28,7 @@ const SENSORY_AVOIDS_OPTIONS = [...SENSORY_OPTIONS, { value: "Other" }];
 
 export default function PassportSectionDPage4() {
   const router = useRouter();
-  const { passportId, record, isReady, save } = usePassportSectionD();
+  const { user, passportId, record, isReady, save } = usePassportSectionD();
 
   const [sensorySeeks, setSensorySeeks] = useState<string[]>([]);
   const [sensoryAvoids, setSensoryAvoids] = useState<string[]>([]);
@@ -104,6 +105,15 @@ export default function PassportSectionDPage4() {
         setIsSaving(false);
         setError(passportError.message);
         return;
+      }
+
+      if (user) {
+        logActivity({
+          passportId,
+          actorId: user.id,
+          eventType: "passport_updated",
+          eventDescription: "Passport completed",
+        });
       }
     }
 

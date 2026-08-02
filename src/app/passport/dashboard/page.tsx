@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { BottomNav } from "@/components/ui/BottomNav";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
@@ -80,6 +80,7 @@ function buildSubInfoLine(age: number | null, school: string | null): string {
 
 export default function PassportDashboardPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { user, isReady: isRoleReady } = useRequireRole("parent");
   const [summary, setSummary] = useState<PassportSummaryData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -245,6 +246,15 @@ export default function PassportDashboardPage() {
     // real navigation (bottom nav / edit-and-return), never kept alive
     // across visits, so there is no stale-data path to guard against here.
   }, [user, router]);
+
+  // Lets the dashboard's "ABC Log" quick action jump straight into the
+  // logger instead of just landing here and requiring an extra tap on the
+  // existing "+ Log Incident" button below.
+  useEffect(() => {
+    if (!summary || searchParams.get("logIncident") !== "1") return;
+    setIsAbcLoggerOpen(true);
+    router.replace("/passport/dashboard");
+  }, [summary, searchParams, router]);
 
   if (!isRoleReady || isLoading) {
     return null;

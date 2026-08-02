@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useRequireRole } from "@/hooks/useRequireRole";
+import { logActivity } from "@/lib/logActivity";
 
 type SleepQuality = "slept_through" | "woke_briefly" | "very_restless" | "barely_slept";
 type RegulationState = "settled" | "unsettled" | "dysregulated";
@@ -178,6 +179,15 @@ export default function MorningCheckinPage() {
     if (insertError) {
       setError(insertError.message);
       return;
+    }
+
+    if (passportId) {
+      logActivity({
+        passportId,
+        actorId: user.id,
+        eventType: "morning_checkin",
+        eventDescription: "Morning check-in sent",
+      });
     }
 
     setShowSuccess(true);
