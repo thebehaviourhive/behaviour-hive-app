@@ -100,11 +100,12 @@ export function AddChildSheet({
       return;
     }
 
-    const { error: saveError } = existingAccess
+    const { data: reactivatedRows, error: saveError } = existingAccess
       ? await supabase
           .from("passport_access")
           .update({ is_active: true, linked_at: new Date().toISOString() })
           .eq("id", existingAccess.id)
+          .select("id")
       : await supabase.from("passport_access").insert({
           passport_id: passport.id,
           teacher_id: teacherId,
@@ -116,6 +117,17 @@ export function AddChildSheet({
 
     if (saveError) {
       setError(saveError.message);
+      return;
+    }
+
+    // An UPDATE can be RLS-filtered down to zero matching rows and still
+    // report success (no error) -- .select() here is what lets us tell
+    // the two apart, since a genuinely applied update always returns the
+    // row it touched.
+    if (existingAccess && (!reactivatedRows || reactivatedRows.length === 0)) {
+      setError(
+        "We couldn't restore access to this child's passport. Please ask the parent to re-approve your school, then try again."
+      );
       return;
     }
 
