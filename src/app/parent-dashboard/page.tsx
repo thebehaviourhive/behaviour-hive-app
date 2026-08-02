@@ -18,32 +18,19 @@ interface TeacherUpdateData {
   headsUp: string | null;
 }
 
-// TODO: replace with a real query against teacher_updates once teachers can
-// actually submit an end-of-day update — for now this lets us see the full
-// State 4 UI end to end.
-const DUMMY_TEACHER_UPDATE: TeacherUpdateData = {
-  teacherName: "Ms. O'Brien",
-  settledState: "unsettled",
-  energyLevel: 3,
-  flags: ["Peer Friction", "Fatigued"],
-  headsUp:
-    "Had a tough moment at lunch after a disagreement with a friend, but settled well after some quiet time with a book.",
-};
-const HAS_TEACHER_UPDATE_TODAY = true;
-
 const SETTLED_BADGE: Record<SettledState, { label: string; dotClassName: string; badgeClassName: string }> = {
   settled: {
-    label: "Settled",
+    label: "Settled and Regulated",
     dotClassName: "bg-green-500",
     badgeClassName: "bg-green-50 text-green-800",
   },
   unsettled: {
-    label: "Unsettled",
+    label: "Unsettled and Anxious",
     dotClassName: "bg-amber-500",
     badgeClassName: "bg-amber-50 text-amber-800",
   },
   dysregulated: {
-    label: "Dysregulated",
+    label: "Highly Dysregulated",
     dotClassName: "bg-red-500",
     badgeClassName: "bg-red-50 text-red-800",
   },
@@ -77,6 +64,8 @@ export default function ParentDashboardPage() {
   const [isLoadingPassport, setIsLoadingPassport] = useState(true);
   const [hasCheckedInToday, setHasCheckedInToday] = useState(false);
   const [checkedInAt, setCheckedInAt] = useState<string | null>(null);
+  const [hasTeacherUpdateToday, setHasTeacherUpdateToday] = useState(false);
+  const [teacherUpdate, setTeacherUpdate] = useState<TeacherUpdateData | null>(null);
   const [isPassportCardDismissed, setIsPassportCardDismissed] = useState(false);
 
   useEffect(() => {
@@ -110,7 +99,7 @@ export default function ParentDashboardPage() {
       ] = await Promise.all([
         supabase
           .from("passports")
-          .select("child_name, passport_status, section_a_complete")
+          .select("id, child_name, passport_status, section_a_complete")
           .eq("user_id", user!.id)
           .maybeSingle(),
         supabase
@@ -147,6 +136,39 @@ export default function ParentDashboardPage() {
       setPassportStatus(status);
       setHasCheckedInToday(Boolean(todaysCheckin));
       setCheckedInAt(todaysCheckin?.submitted_at ?? null);
+
+      // Run after the batch above rather than inside it, since it needs
+      // passportRow.id, which that batch is what resolves in the first
+      // place.
+      if (passportRow?.id) {
+        const { data: todaysUpdate } = await supabase
+          .from("teacher_updates")
+          .select("settled_state, energy_level, flags, heads_up, teacher_id")
+          .eq("passport_id", passportRow.id)
+          .gte("submitted_at", startOfToday.toISOString())
+          .order("submitted_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (!isMounted) return;
+
+        if (todaysUpdate) {
+          const { data: teacherName } = await supabase.rpc("get_teacher_name", {
+            p_teacher_id: todaysUpdate.teacher_id,
+          });
+
+          if (!isMounted) return;
+
+          setHasTeacherUpdateToday(true);
+          setTeacherUpdate({
+            teacherName: teacherName ?? "your child's teacher",
+            settledState: (todaysUpdate.settled_state as SettledState) ?? "settled",
+            energyLevel: todaysUpdate.energy_level ?? 0,
+            flags: todaysUpdate.flags ?? [],
+            headsUp: todaysUpdate.heads_up,
+          });
+        }
+      }
       setResumeHref(
         getPassportResumeHref({
           passportStatus: status,
@@ -205,8 +227,8 @@ export default function ParentDashboardPage() {
           isBefore1pm={isBefore1pm}
           hasCheckedInToday={hasCheckedInToday}
           checkedInAt={checkedInAt}
-          hasTeacherUpdateToday={HAS_TEACHER_UPDATE_TODAY}
-          teacherUpdate={DUMMY_TEACHER_UPDATE}
+          hasTeacherUpdateToday={hasTeacherUpdateToday}
+          teacherUpdate={teacherUpdate}
         />
 
         {passportStatus === "complete" ? (
@@ -305,7 +327,7 @@ function CheckInCard({
   hasCheckedInToday: boolean;
   checkedInAt: string | null;
   hasTeacherUpdateToday: boolean;
-  teacherUpdate: TeacherUpdateData;
+  teacherUpdate: TeacherUpdateData | null;
 }) {
   if (isBefore1pm && !hasCheckedInToday) {
     return (
@@ -360,7 +382,7 @@ function CheckInCard({
     );
   }
 
-  if (!hasTeacherUpdateToday) {
+  if (!hasTeacherUpdateToday || !teacherUpdate) {
     return (
       <div className="flex items-center gap-3 rounded-2xl border border-black/5 bg-black/[0.03] p-4 shadow-sm">
         <span
@@ -385,7 +407,7 @@ function CheckInCard({
     <div className="rounded-2xl border border-black/5 bg-white p-3.5 shadow-sm">
       <div className="flex items-center justify-between gap-2">
         <p className="text-sm font-semibold text-brand-neutral-black">
-          Update from {teacherUpdate.teacherName}
+          Afternoon update from {teacherUpdate.teacherName}
         </p>
         <SettledBadge state={teacherUpdate.settledState} />
       </div>
