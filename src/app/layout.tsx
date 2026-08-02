@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Baloo_2, Nunito_Sans, Quicksand } from "next/font/google";
 import "./globals.css";
+import PreventPinchZoom from "./PreventPinchZoom";
 
 const baloo2 = Baloo_2({
   variable: "--font-baloo-2",
@@ -37,6 +38,10 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = {
   themeColor: "#004F71",
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
 };
 
 export default function RootLayout({
@@ -49,7 +54,10 @@ export default function RootLayout({
       lang="en"
       className={`${baloo2.variable} ${nunitoSans.variable} ${quicksand.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">
+        <PreventPinchZoom />
+        {children}
+      </body>
     </html>
   );
 }
