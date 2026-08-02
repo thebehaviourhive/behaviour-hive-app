@@ -95,6 +95,39 @@ export function ABCLogger({
     saveDraft(passportId, { ...draft, savedAt: new Date().toISOString() });
   }, [draft, isAutosaveEnabled, passportId]);
 
+  // Locks the page behind the modal for as long as this component is
+  // mounted -- which is exactly the modal's open lifetime, since both
+  // parent pages conditionally render <ABCLogger /> and unmount it on
+  // either onComplete or onDismiss. overflow-hidden alone doesn't
+  // reliably stop scroll on iOS Safari (the page can still rubber-band
+  // underneath a fixed overlay), so the body is additionally pinned with
+  // position: fixed at its current scroll offset -- which is also why
+  // that offset has to be restored afterward instead of just clearing
+  // the styles, or closing the modal would jump the page back to the top.
+  useEffect(() => {
+    const scrollY = window.scrollY;
+    const body = document.body;
+    const previous = {
+      overflow: body.style.overflow,
+      position: body.style.position,
+      top: body.style.top,
+      width: body.style.width,
+    };
+
+    body.style.overflow = "hidden";
+    body.style.position = "fixed";
+    body.style.top = `-${scrollY}px`;
+    body.style.width = "100%";
+
+    return () => {
+      body.style.overflow = previous.overflow;
+      body.style.position = previous.position;
+      body.style.top = previous.top;
+      body.style.width = previous.width;
+      window.scrollTo(0, scrollY);
+    };
+  }, []);
+
   function updateDraft(patch: Partial<ABCDraft>) {
     setDraft((prev) => ({ ...prev, ...patch }));
   }
@@ -258,8 +291,8 @@ export function ABCLogger({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col justify-end bg-black/40">
-      <div className="relative flex max-h-[92vh] min-h-[70vh] flex-col rounded-t-2xl bg-white shadow-lg">
+    <div className="fixed inset-0 z-[100] flex flex-col justify-end bg-black/50">
+      <div className="relative flex h-[85vh] flex-col rounded-t-2xl bg-white shadow-lg">
         <div className="mx-auto mt-3 h-1.5 w-12 flex-shrink-0 rounded-full bg-black/10" />
 
         {showSuccess && (
