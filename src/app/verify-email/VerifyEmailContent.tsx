@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/Button";
 import { createClient } from "@/lib/supabase/client";
 import { getPostAuthRedirect } from "@/lib/roleRedirect";
 
-const CODE_LENGTH = 6;
+const CODE_LENGTH = 8;
 const RESEND_COOLDOWN_SECONDS = 60;
 const MAX_ATTEMPTS = 3;
 const LOCKOUT_SECONDS = 5 * 60;
@@ -213,7 +213,7 @@ export function VerifyEmailContent() {
 
         <div className="rounded-3xl border border-black/5 bg-white p-6 shadow-sm">
           <p className="text-sm leading-relaxed text-black/70">
-            We sent a 6-digit code to{" "}
+            We sent a {CODE_LENGTH}-digit code to{" "}
             <span className="font-semibold text-brand-neutral-black">
               {email}
             </span>
@@ -222,8 +222,8 @@ export function VerifyEmailContent() {
 
           <div
             role="group"
-            aria-label="6-digit verification code"
-            className="mt-6 flex justify-center gap-2"
+            aria-label={`${CODE_LENGTH}-digit verification code`}
+            className="mt-6 flex justify-center gap-1"
           >
             {digits.map((digit, index) => (
               <input
@@ -241,7 +241,7 @@ export function VerifyEmailContent() {
                 onChange={(e) => handleDigitChange(index, e.target.value)}
                 onKeyDown={(e) => handleKeyDown(index, e)}
                 onPaste={handlePaste}
-                className="h-14 w-11 rounded-xl border border-black/10 text-center font-heading text-2xl font-bold text-brand-neutral-black focus:border-brand-prussian-blue focus:outline-none focus:ring-2 focus:ring-brand-pastel-blue disabled:cursor-not-allowed disabled:opacity-40"
+                className="h-12 w-8 rounded-xl border border-black/10 text-center font-heading text-xl font-bold text-brand-neutral-black focus:border-brand-prussian-blue focus:outline-none focus:ring-2 focus:ring-brand-pastel-blue disabled:cursor-not-allowed disabled:opacity-40"
               />
             ))}
           </div>
