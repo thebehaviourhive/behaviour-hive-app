@@ -5,7 +5,7 @@ type TeacherNavTab = "dashboard" | "students" | "more";
 const TABS: { key: TeacherNavTab; icon: string; label: string; href?: string }[] = [
   { key: "dashboard", icon: "🐝", label: "Dashboard", href: "/teacher-dashboard" },
   { key: "students", icon: "🧒", label: "Students" },
-  { key: "more", icon: "⋯", label: "More" },
+  { key: "more", icon: "⋯", label: "More", href: "/more" },
 ];
 
 export function TeacherBottomNav({ active }: { active: TeacherNavTab }) {

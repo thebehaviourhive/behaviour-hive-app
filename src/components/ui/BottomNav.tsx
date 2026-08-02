@@ -19,6 +19,7 @@ export function BottomNav({ active, passportHref }: BottomNavProps) {
   const hrefs: Partial<Record<NavTab, string>> = {
     home: "/parent-dashboard",
     passport: passportHref,
+    more: "/more",
   };
 
   return (
