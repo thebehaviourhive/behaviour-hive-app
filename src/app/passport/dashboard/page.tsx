@@ -328,7 +328,7 @@ export default function PassportDashboardPage() {
   );
 
   return (
-    <div className="flex min-h-full flex-1 flex-col bg-brand-safe-ivory pb-24">
+    <div className="flex min-h-full flex-1 flex-col bg-brand-off-white/40 pb-24">
       <header className="px-4 pt-8 pb-6">
         <div className="flex items-start justify-between gap-3">
           <p className="font-accent text-sm uppercase tracking-wide text-brand-neutral-black">
@@ -353,16 +353,21 @@ export default function PassportDashboardPage() {
         )}
 
         {diagnosisPills.length > 0 ? (
-          <div className="mt-4 flex flex-wrap gap-2">
-            {diagnosisPills.map((pill) => (
-              <span
-                key={pill}
-                className="rounded-full border border-brand-pastel-blue bg-brand-pastel-blue/40 px-4 py-1.5 font-accent text-sm font-semibold text-brand-prussian-blue"
-              >
-                {pill}
-              </span>
-            ))}
-          </div>
+          <>
+            <p className="mt-4 mb-2 font-accent text-xs font-bold uppercase tracking-widest text-brand-neutral-black/60">
+              Diagnoses and neurotypes
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {diagnosisPills.map((pill) => (
+                <span
+                  key={pill}
+                  className="rounded-full border border-brand-pastel-blue bg-brand-pastel-blue/40 px-4 py-1.5 font-accent text-sm font-semibold text-brand-prussian-blue"
+                >
+                  {pill}
+                </span>
+              ))}
+            </div>
+          </>
         ) : (
           <Link
             href="/passport/section-a"
