@@ -6,7 +6,6 @@ import { createClient } from "@/lib/supabase/client";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 import { ABCLogger } from "@/components/abc-logger/ABCLogger";
-import { logActivity } from "@/lib/logActivity";
 import { ClinicalFileIcon } from "@/components/ui/icons";
 
 interface ClinicianPassportOption {
@@ -169,12 +168,6 @@ export default function ClinicianAddLogPage() {
           childName={selectedPassport.child_name}
           role="clinician"
           onComplete={() => {
-            logActivity({
-              passportId: selectedPassport.passport_id,
-              actorId: user.id,
-              eventType: "clinician_logged",
-              eventDescription: `ABC incident logged by ${user.user_metadata?.full_name ?? "Clinician"}`,
-            });
             setIsAbcLoggerOpen(false);
             router.push("/clinician/dashboard");
           }}

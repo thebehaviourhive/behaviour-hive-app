@@ -7,7 +7,6 @@ import { useRequireRole } from "@/hooks/useRequireRole";
 import { getChildFirstName } from "@/lib/childDisplayName";
 import { ABCLogger } from "@/components/abc-logger/ABCLogger";
 import { ABCTimeline } from "@/components/abc-logger/ABCTimeline";
-import { logActivity } from "@/lib/logActivity";
 
 type TabKey = "summary" | "behaviour" | "communication" | "supports" | "incidents";
 
@@ -319,12 +318,6 @@ export default function ClinicianPassportPage() {
           childName={profile.childFirstName}
           role="clinician"
           onComplete={() => {
-            logActivity({
-              passportId,
-              actorId: user.id,
-              eventType: "clinician_logged",
-              eventDescription: `ABC incident logged by ${user.user_metadata?.full_name ?? "Clinician"}`,
-            });
             setIsAbcLoggerOpen(false);
             setTimelineRefreshKey((key) => key + 1);
             setActiveTab("incidents");

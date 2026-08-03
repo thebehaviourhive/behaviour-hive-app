@@ -162,12 +162,11 @@ export default function TeacherEodPage() {
       return;
     }
 
-    const teacherName = (user.user_metadata?.full_name as string | undefined) || "your teacher";
     logActivity({
       passportId,
       actorId: user.id,
       eventType: "afternoon_update",
-      eventDescription: `End of day update from ${teacherName}`,
+      eventDescription: "End of day update from Teacher",
     });
 
     setShowSuccess(true);

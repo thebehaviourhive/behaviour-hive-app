@@ -10,6 +10,7 @@ import {
 } from "./roleConfig";
 import { loadDraft, saveDraft, clearDraft, type ABCDraft } from "./draftStorage";
 import { logActivity } from "@/lib/logActivity";
+import { CLINICIAN_SPECIALTY_LABEL, type ClinicianSpecialty } from "@/lib/clinicianSpecialties";
 
 const TOTAL_STEPS = 4;
 
@@ -273,11 +274,25 @@ export function ABCLogger({
       }
 
       clearDraft(passportId);
+
+      let roleLabel: string = ABC_ROLE_DISPLAY_LABEL[role];
+      if (role === "clinician") {
+        const { data: clinicianRow } = await supabase
+          .from("clinicians")
+          .select("specialty")
+          .eq("user_id", user.id)
+          .maybeSingle();
+        if (clinicianRow?.specialty) {
+          roleLabel =
+            CLINICIAN_SPECIALTY_LABEL[clinicianRow.specialty as ClinicianSpecialty] ?? roleLabel;
+        }
+      }
+
       logActivity({
         passportId,
         actorId: user.id,
         eventType: "abc_logged",
-        eventDescription: `ABC incident logged by ${ABC_ROLE_DISPLAY_LABEL[role]}`,
+        eventDescription: `ABC incident logged by ${roleLabel}`,
       });
       setIsSubmitting(false);
       setShowSuccess(true);
