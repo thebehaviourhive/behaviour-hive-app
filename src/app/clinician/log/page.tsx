@@ -58,7 +58,7 @@ export default function ClinicianAddLogPage() {
   }
 
   return (
-    <div className="flex min-h-full flex-1 flex-col bg-brand-safe-ivory">
+    <div className="flex min-h-full flex-1 flex-col bg-brand-off-white/40">
       <header className="flex items-center gap-3 px-4 pt-6 pb-4">
         <button
           type="button"
@@ -66,7 +66,7 @@ export default function ClinicianAddLogPage() {
             selectedPassport ? setSelectedPassport(null) : router.push("/clinician/dashboard")
           }
           aria-label="Back"
-          className="flex h-8 w-8 flex-shrink-0 items-center justify-center text-2xl leading-none text-brand-golden-brown"
+          className="flex h-8 w-8 flex-shrink-0 items-center justify-center text-2xl leading-none text-brand-prussian-blue"
         >
           ‹
         </button>
@@ -88,7 +88,7 @@ export default function ClinicianAddLogPage() {
                 <div className="h-16 animate-pulse rounded-2xl bg-white" />
               </div>
             ) : passports.length === 0 ? (
-              <div className="rounded-2xl border-2 border-dashed border-brand-golden-brown/40 bg-white/60 p-6 text-center">
+              <div className="rounded-2xl border-2 border-dashed border-brand-pastel-blue bg-white/60 p-6 text-center">
                 <p className="text-sm text-brand-neutral-black/70">
                   When parents connect their child&apos;s passport using your
                   clinician code, cases will appear here.
@@ -101,7 +101,7 @@ export default function ClinicianAddLogPage() {
                     key={passport.passport_id}
                     type="button"
                     onClick={() => setSelectedPassport(passport)}
-                    className="w-full rounded-2xl border-t-4 border-brand-golden-brown bg-white p-4 text-left text-base font-semibold text-brand-neutral-black shadow-sm transition-colors active:bg-brand-safe-ivory/50"
+                    className="w-full rounded-2xl border border-black/5 bg-white p-4 text-left text-base font-semibold text-brand-neutral-black shadow-sm transition-colors active:bg-black/[0.02]"
                   >
                     {passport.child_name}
                   </button>
@@ -122,21 +122,21 @@ export default function ClinicianAddLogPage() {
               <button
                 type="button"
                 onClick={() => selectLogType("abc")}
-                className="w-full rounded-2xl border-t-4 border-brand-golden-brown bg-white p-4 text-left text-base font-semibold text-brand-neutral-black shadow-sm"
+                className="w-full rounded-2xl border border-black/5 bg-white p-4 text-left text-base font-semibold text-brand-neutral-black shadow-sm"
               >
                 ABC Log
               </button>
               <button
                 type="button"
                 onClick={() => selectLogType("fba")}
-                className="w-full rounded-2xl border-t-4 border-brand-golden-brown bg-white p-4 text-left text-base font-semibold text-brand-neutral-black shadow-sm"
+                className="w-full rounded-2xl border border-black/5 bg-white p-4 text-left text-base font-semibold text-brand-neutral-black shadow-sm"
               >
                 FBA Log
               </button>
               <button
                 type="button"
                 onClick={() => selectLogType("bsp")}
-                className="w-full rounded-2xl border-t-4 border-brand-golden-brown bg-white p-4 text-left text-base font-semibold text-brand-neutral-black shadow-sm"
+                className="w-full rounded-2xl border border-black/5 bg-white p-4 text-left text-base font-semibold text-brand-neutral-black shadow-sm"
               >
                 BSP Log
               </button>
@@ -147,7 +147,7 @@ export default function ClinicianAddLogPage() {
 
       <BottomSheet isOpen={showAdvancedComingSoon} onClose={() => setShowAdvancedComingSoon(false)}>
         <div className="flex flex-col items-center gap-3 text-center">
-          <span className="flex h-16 w-16 items-center justify-center rounded-full bg-brand-golden-brown/10 text-brand-golden-brown">
+          <span className="flex h-16 w-16 items-center justify-center rounded-full bg-brand-pastel-blue/40 text-brand-prussian-blue">
             <ClinicalFileIcon className="h-8 w-8" />
           </span>
           <p className="text-sm text-brand-neutral-black/70">
@@ -156,7 +156,7 @@ export default function ClinicianAddLogPage() {
           <button
             type="button"
             onClick={() => setShowAdvancedComingSoon(false)}
-            className="mt-2 w-full rounded-2xl bg-brand-golden-brown py-3.5 text-base font-semibold text-white"
+            className="mt-2 w-full rounded-2xl bg-brand-prussian-blue py-3.5 text-base font-semibold text-white"
           >
             Return
           </button>

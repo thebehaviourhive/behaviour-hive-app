@@ -147,9 +147,9 @@ export default function ClinicianDashboardPage() {
 
   if (profile.specialty !== "behavioural_psychologist") {
     return (
-      <div className="flex min-h-full flex-1 flex-col bg-brand-safe-ivory pb-24">
+      <div className="flex min-h-full flex-1 flex-col bg-brand-off-white/40 pb-24">
         <main className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
-          <span className="mb-1 flex h-20 w-20 items-center justify-center rounded-full bg-brand-golden-brown/10 text-brand-golden-brown">
+          <span className="mb-1 flex h-20 w-20 items-center justify-center rounded-full bg-brand-pastel-blue/40 text-brand-prussian-blue">
             <ClinicalFileIcon className="h-10 w-10" />
           </span>
           <h1 className="font-heading text-2xl font-bold text-brand-prussian-blue">
@@ -169,17 +169,21 @@ export default function ClinicianDashboardPage() {
   const isPending = profile.verificationStatus === "pending";
 
   return (
-    <div className="flex min-h-full flex-1 flex-col bg-brand-safe-ivory pb-24">
+    <div className="flex min-h-full flex-1 flex-col bg-brand-off-white/40 pb-24">
       <div className="relative flex-1">
         <div className={isPending ? "pointer-events-none select-none" : ""}>
-          <h1 className="mt-6 px-4 font-heading text-2xl font-bold text-brand-prussian-blue">
+          <h1 className="mt-6 px-4 font-heading text-2xl font-semibold text-brand-neutral-black">
             {getGreeting()}, {firstName}
           </h1>
 
           <div className="scrollbar-hide flex gap-4 overflow-x-auto px-4 py-2">
             <StatCard label="Active Cases" value={isLoadingStats ? "…" : stats.activeCases} />
             <StatCard label="Weekly Logs" value={isLoadingStats ? "…" : stats.weeklyLogs} />
-            <StatCard label="Reviews Due" value={isLoadingStats ? "…" : stats.reviewsDue} />
+            <StatCard
+              label="Reviews Due"
+              value={isLoadingStats ? "…" : stats.reviewsDue}
+              isWarning={!isLoadingStats && stats.reviewsDue > 0}
+            />
           </div>
 
           <div className="px-4">
@@ -192,7 +196,7 @@ export default function ClinicianDashboardPage() {
         {isPending && (
           <div className="absolute inset-0 z-20 flex items-center justify-center bg-white/30 px-6 backdrop-blur-md">
             <div className="w-full max-w-xs rounded-3xl bg-white p-6 text-center shadow-lg">
-              <span className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-brand-golden-brown/10 text-brand-golden-brown">
+              <span className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-brand-pastel-blue/40 text-brand-prussian-blue">
                 <LockIcon className="h-6 w-6" />
               </span>
               <p className="mb-4 text-base font-semibold text-brand-neutral-black">
@@ -200,7 +204,7 @@ export default function ClinicianDashboardPage() {
               </p>
               <Link
                 href="/clinician/verify"
-                className="block w-full rounded-2xl bg-brand-golden-brown py-3.5 text-base font-semibold text-white"
+                className="block w-full rounded-2xl bg-brand-prussian-blue py-3.5 text-base font-semibold text-white"
               >
                 Submit Credentials
               </Link>
@@ -214,9 +218,23 @@ export default function ClinicianDashboardPage() {
   );
 }
 
-function StatCard({ label, value }: { label: string; value: number | string }) {
+function StatCard({
+  label,
+  value,
+  isWarning,
+}: {
+  label: string;
+  value: number | string;
+  isWarning?: boolean;
+}) {
   return (
-    <div className="min-w-[140px] flex-shrink-0 rounded-xl border-t-4 border-brand-golden-brown bg-white p-4 shadow-sm">
+    <div
+      className={`min-w-[140px] flex-shrink-0 rounded-2xl p-4 shadow-sm ${
+        isWarning
+          ? "border-l-4 border-brand-golden-brown bg-brand-safe-ivory/30"
+          : "border border-black/5 bg-white"
+      }`}
+    >
       <p className="font-heading text-2xl font-bold text-brand-prussian-blue">{value}</p>
       <p className="mt-1 font-accent text-xs font-bold uppercase tracking-wide text-brand-neutral-black/60">
         {label}

@@ -15,7 +15,7 @@ export function ClinicianBottomNav({ active }: { active: ClinicianNavTab }) {
         {TABS.map((tab) => {
           const isActive = tab.key === active;
           const className = `flex flex-col items-center gap-0.5 px-2 py-1 ${
-            isActive ? "text-brand-golden-brown" : "text-black/35"
+            isActive ? "text-brand-prussian-blue" : "text-black/35"
           }`;
           return (
             <Link key={tab.key} href={tab.href} className={className}>

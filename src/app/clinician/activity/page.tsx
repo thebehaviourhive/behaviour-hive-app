@@ -94,7 +94,7 @@ export default function ClinicianActivityPage() {
   const groups = groupByDate(entries);
 
   return (
-    <div className="flex min-h-full flex-1 flex-col bg-brand-safe-ivory">
+    <div className="flex min-h-full flex-1 flex-col bg-brand-off-white/40">
       <header className="flex items-center gap-3 px-4 pt-6 pb-4">
         <Link
           href="/clinician/dashboard"
@@ -116,7 +116,7 @@ export default function ClinicianActivityPage() {
             <ActivityRowSkeleton />
           </div>
         ) : entries.length === 0 ? (
-          <div className="rounded-xl border-2 border-dashed border-brand-golden-brown/40 bg-white/60 p-6 text-center">
+          <div className="rounded-xl border-2 border-dashed border-brand-pastel-blue bg-white/60 p-6 text-center">
             <p className="font-sans text-sm text-brand-neutral-black/70">
               Activity across your connected cases will appear here.
             </p>
@@ -149,7 +149,7 @@ export default function ClinicianActivityPage() {
                 type="button"
                 onClick={loadMore}
                 disabled={isLoadingMore}
-                className="mt-2 w-full rounded-2xl border border-brand-golden-brown/30 bg-white py-3 font-sans text-sm font-bold text-brand-golden-brown disabled:opacity-50"
+                className="mt-2 w-full rounded-2xl border border-brand-prussian-blue/20 bg-white py-3 font-sans text-sm font-bold text-brand-prussian-blue disabled:opacity-50"
               >
                 {isLoadingMore ? "Loading…" : "Load more"}
               </button>

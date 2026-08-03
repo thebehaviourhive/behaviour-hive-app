@@ -63,7 +63,7 @@ export default function ClinicianVerifyPage() {
   }
 
   return (
-    <main className="flex min-h-full flex-1 flex-col bg-brand-safe-ivory px-4 pt-8 pb-10">
+    <main className="flex min-h-full flex-1 flex-col bg-brand-off-white/40 px-4 pt-8 pb-10">
       <div className="mx-auto w-full max-w-sm">
         <h1 className="mb-1 font-heading text-2xl font-bold text-brand-prussian-blue">
           Verify your credentials
@@ -73,7 +73,7 @@ export default function ClinicianVerifyPage() {
           displayed on your profile.
         </p>
 
-        <div className="flex flex-col gap-5 rounded-3xl border-t-4 border-brand-golden-brown bg-white p-6 shadow-sm">
+        <div className="flex flex-col gap-5 rounded-3xl border border-black/5 bg-white p-6 shadow-sm">
           <TextField
             label="Full Name"
             type="text"
@@ -139,7 +139,7 @@ export default function ClinicianVerifyPage() {
             type="button"
             onClick={handleSubmit}
             disabled={!isComplete || isSubmitting}
-            className="w-full rounded-2xl bg-brand-golden-brown py-3.5 text-base font-semibold text-white transition-colors disabled:cursor-not-allowed disabled:opacity-40"
+            className="w-full rounded-2xl bg-brand-prussian-blue py-3.5 text-base font-semibold text-white transition-colors disabled:cursor-not-allowed disabled:opacity-40"
           >
             {isSubmitting ? "Submitting…" : "Submit Credentials"}
           </button>

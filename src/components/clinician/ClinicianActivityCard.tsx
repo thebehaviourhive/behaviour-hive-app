@@ -42,7 +42,7 @@ export function ClinicianActivityCard() {
   return (
     <Link
       href="/clinician/activity"
-      className="mb-6 block rounded-2xl border-t-4 border-brand-golden-brown bg-white p-5 shadow-sm"
+      className="mb-6 block rounded-2xl border border-brand-off-white/50 bg-white p-5 shadow-sm"
     >
       <h2 className="mb-4 font-heading text-xl font-bold text-brand-prussian-blue">
         Recent Activity
@@ -55,7 +55,7 @@ export function ClinicianActivityCard() {
           <ActivityRowSkeleton />
         </>
       ) : entries.length === 0 ? (
-        <div className="rounded-xl border-2 border-dashed border-brand-golden-brown/40 bg-brand-safe-ivory/30 p-4 text-center">
+        <div className="rounded-xl border-2 border-dashed border-brand-pastel-blue bg-brand-off-white/30 p-4 text-center">
           <p className="font-sans text-sm text-brand-neutral-black/70">
             Activity across your connected cases will appear here.
           </p>
@@ -74,7 +74,7 @@ export function ClinicianActivityCard() {
         ))
       )}
 
-      <span className="mt-2 block w-full border-t border-brand-off-white/50 pt-2 text-center font-sans text-sm font-bold text-brand-golden-brown">
+      <span className="mt-2 block w-full border-t border-brand-off-white/50 pt-2 text-center font-sans text-sm font-bold text-brand-prussian-blue">
         View all activity
       </span>
     </Link>

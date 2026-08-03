@@ -66,9 +66,9 @@ export default function ClinicianPassportsPage() {
   }
 
   return (
-    <div className="flex min-h-full flex-1 flex-col bg-brand-safe-ivory pb-24">
+    <div className="flex min-h-full flex-1 flex-col bg-brand-off-white/40 pb-24">
       <header className="px-4 pt-8 pb-2">
-        <h1 className="font-heading text-2xl font-bold text-brand-prussian-blue">
+        <h1 className="font-heading text-2xl font-semibold text-brand-neutral-black">
           Passports
         </h1>
       </header>
@@ -80,7 +80,7 @@ export default function ClinicianPassportsPage() {
             <PassportCardSkeleton />
           </>
         ) : passports.length === 0 ? (
-          <div className="mt-4 rounded-2xl border-2 border-dashed border-brand-golden-brown/40 bg-white/60 p-6 text-center">
+          <div className="mt-4 rounded-2xl border-2 border-dashed border-brand-pastel-blue bg-white/60 p-6 text-center">
             <p className="text-sm text-brand-neutral-black/70">
               When parents connect their child&apos;s passport using your
               clinician code, cases will appear here.
@@ -95,7 +95,7 @@ export default function ClinicianPassportsPage() {
               <Link
                 key={passport.passport_id}
                 href={`/clinician/passport/${passport.passport_id}`}
-                className="rounded-2xl border-t-4 border-brand-golden-brown bg-white p-4 shadow-sm"
+                className="rounded-2xl border border-black/5 bg-white p-4 shadow-sm"
               >
                 <h2 className="font-heading text-xl font-bold text-brand-neutral-black">
                   {passport.child_name}
@@ -111,7 +111,7 @@ export default function ClinicianPassportsPage() {
                     {pills.map((pill) => (
                       <span
                         key={pill}
-                        className="rounded-full bg-brand-golden-brown/10 px-2.5 py-1 font-accent text-xs font-semibold text-brand-golden-brown"
+                        className="rounded-full bg-brand-pastel-blue/20 px-2.5 py-1 font-accent text-xs font-semibold text-brand-prussian-blue"
                       >
                         {pill}
                       </span>
@@ -135,7 +135,7 @@ export default function ClinicianPassportsPage() {
 
 function PassportCardSkeleton() {
   return (
-    <div className="animate-pulse rounded-2xl border-t-4 border-brand-off-white bg-white p-4 shadow-sm">
+    <div className="animate-pulse rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
       <div className="h-5 w-32 rounded bg-brand-off-white" />
       <div className="mt-3 flex gap-1.5">
         <div className="h-5 w-16 rounded-full bg-brand-off-white" />

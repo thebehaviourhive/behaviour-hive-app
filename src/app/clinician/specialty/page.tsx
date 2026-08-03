@@ -47,7 +47,7 @@ export default function ClinicianSpecialtyPage() {
   }
 
   return (
-    <main className="flex min-h-full flex-1 items-center justify-center bg-brand-safe-ivory px-4 py-10">
+    <main className="flex min-h-full flex-1 items-center justify-center bg-brand-off-white/40 px-4 py-10">
       <div className="w-full max-w-sm">
         <div className="mb-6 flex flex-col items-center gap-3 text-center">
           <BrandMark />
@@ -63,7 +63,7 @@ export default function ClinicianSpecialtyPage() {
               type="button"
               onClick={() => selectSpecialty(specialty)}
               disabled={pendingSpecialty !== null}
-              className="rounded-2xl border border-brand-off-white/50 bg-white p-4 text-left text-base font-semibold text-brand-neutral-black shadow-sm transition-colors active:bg-brand-safe-ivory/50 disabled:opacity-50"
+              className="rounded-2xl border border-black/5 bg-white p-4 text-left text-base font-semibold text-brand-neutral-black shadow-sm transition-colors active:bg-black/[0.02] disabled:opacity-50"
             >
               {pendingSpecialty === specialty ? "Loading…" : CLINICIAN_SPECIALTY_LABEL[specialty]}
             </button>
@@ -79,7 +79,7 @@ export default function ClinicianSpecialtyPage() {
 
       <BottomSheet isOpen={showComingSoon} onClose={() => router.push("/clinician/dashboard")}>
         <div className="flex flex-col items-center gap-3 text-center">
-          <span className="flex h-16 w-16 items-center justify-center rounded-full bg-brand-golden-brown/10 text-brand-golden-brown">
+          <span className="flex h-16 w-16 items-center justify-center rounded-full bg-brand-pastel-blue/40 text-brand-prussian-blue">
             <svg
               viewBox="0 0 24 24"
               fill="none"
@@ -105,7 +105,7 @@ export default function ClinicianSpecialtyPage() {
           <button
             type="button"
             onClick={() => router.push("/clinician/dashboard")}
-            className="mt-2 w-full rounded-2xl bg-brand-golden-brown py-3.5 text-base font-semibold text-white transition-colors"
+            className="mt-2 w-full rounded-2xl bg-brand-prussian-blue py-3.5 text-base font-semibold text-white transition-colors"
           >
             Return
           </button>

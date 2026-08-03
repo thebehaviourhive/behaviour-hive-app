@@ -9,19 +9,19 @@ export function ClinicianComingSoonPage({
   body: string;
 }) {
   return (
-    <div className="flex min-h-full flex-1 flex-col bg-brand-safe-ivory">
+    <div className="flex min-h-full flex-1 flex-col bg-brand-off-white/40">
       <header className="px-4 pt-6 pb-4">
         <Link
           href="/clinician/dashboard"
           aria-label="Back"
-          className="flex h-8 w-8 items-center justify-center text-2xl leading-none text-brand-golden-brown"
+          className="flex h-8 w-8 items-center justify-center text-2xl leading-none text-brand-prussian-blue"
         >
           ‹
         </Link>
       </header>
 
       <main className="flex flex-1 flex-col items-center justify-center px-4 pb-16">
-        <span className="mb-4 flex h-24 w-24 items-center justify-center rounded-full bg-brand-golden-brown/10 text-brand-golden-brown">
+        <span className="mb-4 flex h-24 w-24 items-center justify-center rounded-full bg-brand-pastel-blue/30 text-brand-prussian-blue">
           <Icon className="h-12 w-12" />
         </span>
         <h1 className="mb-2 font-heading text-2xl font-bold text-brand-prussian-blue">

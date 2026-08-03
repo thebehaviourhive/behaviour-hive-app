@@ -20,9 +20,9 @@ export function ClinicianQuickActions() {
         <Link
           key={label}
           href={href}
-          className="flex flex-col items-center justify-center rounded-2xl border-t-4 border-brand-golden-brown bg-white p-4 text-center shadow-sm transition-colors active:bg-brand-safe-ivory"
+          className="flex flex-col items-center justify-center rounded-2xl border border-brand-off-white/50 bg-white p-4 text-center shadow-sm transition-colors active:bg-brand-safe-ivory"
         >
-          <Icon className="mb-2 h-8 w-8 text-brand-golden-brown" />
+          <Icon className="mb-2 h-8 w-8 text-brand-prussian-blue" />
           <span className="font-sans text-sm font-bold text-brand-neutral-black">
             {label}
           </span>

@@ -139,14 +139,14 @@ export default function ClinicianPassportPage() {
 
   if (!profile) {
     return (
-      <div className="flex min-h-full flex-1 flex-col items-center justify-center gap-4 bg-brand-safe-ivory px-4 text-center">
+      <div className="flex min-h-full flex-1 flex-col items-center justify-center gap-4 bg-brand-off-white/40 px-4 text-center">
         <p className="text-sm text-brand-neutral-black/70">
           We couldn&apos;t find this passport, or you don&apos;t have access to it.
         </p>
         <button
           type="button"
           onClick={() => router.push("/clinician/passports")}
-          className="rounded-full border-2 border-brand-golden-brown px-5 py-2.5 text-sm font-semibold text-brand-golden-brown"
+          className="rounded-full border-2 border-brand-prussian-blue px-5 py-2.5 text-sm font-semibold text-brand-prussian-blue"
         >
           Back to Passports
         </button>
@@ -168,17 +168,17 @@ export default function ClinicianPassportPage() {
       : profile.communicationMethods;
 
   return (
-    <div className="flex min-h-full flex-1 flex-col bg-brand-safe-ivory pb-28">
+    <div className="flex min-h-full flex-1 flex-col bg-brand-off-white/40 pb-28">
       <header className="px-4 pt-6 pb-3">
         <button
           type="button"
           onClick={() => router.push("/clinician/passports")}
           aria-label="Back"
-          className="mb-2 text-2xl leading-none text-brand-golden-brown"
+          className="mb-2 text-2xl leading-none text-brand-prussian-blue"
         >
           ‹
         </button>
-        <h1 className="font-heading text-2xl font-semibold text-brand-prussian-blue">
+        <h1 className="font-heading text-2xl font-semibold text-brand-neutral-black">
           {profile.childFirstName}&apos;s Clinical File
         </h1>
       </header>
@@ -198,7 +198,7 @@ export default function ClinicianPassportPage() {
             }}
             className={`flex-shrink-0 whitespace-nowrap border-b-2 px-3 py-2.5 text-sm font-semibold transition-colors ${
               activeTab === tab.key
-                ? "border-brand-golden-brown text-brand-golden-brown"
+                ? "border-brand-prussian-blue text-brand-prussian-blue"
                 : "border-transparent text-black/40"
             }`}
           >
@@ -306,7 +306,7 @@ export default function ClinicianPassportPage() {
           <button
             type="button"
             onClick={() => setIsAbcLoggerOpen(true)}
-            className="flex-1 rounded-2xl bg-brand-golden-brown py-3.5 text-sm font-semibold text-white shadow-sm"
+            className="flex-1 rounded-2xl border-2 border-brand-prussian-blue py-3.5 text-sm font-semibold text-brand-prussian-blue"
           >
             + Log ABC Incident
           </button>
@@ -355,7 +355,7 @@ function PillRow({ items }: { items: string[] }) {
       {items.map((item) => (
         <span
           key={item}
-          className="rounded-full bg-brand-golden-brown/10 px-3 py-1.5 text-xs font-semibold text-brand-golden-brown"
+          className="rounded-full bg-brand-pastel-blue/20 px-3 py-1.5 text-xs font-semibold text-brand-prussian-blue"
         >
           {item}
         </span>
@@ -373,7 +373,7 @@ function CardList({ items, emptyText }: { items: string[]; emptyText: string }) 
       {items.map((item) => (
         <div
           key={item}
-          className="rounded-2xl border-t-4 border-brand-golden-brown bg-white px-4 py-3 text-sm font-medium text-brand-neutral-black shadow-sm"
+          className="rounded-2xl border border-black/5 bg-white px-4 py-3 text-sm font-medium text-brand-neutral-black shadow-sm"
         >
           {item}
         </div>
@@ -384,7 +384,7 @@ function CardList({ items, emptyText }: { items: string[]; emptyText: string }) 
 
 function TextCard({ label, text }: { label: string; text: string | null }) {
   return (
-    <div className="rounded-2xl border-t-4 border-brand-golden-brown bg-white p-4 shadow-sm">
+    <div className="rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
       <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-black/40">
         {label}
       </p>
@@ -397,7 +397,7 @@ function TextCard({ label, text }: { label: string; text: string | null }) {
 
 function EmptyCard({ text }: { text: string }) {
   return (
-    <div className="rounded-2xl border border-dashed border-brand-golden-brown/30 bg-white/60 p-4 text-sm text-black/50">
+    <div className="rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-sm text-black/50">
       {text}
     </div>
   );

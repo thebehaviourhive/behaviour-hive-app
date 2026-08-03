@@ -102,7 +102,7 @@ export default function MorePage() {
 
       <main className="flex flex-1 flex-col gap-3 px-4 pt-3">
         {role === "clinician" && (
-          <section className="rounded-2xl border-t-4 border-brand-golden-brown bg-white p-4 shadow-sm">
+          <section className="rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
             <p className="mb-1 font-accent text-xs font-bold uppercase tracking-wide text-brand-neutral-black/50">
               My Clinician Code
             </p>
@@ -130,7 +130,7 @@ export default function MorePage() {
                   disabled={isSavingCadence}
                   className={`flex-1 rounded-xl border py-2 text-sm font-semibold transition-colors disabled:opacity-50 ${
                     reviewCadenceDays === days
-                      ? "border-brand-golden-brown bg-brand-golden-brown text-white"
+                      ? "border-brand-prussian-blue bg-brand-prussian-blue text-white"
                       : "border-black/10 bg-white text-brand-neutral-black"
                   }`}
                 >
