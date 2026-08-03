@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 import { createClient } from "@/lib/supabase/client";
 import { generateUniquePassportCode } from "@/lib/generatePassportCode";
@@ -26,8 +26,33 @@ export function ShareBottomSheet({
   onClinicianConnected: () => void;
 }) {
   const [isGeneratingCode, setIsGeneratingCode] = useState(false);
+  const [codeGenerationError, setCodeGenerationError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const hasStartedGenerating = useRef(false);
+
+  // Tracks real unmount only (empty deps) — deliberately separate from any
+  // per-effect "isMounted" flag. generateCode() calls onCodeGenerated(),
+  // which changes passportCode in the parent, which is one of the values
+  // that used to sit in this effect's own dependency array — so the effect
+  // would tear itself down and reset a same-named isMounted flag before
+  // generateCode()'s own finally block could run, permanently stranding
+  // isGeneratingCode at true even though the code had already been saved.
+  // Gating on real unmount instead means the effect can be re-triggered by
+  // its own success (or any other dependency churn) without that ever
+  // discarding the in-flight result.
+  const isUnmountedRef = useRef(false);
+  useEffect(() => {
+    // The reset-on-mount matters, not just the cleanup: dev-mode double-
+    // invokes every effect once (mount -> cleanup -> mount) to check
+    // exactly this kind of resilience. Without resetting to false here,
+    // that synthetic first cleanup would leave the ref stuck at true for
+    // the component's entire real lifetime, silently reintroducing the
+    // exact "never resets loading state" bug this ref exists to prevent.
+    isUnmountedRef.current = false;
+    return () => {
+      isUnmountedRef.current = true;
+    };
+  }, []);
 
   const [institutionCodeInput, setInstitutionCodeInput] = useState("");
   const [isApproving, setIsApproving] = useState(false);
@@ -45,50 +70,60 @@ export function ShareBottomSheet({
     }
   }, [isOpen]);
 
+  const generateCode = useCallback(async () => {
+    setIsGeneratingCode(true);
+    setCodeGenerationError(null);
+    const supabase = createClient();
+    try {
+      const code = await generateUniquePassportCode(supabase, childName);
+      const { error } = await supabase
+        .from("passports")
+        .update({ passport_code: code })
+        .eq("id", passportId);
+
+      if (error) {
+        throw new Error(error.message);
+      }
+
+      if (isUnmountedRef.current) return;
+      onCodeGenerated(code);
+
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (user) {
+        logActivity({
+          passportId,
+          actorId: user.id,
+          eventType: "passport_shared",
+          eventDescription: "Passport code generated",
+        });
+      }
+    } catch (e) {
+      if (!isUnmountedRef.current) {
+        setCodeGenerationError(
+          e instanceof Error ? e.message : "Something went wrong generating the code."
+        );
+      }
+    } finally {
+      if (!isUnmountedRef.current) setIsGeneratingCode(false);
+    }
+  }, [childName, passportId, onCodeGenerated]);
+
   useEffect(() => {
     // hasStartedGenerating (a ref, not state) guards against double-firing
-    // instead of the isGeneratingCode state itself — setting that state
-    // inside this effect while also listing it as a dependency would make
-    // the effect re-run and cancel its own in-flight request via the
-    // cleanup's isMounted flip before the update ever reaches the caller.
+    // this auto-trigger — generateCode's own success changes passportCode,
+    // which is a dependency here, so this effect legitimately re-runs after
+    // a successful generation. That's fine: the guard just means it does
+    // nothing on that re-run rather than starting a second generation.
     if (!isOpen || passportCode || hasStartedGenerating.current) return;
     hasStartedGenerating.current = true;
-    let isMounted = true;
+    generateCode();
+  }, [isOpen, passportCode, generateCode]);
 
-    async function generate() {
-      setIsGeneratingCode(true);
-      const supabase = createClient();
-      try {
-        const code = await generateUniquePassportCode(supabase, childName);
-        const { error } = await supabase
-          .from("passports")
-          .update({ passport_code: code })
-          .eq("id", passportId);
-        if (!isMounted) return;
-        if (!error) {
-          onCodeGenerated(code);
-          const {
-            data: { user },
-          } = await supabase.auth.getUser();
-          if (user) {
-            logActivity({
-              passportId,
-              actorId: user.id,
-              eventType: "passport_shared",
-              eventDescription: "Passport code generated",
-            });
-          }
-        }
-      } finally {
-        if (isMounted) setIsGeneratingCode(false);
-      }
-    }
-
-    generate();
-    return () => {
-      isMounted = false;
-    };
-  }, [isOpen, passportCode, passportId, childName, onCodeGenerated]);
+  function handleRetryGeneration() {
+    generateCode();
+  }
 
   function handleCopy() {
     if (!passportCode) return;
@@ -259,11 +294,29 @@ export function ShareBottomSheet({
         Your child&apos;s passport code
       </p>
       <div className="mt-1.5 flex items-center justify-between gap-3 rounded-2xl border border-dashed border-brand-golden-brown/40 bg-brand-safe-ivory/30 px-5 py-4">
-        {isGeneratingCode || !passportCode ? (
-          <span className="font-heading text-lg text-black/40">Generating…</span>
-        ) : (
+        {passportCode ? (
+          // passportCode is the one authoritative source of truth here — if
+          // it's set, a code genuinely exists, full stop, regardless of what
+          // isGeneratingCode currently thinks. This ordering is itself the
+          // fix for the "stuck on Generating…" class of bug: no combination
+          // of stale flags can hide a code that has actually arrived.
           <span className="font-heading text-2xl font-bold tracking-widest text-brand-neutral-black">
             {passportCode}
+          </span>
+        ) : codeGenerationError ? (
+          <div className="flex flex-col items-start gap-1">
+            <span className="text-sm font-medium text-red-600">{codeGenerationError}</span>
+            <button
+              type="button"
+              onClick={handleRetryGeneration}
+              className="text-xs font-bold text-brand-prussian-blue underline"
+            >
+              Try again
+            </button>
+          </div>
+        ) : (
+          <span className="font-heading text-lg text-black/40">
+            {isGeneratingCode ? "Generating…" : "Waiting to generate…"}
           </span>
         )}
         <button
