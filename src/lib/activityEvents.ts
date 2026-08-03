@@ -2,6 +2,7 @@ import { differenceInHours, differenceInMinutes, format } from "date-fns";
 import {
   BellIcon,
   CheckIcon,
+  ClinicalFileIcon,
   ClipboardIcon,
   DocumentIcon,
   KeyIcon,
@@ -14,7 +15,8 @@ export type ActivityEventType =
   | "afternoon_update"
   | "abc_logged"
   | "passport_shared"
-  | "team_linked";
+  | "team_linked"
+  | "clinician_logged";
 
 export interface ActivityLogEntry {
   id: string;
@@ -33,6 +35,7 @@ export const ACTIVITY_EVENT_ICON: Record<
   abc_logged: ClipboardIcon,
   passport_shared: KeyIcon,
   team_linked: PeopleIcon,
+  clinician_logged: ClinicalFileIcon,
 };
 
 export function formatActivityTimestamp(isoString: string): string {

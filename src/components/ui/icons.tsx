@@ -105,3 +105,22 @@ export function ChatBubbleIcon(props: IconProps) {
     </Base>
   );
 }
+
+export function ClinicalFileIcon(props: IconProps) {
+  return (
+    <Base {...props}>
+      <path d="M7 3.5h7l4 4V19a1.5 1.5 0 0 1-1.5 1.5h-9.5A1.5 1.5 0 0 1 5.5 19V5A1.5 1.5 0 0 1 7 3.5Z" />
+      <path d="M14 3.5V8h4" />
+      <path d="M12 11v5M9.5 13.5h5" />
+    </Base>
+  );
+}
+
+export function LockIcon(props: IconProps) {
+  return (
+    <Base {...props}>
+      <rect x="5.5" y="10.5" width="13" height="9" rx="1.5" />
+      <path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5" />
+    </Base>
+  );
+}

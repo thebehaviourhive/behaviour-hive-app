@@ -5,7 +5,7 @@ export function getPostAuthRedirect(role: string | null | undefined): string {
     case "class_teacher":
       return "/teacher-dashboard";
     case "clinician":
-      return "/dashboard";
+      return "/clinician/dashboard";
     default:
       return "/role-select";
   }

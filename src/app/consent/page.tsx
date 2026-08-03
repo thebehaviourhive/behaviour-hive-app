@@ -13,6 +13,7 @@ export default function ConsentPage() {
   const router = useRouter();
   const [isReady, setIsReady] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
+  const [role, setRole] = useState<string | null>(null);
   const [dataConsent, setDataConsent] = useState(false);
   const [marketingConsent, setMarketingConsent] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -34,12 +35,14 @@ export default function ConsentPage() {
         return;
       }
 
-      if (user.app_metadata?.role !== "parent") {
+      const userRole = user.app_metadata?.role;
+      if (userRole !== "parent" && userRole !== "clinician") {
         router.replace("/");
         return;
       }
 
       setUserId(user.id);
+      setRole(userRole);
       setIsReady(true);
     }
 
@@ -69,7 +72,7 @@ export default function ConsentPage() {
       return;
     }
 
-    router.push("/parent-dashboard");
+    router.push(role === "clinician" ? "/clinician/specialty" : "/parent-dashboard");
   }
 
   if (!isReady) {

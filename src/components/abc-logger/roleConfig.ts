@@ -2,13 +2,9 @@
 // dictionary rather than scattered if/else blocks so a new role is a new
 // entry here, not a hunt through ABCLogger.tsx and ABCTimeline.tsx.
 //
-// Clinician support is intentionally not built yet. To add it later:
-//   1. Add "clinician" to the ABCLoggerRole union below.
-//   2. Add a "clinician" entry to ABC_ROLE_CONFIG.
-//   3. Add a "clinician" entry to ABC_ROLE_DISPLAY_LABEL.
 // Everything that reads from these (ABCLogger's step content, ABCTimeline's
 // footer/reporter-filter labels) picks up a new entry automatically.
-export type ABCLoggerRole = "parent" | "class_teacher";
+export type ABCLoggerRole = "parent" | "class_teacher" | "clinician";
 
 export interface ABCChipStepConfig {
   label: string;
@@ -113,11 +109,52 @@ export const ABC_ROLE_CONFIG: Record<ABCLoggerRole, ABCRoleConfig> = {
       label: "Why do you think this happened? (optional)",
     },
   },
-  // clinician: { ... } <- add here when the clinician role is built
+  clinician: {
+    intensityLabel: "Intensity Level",
+    antecedent: {
+      label: "Antecedent (Setting Event / Trigger)",
+      helper: "What was the environmental or contextual trigger immediately preceding the behaviour?",
+      options: [
+        "Task demand placed",
+        "Transition to new activity",
+        "Denied access to item or activity",
+        "Sensory overload",
+        "Social conflict",
+        "Other",
+      ],
+    },
+    behaviour: {
+      label: "Observable Behaviour",
+      helper: "Describe the objective, measurable behaviour observed.",
+      options: [
+        "Physical aggression",
+        "Elopement (leaving area)",
+        "Vocal outburst",
+        "Property destruction",
+        "Self-injurious behaviour",
+        "Other",
+      ],
+    },
+    consequence: {
+      label: "Consequence (Maintaining Outcome)",
+      helper: "What immediate response or environmental change followed?",
+      options: [
+        "Task removed or delayed",
+        "1:1 attention given",
+        "Planned ignoring",
+        "Access to tangible provided",
+        "Other",
+      ],
+    },
+    step4Extra: {
+      type: "perceivedFunction",
+      label: "Perceived function of behaviour",
+    },
+  },
 };
 
 export const ABC_ROLE_DISPLAY_LABEL: Record<ABCLoggerRole, string> = {
   parent: "Parent",
   class_teacher: "Teacher",
-  // clinician: "Clinician", <- add here when the clinician role is built
+  clinician: "Clinician",
 };

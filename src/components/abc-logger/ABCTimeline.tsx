@@ -44,7 +44,7 @@ interface ABCLogRow {
 }
 
 type IntensityFilter = "all" | "mild" | "moderate" | "severe";
-type ReporterFilter = "all" | "parent" | "class_teacher";
+type ReporterFilter = "all" | "parent" | "class_teacher" | "clinician";
 
 function truncate(text: string, max = 30): string {
   return text.length > max ? `${text.slice(0, max)}…` : text;
@@ -205,6 +205,11 @@ export function ABCTimeline({ passportId, viewerRole }: ABCTimelineProps) {
           label="Teacher"
           isActive={reporterFilter === "class_teacher"}
           onClick={() => setReporterFilter("class_teacher")}
+        />
+        <FilterPill
+          label="Clinician"
+          isActive={reporterFilter === "clinician"}
+          onClick={() => setReporterFilter("clinician")}
         />
       </div>
 

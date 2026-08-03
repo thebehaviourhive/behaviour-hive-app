@@ -5,7 +5,6 @@ import { useState } from "react";
 import { BrandMark } from "@/components/ui/BrandMark";
 import { Button } from "@/components/ui/Button";
 import { createClient } from "@/lib/supabase/client";
-import { getPostAuthRedirect } from "@/lib/roleRedirect";
 
 type Role = "parent" | "class_teacher" | "clinician";
 
@@ -88,9 +87,9 @@ export default function RoleSelectPage() {
       return;
     }
 
-    // Clinician has no dedicated onboarding entry point yet — land on the
-    // same placeholder dashboard a returning login would send them to.
-    router.push(getPostAuthRedirect(selectedRole));
+    // Clinician goes through the same GDPR consent screen as parents,
+    // then on to the clinician-only specialty-select step.
+    router.push("/consent");
   }
 
   return (

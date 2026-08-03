@@ -11,11 +11,21 @@ import { ABCTimeline } from "@/components/abc-logger/ABCTimeline";
 import { createClient } from "@/lib/supabase/client";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { getPassportResumeHref } from "@/lib/getPassportResumeHref";
+import {
+  CLINICIAN_SPECIALTY_LABEL,
+  type ClinicianSpecialty,
+} from "@/lib/clinicianSpecialties";
 
 interface ApprovedInstitution {
   institutionId: string;
   institutionName: string;
   approvedAt: string | null;
+}
+
+interface ConnectedClinician {
+  clinicianId: string;
+  fullName: string;
+  specialty: string;
 }
 
 interface PassportSummaryData {
@@ -86,9 +96,12 @@ export default function PassportDashboardPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [approvedInstitutions, setApprovedInstitutions] = useState<ApprovedInstitution[]>([]);
+  const [connectedClinicians, setConnectedClinicians] = useState<ConnectedClinician[]>([]);
   const [isShareOpen, setIsShareOpen] = useState(false);
   const [revokeConfirmation, setRevokeConfirmation] = useState<string | null>(null);
   const [revokeError, setRevokeError] = useState<string | null>(null);
+  const [clinicianRevokeConfirmation, setClinicianRevokeConfirmation] = useState<string | null>(null);
+  const [clinicianRevokeError, setClinicianRevokeError] = useState<string | null>(null);
   const [isAbcLoggerOpen, setIsAbcLoggerOpen] = useState(false);
   const [timelineRefreshKey, setTimelineRefreshKey] = useState(0);
 
@@ -110,6 +123,23 @@ export default function PassportDashboardPage() {
           approvedAt: row.parent_approved_at,
         };
       })
+    );
+  }
+
+  async function loadConnectedClinicians(passportId: string) {
+    const supabase = createClient();
+    const { data } = await supabase.rpc("get_passport_clinicians", {
+      p_passport_id: passportId,
+    });
+
+    setConnectedClinicians(
+      (data ?? []).map(
+        (row: { clinician_id: string; full_name: string | null; specialty: string }) => ({
+          clinicianId: row.clinician_id,
+          fullName: row.full_name ?? "A clinician",
+          specialty: row.specialty,
+        })
+      )
     );
   }
 
@@ -228,6 +258,7 @@ export default function PassportDashboardPage() {
         setIsLoading(false);
 
         await loadApprovedInstitutions(passport!.id);
+        await loadConnectedClinicians(passport!.id);
       } catch (err) {
         if (!isMounted) return;
         console.error("Failed to load passport dashboard:", err);
@@ -308,6 +339,30 @@ export default function PassportDashboardPage() {
       `Access for ${institutionName} has been removed. They can no longer see ${summary.childName}'s passport.`
     );
     await loadApprovedInstitutions(summary.passportId);
+  }
+
+  async function handleRevokeClinician(clinicianId: string, clinicianName: string) {
+    if (!summary) return;
+
+    setClinicianRevokeError(null);
+    setClinicianRevokeConfirmation(null);
+
+    const supabase = createClient();
+    const { error } = await supabase
+      .from("clinician_access")
+      .update({ is_active: false })
+      .eq("passport_id", summary.passportId)
+      .eq("clinician_id", clinicianId);
+
+    if (error) {
+      setClinicianRevokeError(error.message);
+      return;
+    }
+
+    setClinicianRevokeConfirmation(
+      `Access for ${clinicianName} has been removed. They can no longer see ${summary.childName}'s passport.`
+    );
+    await loadConnectedClinicians(summary.passportId);
   }
 
   const diagnosisPills = getDiagnosisPills(summary.diagnoses, summary.diagnosisOther);
@@ -625,6 +680,60 @@ export default function PassportDashboardPage() {
 
         <ErrorBoundary fallback={fallbackCard}>
           <section className="mt-2 mb-6">
+            <h2 className="mb-4 font-accent text-sm uppercase tracking-widest text-brand-neutral-black/60">
+              Clinical Team
+            </h2>
+
+            {connectedClinicians.length === 0 ? (
+              <p className="text-center text-sm text-brand-neutral-black/60">
+                No clinicians connected yet. Tap the share button above to
+                connect a clinician using their code.
+              </p>
+            ) : (
+              <div>
+                {connectedClinicians.map((clinician) => (
+                  <div
+                    key={clinician.clinicianId}
+                    className="mb-2 flex items-center justify-between rounded-xl bg-brand-off-white/50 p-4"
+                  >
+                    <div>
+                      <p className="font-bold text-brand-neutral-black">
+                        {clinician.fullName}
+                      </p>
+                      <p className="text-xs text-brand-neutral-black/60">
+                        {CLINICIAN_SPECIALTY_LABEL[clinician.specialty as ClinicianSpecialty] ??
+                          clinician.specialty}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        handleRevokeClinician(clinician.clinicianId, clinician.fullName)
+                      }
+                      className="text-sm font-bold text-brand-golden-brown"
+                    >
+                      Revoke Access
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {clinicianRevokeConfirmation && (
+              <p className="mt-3 rounded-xl bg-brand-off-white/50 px-4 py-3 text-sm text-brand-neutral-black">
+                {clinicianRevokeConfirmation}
+              </p>
+            )}
+            {clinicianRevokeError && (
+              <p role="alert" className="mt-3 text-sm font-medium text-brand-golden-brown">
+                {clinicianRevokeError}
+              </p>
+            )}
+          </section>
+        </ErrorBoundary>
+
+        <ErrorBoundary fallback={fallbackCard}>
+          <section className="mt-2 mb-6">
             <h2 className="mb-4 font-heading text-xl font-bold text-brand-prussian-blue">
               Incident Timeline
             </h2>
@@ -647,6 +756,7 @@ export default function PassportDashboardPage() {
           setSummary((prev) => (prev ? { ...prev, passportCode: code } : prev))
         }
         onApproved={() => loadApprovedInstitutions(summary.passportId)}
+        onClinicianConnected={() => loadConnectedClinicians(summary.passportId)}
       />
 
       {isAbcLoggerOpen && (

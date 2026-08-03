@@ -14,6 +14,7 @@ export function ShareBottomSheet({
   passportCode,
   onCodeGenerated,
   onApproved,
+  onClinicianConnected,
 }: {
   isOpen: boolean;
   onClose: () => void;
@@ -22,6 +23,7 @@ export function ShareBottomSheet({
   passportCode: string | null;
   onCodeGenerated: (code: string) => void;
   onApproved: () => void;
+  onClinicianConnected: () => void;
 }) {
   const [isGeneratingCode, setIsGeneratingCode] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -31,6 +33,11 @@ export function ShareBottomSheet({
   const [isApproving, setIsApproving] = useState(false);
   const [approveError, setApproveError] = useState<string | null>(null);
   const [approveSuccess, setApproveSuccess] = useState<string | null>(null);
+
+  const [clinicianCodeInput, setClinicianCodeInput] = useState("");
+  const [isConnectingClinician, setIsConnectingClinician] = useState(false);
+  const [clinicianError, setClinicianError] = useState<string | null>(null);
+  const [clinicianSuccess, setClinicianSuccess] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isOpen) {
@@ -94,6 +101,9 @@ export function ShareBottomSheet({
     setInstitutionCodeInput("");
     setApproveError(null);
     setApproveSuccess(null);
+    setClinicianCodeInput("");
+    setClinicianError(null);
+    setClinicianSuccess(null);
     onClose();
   }
 
@@ -163,6 +173,82 @@ export function ShareBottomSheet({
     onApproved();
   }
 
+  async function handleConnectClinician() {
+    if (!clinicianCodeInput.trim()) return;
+
+    setClinicianError(null);
+    setClinicianSuccess(null);
+    setIsConnectingClinician(true);
+
+    const supabase = createClient();
+    const { data: clinicianRows, error: lookupError } = await supabase.rpc(
+      "lookup_clinician_by_code",
+      { code: clinicianCodeInput.trim() }
+    );
+
+    if (lookupError) {
+      setIsConnectingClinician(false);
+      setClinicianError(lookupError.message);
+      return;
+    }
+
+    const clinician = clinicianRows?.[0] ?? null;
+
+    if (!clinician) {
+      setIsConnectingClinician(false);
+      setClinicianError(
+        "We couldn't find a clinician with that code. Please check with them and try again."
+      );
+      return;
+    }
+
+    const { data: existingAccess } = await supabase
+      .from("clinician_access")
+      .select("id, is_active")
+      .eq("passport_id", passportId)
+      .eq("clinician_id", clinician.user_id)
+      .maybeSingle();
+
+    if (existingAccess?.is_active) {
+      setIsConnectingClinician(false);
+      setClinicianError("This clinician is already connected to this passport.");
+      return;
+    }
+
+    const { error: saveError } = existingAccess
+      ? await supabase
+          .from("clinician_access")
+          .update({ is_active: true, linked_at: new Date().toISOString() })
+          .eq("id", existingAccess.id)
+      : await supabase.from("clinician_access").insert({
+          passport_id: passportId,
+          clinician_id: clinician.user_id,
+        });
+
+    setIsConnectingClinician(false);
+
+    if (saveError) {
+      setClinicianError(saveError.message);
+      return;
+    }
+
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (user) {
+      logActivity({
+        passportId,
+        actorId: user.id,
+        eventType: "team_linked",
+        eventDescription: `${clinician.full_name ?? "A clinician"} linked to passport`,
+      });
+    }
+
+    setClinicianCodeInput("");
+    setClinicianSuccess(`${clinician.full_name ?? "The clinician"} has been connected to ${childName}'s passport.`);
+    onClinicianConnected();
+  }
+
   return (
     <BottomSheet isOpen={isOpen} onClose={handleClose}>
       <h2 className="font-heading text-xl font-semibold text-brand-neutral-black">
@@ -225,6 +311,39 @@ export function ShareBottomSheet({
         className="mt-4 w-full rounded-2xl bg-brand-prussian-blue py-3.5 text-base font-semibold text-white transition-colors disabled:cursor-not-allowed disabled:opacity-40"
       >
         {isApproving ? "Approving…" : "Approve school access"}
+      </button>
+
+      <div className="my-5 border-t border-black/5" />
+
+      <p className="text-sm font-semibold text-brand-neutral-black">
+        Enter your clinician&apos;s code
+      </p>
+      <input
+        type="text"
+        value={clinicianCodeInput}
+        onChange={(e) => setClinicianCodeInput(e.target.value)}
+        placeholder="e.g. CL-4821"
+        className="mt-1.5 w-full rounded-xl border border-black/10 bg-white px-4 py-3 text-base uppercase tracking-widest text-brand-neutral-black placeholder:normal-case placeholder:tracking-normal placeholder:text-black/30 focus:border-brand-golden-brown focus:outline-none focus:ring-2 focus:ring-brand-golden-brown/30"
+      />
+
+      {clinicianError && (
+        <p role="alert" className="mt-3 text-sm font-medium text-red-600">
+          {clinicianError}
+        </p>
+      )}
+      {clinicianSuccess && (
+        <p className="mt-3 rounded-xl bg-green-50 px-4 py-3 text-sm font-medium text-green-800">
+          {clinicianSuccess}
+        </p>
+      )}
+
+      <button
+        type="button"
+        onClick={handleConnectClinician}
+        disabled={!clinicianCodeInput.trim() || isConnectingClinician}
+        className="mt-4 w-full rounded-2xl bg-brand-golden-brown py-3.5 text-base font-semibold text-white transition-colors disabled:cursor-not-allowed disabled:opacity-40"
+      >
+        {isConnectingClinician ? "Connecting…" : "Connect clinician"}
       </button>
     </BottomSheet>
   );
