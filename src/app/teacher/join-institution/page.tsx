@@ -32,7 +32,7 @@ export default function TeacherJoinInstitutionPage() {
       if (!isMounted) return;
 
       if (data) {
-        router.replace("/teacher-dashboard");
+        router.replace("/teacher/dashboard");
         return;
       }
       setIsChecking(false);
@@ -88,7 +88,7 @@ export default function TeacherJoinInstitutionPage() {
       return;
     }
 
-    router.push("/teacher-dashboard");
+    router.push("/teacher/dashboard");
   }
 
   if (!isReady || isChecking) {

@@ -6,6 +6,7 @@ import {
   ClipboardIcon,
   DocumentIcon,
   KeyIcon,
+  LightbulbIcon,
   PeopleIcon,
 } from "@/components/ui/icons";
 
@@ -16,7 +17,8 @@ export type ActivityEventType =
   | "abc_logged"
   | "passport_shared"
   | "team_linked"
-  | "clinician_logged";
+  | "clinician_logged"
+  | "strategy_logged";
 
 export interface ActivityLogEntry {
   id: string;
@@ -36,6 +38,7 @@ export const ACTIVITY_EVENT_ICON: Record<
   passport_shared: KeyIcon,
   team_linked: PeopleIcon,
   clinician_logged: ClinicalFileIcon,
+  strategy_logged: LightbulbIcon,
 };
 
 export function formatActivityTimestamp(isoString: string): string {

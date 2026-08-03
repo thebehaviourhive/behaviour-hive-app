@@ -3,7 +3,7 @@ export function getPostAuthRedirect(role: string | null | undefined): string {
     case "parent":
       return "/parent-dashboard";
     case "class_teacher":
-      return "/teacher-dashboard";
+      return "/teacher/dashboard";
     case "clinician":
       return "/clinician/dashboard";
     default:

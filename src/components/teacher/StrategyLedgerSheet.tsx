@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 import { createClient } from "@/lib/supabase/client";
 import { insertWithOfflineRetry } from "@/lib/waitForReconnect";
+import { logActivity } from "@/lib/logActivity";
 
 type EntryType = "win" | "observation" | "update";
 type Environment = "school" | "other";
@@ -71,6 +72,13 @@ export function StrategyLedgerSheet({
       setError(errorMessage);
       return;
     }
+
+    logActivity({
+      passportId,
+      actorId: userId,
+      eventType: "strategy_logged",
+      eventDescription: "Strategy ledger entry added by Teacher",
+    });
 
     setStatus("success");
     setTimeout(resetAndClose, 900);

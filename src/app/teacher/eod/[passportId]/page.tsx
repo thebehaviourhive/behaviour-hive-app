@@ -171,7 +171,7 @@ export default function TeacherEodPage() {
 
     setShowSuccess(true);
     setTimeout(() => {
-      router.push("/teacher-dashboard");
+      router.push("/teacher/dashboard");
     }, 1000);
   }
 
@@ -199,7 +199,7 @@ export default function TeacherEodPage() {
           </button>
           <button
             type="button"
-            onClick={() => router.push("/teacher-dashboard")}
+            onClick={() => router.push("/teacher/dashboard")}
             className="w-full rounded-2xl border-2 border-brand-prussian-blue py-3.5 text-base font-semibold text-brand-prussian-blue"
           >
             Cancel

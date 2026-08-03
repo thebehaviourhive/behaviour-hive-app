@@ -76,9 +76,10 @@ export default function TeacherPassportPage() {
   const [isLedgerOpen, setIsLedgerOpen] = useState(false);
   const [isAbcLoggerOpen, setIsAbcLoggerOpen] = useState(false);
   const [timelineRefreshKey, setTimelineRefreshKey] = useState(0);
+  const [hasSubmittedEodToday, setHasSubmittedEodToday] = useState(false);
 
   useEffect(() => {
-    if (!isReady || !passportId) return;
+    if (!isReady || !passportId || !user) return;
     let isMounted = true;
 
     async function load() {
@@ -92,6 +93,7 @@ export default function TeacherPassportPage() {
         { data: sectionC },
         { data: sectionD },
         { data: checkin },
+        { data: todaysUpdate },
       ] = await Promise.all([
         supabase
           .from("passports")
@@ -125,9 +127,19 @@ export default function TeacherPassportPage() {
           .order("checked_in_at", { ascending: false })
           .limit(1)
           .maybeSingle(),
+        supabase
+          .from("teacher_updates")
+          .select("id")
+          .eq("passport_id", passportId)
+          .eq("teacher_id", user!.id)
+          .gte("submitted_at", startOfToday.toISOString())
+          .limit(1)
+          .maybeSingle(),
       ]);
 
       if (!isMounted) return;
+
+      setHasSubmittedEodToday(Boolean(todaysUpdate));
 
       if (!passport) {
         setIsLoading(false);
@@ -180,7 +192,7 @@ export default function TeacherPassportPage() {
     return () => {
       isMounted = false;
     };
-  }, [isReady, passportId]);
+  }, [isReady, passportId, user]);
 
   if (!isReady || isLoading) {
     return null;
@@ -195,7 +207,7 @@ export default function TeacherPassportPage() {
         </p>
         <button
           type="button"
-          onClick={() => router.push("/teacher-dashboard")}
+          onClick={() => router.push("/teacher/dashboard")}
           className="rounded-full border-2 border-brand-prussian-blue px-5 py-2.5 text-sm font-semibold text-brand-prussian-blue"
         >
           Back to Dashboard
@@ -203,6 +215,8 @@ export default function TeacherPassportPage() {
       </div>
     );
   }
+
+  const isAfternoon = new Date().getHours() >= 13;
 
   const diagnosisTags = profile.diagnoses.includes("Other") && profile.diagnosisOther
     ? [...profile.diagnoses.filter((d) => d !== "Other"), profile.diagnosisOther]
@@ -217,7 +231,7 @@ export default function TeacherPassportPage() {
       <header className="px-4 pt-6 pb-3">
         <button
           type="button"
-          onClick={() => router.push("/teacher-dashboard")}
+          onClick={() => router.push("/teacher/dashboard")}
           aria-label="Back"
           className="mb-2 text-2xl leading-none text-brand-prussian-blue"
         >
@@ -380,21 +394,39 @@ export default function TeacherPassportPage() {
       </main>
 
       <div className="fixed inset-x-0 bottom-0 border-t border-black/5 bg-white p-4">
-        <div className="mx-auto flex w-full max-w-sm gap-2">
-          <button
-            type="button"
-            onClick={() => setIsLedgerOpen(true)}
-            className="flex-1 rounded-2xl bg-brand-prussian-blue py-3.5 text-sm font-semibold text-white shadow-sm"
-          >
-            + Add to Ledger
-          </button>
-          <button
-            type="button"
-            onClick={() => setIsAbcLoggerOpen(true)}
-            className="flex-1 rounded-2xl bg-brand-golden-brown py-3.5 text-sm font-semibold text-white shadow-sm"
-          >
-            + Log ABC Incident
-          </button>
+        <div className="mx-auto flex w-full max-w-sm flex-col gap-2">
+          {isAfternoon && (
+            <button
+              type="button"
+              onClick={() => {
+                if (!hasSubmittedEodToday) router.push(`/teacher/eod/${passportId}`);
+              }}
+              disabled={hasSubmittedEodToday}
+              className={`w-full rounded-2xl py-3.5 text-sm font-semibold transition-colors ${
+                hasSubmittedEodToday
+                  ? "cursor-not-allowed bg-black/5 text-black/40"
+                  : "bg-brand-golden-brown text-white shadow-sm"
+              }`}
+            >
+              {hasSubmittedEodToday ? "Update Sent" : "Complete EOD Update"}
+            </button>
+          )}
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => setIsLedgerOpen(true)}
+              className="flex-1 rounded-2xl bg-brand-prussian-blue py-3.5 text-sm font-semibold text-white shadow-sm"
+            >
+              + Add to Ledger
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsAbcLoggerOpen(true)}
+              className="flex-1 rounded-2xl bg-brand-golden-brown py-3.5 text-sm font-semibold text-white shadow-sm"
+            >
+              + Log ABC Incident
+            </button>
+          </div>
         </div>
       </div>
 
