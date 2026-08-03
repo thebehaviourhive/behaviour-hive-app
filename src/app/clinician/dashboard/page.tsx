@@ -12,7 +12,16 @@ import { ClinicalFileIcon, LockIcon } from "@/components/ui/icons";
 
 interface ClinicianProfile {
   specialty: string;
-  verificationStatus: "pending" | "verified";
+  verificationStatus: "pending" | "verified" | "rejected";
+  hasSubmitted: boolean;
+}
+
+type ReviewState = "not_submitted" | "pending_review" | "rejected" | "verified";
+
+function getReviewState(profile: ClinicianProfile): ReviewState {
+  if (profile.verificationStatus === "verified") return "verified";
+  if (profile.verificationStatus === "rejected") return "rejected";
+  return profile.hasSubmitted ? "pending_review" : "not_submitted";
 }
 
 interface Stats {
@@ -34,6 +43,23 @@ function isReviewDue(lastReviewDate: string, cadenceDays: number): boolean {
   return new Date() > due;
 }
 
+async function fetchClinicianProfile(userId: string): Promise<ClinicianProfile | null> {
+  const supabase = createClient();
+  const { data } = await supabase
+    .from("clinicians")
+    .select("specialty, verification_status, full_name")
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (!data) return null;
+
+  return {
+    specialty: data.specialty,
+    verificationStatus: data.verification_status,
+    hasSubmitted: data.full_name !== null,
+  };
+}
+
 export default function ClinicianDashboardPage() {
   const router = useRouter();
   const { user, isReady } = useRequireRole("clinician");
@@ -41,6 +67,7 @@ export default function ClinicianDashboardPage() {
   const [firstName, setFirstName] = useState("there");
   const [profile, setProfile] = useState<ClinicianProfile | null>(null);
   const [isLoadingProfile, setIsLoadingProfile] = useState(true);
+  const [isCheckingStatus, setIsCheckingStatus] = useState(false);
   const [stats, setStats] = useState<Stats>({ activeCases: 0, weeklyLogs: 0, reviewsDue: 0 });
   const [isLoadingStats, setIsLoadingStats] = useState(true);
 
@@ -54,33 +81,33 @@ export default function ClinicianDashboardPage() {
 
     let isMounted = true;
 
-    async function loadProfile() {
-      const supabase = createClient();
-      const { data } = await supabase
-        .from("clinicians")
-        .select("specialty, verification_status")
-        .eq("user_id", user!.id)
-        .maybeSingle();
-
+    (async () => {
+      const loaded = await fetchClinicianProfile(user.id);
       if (!isMounted) return;
 
-      if (!data) {
+      if (!loaded) {
         router.replace("/clinician/specialty");
         return;
       }
 
-      setProfile({
-        specialty: data.specialty,
-        verificationStatus: data.verification_status,
-      });
+      setProfile(loaded);
       setIsLoadingProfile(false);
-    }
+    })();
 
-    loadProfile();
     return () => {
       isMounted = false;
     };
   }, [user, router]);
+
+  async function handleCheckStatus() {
+    if (!user) return;
+    setIsCheckingStatus(true);
+    const loaded = await fetchClinicianProfile(user.id);
+    setIsCheckingStatus(false);
+    if (loaded) {
+      setProfile(loaded);
+    }
+  }
 
   useEffect(() => {
     if (!user || !profile || profile.specialty !== "behavioural_psychologist") return;
@@ -166,12 +193,13 @@ export default function ClinicianDashboardPage() {
     );
   }
 
-  const isPending = profile.verificationStatus === "pending";
+  const reviewState = getReviewState(profile);
+  const isLocked = reviewState !== "verified";
 
   return (
     <div className="flex min-h-full flex-1 flex-col bg-brand-off-white/40 pb-24">
       <div className="relative flex-1">
-        <div className={isPending ? "pointer-events-none select-none" : ""}>
+        <div className={isLocked ? "pointer-events-none select-none" : ""}>
           <h1 className="mt-6 px-4 font-heading text-2xl font-semibold text-brand-neutral-black">
             {getGreeting()}, {firstName}
           </h1>
@@ -193,7 +221,7 @@ export default function ClinicianDashboardPage() {
           <ClinicianQuickActions />
         </div>
 
-        {isPending && (
+        {reviewState === "not_submitted" && (
           <div className="absolute inset-0 z-20 flex items-center justify-center bg-white/30 px-6 backdrop-blur-md">
             <div className="w-full max-w-xs rounded-3xl bg-white p-6 text-center shadow-lg">
               <span className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-brand-pastel-blue/40 text-brand-prussian-blue">
@@ -208,6 +236,45 @@ export default function ClinicianDashboardPage() {
               >
                 Submit Credentials
               </Link>
+            </div>
+          </div>
+        )}
+
+        {reviewState === "pending_review" && (
+          <div className="absolute inset-0 z-20 flex items-center justify-center bg-white/30 px-6 backdrop-blur-md">
+            <div className="w-full max-w-xs rounded-3xl bg-white p-6 text-center shadow-lg">
+              <span className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-brand-pastel-blue/40 text-brand-prussian-blue">
+                <LockIcon className="h-6 w-6" />
+              </span>
+              <p className="mb-4 text-base font-semibold text-brand-neutral-black">
+                Thanks — your credentials are being reviewed. You&apos;ll be
+                notified when your account is verified.
+              </p>
+              <button
+                type="button"
+                onClick={handleCheckStatus}
+                disabled={isCheckingStatus}
+                className="block w-full rounded-2xl bg-brand-prussian-blue py-3.5 text-base font-semibold text-white transition-colors disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {isCheckingStatus ? "Checking…" : "Check status"}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {reviewState === "rejected" && (
+          <div className="absolute inset-0 z-20 flex items-center justify-center bg-white/30 px-6 backdrop-blur-md">
+            <div className="w-full max-w-xs rounded-3xl bg-white p-6 text-center shadow-lg">
+              <span className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-brand-pastel-blue/40 text-brand-prussian-blue">
+                <LockIcon className="h-6 w-6" />
+              </span>
+              <p className="mb-2 text-base font-semibold text-brand-neutral-black">
+                We weren&apos;t able to verify your credentials.
+              </p>
+              <p className="text-sm text-brand-neutral-black/70">
+                Please contact info@thebehaviourhive.com for help with your
+                application.
+              </p>
             </div>
           </div>
         )}
