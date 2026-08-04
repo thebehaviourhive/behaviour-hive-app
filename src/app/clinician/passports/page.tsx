@@ -142,7 +142,7 @@ export default function ClinicianPassportsPage() {
         )}
       </main>
 
-      <ClinicianBottomNav active="passports" />
+      <ClinicianBottomNav />
     </div>
   );
 }

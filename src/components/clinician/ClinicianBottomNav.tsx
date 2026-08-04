@@ -1,34 +1,39 @@
-import Link from "next/link";
+import { House, FolderOpen, Menu } from "lucide-react";
+import { AppBottomNav, type NavTab } from "@/components/ui/AppBottomNav";
 
-type ClinicianNavTab = "dashboard" | "passports" | "more";
-
-const TABS: { key: ClinicianNavTab; icon: string; label: string; href: string }[] = [
-  { key: "dashboard", icon: "🏠", label: "Dashboard", href: "/clinician/dashboard" },
-  { key: "passports", icon: "🧒", label: "Passports", href: "/clinician/passports" },
-  { key: "more", icon: "⋯", label: "More", href: "/more" },
+// Clinician track's tab list. "Passports" owns the caseload list plus any
+// individual case's clinical file; "More" owns /more; everything else on
+// this track (dashboard, its activity history, the Add Log flow, and the
+// dashboard-launched resources/messages) falls back to "Dashboard" as the
+// default.
+const TABS: NavTab[] = [
+  {
+    key: "dashboard",
+    label: "Dashboard",
+    icon: House,
+    href: "/clinician/dashboard",
+    isActive: (pathname) =>
+      pathname.startsWith("/clinician") &&
+      !pathname.startsWith("/clinician/passports") &&
+      !pathname.startsWith("/clinician/passport/"),
+  },
+  {
+    key: "passports",
+    label: "Passports",
+    icon: FolderOpen,
+    href: "/clinician/passports",
+    isActive: (pathname) =>
+      pathname.startsWith("/clinician/passports") || pathname.startsWith("/clinician/passport/"),
+  },
+  {
+    key: "more",
+    label: "More",
+    icon: Menu,
+    href: "/more",
+    isActive: (pathname) => pathname.startsWith("/more"),
+  },
 ];
 
-export function ClinicianBottomNav({ active }: { active: ClinicianNavTab }) {
-  return (
-    <nav className="fixed inset-x-0 bottom-0 z-10 border-t border-black/5 bg-white">
-      <div className="mx-auto flex max-w-sm items-center justify-around py-2">
-        {TABS.map((tab) => {
-          const isActive = tab.key === active;
-          const className = `flex flex-col items-center gap-0.5 px-2 py-1 ${
-            isActive ? "text-brand-prussian-blue" : "text-black/35"
-          }`;
-          return (
-            <Link key={tab.key} href={tab.href} className={className}>
-              <span aria-hidden className="text-lg leading-none">
-                {tab.icon}
-              </span>
-              <span className={`text-[10px] ${isActive ? "font-semibold" : "font-medium"}`}>
-                {tab.label}
-              </span>
-            </Link>
-          );
-        })}
-      </div>
-    </nav>
-  );
+export function ClinicianBottomNav() {
+  return <AppBottomNav tabs={TABS} />;
 }

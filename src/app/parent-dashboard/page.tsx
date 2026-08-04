@@ -325,7 +325,7 @@ export default function ParentDashboardPage() {
         <YourTeamCard passportId={passportId} />
       </main>
 
-      <BottomNav active="home" passportHref={resumeHref} />
+      <BottomNav passportHref={resumeHref} />
     </div>
   );
 }

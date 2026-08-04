@@ -863,7 +863,7 @@ export default function PassportDashboardPage() {
         />
       )}
 
-      <BottomNav active="passport" passportHref="/passport/dashboard" />
+      <BottomNav passportHref="/passport/dashboard" />
     </div>
   );
 }

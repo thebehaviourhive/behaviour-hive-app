@@ -206,11 +206,11 @@ export default function MorePage() {
       </BottomSheet>
 
       {role === "class_teacher" ? (
-        <TeacherBottomNav active="more" />
+        <TeacherBottomNav />
       ) : role === "clinician" ? (
-        <ClinicianBottomNav active="more" />
+        <ClinicianBottomNav />
       ) : (
-        <BottomNav active="more" />
+        <BottomNav />
       )}
     </div>
   );

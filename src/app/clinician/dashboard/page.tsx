@@ -243,7 +243,7 @@ export default function ClinicianDashboardPage() {
             integration. We will notify you when this track opens.
           </p>
         </main>
-        <ClinicianBottomNav active="dashboard" />
+        <ClinicianBottomNav />
       </div>
     );
   }
@@ -346,7 +346,7 @@ export default function ClinicianDashboardPage() {
         )}
       </div>
 
-      <ClinicianBottomNav active="dashboard" />
+      <ClinicianBottomNav />
     </div>
   );
 }

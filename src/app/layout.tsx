@@ -42,6 +42,10 @@ export const viewport: Viewport = {
   initialScale: 1,
   maximumScale: 1,
   userScalable: false,
+  // Lets content render edge-to-edge on notched/home-indicator devices so
+  // the bottom nav's env(safe-area-inset-bottom) padding (AppBottomNav)
+  // has a real inset to read instead of resolving to 0.
+  viewportFit: "cover",
 };
 
 export default function RootLayout({

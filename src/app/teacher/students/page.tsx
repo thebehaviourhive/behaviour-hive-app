@@ -132,7 +132,7 @@ export default function TeacherStudentsPage() {
         />
       )}
 
-      <TeacherBottomNav active="students" />
+      <TeacherBottomNav />
     </div>
   );
 }

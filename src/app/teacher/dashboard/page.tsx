@@ -120,7 +120,7 @@ export default function TeacherDashboardPage() {
 
       <MorningCheckinDetailSheet pupil={selectedPupil} onClose={() => setSelectedPupil(null)} />
 
-      <TeacherBottomNav active="dashboard" />
+      <TeacherBottomNav />
     </div>
   );
 }
