@@ -75,6 +75,7 @@ export default function TeacherEodPage() {
   const [error, setError] = useState<string | null>(null);
   const [showSuccess, setShowSuccess] = useState(false);
   const [successVisible, setSuccessVisible] = useState(false);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     if (!user || !passportId) return;
@@ -142,8 +143,11 @@ export default function TeacherEodPage() {
     if (!user || !passportId) return;
     setError(null);
 
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     const supabase = createClient();
-    const errorMessage = await insertWithOfflineRetry(
+    const result = await insertWithOfflineRetry(
       () =>
         supabase.from("teacher_updates").insert({
           passport_id: passportId,
@@ -153,12 +157,18 @@ export default function TeacherEodPage() {
           flags: flags.filter((f) => f !== NO_FLAGS),
           heads_up: headsUp.trim() || null,
         }),
-      setStatus
+      setStatus,
+      controller.signal
     );
 
-    if (errorMessage) {
+    if (result === "cancelled") {
       setStatus("idle");
-      setError(errorMessage);
+      return;
+    }
+
+    if (result) {
+      setStatus("idle");
+      setError(result);
       return;
     }
 
@@ -173,6 +183,10 @@ export default function TeacherEodPage() {
     setTimeout(() => {
       router.push("/teacher/dashboard");
     }, 1000);
+  }
+
+  function handleCancelSubmit() {
+    abortControllerRef.current?.abort();
   }
 
   if (!isReady || isLoading) {
@@ -336,6 +350,16 @@ export default function TeacherEodPage() {
                   ? "Sending…"
                   : "Submit Update"}
             </button>
+
+            {status === "waiting-for-connection" && (
+              <button
+                type="button"
+                onClick={handleCancelSubmit}
+                className="mt-2 w-full rounded-2xl border-2 border-black/10 py-3 text-sm font-semibold text-black/60"
+              >
+                Cancel
+              </button>
+            )}
           </StepPanel>
         </div>
       </div>

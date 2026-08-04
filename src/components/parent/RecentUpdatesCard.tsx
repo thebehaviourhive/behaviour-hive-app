@@ -1,42 +1,50 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { ActivityRow, ActivityRowSkeleton } from "./ActivityRow";
+import { InlineErrorState } from "@/components/ui/InlineErrorState";
 import type { ActivityLogEntry } from "@/lib/activityEvents";
 
 export function RecentUpdatesCard({ passportId }: { passportId: string | null }) {
   const [entries, setEntries] = useState<ActivityLogEntry[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isFetching, setIsFetching] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  // No passportId means there's nothing to fetch — derived directly
+  // rather than requiring the effect below to set state just to cover
+  // that branch.
+  const isLoading = isFetching && passportId !== null;
 
-  useEffect(() => {
-    if (!passportId) {
-      setIsLoading(false);
+  const load = useCallback(async () => {
+    if (!passportId) return;
+    setError(null);
+    const supabase = createClient();
+    const { data, error: fetchError } = await supabase
+      .from("activity_log")
+      .select("id, event_type, event_description, created_at")
+      .eq("passport_id", passportId)
+      .order("created_at", { ascending: false })
+      .limit(3);
+
+    if (fetchError) {
+      console.error("Failed to load recent activity:", fetchError);
+      setError("Couldn't load recent activity.");
+      setIsFetching(false);
       return;
     }
 
-    let isMounted = true;
-
-    async function load() {
-      const supabase = createClient();
-      const { data } = await supabase
-        .from("activity_log")
-        .select("id, event_type, event_description, created_at")
-        .eq("passport_id", passportId)
-        .order("created_at", { ascending: false })
-        .limit(3);
-
-      if (!isMounted) return;
-      setEntries((data ?? []) as ActivityLogEntry[]);
-      setIsLoading(false);
-    }
-
-    load();
-    return () => {
-      isMounted = false;
-    };
+    setEntries((data ?? []) as ActivityLogEntry[]);
+    setIsFetching(false);
   }, [passportId]);
+
+  // Fetches on mount and whenever `load`'s identity changes -- a genuine
+  // effect for syncing with the external data source, not a synchronous
+  // state derivation.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    load();
+  }, [load]);
 
   return (
     <Link
@@ -53,6 +61,16 @@ export function RecentUpdatesCard({ passportId }: { passportId: string | null })
           <ActivityRowSkeleton />
           <ActivityRowSkeleton />
         </>
+      ) : error ? (
+        <InlineErrorState
+          message={error}
+          onRetry={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            setIsFetching(true);
+            load();
+          }}
+        />
       ) : entries.length === 0 ? (
         <div className="rounded-xl border-2 border-dashed border-brand-pastel-blue bg-brand-off-white/30 p-4 text-center">
           <p className="font-sans text-sm text-brand-neutral-black/70">

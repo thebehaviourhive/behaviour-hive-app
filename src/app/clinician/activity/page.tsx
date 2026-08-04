@@ -1,11 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { format, isToday, isYesterday } from "date-fns";
 import { createClient } from "@/lib/supabase/client";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { ActivityRow, ActivityRowSkeleton } from "@/components/parent/ActivityRow";
+import { InlineErrorState } from "@/components/ui/InlineErrorState";
 import type { ActivityEventType } from "@/lib/activityEvents";
 
 const PAGE_SIZE = 20;
@@ -46,40 +47,58 @@ export default function ClinicianActivityPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const load = useCallback(async () => {
     if (!isReady) return;
-    let isMounted = true;
+    setIsLoading(true);
+    setLoadError(null);
 
-    async function load() {
-      const supabase = createClient();
-      const { data } = await supabase.rpc("get_clinician_activity_feed", {
-        p_limit: PAGE_SIZE,
-        p_offset: 0,
-      });
+    const supabase = createClient();
+    const { data, error } = await supabase.rpc("get_clinician_activity_feed", {
+      p_limit: PAGE_SIZE,
+      p_offset: 0,
+    });
 
-      if (!isMounted) return;
-      const rows = (data ?? []) as ClinicianActivityEntry[];
-      setEntries(rows);
-      setHasMore(rows.length === PAGE_SIZE);
+    if (error) {
+      console.error("Failed to load clinician activity:", error);
+      setLoadError("Couldn't load your activity.");
       setIsLoading(false);
+      return;
     }
 
-    load();
-    return () => {
-      isMounted = false;
-    };
+    const rows = (data ?? []) as ClinicianActivityEntry[];
+    setEntries(rows);
+    setHasMore(rows.length === PAGE_SIZE);
+    setIsLoading(false);
   }, [isReady]);
+
+  // Fetches on mount and whenever `load`'s identity changes -- a genuine
+  // effect for syncing with the external data source, not a synchronous
+  // state derivation.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    load();
+  }, [load]);
 
   async function loadMore() {
     if (isLoadingMore) return;
     setIsLoadingMore(true);
+    setLoadMoreError(null);
 
     const supabase = createClient();
-    const { data } = await supabase.rpc("get_clinician_activity_feed", {
+    const { data, error } = await supabase.rpc("get_clinician_activity_feed", {
       p_limit: PAGE_SIZE,
       p_offset: entries.length,
     });
+
+    if (error) {
+      console.error("Failed to load more clinician activity:", error);
+      setLoadMoreError("Couldn't load more activity.");
+      setIsLoadingMore(false);
+      return;
+    }
 
     const rows = (data ?? []) as ClinicianActivityEntry[];
     setEntries((prev) => [...prev, ...rows]);
@@ -115,6 +134,8 @@ export default function ClinicianActivityPage() {
             <ActivityRowSkeleton />
             <ActivityRowSkeleton />
           </div>
+        ) : loadError ? (
+          <InlineErrorState message={loadError} onRetry={load} />
         ) : entries.length === 0 ? (
           <div className="rounded-xl border-2 border-dashed border-brand-pastel-blue bg-white/60 p-6 text-center">
             <p className="font-sans text-sm text-brand-neutral-black/70">
@@ -144,7 +165,11 @@ export default function ClinicianActivityPage() {
               </section>
             ))}
 
-            {hasMore && (
+            {loadMoreError && (
+              <InlineErrorState message={loadMoreError} onRetry={loadMore} />
+            )}
+
+            {hasMore && !loadMoreError && (
               <button
                 type="button"
                 onClick={loadMore}

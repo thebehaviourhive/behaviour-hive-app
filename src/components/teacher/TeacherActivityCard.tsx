@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { ActivityRow, ActivityRowSkeleton } from "@/components/parent/ActivityRow";
+import { InlineErrorState } from "@/components/ui/InlineErrorState";
 import { getChildDisplayName } from "@/lib/childDisplayName";
 import type { ActivityEventType } from "@/lib/activityEvents";
 
@@ -18,27 +19,34 @@ interface TeacherActivityEntry {
 export function TeacherActivityCard() {
   const [entries, setEntries] = useState<TeacherActivityEntry[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    let isMounted = true;
+  const load = useCallback(async () => {
+    setError(null);
+    const supabase = createClient();
+    const { data, error: fetchError } = await supabase.rpc("get_teacher_activity_feed", {
+      p_limit: 3,
+      p_offset: 0,
+    });
 
-    async function load() {
-      const supabase = createClient();
-      const { data } = await supabase.rpc("get_teacher_activity_feed", {
-        p_limit: 3,
-        p_offset: 0,
-      });
-
-      if (!isMounted) return;
-      setEntries((data ?? []) as TeacherActivityEntry[]);
+    if (fetchError) {
+      console.error("Failed to load teacher activity feed:", fetchError);
+      setError("Couldn't load recent activity.");
       setIsLoading(false);
+      return;
     }
 
-    load();
-    return () => {
-      isMounted = false;
-    };
+    setEntries((data ?? []) as TeacherActivityEntry[]);
+    setIsLoading(false);
   }, []);
+
+  // Fetches on mount and whenever `load`'s identity changes -- a genuine
+  // effect for syncing with the external data source, not a synchronous
+  // state derivation.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    load();
+  }, [load]);
 
   return (
     <Link
@@ -55,6 +63,16 @@ export function TeacherActivityCard() {
           <ActivityRowSkeleton />
           <ActivityRowSkeleton />
         </>
+      ) : error ? (
+        <InlineErrorState
+          message={error}
+          onRetry={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            setIsLoading(true);
+            load();
+          }}
+        />
       ) : entries.length === 0 ? (
         <div className="rounded-xl border-2 border-dashed border-brand-pastel-blue bg-brand-off-white/30 p-4 text-center">
           <p className="font-sans text-sm text-brand-neutral-black/70">

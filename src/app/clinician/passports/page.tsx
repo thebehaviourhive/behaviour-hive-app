@@ -1,14 +1,18 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { format } from "date-fns";
 import { createClient } from "@/lib/supabase/client";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { ClinicianBottomNav } from "@/components/clinician/ClinicianBottomNav";
+import { InlineErrorState } from "@/components/ui/InlineErrorState";
 
 interface ClinicianPassportRow {
   passport_id: string;
+  // Full name, shown as-is to clinicians (unlike the redacted teacher-track
+  // view) -- clinical records require certainty of identity. Deliberate
+  // product decision, pending clinical sign-off.
   child_name: string;
   date_of_birth: string | null;
   diagnoses: string[] | null;
@@ -41,25 +45,33 @@ export default function ClinicianPassportsPage() {
   const { isReady } = useRequireRole("clinician");
   const [passports, setPassports] = useState<ClinicianPassportRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!isReady) return;
-    let isMounted = true;
+  const load = useCallback(async () => {
+    setIsLoading(true);
+    setLoadError(null);
+    const supabase = createClient();
+    const { data, error } = await supabase.rpc("get_clinician_passports");
 
-    async function load() {
-      const supabase = createClient();
-      const { data } = await supabase.rpc("get_clinician_passports");
-
-      if (!isMounted) return;
-      setPassports((data ?? []) as ClinicianPassportRow[]);
+    if (error) {
+      console.error("Failed to load clinician passports:", error);
+      setLoadError("Couldn't load your passports.");
       setIsLoading(false);
+      return;
     }
 
+    setPassports((data ?? []) as ClinicianPassportRow[]);
+    setIsLoading(false);
+  }, []);
+
+  // Fetches once the role check is ready and whenever `load`'s identity
+  // changes -- a genuine effect for syncing with the external data
+  // source, not a synchronous state derivation.
+  useEffect(() => {
+    if (!isReady) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
-    return () => {
-      isMounted = false;
-    };
-  }, [isReady]);
+  }, [isReady, load]);
 
   if (!isReady) {
     return null;
@@ -79,6 +91,8 @@ export default function ClinicianPassportsPage() {
             <PassportCardSkeleton />
             <PassportCardSkeleton />
           </>
+        ) : loadError ? (
+          <InlineErrorState message={loadError} onRetry={load} />
         ) : passports.length === 0 ? (
           <div className="mt-4 rounded-2xl border-2 border-dashed border-brand-pastel-blue bg-white/60 p-6 text-center">
             <p className="text-sm text-brand-neutral-black/70">

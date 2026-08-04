@@ -84,6 +84,26 @@ export default function TeacherPassportPage() {
 
     async function load() {
       const supabase = createClient();
+
+      // Explicit access guard, checked before anything else: a teacher
+      // whose access has been revoked (or was never granted) must see the
+      // clean "no access" state immediately, not fire five more queries
+      // that RLS would filter to empty anyway. A bookmarked/history URL
+      // is the exact path a revoked teacher would use to reach this page.
+      const { data: access } = await supabase
+        .from("passport_access")
+        .select("is_active")
+        .eq("passport_id", passportId)
+        .eq("teacher_id", user!.id)
+        .maybeSingle();
+
+      if (!isMounted) return;
+
+      if (!access?.is_active) {
+        setIsLoading(false);
+        return;
+      }
+
       const startOfToday = new Date();
       startOfToday.setHours(0, 0, 0, 0);
 

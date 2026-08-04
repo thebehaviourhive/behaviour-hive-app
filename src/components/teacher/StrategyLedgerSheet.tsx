@@ -33,6 +33,7 @@ export function StrategyLedgerSheet({
   const [status, setStatus] = useState<Status>("idle");
   const [error, setError] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     const el = textareaRef.current;
@@ -54,8 +55,11 @@ export function StrategyLedgerSheet({
     if (!description.trim()) return;
     setError(null);
 
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     const supabase = createClient();
-    const errorMessage = await insertWithOfflineRetry(
+    const result = await insertWithOfflineRetry(
       () =>
         supabase.from("strategy_ledger").insert({
           passport_id: passportId,
@@ -64,12 +68,18 @@ export function StrategyLedgerSheet({
           description: description.trim(),
           environment,
         }),
-      setStatus
+      setStatus,
+      controller.signal
     );
 
-    if (errorMessage) {
+    if (result === "cancelled") {
       setStatus("idle");
-      setError(errorMessage);
+      return;
+    }
+
+    if (result) {
+      setStatus("idle");
+      setError(result);
       return;
     }
 
@@ -82,6 +92,10 @@ export function StrategyLedgerSheet({
 
     setStatus("success");
     setTimeout(resetAndClose, 900);
+  }
+
+  function handleCancelSave() {
+    abortControllerRef.current?.abort();
   }
 
   const isSaving = status === "saving" || status === "waiting-for-connection";
@@ -170,6 +184,16 @@ export function StrategyLedgerSheet({
                 ? "Saving…"
                 : "Save to Ledger"}
           </button>
+
+          {status === "waiting-for-connection" && (
+            <button
+              type="button"
+              onClick={handleCancelSave}
+              className="mt-2 w-full rounded-2xl border-2 border-black/10 py-3 text-sm font-semibold text-black/60"
+            >
+              Cancel
+            </button>
+          )}
         </>
       )}
     </BottomSheet>

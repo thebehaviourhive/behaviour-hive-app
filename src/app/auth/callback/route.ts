@@ -40,7 +40,14 @@ export async function GET(request: Request) {
     });
 
     if (!error) {
-      const next = getPostAuthRedirect(data.user?.app_metadata?.role);
+      // A password-recovery link should land the user on the "set a new
+      // password" screen, not straight into their dashboard as if this
+      // were an ordinary sign-in -- the whole point of the link was that
+      // they can't sign in with their old password.
+      const next =
+        type === "recovery"
+          ? "/reset-password"
+          : getPostAuthRedirect(data.user?.app_metadata?.role);
       return NextResponse.redirect(`${origin}${next}`);
     }
 

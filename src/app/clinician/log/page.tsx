@@ -1,12 +1,13 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 import { ABCLogger } from "@/components/abc-logger/ABCLogger";
 import { ClinicalFileIcon } from "@/components/ui/icons";
+import { InlineErrorState } from "@/components/ui/InlineErrorState";
 
 interface ClinicianPassportOption {
   passport_id: string;
@@ -21,28 +22,36 @@ export default function ClinicianAddLogPage() {
 
   const [passports, setPassports] = useState<ClinicianPassportOption[]>([]);
   const [isLoadingPassports, setIsLoadingPassports] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedPassport, setSelectedPassport] = useState<ClinicianPassportOption | null>(null);
   const [showAdvancedComingSoon, setShowAdvancedComingSoon] = useState(false);
   const [isAbcLoggerOpen, setIsAbcLoggerOpen] = useState(false);
 
-  useEffect(() => {
-    if (!isReady) return;
-    let isMounted = true;
+  const load = useCallback(async () => {
+    setIsLoadingPassports(true);
+    setLoadError(null);
+    const supabase = createClient();
+    const { data, error } = await supabase.rpc("get_clinician_passports");
 
-    async function load() {
-      const supabase = createClient();
-      const { data } = await supabase.rpc("get_clinician_passports");
-
-      if (!isMounted) return;
-      setPassports((data ?? []) as ClinicianPassportOption[]);
+    if (error) {
+      console.error("Failed to load clinician passports:", error);
+      setLoadError("Couldn't load your cases.");
       setIsLoadingPassports(false);
+      return;
     }
 
+    setPassports((data ?? []) as ClinicianPassportOption[]);
+    setIsLoadingPassports(false);
+  }, []);
+
+  // Fetches once the role check is ready and whenever `load`'s identity
+  // changes -- a genuine effect for syncing with the external data
+  // source, not a synchronous state derivation.
+  useEffect(() => {
+    if (!isReady) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
-    return () => {
-      isMounted = false;
-    };
-  }, [isReady]);
+  }, [isReady, load]);
 
   function selectLogType(logType: LogType) {
     if (logType === "abc") {
@@ -86,6 +95,8 @@ export default function ClinicianAddLogPage() {
                 <div className="h-16 animate-pulse rounded-2xl bg-white" />
                 <div className="h-16 animate-pulse rounded-2xl bg-white" />
               </div>
+            ) : loadError ? (
+              <InlineErrorState message={loadError} onRetry={load} />
             ) : passports.length === 0 ? (
               <div className="rounded-2xl border-2 border-dashed border-brand-pastel-blue bg-white/60 p-6 text-center">
                 <p className="text-sm text-brand-neutral-black/70">

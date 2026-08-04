@@ -1,11 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { format, isToday, isYesterday } from "date-fns";
 import { createClient } from "@/lib/supabase/client";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { ActivityRow, ActivityRowSkeleton } from "@/components/parent/ActivityRow";
+import { InlineErrorState } from "@/components/ui/InlineErrorState";
 import type { ActivityLogEntry } from "@/lib/activityEvents";
 
 const PAGE_SIZE = 20;
@@ -39,59 +40,82 @@ export default function ActivityPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const load = useCallback(async () => {
     if (!user) return;
-    let isMounted = true;
+    setIsLoading(true);
+    setLoadError(null);
 
-    async function load() {
-      const supabase = createClient();
-      const { data: passport } = await supabase
-        .from("passports")
-        .select("id")
-        .eq("user_id", user!.id)
-        .maybeSingle();
+    const supabase = createClient();
+    const { data: passport, error: passportError } = await supabase
+      .from("passports")
+      .select("id")
+      .eq("user_id", user.id)
+      .maybeSingle();
 
-      if (!isMounted) return;
-
-      if (!passport?.id) {
-        setIsLoading(false);
-        return;
-      }
-
-      setPassportId(passport.id);
-
-      const { data } = await supabase
-        .from("activity_log")
-        .select("id, event_type, event_description, created_at")
-        .eq("passport_id", passport.id)
-        .order("created_at", { ascending: false })
-        .range(0, PAGE_SIZE - 1);
-
-      if (!isMounted) return;
-      const rows = (data ?? []) as ActivityLogEntry[];
-      setEntries(rows);
-      setHasMore(rows.length === PAGE_SIZE);
+    if (passportError) {
+      console.error("Failed to load passport for activity page:", passportError);
+      setLoadError("Couldn't load your activity.");
       setIsLoading(false);
+      return;
     }
 
-    load();
-    return () => {
-      isMounted = false;
-    };
+    if (!passport?.id) {
+      setIsLoading(false);
+      return;
+    }
+
+    setPassportId(passport.id);
+
+    const { data, error: activityError } = await supabase
+      .from("activity_log")
+      .select("id, event_type, event_description, created_at")
+      .eq("passport_id", passport.id)
+      .order("created_at", { ascending: false })
+      .range(0, PAGE_SIZE - 1);
+
+    if (activityError) {
+      console.error("Failed to load activity log:", activityError);
+      setLoadError("Couldn't load your activity.");
+      setIsLoading(false);
+      return;
+    }
+
+    const rows = (data ?? []) as ActivityLogEntry[];
+    setEntries(rows);
+    setHasMore(rows.length === PAGE_SIZE);
+    setIsLoading(false);
   }, [user]);
+
+  // Fetches on mount and whenever `load`'s identity changes -- a genuine
+  // effect for syncing with the external data source, not a synchronous
+  // state derivation.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    load();
+  }, [load]);
 
   async function loadMore() {
     if (!passportId || isLoadingMore) return;
     setIsLoadingMore(true);
+    setLoadMoreError(null);
 
     const supabase = createClient();
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("activity_log")
       .select("id, event_type, event_description, created_at")
       .eq("passport_id", passportId)
       .order("created_at", { ascending: false })
       .range(entries.length, entries.length + PAGE_SIZE - 1);
+
+    if (error) {
+      console.error("Failed to load more activity:", error);
+      setLoadMoreError("Couldn't load more activity.");
+      setIsLoadingMore(false);
+      return;
+    }
 
     const rows = (data ?? []) as ActivityLogEntry[];
     setEntries((prev) => [...prev, ...rows]);
@@ -127,6 +151,8 @@ export default function ActivityPage() {
             <ActivityRowSkeleton />
             <ActivityRowSkeleton />
           </div>
+        ) : loadError ? (
+          <InlineErrorState message={loadError} onRetry={load} />
         ) : entries.length === 0 ? (
           <div className="rounded-xl border-2 border-dashed border-brand-pastel-blue bg-white/60 p-6 text-center">
             <p className="font-sans text-sm text-brand-neutral-black/70">
@@ -149,7 +175,11 @@ export default function ActivityPage() {
               </section>
             ))}
 
-            {hasMore && (
+            {loadMoreError && (
+              <InlineErrorState message={loadMoreError} onRetry={loadMore} />
+            )}
+
+            {hasMore && !loadMoreError && (
               <button
                 type="button"
                 onClick={loadMore}

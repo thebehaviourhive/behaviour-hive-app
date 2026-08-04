@@ -1,6 +1,6 @@
 import Link from "next/link";
 
-type NavTab = "home" | "passport" | "morning" | "hive" | "more";
+type NavTab = "home" | "passport" | "more";
 
 interface BottomNavProps {
   active: NavTab;
@@ -10,8 +10,6 @@ interface BottomNavProps {
 const TABS: { key: NavTab; icon: string; label: string }[] = [
   { key: "home", icon: "🏠", label: "Home" },
   { key: "passport", icon: "📄", label: "Passport" },
-  { key: "morning", icon: "☀️", label: "Morning" },
-  { key: "hive", icon: "🐝", label: "Hive" },
   { key: "more", icon: "⋯", label: "More" },
 ];
 

@@ -26,7 +26,7 @@ export function MorningCheckinDetailSheet({
       {pupil && (
         <>
           <h2 className="font-heading text-xl font-bold text-brand-prussian-blue">
-            {pupil.firstName}&apos;s Morning Check-in
+            {pupil.displayName}&apos;s Morning Check-in
           </h2>
           <p className="mt-1 font-sans text-xs text-brand-neutral-black/50">
             {pupil.checkedInAt

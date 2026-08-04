@@ -2,13 +2,14 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { ClinicianBottomNav } from "@/components/clinician/ClinicianBottomNav";
 import { ClinicianActivityCard } from "@/components/clinician/ClinicianActivityCard";
 import { ClinicianQuickActions } from "@/components/clinician/ClinicianQuickActions";
 import { ClinicalFileIcon, LockIcon } from "@/components/ui/icons";
+import { InlineErrorState } from "@/components/ui/InlineErrorState";
 
 interface ClinicianProfile {
   specialty: string;
@@ -37,26 +38,45 @@ function getGreeting(): string {
   return "Good evening";
 }
 
+// new Date("YYYY-MM-DD") parses as UTC midnight, not local midnight --
+// during BST that's 1am local, shifting the due threshold by up to an
+// hour. Parsing the components directly constructs a local-midnight Date
+// instead, matching what a clinician actually means by "that calendar day".
+function parseLocalDateOnly(dateOnly: string): Date {
+  const [year, month, day] = dateOnly.split("-").map(Number);
+  return new Date(year, month - 1, day);
+}
+
 function isReviewDue(lastReviewDate: string, cadenceDays: number): boolean {
-  const due = new Date(lastReviewDate);
+  const due = parseLocalDateOnly(lastReviewDate);
   due.setDate(due.getDate() + cadenceDays);
   return new Date() > due;
 }
 
-async function fetchClinicianProfile(userId: string): Promise<ClinicianProfile | null> {
+async function fetchClinicianProfile(
+  userId: string
+): Promise<{ profile: ClinicianProfile | null; error: boolean }> {
   const supabase = createClient();
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from("clinicians")
     .select("specialty, verification_status, full_name")
     .eq("user_id", userId)
     .maybeSingle();
 
-  if (!data) return null;
+  if (error) {
+    console.error("Failed to load clinician profile:", error);
+    return { profile: null, error: true };
+  }
+
+  if (!data) return { profile: null, error: false };
 
   return {
-    specialty: data.specialty,
-    verificationStatus: data.verification_status,
-    hasSubmitted: data.full_name !== null,
+    profile: {
+      specialty: data.specialty,
+      verificationStatus: data.verification_status,
+      hasSubmitted: data.full_name !== null,
+    },
+    error: false,
   };
 }
 
@@ -64,111 +84,146 @@ export default function ClinicianDashboardPage() {
   const router = useRouter();
   const { user, isReady } = useRequireRole("clinician");
 
-  const [firstName, setFirstName] = useState("there");
   const [profile, setProfile] = useState<ClinicianProfile | null>(null);
   const [isLoadingProfile, setIsLoadingProfile] = useState(true);
+  const [profileLoadError, setProfileLoadError] = useState<string | null>(null);
   const [isCheckingStatus, setIsCheckingStatus] = useState(false);
+  const [checkStatusMessage, setCheckStatusMessage] = useState<string | null>(null);
   const [stats, setStats] = useState<Stats>({ activeCases: 0, weeklyLogs: 0, reviewsDue: 0 });
   const [isLoadingStats, setIsLoadingStats] = useState(true);
+  const [statsError, setStatsError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const fullName = user?.user_metadata?.full_name as string | undefined;
+  const firstName = fullName ? fullName.split(" ")[0] : "there";
+
+  const loadProfile = useCallback(async () => {
     if (!user) return;
+    setIsLoadingProfile(true);
+    setProfileLoadError(null);
 
-    const fullName = user.user_metadata?.full_name as string | undefined;
-    if (fullName) {
-      setFirstName(fullName.split(" ")[0]);
+    const { profile: loaded, error } = await fetchClinicianProfile(user.id);
+
+    if (error) {
+      setProfileLoadError("Couldn't load your profile.");
+      setIsLoadingProfile(false);
+      return;
     }
 
-    let isMounted = true;
+    if (!loaded) {
+      router.replace("/clinician/specialty");
+      return;
+    }
 
-    (async () => {
-      const loaded = await fetchClinicianProfile(user.id);
-      if (!isMounted) return;
-
-      if (!loaded) {
-        router.replace("/clinician/specialty");
-        return;
-      }
-
-      setProfile(loaded);
-      setIsLoadingProfile(false);
-    })();
-
-    return () => {
-      isMounted = false;
-    };
+    setProfile(loaded);
+    setIsLoadingProfile(false);
   }, [user, router]);
+
+  // Fetches on mount and whenever `loadProfile`'s identity changes -- a
+  // genuine effect for syncing with the external data source, not a
+  // synchronous state derivation.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    loadProfile();
+  }, [loadProfile]);
 
   async function handleCheckStatus() {
     if (!user) return;
     setIsCheckingStatus(true);
-    const loaded = await fetchClinicianProfile(user.id);
+    setCheckStatusMessage(null);
+    const { profile: loaded, error } = await fetchClinicianProfile(user.id);
     setIsCheckingStatus(false);
-    if (loaded) {
-      setProfile(loaded);
+    if (error) {
+      setCheckStatusMessage("Couldn't check your status. Please try again.");
+      return;
+    }
+    if (!loaded) return;
+
+    setProfile(loaded);
+    if (getReviewState(loaded) === "pending_review") {
+      setCheckStatusMessage("Pending approval. Please check back soon.");
     }
   }
 
-  useEffect(() => {
+  const loadStats = useCallback(async () => {
     if (!user || !profile || profile.specialty !== "behavioural_psychologist") return;
-    let isMounted = true;
+    setIsLoadingStats(true);
+    setStatsError(null);
 
-    async function loadStats() {
-      const supabase = createClient();
-      const sevenDaysAgo = new Date();
-      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    const supabase = createClient();
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
-      const [
-        { count: activeCases },
-        { count: weeklyLogs },
-        { data: cadenceRow },
-        { data: caseRows },
-      ] = await Promise.all([
-        supabase
-          .from("clinician_access")
-          .select("id", { count: "exact", head: true })
-          .eq("clinician_id", user!.id)
-          .eq("is_active", true),
-        supabase
-          .from("abc_logs")
-          .select("id", { count: "exact", head: true })
-          .eq("logged_by", user!.id)
-          .eq("logged_by_role", "clinician")
-          .gte("created_at", sevenDaysAgo.toISOString()),
-        supabase
-          .from("clinicians")
-          .select("review_cadence_days")
-          .eq("user_id", user!.id)
-          .maybeSingle(),
-        supabase
-          .from("clinician_access")
-          .select("last_review_date")
-          .eq("clinician_id", user!.id)
-          .eq("is_active", true),
-      ]);
+    const [
+      { count: activeCases, error: activeCasesError },
+      { count: weeklyLogs, error: weeklyLogsError },
+      { data: cadenceRow, error: cadenceError },
+      { data: caseRows, error: caseRowsError },
+    ] = await Promise.all([
+      supabase
+        .from("clinician_access")
+        .select("id", { count: "exact", head: true })
+        .eq("clinician_id", user.id)
+        .eq("is_active", true),
+      supabase
+        .from("abc_logs")
+        .select("id", { count: "exact", head: true })
+        .eq("logged_by", user.id)
+        .eq("logged_by_role", "clinician")
+        .gte("created_at", sevenDaysAgo.toISOString()),
+      supabase
+        .from("clinicians")
+        .select("review_cadence_days")
+        .eq("user_id", user.id)
+        .maybeSingle(),
+      supabase
+        .from("clinician_access")
+        .select("last_review_date")
+        .eq("clinician_id", user.id)
+        .eq("is_active", true),
+    ]);
 
-      if (!isMounted) return;
-
-      const cadenceDays = cadenceRow?.review_cadence_days ?? 30;
-      const reviewsDue = (caseRows ?? []).filter((row) =>
-        isReviewDue(row.last_review_date, cadenceDays)
-      ).length;
-
-      setStats({
-        activeCases: activeCases ?? 0,
-        weeklyLogs: weeklyLogs ?? 0,
-        reviewsDue,
-      });
+    const firstError = activeCasesError ?? weeklyLogsError ?? cadenceError ?? caseRowsError;
+    if (firstError) {
+      console.error("Failed to load clinician stats:", firstError);
+      setStatsError("Couldn't load your stats.");
       setIsLoadingStats(false);
+      return;
     }
 
-    loadStats();
-    return () => {
-      isMounted = false;
-    };
+    const cadenceDays = cadenceRow?.review_cadence_days ?? 30;
+    const reviewsDue = (caseRows ?? []).filter((row) =>
+      isReviewDue(row.last_review_date, cadenceDays)
+    ).length;
+
+    setStats({
+      activeCases: activeCases ?? 0,
+      weeklyLogs: weeklyLogs ?? 0,
+      reviewsDue,
+    });
+    setIsLoadingStats(false);
   }, [user, profile]);
 
-  if (!isReady || isLoadingProfile || !profile) {
+  // Fetches on mount and whenever `loadStats`'s identity changes -- a
+  // genuine effect for syncing with the external data source, not a
+  // synchronous state derivation.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    loadStats();
+  }, [loadStats]);
+
+  if (!isReady || isLoadingProfile) {
+    return null;
+  }
+
+  if (profileLoadError) {
+    return (
+      <div className="flex min-h-full flex-1 flex-col items-center justify-center gap-4 bg-brand-off-white/40 px-4 pb-24 text-center">
+        <InlineErrorState message={profileLoadError} onRetry={loadProfile} />
+      </div>
+    );
+  }
+
+  if (!profile) {
     return null;
   }
 
@@ -204,15 +259,21 @@ export default function ClinicianDashboardPage() {
             {getGreeting()}, {firstName}
           </h1>
 
-          <div className="scrollbar-hide flex gap-4 overflow-x-auto px-4 py-2">
-            <StatCard label="Active Cases" value={isLoadingStats ? "…" : stats.activeCases} />
-            <StatCard label="Weekly Logs" value={isLoadingStats ? "…" : stats.weeklyLogs} />
-            <StatCard
-              label="Reviews Due"
-              value={isLoadingStats ? "…" : stats.reviewsDue}
-              isWarning={!isLoadingStats && stats.reviewsDue > 0}
-            />
-          </div>
+          {statsError ? (
+            <div className="px-4 py-2">
+              <InlineErrorState message={statsError} onRetry={loadStats} />
+            </div>
+          ) : (
+            <div className="scrollbar-hide flex gap-4 overflow-x-auto px-4 py-2">
+              <StatCard label="Active Cases" value={isLoadingStats ? "…" : stats.activeCases} />
+              <StatCard label="Weekly Logs" value={isLoadingStats ? "…" : stats.weeklyLogs} />
+              <StatCard
+                label="Reviews Due"
+                value={isLoadingStats ? "…" : stats.reviewsDue}
+                isWarning={!isLoadingStats && stats.reviewsDue > 0}
+              />
+            </div>
+          )}
 
           <div className="px-4">
             <ClinicianActivityCard />
@@ -258,6 +319,11 @@ export default function ClinicianDashboardPage() {
               >
                 {isCheckingStatus ? "Checking…" : "Check status"}
               </button>
+              {checkStatusMessage && (
+                <p className="mt-3 text-sm font-medium text-brand-neutral-black/60">
+                  {checkStatusMessage}
+                </p>
+              )}
             </div>
           </div>
         )}

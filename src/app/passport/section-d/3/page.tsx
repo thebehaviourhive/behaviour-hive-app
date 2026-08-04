@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { BrandMark } from "@/components/ui/BrandMark";
 import { Button } from "@/components/ui/Button";
 import { TextField } from "@/components/ui/TextField";
@@ -31,12 +31,13 @@ export default function PassportSectionDPage3() {
   const [afterDistressOther, setAfterDistressOther] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [hasHydrated, setHasHydrated] = useState(false);
 
-  useEffect(() => {
-    if (!isReady) return;
+  if (isReady && !hasHydrated) {
+    setHasHydrated(true);
     setAfterDistress(record.after_distress ?? []);
     setAfterDistressOther(record.after_distress_other ?? "");
-  }, [isReady, record]);
+  }
 
   function toggleOption(value: string) {
     setAfterDistress((prev) =>

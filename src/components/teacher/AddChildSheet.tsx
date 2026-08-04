@@ -71,13 +71,17 @@ export function AddChildSheet({
       return;
     }
 
-    const { data: link } = await supabase
+    const { data: link, error: linkLookupError } = await supabase
       .from("passport_institution_links")
       .select("id")
       .eq("passport_id", passport.id)
       .eq("institution_id", institutionId)
       .eq("approved_by_parent", true)
       .maybeSingle();
+
+    if (linkLookupError) {
+      console.error("Failed to look up institution link:", linkLookupError);
+    }
 
     if (!link) {
       setIsSaving(false);
@@ -87,12 +91,16 @@ export function AddChildSheet({
       return;
     }
 
-    const { data: existingAccess } = await supabase
+    const { data: existingAccess, error: accessLookupError } = await supabase
       .from("passport_access")
       .select("id, is_active")
       .eq("passport_id", passport.id)
       .eq("teacher_id", teacherId)
       .maybeSingle();
+
+    if (accessLookupError) {
+      console.error("Failed to look up existing passport access:", accessLookupError);
+    }
 
     if (existingAccess?.is_active) {
       setIsSaving(false);

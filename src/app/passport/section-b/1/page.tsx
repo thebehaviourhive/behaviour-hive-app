@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { BrandMark } from "@/components/ui/BrandMark";
 import { Button } from "@/components/ui/Button";
 import { TextField } from "@/components/ui/TextField";
@@ -34,12 +34,17 @@ export default function PassportSectionBPage1() {
   const [okaySignalsOther, setOkaySignalsOther] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [hasHydrated, setHasHydrated] = useState(false);
 
-  useEffect(() => {
-    if (!isReady) return;
+  // Seeds local editable state from the loaded record exactly once, the
+  // render after isReady first becomes true -- calling setState directly
+  // in the render body (React's documented pattern for this) rather than
+  // in an effect avoids the extra effect-triggered re-render.
+  if (isReady && !hasHydrated) {
+    setHasHydrated(true);
     setOkaySignals(record.okay_signals ?? []);
     setOkaySignalsOther(record.okay_signals_other ?? "");
-  }, [isReady, record]);
+  }
 
   function toggleSignal(value: string) {
     setOkaySignals((prev) =>

@@ -5,12 +5,14 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { BottomNav } from "@/components/ui/BottomNav";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
+import { InlineErrorState } from "@/components/ui/InlineErrorState";
 import { ShareBottomSheet } from "@/components/parent/ShareBottomSheet";
 import { ABCLogger } from "@/components/abc-logger/ABCLogger";
 import { ABCTimeline } from "@/components/abc-logger/ABCTimeline";
 import { createClient } from "@/lib/supabase/client";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { getPassportResumeHref } from "@/lib/getPassportResumeHref";
+import { logActivity } from "@/lib/logActivity";
 import {
   CLINICIAN_SPECIALTY_LABEL,
   type ClinicianSpecialty,
@@ -104,15 +106,24 @@ export default function PassportDashboardPage() {
   const [clinicianRevokeError, setClinicianRevokeError] = useState<string | null>(null);
   const [isAbcLoggerOpen, setIsAbcLoggerOpen] = useState(false);
   const [timelineRefreshKey, setTimelineRefreshKey] = useState(0);
+  const [institutionsError, setInstitutionsError] = useState<string | null>(null);
+  const [cliniciansError, setCliniciansError] = useState<string | null>(null);
 
   async function loadApprovedInstitutions(passportId: string) {
+    setInstitutionsError(null);
     const supabase = createClient();
-    const { data: linkRows } = await supabase
+    const { data: linkRows, error } = await supabase
       .from("passport_institution_links")
       .select("institution_id, parent_approved_at, institutions(name)")
       .eq("passport_id", passportId)
       .eq("approved_by_parent", true)
       .order("parent_approved_at", { ascending: false });
+
+    if (error) {
+      console.error("Failed to load approved institutions:", error);
+      setInstitutionsError("Couldn't load connected schools.");
+      return;
+    }
 
     setApprovedInstitutions(
       (linkRows ?? []).map((row) => {
@@ -127,10 +138,17 @@ export default function PassportDashboardPage() {
   }
 
   async function loadConnectedClinicians(passportId: string) {
+    setCliniciansError(null);
     const supabase = createClient();
-    const { data } = await supabase.rpc("get_passport_clinicians", {
+    const { data, error } = await supabase.rpc("get_passport_clinicians", {
       p_passport_id: passportId,
     });
+
+    if (error) {
+      console.error("Failed to load connected clinicians:", error);
+      setCliniciansError("Couldn't load your clinical team.");
+      return;
+    }
 
     setConnectedClinicians(
       (data ?? []).map(
@@ -283,6 +301,10 @@ export default function PassportDashboardPage() {
   // existing "+ Log Incident" button below.
   useEffect(() => {
     if (!summary || searchParams.get("logIncident") !== "1") return;
+    // Reacting to an external system (the URL query param) and performing
+    // a navigation side effect together -- a genuine effect, not state
+    // that could be derived during render.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setIsAbcLoggerOpen(true);
     router.replace("/passport/dashboard");
   }, [summary, searchParams, router]);
@@ -310,6 +332,13 @@ export default function PassportDashboardPage() {
     return null;
   }
 
+  // Revokes at the institution level: updates every passport_access row for
+  // this institution, not just one teacher's. Teacher trust is
+  // institution-scoped -- a parent approves a school, not an individual
+  // teacher -- so revoking removes the whole school's access in one action.
+  // This is intentionally asymmetric with handleRevokeClinician below,
+  // where trust is scoped to one named individual instead. No code change
+  // needed here; documenting the asymmetry as designed.
   async function handleRevoke(institutionId: string, institutionName: string) {
     if (!summary) return;
 
@@ -317,22 +346,44 @@ export default function PassportDashboardPage() {
     setRevokeConfirmation(null);
 
     const supabase = createClient();
-    const [{ error: linkError }, { error: accessError }] = await Promise.all([
+    const [
+      { data: linkRows, error: linkError },
+      { data: accessRows, error: accessError },
+    ] = await Promise.all([
       supabase
         .from("passport_institution_links")
         .update({ approved_by_parent: false })
         .eq("passport_id", summary.passportId)
-        .eq("institution_id", institutionId),
+        .eq("institution_id", institutionId)
+        .select("id"),
       supabase
         .from("passport_access")
         .update({ is_active: false })
         .eq("passport_id", summary.passportId)
-        .eq("institution_id", institutionId),
+        .eq("institution_id", institutionId)
+        .select("id"),
     ]);
 
     if (linkError || accessError) {
       setRevokeError((linkError ?? accessError)?.message ?? "Something went wrong. Please try again.");
       return;
+    }
+
+    // A matching row in neither table means there was nothing left to
+    // revoke (already revoked, or the link never existed) — a parent must
+    // never see a "removed" confirmation when nothing actually changed.
+    if (!linkRows?.length && !accessRows?.length) {
+      setRevokeError("Nothing was removed — this access may already have been revoked.");
+      return;
+    }
+
+    if (user) {
+      logActivity({
+        passportId: summary.passportId,
+        actorId: user.id,
+        eventType: "access_revoked",
+        eventDescription: "Teacher access removed",
+      });
     }
 
     setRevokeConfirmation(
@@ -341,22 +392,48 @@ export default function PassportDashboardPage() {
     await loadApprovedInstitutions(summary.passportId);
   }
 
-  async function handleRevokeClinician(clinicianId: string, clinicianName: string) {
+  // Revokes at the individual level: only this clinician's own
+  // clinician_access row is touched. Clinicians are connected one at a
+  // time by their personal code (no institution grouping), so trust is
+  // scoped to the named individual -- the intentional counterpart to
+  // handleRevoke's institution-wide scope above.
+  async function handleRevokeClinician(
+    clinicianId: string,
+    clinicianName: string,
+    specialty: string
+  ) {
     if (!summary) return;
 
     setClinicianRevokeError(null);
     setClinicianRevokeConfirmation(null);
 
     const supabase = createClient();
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from("clinician_access")
       .update({ is_active: false })
       .eq("passport_id", summary.passportId)
-      .eq("clinician_id", clinicianId);
+      .eq("clinician_id", clinicianId)
+      .select("id");
 
     if (error) {
       setClinicianRevokeError(error.message);
       return;
+    }
+
+    if (!data?.length) {
+      setClinicianRevokeError("Nothing was removed — this access may already have been revoked.");
+      return;
+    }
+
+    if (user) {
+      const specialtyLabel =
+        CLINICIAN_SPECIALTY_LABEL[specialty as ClinicianSpecialty] ?? specialty;
+      logActivity({
+        passportId: summary.passportId,
+        actorId: user.id,
+        eventType: "access_revoked",
+        eventDescription: `${specialtyLabel} access removed`,
+      });
     }
 
     setClinicianRevokeConfirmation(
@@ -636,7 +713,12 @@ export default function PassportDashboardPage() {
               Manage Access
             </h2>
 
-            {approvedInstitutions.length === 0 ? (
+            {institutionsError ? (
+              <InlineErrorState
+                message={institutionsError}
+                onRetry={() => loadApprovedInstitutions(summary.passportId)}
+              />
+            ) : approvedInstitutions.length === 0 ? (
               <p className="text-center text-sm text-brand-neutral-black/60">
                 No schools approved yet. Tap the share button above to approve
                 your child&apos;s school.
@@ -684,7 +766,12 @@ export default function PassportDashboardPage() {
               Clinical Team
             </h2>
 
-            {connectedClinicians.length === 0 ? (
+            {cliniciansError ? (
+              <InlineErrorState
+                message={cliniciansError}
+                onRetry={() => loadConnectedClinicians(summary.passportId)}
+              />
+            ) : connectedClinicians.length === 0 ? (
               <p className="text-center text-sm text-brand-neutral-black/60">
                 No clinicians connected yet. Tap the share button above to
                 connect a clinician using their code.
@@ -708,7 +795,11 @@ export default function PassportDashboardPage() {
                     <button
                       type="button"
                       onClick={() =>
-                        handleRevokeClinician(clinician.clinicianId, clinician.fullName)
+                        handleRevokeClinician(
+                          clinician.clinicianId,
+                          clinician.fullName,
+                          clinician.specialty
+                        )
                       }
                       className="text-sm font-bold text-brand-golden-brown"
                     >

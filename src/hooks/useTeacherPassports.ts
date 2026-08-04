@@ -2,12 +2,13 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { getChildFirstName } from "@/lib/childDisplayName";
+import { getChildDisplayName, getChildFirstName } from "@/lib/childDisplayName";
 
 export interface TeacherPassport {
   passportId: string;
   childName: string;
   firstName: string;
+  displayName: string;
   diagnoses: string[] | null;
   diagnosisOther: string | null;
 }
@@ -149,6 +150,7 @@ export function useTeacherPassports(userId: string | null): UseTeacherPassportsR
           passportId: row.id,
           childName: row.child_name || "This child",
           firstName: getChildFirstName(row.child_name),
+          displayName: getChildDisplayName(row.child_name),
           diagnoses: row.diagnoses,
           diagnosisOther: row.diagnosis_other,
         }))

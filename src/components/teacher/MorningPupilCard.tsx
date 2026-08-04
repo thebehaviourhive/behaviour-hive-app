@@ -32,7 +32,7 @@ export function MorningPupilCard({
         BORDER_CLASS[pupil.rag]
       } ${isTappable ? "active:bg-black/[0.02]" : "cursor-default"}`}
     >
-      <p className="font-heading text-lg font-bold text-brand-prussian-blue">{pupil.firstName}</p>
+      <p className="font-heading text-lg font-bold text-brand-prussian-blue">{pupil.displayName}</p>
       <p className="font-sans text-xs text-brand-neutral-black/70">{STATE_LABEL[pupil.rag]}</p>
     </button>
   );

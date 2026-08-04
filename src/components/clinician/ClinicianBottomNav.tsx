@@ -3,7 +3,7 @@ import Link from "next/link";
 type ClinicianNavTab = "dashboard" | "passports" | "more";
 
 const TABS: { key: ClinicianNavTab; icon: string; label: string; href: string }[] = [
-  { key: "dashboard", icon: "🗂", label: "Dashboard", href: "/clinician/dashboard" },
+  { key: "dashboard", icon: "🏠", label: "Dashboard", href: "/clinician/dashboard" },
   { key: "passports", icon: "🧒", label: "Passports", href: "/clinician/passports" },
   { key: "more", icon: "⋯", label: "More", href: "/more" },
 ];

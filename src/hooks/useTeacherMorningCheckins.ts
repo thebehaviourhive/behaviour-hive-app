@@ -11,6 +11,7 @@ type RegulationState = "settled" | "unsettled" | "dysregulated" | null;
 export interface MorningPupilStatus {
   passportId: string;
   firstName: string;
+  displayName: string;
   rag: RagStatus;
   sleepQuality: SleepQuality;
   regulationState: RegulationState;
@@ -52,6 +53,11 @@ export function useTeacherMorningCheckins(userId: string | null): UseTeacherMorn
     if (isLoadingPassports) return;
 
     if (passports.length === 0) {
+      // Resets pupils when the upstream passport list shrinks to zero
+      // (e.g. a teacher's last remaining access is revoked while the
+      // dashboard is open) -- a genuine reset-on-change, not state
+      // derivable from a single render's inputs alone.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setPupils([]);
       setIsLoadingCheckins(false);
       return;
@@ -96,6 +102,7 @@ export function useTeacherMorningCheckins(userId: string | null): UseTeacherMorn
         return {
           passportId: passport.passportId,
           firstName: passport.firstName,
+          displayName: passport.displayName,
           rag: getRagStatus(
             checkin
               ? {

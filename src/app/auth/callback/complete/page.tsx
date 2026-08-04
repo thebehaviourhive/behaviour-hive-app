@@ -32,6 +32,7 @@ export default function AuthCallbackCompletePage() {
 
       const accessToken = params.get("access_token");
       const refreshToken = params.get("refresh_token");
+      const type = params.get("type");
 
       if (!accessToken || !refreshToken) {
         redirectToLoginWithError(
@@ -52,6 +53,14 @@ export default function AuthCallbackCompletePage() {
           router,
           error?.message ?? "Could not establish a session."
         );
+        return;
+      }
+
+      // Same distinction as the server-side callback route: a recovery
+      // link must land on the "set a new password" screen, not the
+      // dashboard.
+      if (type === "recovery") {
+        router.replace("/reset-password");
         return;
       }
 

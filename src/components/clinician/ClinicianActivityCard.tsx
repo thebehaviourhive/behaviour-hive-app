@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { ActivityRow, ActivityRowSkeleton } from "@/components/parent/ActivityRow";
+import { InlineErrorState } from "@/components/ui/InlineErrorState";
 import type { ActivityEventType } from "@/lib/activityEvents";
 
 interface ClinicianActivityEntry {
@@ -17,27 +18,34 @@ interface ClinicianActivityEntry {
 export function ClinicianActivityCard() {
   const [entries, setEntries] = useState<ClinicianActivityEntry[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    let isMounted = true;
+  const load = useCallback(async () => {
+    setError(null);
+    const supabase = createClient();
+    const { data, error: fetchError } = await supabase.rpc("get_clinician_activity_feed", {
+      p_limit: 3,
+      p_offset: 0,
+    });
 
-    async function load() {
-      const supabase = createClient();
-      const { data } = await supabase.rpc("get_clinician_activity_feed", {
-        p_limit: 3,
-        p_offset: 0,
-      });
-
-      if (!isMounted) return;
-      setEntries((data ?? []) as ClinicianActivityEntry[]);
+    if (fetchError) {
+      console.error("Failed to load clinician activity feed:", fetchError);
+      setError("Couldn't load recent activity.");
       setIsLoading(false);
+      return;
     }
 
-    load();
-    return () => {
-      isMounted = false;
-    };
+    setEntries((data ?? []) as ClinicianActivityEntry[]);
+    setIsLoading(false);
   }, []);
+
+  // Fetches on mount and whenever `load`'s identity changes -- a genuine
+  // effect for syncing with the external data source, not a synchronous
+  // state derivation.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    load();
+  }, [load]);
 
   return (
     <Link
@@ -54,6 +62,16 @@ export function ClinicianActivityCard() {
           <ActivityRowSkeleton />
           <ActivityRowSkeleton />
         </>
+      ) : error ? (
+        <InlineErrorState
+          message={error}
+          onRetry={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            setIsLoading(true);
+            load();
+          }}
+        />
       ) : entries.length === 0 ? (
         <div className="rounded-xl border-2 border-dashed border-brand-pastel-blue bg-brand-off-white/30 p-4 text-center">
           <p className="font-sans text-sm text-brand-neutral-black/70">

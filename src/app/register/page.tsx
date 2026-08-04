@@ -6,6 +6,7 @@ import { BrandMark } from "@/components/ui/BrandMark";
 import { Button } from "@/components/ui/Button";
 import { TextField } from "@/components/ui/TextField";
 import { createClient } from "@/lib/supabase/client";
+import { getAuthErrorMessage } from "@/lib/authErrorMessage";
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -32,7 +33,12 @@ export default function RegisterPage() {
     setIsSubmitting(false);
 
     if (signUpError) {
-      setError(signUpError.message);
+      setError(
+        getAuthErrorMessage(
+          signUpError,
+          "Something went wrong creating your account — please try again."
+        )
+      );
       return;
     }
 

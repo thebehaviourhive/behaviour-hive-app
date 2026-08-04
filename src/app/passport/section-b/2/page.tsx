@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { BrandMark } from "@/components/ui/BrandMark";
 import { Button } from "@/components/ui/Button";
 import { TextField } from "@/components/ui/TextField";
@@ -33,12 +33,13 @@ export default function PassportSectionBPage2() {
   const [hardSignalsOther, setHardSignalsOther] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [hasHydrated, setHasHydrated] = useState(false);
 
-  useEffect(() => {
-    if (!isReady) return;
+  if (isReady && !hasHydrated) {
+    setHasHydrated(true);
     setHardSignals(record.hard_signals ?? []);
     setHardSignalsOther(record.hard_signals_other ?? "");
-  }, [isReady, record]);
+  }
 
   function toggleSignal(value: string) {
     setHardSignals((prev) =>

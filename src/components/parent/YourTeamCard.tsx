@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { PeopleIcon } from "@/components/ui/icons";
+import { InlineErrorState } from "@/components/ui/InlineErrorState";
 
 interface TeamMember {
   teacherId: string;
@@ -41,41 +42,44 @@ function sortTeam(members: TeamMember[]): TeamMember[] {
 
 export function YourTeamCard({ passportId }: { passportId: string | null }) {
   const [members, setMembers] = useState<TeamMember[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isFetching, setIsFetching] = useState(true);
   const [isExpanded, setIsExpanded] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const isLoading = isFetching && passportId !== null;
 
-  useEffect(() => {
-    if (!passportId) {
-      setIsLoading(false);
+  const load = useCallback(async () => {
+    if (!passportId) return;
+    setError(null);
+    const supabase = createClient();
+    const { data, error: fetchError } = await supabase.rpc("get_passport_team", {
+      p_passport_id: passportId,
+    });
+
+    if (fetchError) {
+      console.error("Failed to load your team:", fetchError);
+      setError("Couldn't load your team.");
+      setIsFetching(false);
       return;
     }
 
-    let isMounted = true;
-
-    async function load() {
-      const supabase = createClient();
-      const { data } = await supabase.rpc("get_passport_team", {
-        p_passport_id: passportId,
-      });
-
-      if (!isMounted) return;
-
-      const rows: TeamMember[] = (data ?? []).map(
-        (row: { teacher_id: string; full_name: string | null; role: string }) => ({
-          teacherId: row.teacher_id,
-          fullName: row.full_name || "A team member",
-          role: row.role,
-        })
-      );
-      setMembers(sortTeam(rows));
-      setIsLoading(false);
-    }
-
-    load();
-    return () => {
-      isMounted = false;
-    };
+    const rows: TeamMember[] = (data ?? []).map(
+      (row: { teacher_id: string; full_name: string | null; role: string }) => ({
+        teacherId: row.teacher_id,
+        fullName: row.full_name || "A team member",
+        role: row.role,
+      })
+    );
+    setMembers(sortTeam(rows));
+    setIsFetching(false);
   }, [passportId]);
+
+  // Fetches on mount and whenever `load`'s identity changes -- a genuine
+  // effect for syncing with the external data source, not a synchronous
+  // state derivation.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    load();
+  }, [load]);
 
   const visibleMembers = isExpanded ? members : members.slice(0, 3);
   const remaining = members.length - 3;
@@ -91,6 +95,14 @@ export function YourTeamCard({ passportId }: { passportId: string | null }) {
           <TeamRowSkeleton />
           <TeamRowSkeleton />
         </>
+      ) : error ? (
+        <InlineErrorState
+          message={error}
+          onRetry={() => {
+            setIsFetching(true);
+            load();
+          }}
+        />
       ) : members.length === 0 ? (
         <div className="flex flex-col items-center gap-2 rounded-xl bg-brand-safe-ivory/30 p-4 text-center">
           <PeopleIcon className="h-8 w-8 text-brand-prussian-blue/60" />

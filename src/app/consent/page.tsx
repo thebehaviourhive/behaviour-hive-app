@@ -151,7 +151,7 @@ export default function ConsentPage() {
           </Button>
 
           <p className="mt-4 text-center text-xs text-black/50">
-            <a href="#" className="font-semibold text-brand-prussian-blue">
+            <a href="/privacy" className="font-semibold text-brand-prussian-blue">
               Read our privacy policy
             </a>
           </p>

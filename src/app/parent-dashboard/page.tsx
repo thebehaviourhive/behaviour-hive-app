@@ -60,7 +60,8 @@ function formatTime(isoString: string): string {
 
 export default function ParentDashboardPage() {
   const { user, isReady } = useRequireRole("parent");
-  const [firstName, setFirstName] = useState("there");
+  const parentFullName = user?.user_metadata?.full_name as string | undefined;
+  const firstName = parentFullName ? parentFullName.split(" ")[0] : "there";
   const [childName, setChildName] = useState("your child");
   const [passportId, setPassportId] = useState<string | null>(null);
   const [passportStatus, setPassportStatus] = useState<PassportStatus>("not_started");
@@ -74,6 +75,10 @@ export default function ParentDashboardPage() {
 
   useEffect(() => {
     if (!user) return;
+    // Genuine external-system read (localStorage isn't available during
+    // SSR, so this can't be derived during render) -- the one case in
+    // this sweep where an effect is the correct tool, not a workaround.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setIsPassportCardDismissed(
       window.localStorage.getItem(getDismissKey(user.id)) === "true"
     );
@@ -81,11 +86,6 @@ export default function ParentDashboardPage() {
 
   useEffect(() => {
     if (!user) return;
-
-    const fullName = user.user_metadata?.full_name as string | undefined;
-    if (fullName) {
-      setFirstName(fullName.split(" ")[0]);
-    }
 
     let isMounted = true;
 
@@ -158,9 +158,14 @@ export default function ParentDashboardPage() {
         if (!isMounted) return;
 
         if (todaysUpdate) {
-          const { data: teacherName } = await supabase.rpc("get_teacher_name", {
-            p_teacher_id: todaysUpdate.teacher_id,
-          });
+          const { data: teacherName, error: teacherNameError } = await supabase.rpc(
+            "get_teacher_name",
+            { p_teacher_id: todaysUpdate.teacher_id }
+          );
+
+          if (teacherNameError) {
+            console.error("Failed to load teacher name:", teacherNameError);
+          }
 
           if (!isMounted) return;
 

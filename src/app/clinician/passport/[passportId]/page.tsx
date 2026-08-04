@@ -4,7 +4,6 @@ import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useRequireRole } from "@/hooks/useRequireRole";
-import { getChildFirstName } from "@/lib/childDisplayName";
 import { ABCLogger } from "@/components/abc-logger/ABCLogger";
 import { ABCTimeline } from "@/components/abc-logger/ABCTimeline";
 
@@ -19,7 +18,10 @@ const TABS: { key: TabKey; label: string }[] = [
 ];
 
 interface ClinicalProfile {
-  childFirstName: string;
+  // Clinicians see the child's full name, unlike the redacted first-name
+  // view teachers get -- clinical records require certainty of identity.
+  // Deliberate product decision, pending clinical sign-off.
+  childFullName: string;
   diagnoses: string[];
   diagnosisOther: string | null;
   communicationMethods: string[];
@@ -97,7 +99,7 @@ export default function ClinicianPassportPage() {
       }
 
       setProfile({
-        childFirstName: getChildFirstName(passport.child_name),
+        childFullName: passport.child_name,
         diagnoses: Array.isArray(passport.diagnoses) ? passport.diagnoses : [],
         diagnosisOther: passport.diagnosis_other,
         communicationMethods: Array.isArray(sectionC?.communication_methods)
@@ -178,7 +180,7 @@ export default function ClinicianPassportPage() {
           ‹
         </button>
         <h1 className="font-heading text-2xl font-semibold text-brand-neutral-black">
-          {profile.childFirstName}&apos;s Clinical File
+          {profile.childFullName}&apos;s Clinical File
         </h1>
       </header>
 
@@ -315,7 +317,7 @@ export default function ClinicianPassportPage() {
       {isAbcLoggerOpen && user && (
         <ABCLogger
           passportId={passportId}
-          childName={profile.childFirstName}
+          childName={profile.childFullName}
           role="clinician"
           onComplete={() => {
             setIsAbcLoggerOpen(false);

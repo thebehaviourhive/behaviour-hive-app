@@ -26,7 +26,6 @@ export default function TeacherDashboardPage() {
   const router = useRouter();
   const { user, isReady } = useRequireRole("class_teacher");
 
-  const [firstName, setFirstName] = useState("there");
   const [isAddChildOpen, setIsAddChildOpen] = useState(false);
   const [selectedPupil, setSelectedPupil] = useState<MorningPupilStatus | null>(null);
 
@@ -42,11 +41,8 @@ export default function TeacherDashboardPage() {
     user?.id ?? null
   );
 
-  useEffect(() => {
-    if (!user) return;
-    const fullName = user.user_metadata?.full_name as string | undefined;
-    if (fullName) setFirstName(fullName.split(" ")[0]);
-  }, [user]);
+  const teacherFullName = user?.user_metadata?.full_name as string | undefined;
+  const firstName = teacherFullName ? teacherFullName.split(" ")[0] : "there";
 
   useEffect(() => {
     if (!isReady || isLoadingPassports) return;

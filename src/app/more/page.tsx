@@ -21,6 +21,7 @@ export default function MorePage() {
   const [clinicianCode, setClinicianCode] = useState<string | null>(null);
   const [reviewCadenceDays, setReviewCadenceDays] = useState<number | null>(null);
   const [isSavingCadence, setIsSavingCadence] = useState(false);
+  const [cadenceError, setCadenceError] = useState<string | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -67,6 +68,7 @@ export default function MorePage() {
   async function handleCadenceChange(days: number) {
     if (!userId) return;
     setIsSavingCadence(true);
+    setCadenceError(null);
     const supabase = createClient();
     const { error } = await supabase
       .from("clinicians")
@@ -74,9 +76,15 @@ export default function MorePage() {
       .eq("user_id", userId);
 
     setIsSavingCadence(false);
-    if (!error) {
-      setReviewCadenceDays(days);
+    if (error) {
+      // The control was never optimistically updated, so it's already
+      // showing the pre-save value — this just makes the failure visible
+      // instead of a silent no-op the clinician has no way to notice.
+      setCadenceError("Couldn't save your review cadence. Please try again.");
+      return;
     }
+
+    setReviewCadenceDays(days);
   }
 
   async function handleLogout() {
@@ -138,6 +146,11 @@ export default function MorePage() {
                 </button>
               ))}
             </div>
+            {cadenceError && (
+              <p role="alert" className="mt-2 text-sm font-medium text-red-600">
+                {cadenceError}
+              </p>
+            )}
           </section>
         )}
 

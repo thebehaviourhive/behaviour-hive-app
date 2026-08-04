@@ -22,8 +22,16 @@ interface ABCLoggerProps {
   onDismiss: () => void;
 }
 
+// Must derive from local date components, not toISOString() (always UTC) --
+// between local midnight and 1am during BST the UTC date is still
+// "yesterday", which previously paired a correct local incident TIME
+// (nowTime(), already local) with the wrong incident DATE.
 function nowDate(): string {
-  return new Date().toISOString().slice(0, 10);
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 function nowTime(): string {
@@ -219,6 +227,16 @@ export function ABCLogger({
         return;
       }
 
+      // DO NOT chain .select() onto this insert. `authenticated` only has a
+      // column-level SELECT grant on abc_logs that excludes clinical_notes
+      // (migration 0021, replacing an earlier table-level grant that a
+      // column REVOKE couldn't override). Adding .select() makes PostgREST
+      // execute the insert with `Prefer: return=representation`, which
+      // needs SELECT on every returned column -- a bare `RETURNING *` would
+      // hit clinical_notes and fail with a confusing permission error, even
+      // though this insert never touches that column. Reads go through
+      // get_abc_logs() (SECURITY DEFINER) instead, never this table
+      // directly.
       const { error } = await supabase.from("abc_logs").insert({
         passport_id: passportId,
         logged_by: user.id,
@@ -277,11 +295,14 @@ export function ABCLogger({
 
       let roleLabel: string = ABC_ROLE_DISPLAY_LABEL[role];
       if (role === "clinician") {
-        const { data: clinicianRow } = await supabase
+        const { data: clinicianRow, error: specialtyError } = await supabase
           .from("clinicians")
           .select("specialty")
           .eq("user_id", user.id)
           .maybeSingle();
+        if (specialtyError) {
+          console.error("Failed to load clinician specialty for activity log:", specialtyError);
+        }
         if (clinicianRow?.specialty) {
           roleLabel =
             CLINICIAN_SPECIALTY_LABEL[clinicianRow.specialty as ClinicianSpecialty] ?? roleLabel;

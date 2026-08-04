@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/Button";
 import { TextField } from "@/components/ui/TextField";
 import { createClient } from "@/lib/supabase/client";
 import { getPostAuthRedirect } from "@/lib/roleRedirect";
+import { getAuthErrorMessage } from "@/lib/authErrorMessage";
 
 export function LoginContent() {
   const router = useRouter();
@@ -33,7 +34,9 @@ export function LoginContent() {
     setIsSubmitting(false);
 
     if (signInError) {
-      setError(signInError.message);
+      setError(
+        getAuthErrorMessage(signInError, "Something went wrong signing in — please try again.")
+      );
       return;
     }
 
@@ -86,7 +89,7 @@ export function LoginContent() {
                 onChange={(e) => setPassword(e.target.value)}
               />
               <a
-                href="#"
+                href="/forgot-password"
                 className="self-end text-xs font-semibold text-brand-prussian-blue"
               >
                 Forgot password?

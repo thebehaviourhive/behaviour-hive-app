@@ -3,7 +3,7 @@ import Link from "next/link";
 type TeacherNavTab = "dashboard" | "students" | "more";
 
 const TABS: { key: TeacherNavTab; icon: string; label: string; href?: string }[] = [
-  { key: "dashboard", icon: "🐝", label: "Dashboard", href: "/teacher/dashboard" },
+  { key: "dashboard", icon: "🏠", label: "Dashboard", href: "/teacher/dashboard" },
   { key: "students", icon: "🧒", label: "Students", href: "/teacher/students" },
   { key: "more", icon: "⋯", label: "More", href: "/more" },
 ];

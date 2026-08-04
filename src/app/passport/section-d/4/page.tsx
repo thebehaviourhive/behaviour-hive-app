@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { BrandMark } from "@/components/ui/BrandMark";
 import { Button } from "@/components/ui/Button";
 import { TextField } from "@/components/ui/TextField";
@@ -35,13 +35,14 @@ export default function PassportSectionDPage4() {
   const [sensoryAvoidsOther, setSensoryAvoidsOther] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [hasHydrated, setHasHydrated] = useState(false);
 
-  useEffect(() => {
-    if (!isReady) return;
+  if (isReady && !hasHydrated) {
+    setHasHydrated(true);
     setSensorySeeks(record.sensory_seeks ?? []);
     setSensoryAvoids(record.sensory_avoids ?? []);
     setSensoryAvoidsOther(record.sensory_avoids_other ?? "");
-  }, [isReady, record]);
+  }
 
   function toggleSeeks(value: string) {
     setSensorySeeks((prev) =>

@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { BrandMark } from "@/components/ui/BrandMark";
 import { Button } from "@/components/ui/Button";
 import { Textarea } from "@/components/ui/Textarea";
@@ -45,15 +45,16 @@ export default function PassportSectionCPage() {
 
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [hasHydrated, setHasHydrated] = useState(false);
 
-  useEffect(() => {
-    if (!isReady) return;
+  if (isReady && !hasHydrated) {
+    setHasHydrated(true);
     setCommunicationMethods(record.communication_methods ?? []);
     setCommunicationMethodsOther(record.communication_methods_other ?? "");
     setShowsHappy(record.shows_happy ?? "");
     setShowsAnxious(record.shows_anxious ?? "");
     setPhrasesToAvoid(record.phrases_to_avoid ?? "");
-  }, [isReady, record]);
+  }
 
   function toggleMethod(value: string) {
     setCommunicationMethods((prev) =>

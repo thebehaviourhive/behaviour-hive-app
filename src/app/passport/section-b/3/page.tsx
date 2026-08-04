@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { BrandMark } from "@/components/ui/BrandMark";
 import { Button } from "@/components/ui/Button";
 import { TextField } from "@/components/ui/TextField";
@@ -37,12 +37,13 @@ export default function PassportSectionBPage3() {
   const [hardTriggersOther, setHardTriggersOther] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [hasHydrated, setHasHydrated] = useState(false);
 
-  useEffect(() => {
-    if (!isReady) return;
+  if (isReady && !hasHydrated) {
+    setHasHydrated(true);
     setHardTriggers(record.hard_triggers ?? []);
     setHardTriggersOther(record.hard_triggers_other ?? "");
-  }, [isReady, record]);
+  }
 
   function toggleTrigger(value: string) {
     setHardTriggers((prev) =>
