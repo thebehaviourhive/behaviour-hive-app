@@ -740,7 +740,7 @@ export default function PassportDashboardPage() {
                       }
                       className="text-sm font-bold text-brand-golden-brown"
                     >
-                      Revoke
+                      Revoke Access
                     </button>
                   </div>
                 ))}
