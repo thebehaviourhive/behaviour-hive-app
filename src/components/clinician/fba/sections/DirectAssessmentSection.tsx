@@ -3,12 +3,14 @@
 import { useEffect, useMemo } from "react";
 import { format } from "date-fns";
 import { useAbcLogs } from "@/hooks/useAbcLogs";
+import { useDailyPatterns } from "@/hooks/useDailyPatterns";
 import { countByFunction, tallyAntecedents, tallyConsequences } from "@/lib/fba/abcAnalysis";
 import { NarrativeField } from "../NarrativeField";
 import { InlineErrorState } from "@/components/ui/InlineErrorState";
 import { HorizontalBarChart } from "../charts/HorizontalBarChart";
 import { PieChart } from "../charts/PieChart";
 import { AbcIncidentCard } from "./direct/AbcIncidentCard";
+import { DailyPatternsPanel } from "./direct/DailyPatternsPanel";
 import type { AbcHypothesisedFunction } from "@/lib/fba/types";
 import type { FbaSectionBodyProps } from "./types";
 
@@ -21,6 +23,12 @@ export function DirectAssessmentSection({
   readOnly,
 }: FbaSectionBodyProps & { passportId: string }) {
   const { logs, isLoading, loadError } = useAbcLogs(passportId);
+  const {
+    checkins: dailyCheckins,
+    updates: dailyUpdates,
+    isLoading: isLoadingDailyPatterns,
+    loadError: dailyPatternsError,
+  } = useDailyPatterns(passportId);
 
   const hasRange = Boolean(content.abcRangeStart && content.abcRangeEnd);
   const filteredLogs = useMemo(() => {
@@ -170,18 +178,44 @@ export function DirectAssessmentSection({
           </>
         )}
 
-        <div className="mt-4">
-          <NarrativeField
-            label="ABC Interpretation"
-            value={content.abcInterpretation ?? ""}
-            onChange={(next) => onFieldChange({ ...content, abcInterpretation: next })}
-            onBlur={onFieldBlur}
-            readOnly={readOnly}
-            rows={6}
-            placeholder="Interpretation of the ABC data above…"
-          />
-        </div>
       </div>
+
+      <div>
+        <p className="mb-2 font-heading text-base font-bold text-brand-neutral-black">Daily Patterns</p>
+        {!hasRange ? (
+          <div className="rounded-2xl border-2 border-dashed border-brand-pastel-blue bg-white/60 p-6 text-center">
+            <p className="text-sm text-brand-neutral-black/70">
+              {readOnly
+                ? "No assessment date range was set."
+                : "Set the date range above to pull morning check-ins and end-of-day updates."}
+            </p>
+          </div>
+        ) : isLoadingDailyPatterns ? (
+          <div className="flex flex-col gap-2">
+            <div className="h-16 animate-pulse rounded-2xl bg-brand-off-white" />
+            <div className="h-16 animate-pulse rounded-2xl bg-brand-off-white" />
+          </div>
+        ) : dailyPatternsError ? (
+          <InlineErrorState message={dailyPatternsError} onRetry={() => window.location.reload()} />
+        ) : (
+          <DailyPatternsPanel
+            checkins={dailyCheckins}
+            updates={dailyUpdates}
+            rangeStart={content.abcRangeStart!}
+            rangeEnd={content.abcRangeEnd!}
+          />
+        )}
+      </div>
+
+      <NarrativeField
+        label="ABC Interpretation"
+        value={content.abcInterpretation ?? ""}
+        onChange={(next) => onFieldChange({ ...content, abcInterpretation: next })}
+        onBlur={onFieldBlur}
+        readOnly={readOnly}
+        rows={6}
+        placeholder="Interpretation of the ABC data above…"
+      />
     </div>
   );
 }

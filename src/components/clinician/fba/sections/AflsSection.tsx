@@ -25,6 +25,7 @@ export function AflsSection({
   onSummaryChange,
   onSummaryBlur,
   readOnly,
+  forceExpanded = false,
 }: {
   scoresData: AflsScoresData;
   summary: string;
@@ -32,6 +33,10 @@ export function AflsSection({
   onSummaryChange: (value: string) => void;
   onSummaryBlur: () => void;
   readOnly: boolean;
+  // The PDF/print view has no interactivity to expand a domain with --
+  // every domain must render open, or its items would simply be absent
+  // from the document.
+  forceExpanded?: boolean;
 }) {
   const [itemsByDomain, setItemsByDomain] = useState<Record<string, InstrumentItem[]> | null>(null);
   const [loadError, setLoadError] = useState(false);
@@ -99,7 +104,7 @@ export function AflsSection({
           const items = itemsByDomain[domain] ?? [];
           const scored = scoresData[domain]?.length ?? 0;
           const total = items.length || 8;
-          const isExpanded = expandedDomains.has(domain);
+          const isExpanded = forceExpanded || expandedDomains.has(domain);
 
           return (
             <div key={domain} className="rounded-2xl border border-black/5 bg-white shadow-sm">

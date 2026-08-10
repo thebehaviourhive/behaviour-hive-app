@@ -6,6 +6,14 @@ import { INSTRUMENT_LABELS, RECIPIENT_ROLE_LABELS, type FbaInstrumentRequest } f
 import { HorizontalBarChart } from "../../charts/HorizontalBarChart";
 import { NarrativeField } from "../../NarrativeField";
 
+// The parent reader (Part C) reuses this card but has no server-side way
+// to resolve a recipient's name (that join only exists inside the
+// clinician-only get_fba_instrument_requests RPC) -- and doesn't
+// necessarily need to show it, so the attribution fields are optional
+// and the line is skippable via showAttribution.
+type InstrumentResultRequest = Omit<FbaInstrumentRequest, "recipientName" | "recipientRole"> &
+  Partial<Pick<FbaInstrumentRequest, "recipientName" | "recipientRole">>;
+
 // Renders one completed instrument's results. QABF/MAS get a scored bar
 // chart + raw totals table; the Open-Ended Interview gets its answers
 // rendered as plain Q&A. Multiple completions of the same instrument
@@ -17,12 +25,14 @@ export function InstrumentResultCard({
   onInterpretationChange,
   onInterpretationBlur,
   readOnly,
+  showAttribution = true,
 }: {
-  request: FbaInstrumentRequest;
+  request: InstrumentResultRequest;
   interpretation: string;
   onInterpretationChange: (value: string) => void;
   onInterpretationBlur: () => void;
   readOnly: boolean;
+  showAttribution?: boolean;
 }) {
   const { items, isLoading, loadError } = useInstrumentItems(request.instrumentType);
 
@@ -31,9 +41,11 @@ export function InstrumentResultCard({
       <p className="font-heading text-base font-bold text-brand-neutral-black">
         {INSTRUMENT_LABELS[request.instrumentType]}
       </p>
-      <p className="mb-3 text-sm text-brand-neutral-black/60">
-        Completed by {request.recipientName} ({RECIPIENT_ROLE_LABELS[request.recipientRole]})
-      </p>
+      {showAttribution && request.recipientName && request.recipientRole && (
+        <p className="mb-3 text-sm text-brand-neutral-black/60">
+          Completed by {request.recipientName} ({RECIPIENT_ROLE_LABELS[request.recipientRole]})
+        </p>
+      )}
 
       {isLoading ? (
         <div className="h-24 animate-pulse rounded-2xl bg-brand-off-white" />
@@ -77,7 +89,7 @@ function ScoredResults({
   request,
 }: {
   items: NonNullable<ReturnType<typeof useInstrumentItems>["items"]>;
-  request: FbaInstrumentRequest;
+  request: InstrumentResultRequest;
 }) {
   const totals = scoreInstrumentByCategory(items, request.responsesData);
   const maxes = getCategoryMaxScores(items);

@@ -6,8 +6,11 @@ import { createClient } from "@/lib/supabase/client";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { ABCLogger } from "@/components/abc-logger/ABCLogger";
 import { ABCTimeline } from "@/components/abc-logger/ABCTimeline";
+import { usePassportClinicalContent } from "@/hooks/usePassportClinicalContent";
+import { ClinicalTeamSection } from "@/components/passport/clinical-team/ClinicalTeamSection";
+import { InlineErrorState } from "@/components/ui/InlineErrorState";
 
-type TabKey = "summary" | "behaviour" | "communication" | "supports" | "incidents";
+type TabKey = "summary" | "behaviour" | "communication" | "supports" | "incidents" | "clinicalTeam";
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: "summary", label: "Summary" },
@@ -15,6 +18,7 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: "communication", label: "Communication" },
   { key: "supports", label: "Supports" },
   { key: "incidents", label: "Incidents" },
+  { key: "clinicalTeam", label: "Clinical Team" },
 ];
 
 interface ClinicalProfile {
@@ -55,6 +59,12 @@ export default function ClinicianPassportPage() {
   const [activeTab, setActiveTab] = useState<TabKey>("summary");
   const [isAbcLoggerOpen, setIsAbcLoggerOpen] = useState(false);
   const [timelineRefreshKey, setTimelineRefreshKey] = useState(0);
+  const {
+    items: clinicalContentItems,
+    isLoading: isLoadingClinicalContent,
+    loadError: clinicalContentError,
+    reload: reloadClinicalContent,
+  } = usePassportClinicalContent(passportId);
 
   useEffect(() => {
     if (!isReady || !passportId) return;
@@ -299,6 +309,23 @@ export default function ClinicianPassportPage() {
             passportId={passportId}
             viewerRole="clinician"
           />
+        )}
+
+        {activeTab === "clinicalTeam" && (
+          <>
+            {isLoadingClinicalContent ? (
+              <div className="flex flex-col gap-2">
+                <div className="h-20 animate-pulse rounded-2xl bg-white" />
+                <div className="h-20 animate-pulse rounded-2xl bg-white" />
+              </div>
+            ) : clinicalContentError ? (
+              <InlineErrorState message={clinicalContentError} onRetry={reloadClinicalContent} />
+            ) : clinicalContentItems.length === 0 ? (
+              <EmptyCard text="Nothing from the clinical team yet." />
+            ) : (
+              <ClinicalTeamSection items={clinicalContentItems} viewerRole="clinician" />
+            )}
+          </>
         )}
       </main>
 

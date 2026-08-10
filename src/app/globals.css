@@ -48,3 +48,36 @@ body {
 .scrollbar-hide::-webkit-scrollbar {
   display: none;
 }
+
+/* FBA PDF export (Part F) -- the print page reuses the same on-screen
+   components and layout, then relies entirely on print media rules to
+   turn it into a paginated A4 document. `.no-print` hides interactive/
+   navigational chrome that has no place in an exported PDF. */
+@media print {
+  .no-print {
+    display: none !important;
+  }
+
+  html,
+  body {
+    background: #ffffff !important;
+  }
+
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+
+  .print-avoid-break {
+    break-inside: avoid;
+  }
+
+  .print-page-break-before {
+    break-before: page;
+  }
+}
+
+@page {
+  size: A4;
+  margin: 16mm 14mm;
+}

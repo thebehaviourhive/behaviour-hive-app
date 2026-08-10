@@ -9,6 +9,7 @@ import { InlineErrorState } from "@/components/ui/InlineErrorState";
 import { ShareBottomSheet } from "@/components/parent/ShareBottomSheet";
 import { ABCLogger } from "@/components/abc-logger/ABCLogger";
 import { ABCTimeline } from "@/components/abc-logger/ABCTimeline";
+import { ParentClinicalTeamCard } from "@/components/passport/clinical-team/ParentClinicalTeamCard";
 import { createClient } from "@/lib/supabase/client";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { getPassportResumeHref } from "@/lib/getPassportResumeHref";
@@ -705,6 +706,10 @@ export default function PassportDashboardPage() {
               </div>
             )}
           </section>
+        </ErrorBoundary>
+
+        <ErrorBoundary fallback={fallbackCard}>
+          <ParentClinicalTeamCard passportId={summary.passportId} />
         </ErrorBoundary>
 
         <ErrorBoundary fallback={fallbackCard}>

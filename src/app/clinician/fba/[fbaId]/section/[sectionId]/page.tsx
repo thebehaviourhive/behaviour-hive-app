@@ -241,7 +241,19 @@ export default function FbaSectionEditorPage() {
               readOnly={readOnly}
             />
           )}
-          {section.kind === "review" && <ReviewSection content={content} afls={afls} />}
+          {section.kind === "review" && (
+            <ReviewSection
+              fbaId={fbaId}
+              passportId={report.passportId}
+              content={content}
+              afls={afls}
+              readOnly={readOnly}
+              onFinalized={() => {
+                reload();
+                router.push(`/clinician/fba/${fbaId}`);
+              }}
+            />
+          )}
         </>
       )}
     </FbaSectionShell>
