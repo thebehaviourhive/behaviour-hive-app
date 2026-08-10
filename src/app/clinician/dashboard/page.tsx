@@ -29,6 +29,7 @@ interface Stats {
   activeCases: number;
   weeklyLogs: number;
   reviewsDue: number;
+  activeFbas: number;
 }
 
 function getGreeting(): string {
@@ -89,7 +90,12 @@ export default function ClinicianDashboardPage() {
   const [profileLoadError, setProfileLoadError] = useState<string | null>(null);
   const [isCheckingStatus, setIsCheckingStatus] = useState(false);
   const [checkStatusMessage, setCheckStatusMessage] = useState<string | null>(null);
-  const [stats, setStats] = useState<Stats>({ activeCases: 0, weeklyLogs: 0, reviewsDue: 0 });
+  const [stats, setStats] = useState<Stats>({
+    activeCases: 0,
+    weeklyLogs: 0,
+    reviewsDue: 0,
+    activeFbas: 0,
+  });
   const [isLoadingStats, setIsLoadingStats] = useState(true);
   const [statsError, setStatsError] = useState<string | null>(null);
 
@@ -158,6 +164,7 @@ export default function ClinicianDashboardPage() {
       { count: weeklyLogs, error: weeklyLogsError },
       { data: cadenceRow, error: cadenceError },
       { data: caseRows, error: caseRowsError },
+      { count: activeFbas, error: activeFbasError },
     ] = await Promise.all([
       supabase
         .from("clinician_access")
@@ -180,9 +187,14 @@ export default function ClinicianDashboardPage() {
         .select("last_review_date")
         .eq("clinician_id", user.id)
         .eq("is_active", true),
+      supabase
+        .from("fba_reports")
+        .select("id", { count: "exact", head: true })
+        .eq("clinician_id", user.id)
+        .in("status", ["draft", "in_progress"]),
     ]);
 
-    const firstError = activeCasesError ?? weeklyLogsError ?? cadenceError ?? caseRowsError;
+    const firstError = activeCasesError ?? weeklyLogsError ?? cadenceError ?? caseRowsError ?? activeFbasError;
     if (firstError) {
       console.error("Failed to load clinician stats:", firstError);
       setStatsError("Couldn't load your stats.");
@@ -199,6 +211,7 @@ export default function ClinicianDashboardPage() {
       activeCases: activeCases ?? 0,
       weeklyLogs: weeklyLogs ?? 0,
       reviewsDue,
+      activeFbas: activeFbas ?? 0,
     });
     setIsLoadingStats(false);
   }, [user, profile]);
@@ -271,6 +284,11 @@ export default function ClinicianDashboardPage() {
                 label="Reviews Due"
                 value={isLoadingStats ? "…" : stats.reviewsDue}
                 isWarning={!isLoadingStats && stats.reviewsDue > 0}
+              />
+              <StatCard
+                label="Active FBAs"
+                value={isLoadingStats ? "…" : stats.activeFbas}
+                href="/clinician/fba"
               />
             </div>
           )}
@@ -355,23 +373,35 @@ function StatCard({
   label,
   value,
   isWarning,
+  href,
 }: {
   label: string;
   value: number | string;
   isWarning?: boolean;
+  href?: string;
 }) {
-  return (
-    <div
-      className={`min-w-[140px] flex-shrink-0 rounded-2xl p-4 shadow-sm ${
-        isWarning
-          ? "border-l-4 border-brand-golden-brown bg-brand-safe-ivory/30"
-          : "border border-black/5 bg-white"
-      }`}
-    >
+  const className = `min-w-[140px] flex-shrink-0 rounded-2xl p-4 shadow-sm ${
+    isWarning
+      ? "border-l-4 border-brand-golden-brown bg-brand-safe-ivory/30"
+      : "border border-black/5 bg-white"
+  }`;
+
+  const content = (
+    <>
       <p className="font-heading text-2xl font-bold text-brand-prussian-blue">{value}</p>
       <p className="mt-1 font-accent text-xs font-bold uppercase tracking-wide text-brand-neutral-black/60">
         {label}
       </p>
-    </div>
+    </>
   );
+
+  if (href) {
+    return (
+      <Link href={href} className={className}>
+        {content}
+      </Link>
+    );
+  }
+
+  return <div className={className}>{content}</div>;
 }

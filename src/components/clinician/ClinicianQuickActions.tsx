@@ -1,6 +1,7 @@
 import Link from "next/link";
 import {
   ChatBubbleIcon,
+  ClinicalFileIcon,
   ClipboardIcon,
   LightbulbIcon,
   OpenBookIcon,
@@ -11,6 +12,7 @@ const ACTIONS = [
   { label: "Messages", href: "/clinician/messages", Icon: ChatBubbleIcon },
   { label: "View Passports", href: "/clinician/passports", Icon: OpenBookIcon },
   { label: "Add Log", href: "/clinician/log", Icon: ClipboardIcon },
+  { label: "FBAs", href: "/clinician/fba", Icon: ClinicalFileIcon },
 ];
 
 export function ClinicianQuickActions() {

@@ -40,3 +40,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# demo data credentials (Phase 1 of the user-guide screenshot pipeline)
+scripts/demo/.demo-credentials.json
+
+# fba-test rig credentials (throwaway accounts for FBA module verification)
+scripts/fba-test/.credentials.json

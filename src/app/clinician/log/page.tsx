@@ -58,6 +58,10 @@ export default function ClinicianAddLogPage() {
       setIsAbcLoggerOpen(true);
       return;
     }
+    if (logType === "fba") {
+      router.push("/clinician/fba");
+      return;
+    }
     setShowAdvancedComingSoon(true);
   }
 

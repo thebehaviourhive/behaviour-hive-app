@@ -20,7 +20,9 @@ export type ActivityEventType =
   | "team_linked"
   | "clinician_logged"
   | "strategy_logged"
-  | "access_revoked";
+  | "access_revoked"
+  | "fba_started"
+  | "fba_completed";
 
 export interface ActivityLogEntry {
   id: string;
@@ -42,6 +44,8 @@ export const ACTIVITY_EVENT_ICON: Record<
   clinician_logged: ClinicalFileIcon,
   strategy_logged: LightbulbIcon,
   access_revoked: LockIcon,
+  fba_started: ClinicalFileIcon,
+  fba_completed: ClinicalFileIcon,
 };
 
 export function formatActivityTimestamp(isoString: string): string {
