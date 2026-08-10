@@ -1,0 +1,117 @@
+"use client";
+
+import { useInstrumentItems } from "@/hooks/useInstrumentItems";
+import { getCategoryMaxScores, scoreInstrumentByCategory } from "@/lib/fba/instrumentScoring";
+import { INSTRUMENT_LABELS, RECIPIENT_ROLE_LABELS, type FbaInstrumentRequest } from "@/lib/fba/types";
+import { HorizontalBarChart } from "../../charts/HorizontalBarChart";
+import { NarrativeField } from "../../NarrativeField";
+
+// Renders one completed instrument's results. QABF/MAS get a scored bar
+// chart + raw totals table; the Open-Ended Interview gets its answers
+// rendered as plain Q&A. Multiple completions of the same instrument
+// (e.g. QABF from both parent and teacher) each get their own card,
+// labelled by respondent -- the caller renders one of these per request.
+export function InstrumentResultCard({
+  request,
+  interpretation,
+  onInterpretationChange,
+  onInterpretationBlur,
+  readOnly,
+}: {
+  request: FbaInstrumentRequest;
+  interpretation: string;
+  onInterpretationChange: (value: string) => void;
+  onInterpretationBlur: () => void;
+  readOnly: boolean;
+}) {
+  const { items, isLoading, loadError } = useInstrumentItems(request.instrumentType);
+
+  return (
+    <div className="rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
+      <p className="font-heading text-base font-bold text-brand-neutral-black">
+        {INSTRUMENT_LABELS[request.instrumentType]}
+      </p>
+      <p className="mb-3 text-sm text-brand-neutral-black/60">
+        Completed by {request.recipientName} ({RECIPIENT_ROLE_LABELS[request.recipientRole]})
+      </p>
+
+      {isLoading ? (
+        <div className="h-24 animate-pulse rounded-2xl bg-brand-off-white" />
+      ) : loadError || !items ? (
+        <p className="text-sm text-red-600">{loadError ?? "Couldn't load this instrument."}</p>
+      ) : request.instrumentType === "open_ended" ? (
+        <div className="flex flex-col gap-3">
+          {items.map((item) => (
+            <div key={item.id}>
+              <p className="text-sm font-semibold text-brand-neutral-black">{item.text}</p>
+              <p className="mt-1 text-sm text-brand-neutral-black/70">
+                {request.responsesData[item.id]?.trim() || (
+                  <span className="text-black/30">No answer given.</span>
+                )}
+              </p>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <>
+          <ScoredResults items={items} request={request} />
+          <div className="mt-4">
+            <NarrativeField
+              label="Interpretation"
+              value={interpretation}
+              onChange={onInterpretationChange}
+              onBlur={onInterpretationBlur}
+              readOnly={readOnly}
+              rows={4}
+              placeholder="Clinical interpretation of these results…"
+            />
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function ScoredResults({
+  items,
+  request,
+}: {
+  items: NonNullable<ReturnType<typeof useInstrumentItems>["items"]>;
+  request: FbaInstrumentRequest;
+}) {
+  const totals = scoreInstrumentByCategory(items, request.responsesData);
+  const maxes = getCategoryMaxScores(items);
+  const categories = Object.keys(maxes);
+
+  return (
+    <div>
+      <HorizontalBarChart
+        bars={categories.map((category) => ({
+          label: category,
+          value: totals[category] ?? 0,
+          max: maxes[category],
+        }))}
+      />
+      <div className="mt-4 overflow-hidden rounded-xl border border-black/5">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="bg-brand-off-white/60 text-left">
+              <th className="px-3 py-2 font-semibold text-brand-neutral-black/70">Category</th>
+              <th className="px-3 py-2 text-right font-semibold text-brand-neutral-black/70">Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            {categories.map((category) => (
+              <tr key={category} className="border-t border-black/5">
+                <td className="px-3 py-2 text-brand-neutral-black">{category}</td>
+                <td className="px-3 py-2 text-right font-semibold text-brand-neutral-black">
+                  {totals[category] ?? 0} / {maxes[category]}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}

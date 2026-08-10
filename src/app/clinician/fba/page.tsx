@@ -50,6 +50,7 @@ export default function ClinicianFbaListPage() {
 
   const [tab, setTab] = useState<"active" | "completed">("active");
   const [fbas, setFbas] = useState<ClinicianFbaRow[]>([]);
+  const [outstandingCounts, setOutstandingCounts] = useState<Record<string, number>>({});
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -73,7 +74,31 @@ export default function ClinicianFbaListPage() {
       return;
     }
 
-    setFbas((data ?? []) as ClinicianFbaRow[]);
+    const fbaRows = (data ?? []) as ClinicianFbaRow[];
+    setFbas(fbaRows);
+
+    // Cheap outstanding-questionnaire hint per card -- one extra query,
+    // no new RPC needed: the clinician's existing SELECT policy on
+    // fba_instrument_requests (via the fba_reports/clinician_access
+    // join) already covers this.
+    const activeIds = fbaRows.filter((fba) => fba.status !== "completed").map((fba) => fba.fba_id);
+    if (activeIds.length > 0) {
+      const { data: requestRows, error: requestError } = await supabase
+        .from("fba_instrument_requests")
+        .select("fba_id, status")
+        .in("fba_id", activeIds)
+        .neq("status", "completed");
+      if (!requestError) {
+        const counts: Record<string, number> = {};
+        for (const row of requestRows ?? []) {
+          counts[row.fba_id] = (counts[row.fba_id] ?? 0) + 1;
+        }
+        setOutstandingCounts(counts);
+      }
+    } else {
+      setOutstandingCounts({});
+    }
+
     setIsLoading(false);
   }, []);
 
@@ -235,6 +260,12 @@ export default function ClinicianFbaListPage() {
               <p className="mt-1.5 text-xs text-brand-neutral-black/50">
                 Last updated {format(new Date(fba.updated_at), "d MMM yyyy")}
               </p>
+              {(outstandingCounts[fba.fba_id] ?? 0) > 0 && (
+                <p className="mt-1 text-xs font-semibold text-brand-golden-brown">
+                  {outstandingCounts[fba.fba_id]} questionnaire
+                  {outstandingCounts[fba.fba_id] === 1 ? "" : "s"} outstanding
+                </p>
+              )}
             </Link>
           ))
         )}

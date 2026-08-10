@@ -163,6 +163,125 @@ async function main() {
     "passport_id,clinician_id"
   );
 
+  console.log("== ABC logs (for Stage 2 Section 8 verification) ==");
+  function daysAgo(n) {
+    const d = new Date();
+    d.setDate(d.getDate() - n);
+    return d.toISOString().slice(0, 10);
+  }
+  const { data: existingAbc } = await supabase
+    .from("abc_logs")
+    .select("id")
+    .eq("passport_id", passport.id)
+    .limit(1);
+  if (existingAbc?.length) {
+    console.log("  (already seeded, skipping)");
+  } else {
+    const abcRows = [
+      {
+        passport_id: passport.id,
+        logged_by: parent.id,
+        logged_by_role: "parent",
+        incident_date: daysAgo(8),
+        incident_time: "16:20",
+        intensity: 3,
+        antecedents: ["Too loud or busy"],
+        behaviours: ["Cried or screamed"],
+        consequences: ["Comforted them"],
+        general_notes: "Happened at a busy shopping centre.",
+      },
+      {
+        passport_id: passport.id,
+        logged_by: teacher.id,
+        logged_by_role: "class_teacher",
+        incident_date: daysAgo(7),
+        incident_time: "11:10",
+        intensity: 2,
+        antecedents: ["Transition to new activity"],
+        behaviours: ["Vocal outburst"],
+        consequences: ["Task removed or delayed"],
+        perceived_function: "escape",
+      },
+      {
+        passport_id: passport.id,
+        logged_by: teacher.id,
+        logged_by_role: "class_teacher",
+        incident_date: daysAgo(6),
+        incident_time: "09:45",
+        intensity: 4,
+        antecedents: ["Denied access to item or activity"],
+        behaviours: ["Physical aggression"],
+        consequences: ["Access to tangible provided"],
+        perceived_function: "tangible",
+      },
+      {
+        passport_id: passport.id,
+        logged_by: clinician.id,
+        logged_by_role: "clinician",
+        incident_date: daysAgo(5),
+        incident_time: "14:00",
+        intensity: 3,
+        antecedents: ["Sensory overload"],
+        behaviours: ["Vocal outburst"],
+        consequences: ["Planned ignoring"],
+        perceived_function: "sensory",
+        clinical_notes: "Consistent with sensory-seeking pattern noted previously.",
+      },
+      {
+        passport_id: passport.id,
+        logged_by: parent.id,
+        logged_by_role: "parent",
+        incident_date: daysAgo(4),
+        incident_time: "18:30",
+        intensity: 2,
+        antecedents: ["Told them no"],
+        behaviours: ["Threw or broke things"],
+        consequences: ["Ignored it"],
+        general_notes: "Wanted more screen time before bed.",
+      },
+      {
+        passport_id: passport.id,
+        logged_by: teacher.id,
+        logged_by_role: "class_teacher",
+        incident_date: daysAgo(3),
+        incident_time: "10:15",
+        intensity: 3,
+        antecedents: ["Task demand placed"],
+        behaviours: ["Elopement (leaving area)"],
+        consequences: ["1:1 attention given"],
+        perceived_function: "attention",
+      },
+      {
+        passport_id: passport.id,
+        logged_by: parent.id,
+        logged_by_role: "parent",
+        incident_date: daysAgo(2),
+        incident_time: "07:50",
+        intensity: 1,
+        antecedents: ["Change of plan"],
+        behaviours: ["Cried or screamed"],
+        consequences: ["Comforted them"],
+      },
+      {
+        passport_id: passport.id,
+        logged_by: clinician.id,
+        logged_by_role: "clinician",
+        incident_date: daysAgo(1),
+        incident_time: "13:20",
+        intensity: 4,
+        antecedents: ["Task demand placed", "Social conflict"],
+        behaviours: ["Physical aggression", "Vocal outburst"],
+        consequences: ["Task removed or delayed"],
+        perceived_function: "escape",
+      },
+    ];
+    for (const row of abcRows) {
+      const { error } = await supabase.from("abc_logs").insert(row);
+      if (error) throw new Error(`abc_logs insert: ${error.message}`);
+    }
+    console.log(`  seeded ${abcRows.length} ABC logs (days ago: 8..1)`);
+  }
+
   const credentials = {
     password: PASSWORD,
     institutionId: institution.id,

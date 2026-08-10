@@ -12,6 +12,7 @@ import { MorningPupilCard, MorningPupilCardSkeleton } from "@/components/teacher
 import { MorningCheckinDetailSheet } from "@/components/teacher/MorningCheckinDetailSheet";
 import { TeacherQuickActions } from "@/components/teacher/TeacherQuickActions";
 import { TeacherActivityCard } from "@/components/teacher/TeacherActivityCard";
+import { QuestionnairePromptCard } from "@/components/questionnaire/QuestionnairePromptCard";
 
 const GRID_CAP = 6;
 
@@ -102,6 +103,7 @@ export default function TeacherDashboardPage() {
           )}
 
           <TeacherQuickActions />
+          <QuestionnairePromptCard track="teacher" />
           <TeacherActivityCard />
         </>
       )}

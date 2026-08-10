@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/client";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { getPassportResumeHref } from "@/lib/getPassportResumeHref";
 import { RecentUpdatesCard } from "@/components/parent/RecentUpdatesCard";
+import { QuestionnairePromptCard } from "@/components/questionnaire/QuestionnairePromptCard";
 import { QuickActionButtons } from "@/components/parent/QuickActionButtons";
 import { YourTeamCard } from "@/components/parent/YourTeamCard";
 
@@ -305,6 +306,8 @@ export default function ParentDashboardPage() {
             </Link>
           </section>
         )}
+
+        <QuestionnairePromptCard track="parent" />
 
         <RecentUpdatesCard passportId={passportId} />
 

@@ -194,6 +194,8 @@ export default function FbaSectionEditorPage() {
           )}
           {section.kind === "indirectAssessment" && (
             <IndirectAssessmentSection
+              fbaId={fbaId}
+              passportId={report.passportId}
               content={content}
               onFieldChange={handleFieldChange}
               onFieldBlur={handleFieldBlur}
@@ -203,6 +205,7 @@ export default function FbaSectionEditorPage() {
           )}
           {section.kind === "directAssessment" && (
             <DirectAssessmentSection
+              passportId={report.passportId}
               content={content}
               onFieldChange={handleFieldChange}
               onFieldBlur={handleFieldBlur}

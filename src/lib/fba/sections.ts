@@ -115,14 +115,35 @@ export function getSectionCompleteness(
       return "empty";
     }
 
-    case "indirectAssessment":
-      return content.openEndedInterviewNotes?.trim() ? "complete" : "empty";
+    case "indirectAssessment": {
+      // Stage 2: also reflects whether any sent QABF/MAS questionnaires
+      // have actually come back, via indirectAssessmentSummary -- a
+      // denormalized snapshot of fba_instrument_requests (this function
+      // has no DB access of its own, see the section component's own
+      // comment on why that snapshot exists).
+      const hasNarrative = Boolean(content.openEndedInterviewNotes?.trim());
+      const summary = content.indirectAssessmentSummary;
+      const allInstrumentsBack = !summary || summary.sentCount === 0 || summary.completedCount >= summary.sentCount;
+      if (hasNarrative && allInstrumentsBack) return "complete";
+      if (hasNarrative || (summary && summary.sentCount > 0)) return "partial";
+      return "empty";
+    }
 
     case "directAssessment": {
-      const a = Boolean(content.onSiteObservations?.trim());
-      const b = Boolean(content.communityParticipation?.trim());
-      if (a && b) return "complete";
-      if (a || b) return "partial";
+      // Stage 2: also reflects the ABC assessment range being set and
+      // fully tagged (via the denormalized abcAnalysisSummary) plus the
+      // ABC interpretation narrative, on top of the original Stage 1
+      // pair of observation narratives.
+      const hasObservations = Boolean(content.onSiteObservations?.trim());
+      const hasCommunity = Boolean(content.communityParticipation?.trim());
+      const hasAnyNarrative = hasObservations || hasCommunity;
+      const rangeSet = Boolean(content.abcRangeStart && content.abcRangeEnd);
+      const summary = content.abcAnalysisSummary;
+      const fullyTagged = !summary || summary.totalLogsInRange === 0 || summary.taggedCount >= summary.totalLogsInRange;
+      const hasInterpretation = Boolean(content.abcInterpretation?.trim());
+
+      if (hasObservations && hasCommunity && rangeSet && fullyTagged && hasInterpretation) return "complete";
+      if (hasAnyNarrative || rangeSet) return "partial";
       return "empty";
     }
 
