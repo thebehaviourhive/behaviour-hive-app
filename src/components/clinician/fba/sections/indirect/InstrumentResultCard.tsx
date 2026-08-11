@@ -34,7 +34,10 @@ export function InstrumentResultCard({
   readOnly: boolean;
   showAttribution?: boolean;
 }) {
-  const { items, isLoading, loadError } = useInstrumentItems(request.instrumentType);
+  const { items, isLoading, loadError } = useInstrumentItems(
+    request.instrumentType,
+    Object.keys(request.responsesData)
+  );
 
   return (
     <div className="rounded-2xl border border-black/5 bg-white p-4 shadow-sm">

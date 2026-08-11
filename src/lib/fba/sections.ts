@@ -121,11 +121,20 @@ export function getSectionCompleteness(
       // denormalized snapshot of fba_instrument_requests (this function
       // has no DB access of its own, see the section component's own
       // comment on why that snapshot exists).
+      //
+      // A recorded FAI interview counts the same as the free-text notes
+      // field -- it's now the primary way this section gets indirect-
+      // assessment content, not a lesser substitute for it. "Recorded"
+      // means at least one interview has at least one non-empty answer,
+      // not just an empty shell created by tapping [+ Add Interview].
       const hasNarrative = Boolean(content.openEndedInterviewNotes?.trim());
+      const hasInterview = (content.faiInterviews ?? []).some((interview) =>
+        Object.values(interview.answers).some((answer) => answer?.trim())
+      );
       const summary = content.indirectAssessmentSummary;
       const allInstrumentsBack = !summary || summary.sentCount === 0 || summary.completedCount >= summary.sentCount;
-      if (hasNarrative && allInstrumentsBack) return "complete";
-      if (hasNarrative || (summary && summary.sentCount > 0)) return "partial";
+      if ((hasNarrative || hasInterview) && allInstrumentsBack) return "complete";
+      if (hasNarrative || hasInterview || (summary && summary.sentCount > 0)) return "partial";
       return "empty";
     }
 

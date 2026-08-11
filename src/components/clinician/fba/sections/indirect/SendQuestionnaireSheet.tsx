@@ -11,7 +11,12 @@ import {
   type SendableInstrumentType,
 } from "@/lib/fba/types";
 
-const INSTRUMENT_OPTIONS: SendableInstrumentType[] = ["open_ended", "qabf", "mas"];
+// Open-Ended is deliberately absent -- it's a clinician-transcribed form
+// now (see the FAI interview list further up Section 7), never sent to
+// a recipient. SendableInstrumentType itself no longer includes it, so
+// this list can't drift from that even if someone tries to add it back
+// here without also widening the type.
+const INSTRUMENT_OPTIONS: SendableInstrumentType[] = ["qabf", "mas"];
 
 export function SendQuestionnaireSheet({
   isOpen,

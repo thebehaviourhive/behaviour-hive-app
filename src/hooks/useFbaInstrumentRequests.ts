@@ -7,13 +7,17 @@ import type {
   FbaRecipientCandidate,
   InstrumentRequestStatus,
   InstrumentResponsesData,
+  InstrumentRequestType,
   RecipientRole,
   SendableInstrumentType,
 } from "@/lib/fba/types";
 
 interface RequestRow {
   id: string;
-  instrument_type: SendableInstrumentType;
+  // Broader than what can be SENT (SendableInstrumentType) -- this reads
+  // whatever's already in the table, including the one legacy
+  // open_ended request from before migration 0044.
+  instrument_type: InstrumentRequestType;
   recipient_id: string;
   recipient_name: string | null;
   recipient_role: RecipientRole;

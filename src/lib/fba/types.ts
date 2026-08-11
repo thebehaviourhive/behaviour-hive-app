@@ -30,6 +30,25 @@ export interface StrategyEntry {
   details: string[];
 }
 
+// One clinician-transcribed Open-Ended FAI interview: item id (see
+// FAI_ITEM_IDS/FAI_ITEMS) -> the respondent's answer. Item 1's answer is
+// still a plain string here (an ISO yyyy-mm-dd date), matching how
+// reportDate/signOffDate are stored elsewhere in content_data.
+export interface FaiInterview {
+  id: string;
+  answers: Record<string, string>;
+}
+
+// The four items every interview form pre-fills or reads a respondent's
+// identity from -- named rather than left as magic "fai-N" strings
+// anywhere pre-fill or respondent-name/relation extraction happens.
+export const FAI_ITEM_IDS = {
+  date: "fai-1",
+  childNameAndAge: "fai-2",
+  respondentName: "fai-3",
+  respondentRelation: "fai-4",
+} as const;
+
 export interface FbaContentData {
   // Section 1 -- Client Profile
   reportDate?: string;
@@ -56,6 +75,13 @@ export interface FbaContentData {
 
   // Section 7 -- Indirect Assessment
   openEndedInterviewNotes?: string;
+  // Clinician-transcribed Open-Ended FAI interviews -- one per
+  // respondent (parent, teacher, SNA, etc.), recorded live by the
+  // clinician inside the workspace rather than sent out. Not the same
+  // thing as the old sendable open_ended instrument (still present for
+  // reading the one legacy test response, never writable again -- see
+  // InstrumentRequestType).
+  faiInterviews?: FaiInterview[];
   // Keyed by fba_instrument_requests.id -- the clinician's written
   // interpretation of one completed QABF/MAS result. Per-request rather
   // than one shared field, since Section 7 can hold several completions
@@ -136,7 +162,7 @@ export interface FbaAflsData {
 export interface InstrumentItem {
   id: string;
   text: string;
-  answer_type: "rating_scale" | "free_text" | "afls_scale";
+  answer_type: "rating_scale" | "free_text" | "afls_scale" | "date";
   scale?: string[];
   category?: string;
 }
@@ -146,6 +172,10 @@ export interface FbaInstrument {
   instrumentType: "qabf" | "mas" | "open_ended" | "afls";
   version: number;
   items: InstrumentItem[];
+  // Nullable, generic to any instrument (not open_ended-specific) --
+  // shown only on the finalized reader view and PDF, never in the
+  // clinician's own editing UI.
+  attribution?: string | null;
 }
 
 export const AFLS_DOMAINS = [
@@ -163,10 +193,19 @@ export const AFLS_DOMAINS = [
 // Stage 2 -- the questionnaire engine
 // ============================================================
 
-// fba_instrument_requests.instrument_type is a stricter subset of
-// FbaInstrument.instrumentType -- AFLS is clinician-self-scored and
-// never sent to a recipient (Stage 1 decision, unchanged).
-export type SendableInstrumentType = "qabf" | "mas" | "open_ended";
+// What the Send Questionnaire flow may create GOING FORWARD. Open-Ended
+// was removed from this (migration 0044): it's now a clinician-
+// transcribed form (FaiInterview), never sent to a recipient. The one
+// pre-existing completed open_ended request from before that change
+// still exists in the table and must keep rendering -- that's what the
+// broader InstrumentRequestType below is for.
+export type SendableInstrumentType = "qabf" | "mas";
+
+// Every instrument_type fba_instrument_requests can actually contain,
+// including the now-unsendable "open_ended" -- used anywhere a request
+// is being READ/rendered rather than created, so the one legacy
+// completed response doesn't become a type error waiting to happen.
+export type InstrumentRequestType = SendableInstrumentType | "open_ended";
 
 export type InstrumentRequestStatus = "sent" | "in_progress" | "completed";
 
@@ -189,7 +228,7 @@ export type InstrumentResponsesData = Record<string, string>;
 // shape of get_fba_instrument_requests()'s return row.
 export interface FbaInstrumentRequest {
   id: string;
-  instrumentType: SendableInstrumentType;
+  instrumentType: InstrumentRequestType;
   recipientId: string;
   recipientName: string;
   recipientRole: RecipientRole;
@@ -215,14 +254,14 @@ export interface FbaRecipientCandidate {
 export interface MyInstrumentRequest {
   id: string;
   fbaId: string;
-  instrumentType: SendableInstrumentType;
+  instrumentType: InstrumentRequestType;
   status: InstrumentRequestStatus;
   childName: string;
   clinicianName: string;
   createdAt: string;
 }
 
-export const INSTRUMENT_LABELS: Record<SendableInstrumentType, string> = {
+export const INSTRUMENT_LABELS: Record<InstrumentRequestType, string> = {
   qabf: "QABF",
   mas: "MAS",
   open_ended: "Open-Ended Interview",

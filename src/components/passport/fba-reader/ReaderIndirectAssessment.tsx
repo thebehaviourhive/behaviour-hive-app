@@ -4,17 +4,18 @@ import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { NarrativeField } from "@/components/clinician/fba/NarrativeField";
 import { InstrumentResultCard } from "@/components/clinician/fba/sections/indirect/InstrumentResultCard";
+import { FaiInterviewReadOnly } from "@/components/clinician/fba/sections/indirect/FaiInterviewReadOnly";
 import { FbaNote } from "@/components/clinician/fba/FbaNote";
 import type {
   FbaContentData,
   InstrumentRequestStatus,
   InstrumentResponsesData,
-  SendableInstrumentType,
+  InstrumentRequestType,
 } from "@/lib/fba/types";
 
 interface RequestRow {
   id: string;
-  instrument_type: SendableInstrumentType;
+  instrument_type: InstrumentRequestType;
   status: InstrumentRequestStatus;
   responses_data: InstrumentResponsesData;
 }
@@ -61,6 +62,8 @@ export function ReaderIndirectAssessment({ fbaId, content }: { fbaId: string; co
         readOnly
         rows={10}
       />
+
+      <FaiInterviewReadOnly interviews={content.faiInterviews ?? []} />
 
       {loadError ? (
         <p className="text-sm text-red-600">{loadError}</p>

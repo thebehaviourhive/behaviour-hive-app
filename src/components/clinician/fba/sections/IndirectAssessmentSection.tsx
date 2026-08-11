@@ -1,12 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useFbaInstrumentRequests } from "@/hooks/useFbaInstrumentRequests";
 import { NarrativeField } from "../NarrativeField";
 import { InlineErrorState } from "@/components/ui/InlineErrorState";
 import { SendQuestionnaireSheet } from "./indirect/SendQuestionnaireSheet";
 import { InstrumentRequestChip } from "./indirect/InstrumentRequestChip";
 import { InstrumentResultCard } from "./indirect/InstrumentResultCard";
+import { FAI_ITEM_IDS, type FaiInterview } from "@/lib/fba/types";
 import type { FbaSectionBodyProps } from "./types";
 
 export function IndirectAssessmentSection({
@@ -18,6 +20,7 @@ export function IndirectAssessmentSection({
   onStructuralChange,
   readOnly,
 }: FbaSectionBodyProps & { fbaId: string; passportId: string }) {
+  const router = useRouter();
   const { requests, candidates, isLoading, loadError, reload, sendRequest, sendReminder } =
     useFbaInstrumentRequests(fbaId, passportId);
 
@@ -49,12 +52,27 @@ export function IndirectAssessmentSection({
   }, [requests, isLoading]);
 
   const completedRequests = requests.filter((r) => r.status === "completed");
+  const interviews = content.faiInterviews ?? [];
 
   function updateInterpretation(requestId: string, value: string) {
     onFieldChange({
       ...content,
       instrumentInterpretations: { ...content.instrumentInterpretations, [requestId]: value },
     });
+  }
+
+  // Creates the interview shell (just today's date -- the respondent
+  // identity and child name/age pre-fill happen on the full-screen
+  // form's own first load, not here) and saves it immediately via
+  // onStructuralChange, matching every other repeatable-entry section's
+  // add pattern, before navigating to it.
+  function handleAddInterview() {
+    const newInterview: FaiInterview = {
+      id: crypto.randomUUID(),
+      answers: { [FAI_ITEM_IDS.date]: new Date().toISOString().slice(0, 10) },
+    };
+    onStructuralChange({ ...content, faiInterviews: [...interviews, newInterview] });
+    router.push(`/clinician/fba/${fbaId}/section/7/interview/${newInterview.id}`);
   }
 
   return (
@@ -67,6 +85,58 @@ export function IndirectAssessmentSection({
         readOnly={readOnly}
         rows={10}
       />
+
+      <div>
+        <div className="mb-2 flex items-center justify-between">
+          <p className="font-heading text-base font-bold text-brand-neutral-black">
+            Open-Ended Functional Assessment Interview
+          </p>
+          {!readOnly && (
+            <button
+              type="button"
+              onClick={handleAddInterview}
+              className="text-sm font-semibold text-brand-prussian-blue"
+            >
+              + Add Interview
+            </button>
+          )}
+        </div>
+
+        {interviews.length === 0 ? (
+          <div className="rounded-2xl border-2 border-dashed border-brand-pastel-blue bg-white/60 p-6 text-center">
+            <p className="text-sm text-brand-neutral-black/70">
+              {readOnly ? "No interviews were recorded for this assessment." : "Record one interview per respondent."}
+            </p>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {interviews.map((interview) => {
+              const respondentName = interview.answers[FAI_ITEM_IDS.respondentName]?.trim();
+              const respondentRelation = interview.answers[FAI_ITEM_IDS.respondentRelation]?.trim();
+              return (
+                <button
+                  key={interview.id}
+                  type="button"
+                  onClick={() => router.push(`/clinician/fba/${fbaId}/section/7/interview/${interview.id}`)}
+                  className="flex w-full items-center justify-between gap-3 rounded-2xl border border-black/5 bg-white p-4 text-left shadow-sm"
+                >
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-base font-semibold text-brand-neutral-black">
+                      {respondentName || "Untitled respondent"}
+                    </span>
+                    <span className="block text-xs text-brand-neutral-black/50">
+                      {respondentRelation || (readOnly ? "No relation recorded" : "Tap to complete")}
+                    </span>
+                  </span>
+                  <span aria-hidden className="flex-shrink-0 text-black/30">
+                    ›
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
 
       <div>
         <div className="mb-2 flex items-center justify-between">
