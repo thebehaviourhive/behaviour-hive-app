@@ -2,14 +2,16 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { BottomNav } from "@/components/ui/BottomNav";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { InlineErrorState } from "@/components/ui/InlineErrorState";
 import { ShareBottomSheet } from "@/components/parent/ShareBottomSheet";
 import { ABCLogger } from "@/components/abc-logger/ABCLogger";
 import { ABCTimeline } from "@/components/abc-logger/ABCTimeline";
-import { ParentClinicalTeamCard } from "@/components/passport/clinical-team/ParentClinicalTeamCard";
+import { PassportAccordion } from "@/components/passport/PassportAccordion";
+import { ClinicalTeamSection } from "@/components/passport/clinical-team/ClinicalTeamSection";
+import { usePassportClinicalContent } from "@/hooks/usePassportClinicalContent";
 import { createClient } from "@/lib/supabase/client";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { getPassportResumeHref } from "@/lib/getPassportResumeHref";
@@ -18,6 +20,7 @@ import {
   CLINICIAN_SPECIALTY_LABEL,
   type ClinicianSpecialty,
 } from "@/lib/clinicianSpecialties";
+import type { ClinicalContentItem } from "@/lib/passportClinicalContent";
 
 interface ApprovedInstitution {
   institutionId: string;
@@ -109,6 +112,43 @@ export default function PassportDashboardPage() {
   const [timelineRefreshKey, setTimelineRefreshKey] = useState(0);
   const [institutionsError, setInstitutionsError] = useState<string | null>(null);
   const [cliniciansError, setCliniciansError] = useState<string | null>(null);
+
+  // Accordion state: "About Your Child" is expanded by default, every
+  // other section starts collapsed -- independent toggling, so opening
+  // one never affects another. A #section-id in the URL (e.g.
+  // #clinical-team) ADDS that section to the expanded set rather than
+  // replacing it, matching "independent toggling" -- arriving via a
+  // deep link doesn't collapse the default-open section.
+  const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(["about-your-child"]));
+  const [clinicalTeamItems, setClinicalTeamItems] = useState<ClinicalContentItem[] | null>(null);
+  const hasHandledHashRef = useRef(false);
+
+  function toggleSection(id: string) {
+    setExpandedSections((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  // Runs once, after the page's own data has loaded (so the target
+  // section actually exists in the DOM to expand/scroll to). Scrolling
+  // is deferred past the accordion's own 300ms grid-rows transition
+  // (see PassportAccordion) so it lands on the section's real expanded
+  // position, not where it was still collapsed.
+  useEffect(() => {
+    if (!summary || hasHandledHashRef.current || typeof window === "undefined") return;
+    hasHandledHashRef.current = true;
+    const hash = window.location.hash.replace("#", "");
+    if (!hash) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setExpandedSections((prev) => new Set(prev).add(hash));
+    const timer = setTimeout(() => {
+      document.getElementById(hash)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [summary]);
 
   async function loadApprovedInstitutions(passportId: string) {
     setInstitutionsError(null);
@@ -465,6 +505,28 @@ export default function PassportDashboardPage() {
   const hasAvoids = (summary.sensoryAvoids?.length ?? 0) > 0;
   const sectionDEmpty = !hasBefore && !hasDuring && !hasAfter && !hasSeeks && !hasAvoids;
 
+  // Accordion header pill counts -- real counts derived from the same
+  // data each section already renders, not a separate source of truth.
+  // A count of 0 renders no pill at all (undefined), matching how these
+  // sections already self-hide their content rather than show an empty
+  // "0 items".
+  const aboutCount = [summary.age !== null, Boolean(summary.school), Boolean(summary.importantPeople)].filter(
+    Boolean
+  ).length;
+  const understandingCount =
+    (summary.okaySignals?.length ?? 0) + (summary.hardSignals?.length ?? 0) + (summary.hardTriggers?.length ?? 0);
+  const communicatesCount =
+    (summary.communicationMethods?.length ?? 0) +
+    (hasShowsHappy ? 1 : 0) +
+    (hasShowsAnxious ? 1 : 0) +
+    (hasPhrasesToAvoid ? 1 : 0);
+  const supportCount =
+    (summary.beforeBehaviour?.length ?? 0) +
+    (summary.duringDistress?.length ?? 0) +
+    (summary.afterDistress?.length ?? 0) +
+    (summary.sensorySeeks?.length ?? 0) +
+    (summary.sensoryAvoids?.length ?? 0);
+
   const fallbackCard = (
     <section className={CARD_CLASSNAME}>
       <p className="text-sm text-brand-neutral-black/60">
@@ -494,10 +556,6 @@ export default function PassportDashboardPage() {
         <h1 className="mt-1 font-heading text-4xl font-bold leading-tight text-brand-prussian-blue">
           {summary.childName}
         </h1>
-
-        {subInfoLine && (
-          <p className="mt-1 text-base text-brand-neutral-black">{subInfoLine}</p>
-        )}
 
         {diagnosisPills.length > 0 ? (
           <>
@@ -536,308 +594,350 @@ export default function PassportDashboardPage() {
       </div>
 
       <main className="flex flex-col gap-6 px-4 pt-6">
-        <ErrorBoundary fallback={fallbackCard}>
-          <section className={CARD_CLASSNAME}>
-            <div className="flex items-center justify-between">
-              <h2 className="font-heading text-xl font-bold text-brand-prussian-blue">
-                Understanding My Child
-              </h2>
-              <Link href="/passport/section-b/1" className="text-sm text-brand-prussian-blue/50">
-                Edit
-              </Link>
-            </div>
+        {/* The two access cards -- permanently visible, never collapsed,
+            same behaviour as before (share/revoke/approvals/code entry
+            all unchanged); only the visual treatment (consistent card
+            chrome, gap-4 grouping) and position (moved above the
+            accordion content) changed. */}
+        <div className="flex flex-col gap-4">
+          <ErrorBoundary fallback={fallbackCard}>
+            <section className={CARD_CLASSNAME}>
+              <h2 className="mb-4 font-heading text-lg font-bold text-brand-prussian-blue">Manage Access</h2>
 
-            {sectionBEmpty ? (
-              <EmptyStateBox
-                prompt={`Help teachers recognise when ${summary.childName} is feeling regulated, and spot the early signs when they are finding things hard.`}
-                ctaLabel="Add Signals and Triggers"
-                ctaHref="/passport/section-b/1"
-              />
-            ) : (
-              <div className="mt-5 flex flex-col gap-5">
-                {hasOkay && (
-                  <ChipGroup
-                    heading="When I am okay, you might see me..."
-                    items={summary.okaySignals!}
-                    variant="okay"
-                  />
-                )}
-                {hasHard && (
-                  <ChipGroup
-                    heading="When I am finding things hard..."
-                    items={summary.hardSignals!}
-                    variant="hard"
-                  />
-                )}
-                {hasTriggers && (
-                  <ChipGroup
-                    heading="What can make things hard for me..."
-                    items={summary.hardTriggers!}
-                    variant="hard"
-                  />
-                )}
-              </div>
-            )}
-          </section>
-        </ErrorBoundary>
+              {institutionsError ? (
+                <InlineErrorState
+                  message={institutionsError}
+                  onRetry={() => loadApprovedInstitutions(summary.passportId)}
+                />
+              ) : approvedInstitutions.length === 0 ? (
+                <p className="text-center text-sm text-brand-neutral-black/60">
+                  No schools approved yet. Tap the share button above to approve
+                  your child&apos;s school.
+                </p>
+              ) : (
+                <div>
+                  {approvedInstitutions.map((institution) => (
+                    <div
+                      key={institution.institutionId}
+                      className="mb-2 flex items-center justify-between rounded-xl bg-brand-off-white/50 p-4"
+                    >
+                      <p className="font-bold text-brand-neutral-black">
+                        {institution.institutionName}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleRevoke(institution.institutionId, institution.institutionName)
+                        }
+                        className="text-sm font-bold text-brand-golden-brown"
+                      >
+                        Revoke Access
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
 
-        <ErrorBoundary fallback={fallbackCard}>
-          <section className={CARD_CLASSNAME}>
-            <div className="flex items-center justify-between">
-              <h2 className="font-heading text-xl font-bold text-brand-prussian-blue">
-                How My Child Communicates
-              </h2>
-              <Link href="/passport/section-c" className="text-sm text-brand-prussian-blue/50">
-                Edit
-              </Link>
-            </div>
+              {revokeConfirmation && (
+                <p className="mt-3 rounded-xl bg-brand-off-white/50 px-4 py-3 text-sm text-brand-neutral-black">
+                  {revokeConfirmation}
+                </p>
+              )}
+              {revokeError && (
+                <p role="alert" className="mt-3 text-sm font-medium text-brand-golden-brown">
+                  {revokeError}
+                </p>
+              )}
+            </section>
+          </ErrorBoundary>
 
-            {sectionCEmpty ? (
-              <EmptyStateBox
-                prompt={`Every child has a voice. Share ${summary.childName}'s unique communication style so others know exactly how to connect with them.`}
-                ctaLabel="Add Communication Profile"
-                ctaHref="/passport/section-c"
-              />
-            ) : (
-              <div className="mt-5 flex flex-col gap-5">
-                {hasCommMethods && (
-                  <ChipGroup
-                    heading="Communication methods"
-                    items={summary.communicationMethods!}
-                    variant="okay"
-                  />
-                )}
-                {hasShowsHappy && (
-                  <QuoteBox
-                    heading={`How ${summary.childName} shows they are happy`}
-                    text={summary.showsHappy!}
-                  />
-                )}
-                {hasShowsAnxious && (
-                  <QuoteBox
-                    heading={`How ${summary.childName} shows they are anxious`}
-                    text={summary.showsAnxious!}
-                  />
-                )}
-                {hasPhrasesToAvoid && (
-                  <QuoteBox heading="Phrases to avoid" text={summary.phrasesToAvoid!} />
-                )}
-              </div>
-            )}
-          </section>
-        </ErrorBoundary>
+          <ErrorBoundary fallback={fallbackCard}>
+            <section className={CARD_CLASSNAME}>
+              <h2 className="mb-4 font-heading text-lg font-bold text-brand-prussian-blue">Clinical Team</h2>
 
-        <ErrorBoundary fallback={fallbackCard}>
-          <section className={CARD_CLASSNAME}>
-            <div className="flex items-center justify-between">
-              <h2 className="font-heading text-xl font-bold text-brand-prussian-blue">
-                How I Support My Child
-              </h2>
-              <Link href="/passport/section-d/1" className="text-sm text-brand-prussian-blue/50">
-                Edit
-              </Link>
-            </div>
+              {cliniciansError ? (
+                <InlineErrorState
+                  message={cliniciansError}
+                  onRetry={() => loadConnectedClinicians(summary.passportId)}
+                />
+              ) : connectedClinicians.length === 0 ? (
+                <p className="text-center text-sm text-brand-neutral-black/60">
+                  No clinicians connected yet. Tap the share button above to
+                  connect a clinician using their code.
+                </p>
+              ) : (
+                <div>
+                  {connectedClinicians.map((clinician) => (
+                    <div
+                      key={clinician.clinicianId}
+                      className="mb-2 flex items-center justify-between rounded-xl bg-brand-off-white/50 p-4"
+                    >
+                      <div>
+                        <p className="font-bold text-brand-neutral-black">
+                          {clinician.fullName}
+                        </p>
+                        <p className="text-xs text-brand-neutral-black/60">
+                          {CLINICIAN_SPECIALTY_LABEL[clinician.specialty as ClinicianSpecialty] ??
+                            clinician.specialty}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleRevokeClinician(
+                            clinician.clinicianId,
+                            clinician.fullName,
+                            clinician.specialty
+                          )
+                        }
+                        className="text-sm font-bold text-brand-golden-brown"
+                      >
+                        Revoke Access
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
 
-            {sectionDEmpty ? (
-              <EmptyStateBox
-                prompt="What sensory tools and de-escalation strategies work best? Build a quick-reference toolkit for the classroom."
-                ctaLabel="Add Support Strategies"
-                ctaHref="/passport/section-d/1"
-              />
-            ) : (
-              <div className="mt-5 flex flex-col gap-5">
-                {hasBefore && (
-                  <VerticalChipList heading="What helps before a behaviour" items={summary.beforeBehaviour!} />
-                )}
-                {hasDuring && (
-                  <VerticalChipList heading="What helps during distress" items={summary.duringDistress!} />
-                )}
-                {hasAfter && (
-                  <VerticalChipList heading="What helps after distress" items={summary.afterDistress!} />
-                )}
+              {clinicianRevokeConfirmation && (
+                <p className="mt-3 rounded-xl bg-brand-off-white/50 px-4 py-3 text-sm text-brand-neutral-black">
+                  {clinicianRevokeConfirmation}
+                </p>
+              )}
+              {clinicianRevokeError && (
+                <p role="alert" className="mt-3 text-sm font-medium text-brand-golden-brown">
+                  {clinicianRevokeError}
+                </p>
+              )}
+            </section>
+          </ErrorBoundary>
+        </div>
 
-                {(hasSeeks || hasAvoids) && (
+        <div aria-hidden className="h-px bg-black/5" />
+
+        {/* Fetches "From your Clinical Team" content once, headlessly --
+            always mounted once summary is ready (independent of whether
+            its own accordion below is expanded), so the accordion's
+            collapsed-state pill count is never stuck waiting on an
+            expand to trigger the fetch. Renders nothing itself. */}
+        <ClinicalTeamDataLoader passportId={summary.passportId} onLoaded={setClinicalTeamItems} />
+
+        <div className="flex flex-col gap-3">
+          <PassportAccordion
+            id="about-your-child"
+            title="About Your Child"
+            hint={aboutCount > 0 ? `${aboutCount} items` : undefined}
+            editHref="/passport/section-a"
+            isExpanded={expandedSections.has("about-your-child")}
+            onToggle={() => toggleSection("about-your-child")}
+          >
+            {subInfoLine || summary.importantPeople ? (
+              <div className="flex flex-col gap-3">
+                {subInfoLine && <p className="text-sm text-brand-neutral-black">{subInfoLine}</p>}
+                {summary.importantPeople && (
                   <div>
                     <h3 className="font-accent text-xs font-bold uppercase tracking-[0.1em] text-brand-neutral-black/60">
-                      Sensory Profile
+                      Important People
                     </h3>
-                    <div
-                      className={
-                        hasSeeks && hasAvoids ? "mt-2 grid grid-cols-2 gap-4" : "mt-2"
-                      }
-                    >
-                      {hasSeeks && (
-                        <div>
-                          <h4 className="font-accent text-xs font-bold uppercase tracking-[0.1em] text-brand-neutral-black/60">
-                            Sensory Seeks
-                          </h4>
-                          <div className="mt-2 flex flex-wrap gap-2">
-                            {summary.sensorySeeks!.map((item, index) => (
-                              <span
-                                key={index}
-                                className="rounded-lg bg-brand-pastel-blue/20 px-3 py-1.5 text-sm font-semibold text-brand-prussian-blue"
-                              >
-                                + {item}
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                      {hasAvoids && (
-                        <div>
-                          <h4 className="font-accent text-xs font-bold uppercase tracking-[0.1em] text-brand-neutral-black/60">
-                            Sensory Avoids
-                          </h4>
-                          <div className="mt-2 flex flex-wrap gap-2">
-                            {summary.sensoryAvoids!.map((item, index) => (
-                              <span
-                                key={index}
-                                className="rounded-lg bg-brand-pastel-blue/20 px-3 py-1.5 text-sm font-semibold text-brand-prussian-blue"
-                              >
-                                − {item}
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
+                    <p className="mt-1 text-sm text-brand-neutral-black">{summary.importantPeople}</p>
                   </div>
                 )}
               </div>
-            )}
-          </section>
-        </ErrorBoundary>
-
-        <ErrorBoundary fallback={fallbackCard}>
-          <ParentClinicalTeamCard passportId={summary.passportId} />
-        </ErrorBoundary>
-
-        <ErrorBoundary fallback={fallbackCard}>
-          <section className="mt-2 mb-6">
-            <h2 className="mb-4 font-accent text-sm uppercase tracking-widest text-brand-neutral-black/60">
-              Manage Access
-            </h2>
-
-            {institutionsError ? (
-              <InlineErrorState
-                message={institutionsError}
-                onRetry={() => loadApprovedInstitutions(summary.passportId)}
-              />
-            ) : approvedInstitutions.length === 0 ? (
-              <p className="text-center text-sm text-brand-neutral-black/60">
-                No schools approved yet. Tap the share button above to approve
-                your child&apos;s school.
-              </p>
             ) : (
-              <div>
-                {approvedInstitutions.map((institution) => (
-                  <div
-                    key={institution.institutionId}
-                    className="mb-2 flex items-center justify-between rounded-xl bg-brand-off-white/50 p-4"
-                  >
-                    <p className="font-bold text-brand-neutral-black">
-                      {institution.institutionName}
-                    </p>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        handleRevoke(institution.institutionId, institution.institutionName)
-                      }
-                      className="text-sm font-bold text-brand-golden-brown"
-                    >
-                      Revoke Access
-                    </button>
-                  </div>
-                ))}
-              </div>
+              <p className="text-sm text-brand-neutral-black/60">No additional details added yet.</p>
             )}
+          </PassportAccordion>
 
-            {revokeConfirmation && (
-              <p className="mt-3 rounded-xl bg-brand-off-white/50 px-4 py-3 text-sm text-brand-neutral-black">
-                {revokeConfirmation}
-              </p>
-            )}
-            {revokeError && (
-              <p role="alert" className="mt-3 text-sm font-medium text-brand-golden-brown">
-                {revokeError}
-              </p>
-            )}
-          </section>
-        </ErrorBoundary>
+          <ErrorBoundary fallback={fallbackCard}>
+            <PassportAccordion
+              id="understanding-my-child"
+              title="Understanding My Child"
+              hint={understandingCount > 0 ? `${understandingCount} items` : undefined}
+              editHref="/passport/section-b/1"
+              isExpanded={expandedSections.has("understanding-my-child")}
+              onToggle={() => toggleSection("understanding-my-child")}
+            >
+              {sectionBEmpty ? (
+                <EmptyStateBox
+                  prompt={`Help teachers recognise when ${summary.childName} is feeling regulated, and spot the early signs when they are finding things hard.`}
+                  ctaLabel="Add Signals and Triggers"
+                  ctaHref="/passport/section-b/1"
+                />
+              ) : (
+                <div className="flex flex-col gap-5">
+                  {hasOkay && (
+                    <ChipGroup
+                      heading="When I am okay, you might see me..."
+                      items={summary.okaySignals!}
+                      variant="okay"
+                    />
+                  )}
+                  {hasHard && (
+                    <ChipGroup
+                      heading="When I am finding things hard..."
+                      items={summary.hardSignals!}
+                      variant="hard"
+                    />
+                  )}
+                  {hasTriggers && (
+                    <ChipGroup
+                      heading="What can make things hard for me..."
+                      items={summary.hardTriggers!}
+                      variant="hard"
+                    />
+                  )}
+                </div>
+              )}
+            </PassportAccordion>
+          </ErrorBoundary>
 
-        <ErrorBoundary fallback={fallbackCard}>
-          <section className="mt-2 mb-6">
-            <h2 className="mb-4 font-accent text-sm uppercase tracking-widest text-brand-neutral-black/60">
-              Clinical Team
-            </h2>
+          <ErrorBoundary fallback={fallbackCard}>
+            <PassportAccordion
+              id="how-my-child-communicates"
+              title="How My Child Communicates"
+              hint={communicatesCount > 0 ? `${communicatesCount} items` : undefined}
+              editHref="/passport/section-c"
+              isExpanded={expandedSections.has("how-my-child-communicates")}
+              onToggle={() => toggleSection("how-my-child-communicates")}
+            >
+              {sectionCEmpty ? (
+                <EmptyStateBox
+                  prompt={`Every child has a voice. Share ${summary.childName}'s unique communication style so others know exactly how to connect with them.`}
+                  ctaLabel="Add Communication Profile"
+                  ctaHref="/passport/section-c"
+                />
+              ) : (
+                <div className="flex flex-col gap-5">
+                  {hasCommMethods && (
+                    <ChipGroup
+                      heading="Communication methods"
+                      items={summary.communicationMethods!}
+                      variant="okay"
+                    />
+                  )}
+                  {hasShowsHappy && (
+                    <QuoteBox
+                      heading={`How ${summary.childName} shows they are happy`}
+                      text={summary.showsHappy!}
+                    />
+                  )}
+                  {hasShowsAnxious && (
+                    <QuoteBox
+                      heading={`How ${summary.childName} shows they are anxious`}
+                      text={summary.showsAnxious!}
+                    />
+                  )}
+                  {hasPhrasesToAvoid && (
+                    <QuoteBox heading="Phrases to avoid" text={summary.phrasesToAvoid!} />
+                  )}
+                </div>
+              )}
+            </PassportAccordion>
+          </ErrorBoundary>
 
-            {cliniciansError ? (
-              <InlineErrorState
-                message={cliniciansError}
-                onRetry={() => loadConnectedClinicians(summary.passportId)}
-              />
-            ) : connectedClinicians.length === 0 ? (
-              <p className="text-center text-sm text-brand-neutral-black/60">
-                No clinicians connected yet. Tap the share button above to
-                connect a clinician using their code.
-              </p>
-            ) : (
-              <div>
-                {connectedClinicians.map((clinician) => (
-                  <div
-                    key={clinician.clinicianId}
-                    className="mb-2 flex items-center justify-between rounded-xl bg-brand-off-white/50 p-4"
-                  >
+          <ErrorBoundary fallback={fallbackCard}>
+            <PassportAccordion
+              id="how-i-support-my-child"
+              title="How I Support My Child"
+              hint={supportCount > 0 ? `${supportCount} strategies` : undefined}
+              editHref="/passport/section-d/1"
+              isExpanded={expandedSections.has("how-i-support-my-child")}
+              onToggle={() => toggleSection("how-i-support-my-child")}
+            >
+              {sectionDEmpty ? (
+                <EmptyStateBox
+                  prompt="What sensory tools and de-escalation strategies work best? Build a quick-reference toolkit for the classroom."
+                  ctaLabel="Add Support Strategies"
+                  ctaHref="/passport/section-d/1"
+                />
+              ) : (
+                <div className="flex flex-col gap-5">
+                  {hasBefore && (
+                    <VerticalChipList heading="What helps before a behaviour" items={summary.beforeBehaviour!} />
+                  )}
+                  {hasDuring && (
+                    <VerticalChipList heading="What helps during distress" items={summary.duringDistress!} />
+                  )}
+                  {hasAfter && (
+                    <VerticalChipList heading="What helps after distress" items={summary.afterDistress!} />
+                  )}
+
+                  {(hasSeeks || hasAvoids) && (
                     <div>
-                      <p className="font-bold text-brand-neutral-black">
-                        {clinician.fullName}
-                      </p>
-                      <p className="text-xs text-brand-neutral-black/60">
-                        {CLINICIAN_SPECIALTY_LABEL[clinician.specialty as ClinicianSpecialty] ??
-                          clinician.specialty}
-                      </p>
+                      <h3 className="font-accent text-xs font-bold uppercase tracking-[0.1em] text-brand-neutral-black/60">
+                        Sensory Profile
+                      </h3>
+                      <div
+                        className={
+                          hasSeeks && hasAvoids ? "mt-2 grid grid-cols-2 gap-4" : "mt-2"
+                        }
+                      >
+                        {hasSeeks && (
+                          <div>
+                            <h4 className="font-accent text-xs font-bold uppercase tracking-[0.1em] text-brand-neutral-black/60">
+                              Sensory Seeks
+                            </h4>
+                            <div className="mt-2 flex flex-wrap gap-2">
+                              {summary.sensorySeeks!.map((item, index) => (
+                                <span
+                                  key={index}
+                                  className="rounded-lg bg-brand-pastel-blue/20 px-3 py-1.5 text-sm font-semibold text-brand-prussian-blue"
+                                >
+                                  + {item}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        {hasAvoids && (
+                          <div>
+                            <h4 className="font-accent text-xs font-bold uppercase tracking-[0.1em] text-brand-neutral-black/60">
+                              Sensory Avoids
+                            </h4>
+                            <div className="mt-2 flex flex-wrap gap-2">
+                              {summary.sensoryAvoids!.map((item, index) => (
+                                <span
+                                  key={index}
+                                  className="rounded-lg bg-brand-pastel-blue/20 px-3 py-1.5 text-sm font-semibold text-brand-prussian-blue"
+                                >
+                                  − {item}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        handleRevokeClinician(
-                          clinician.clinicianId,
-                          clinician.fullName,
-                          clinician.specialty
-                        )
-                      }
-                      className="text-sm font-bold text-brand-golden-brown"
-                    >
-                      Revoke Access
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
+                  )}
+                </div>
+              )}
+            </PassportAccordion>
+          </ErrorBoundary>
 
-            {clinicianRevokeConfirmation && (
-              <p className="mt-3 rounded-xl bg-brand-off-white/50 px-4 py-3 text-sm text-brand-neutral-black">
-                {clinicianRevokeConfirmation}
-              </p>
-            )}
-            {clinicianRevokeError && (
-              <p role="alert" className="mt-3 text-sm font-medium text-brand-golden-brown">
-                {clinicianRevokeError}
-              </p>
-            )}
-          </section>
-        </ErrorBoundary>
+          {/* Self-hides entirely until something is approved into it --
+              same behaviour as the old ParentClinicalTeamCard, just now
+              accordion-wrapped instead of its own standalone card (its
+              own heading/wrapper would be redundant nested inside the
+              accordion's identical chrome). */}
+          {clinicalTeamItems && clinicalTeamItems.length > 0 && (
+            <ErrorBoundary fallback={fallbackCard}>
+              <PassportAccordion
+                id="clinical-team"
+                title="From your Clinical Team"
+                hint={`${clinicalTeamItems.length} items`}
+                isExpanded={expandedSections.has("clinical-team")}
+                onToggle={() => toggleSection("clinical-team")}
+              >
+                <ClinicalTeamSection items={clinicalTeamItems} viewerRole="parent" />
+              </PassportAccordion>
+            </ErrorBoundary>
+          )}
+        </div>
 
         <ErrorBoundary fallback={fallbackCard}>
           <section className="mt-2 mb-6">
-            <h2 className="mb-4 font-heading text-xl font-bold text-brand-prussian-blue">
-              Incident Timeline
-            </h2>
-            <ABCTimeline
-              key={timelineRefreshKey}
-              passportId={summary.passportId}
-              viewerRole="parent"
-            />
+            <h2 className="mb-4 font-heading text-xl font-bold text-brand-prussian-blue">Incident Timeline</h2>
+            <ABCTimeline key={timelineRefreshKey} passportId={summary.passportId} viewerRole="parent" />
           </section>
         </ErrorBoundary>
       </main>
@@ -976,4 +1076,31 @@ function VerticalChipList({ heading, items }: { heading: string; items: string[]
       </div>
     </div>
   );
+}
+
+// Headless: renders nothing itself, exists purely to run
+// usePassportClinicalContent and hand the result up to the page via
+// onLoaded. Kept as its own component (rather than calling the hook
+// directly in PassportDashboardPage) because the page already has an
+// early `if (!summary) return null` before summary.passportId exists --
+// React's rules of hooks forbid calling a hook after a conditional
+// return in the same component, so this is mounted only once summary
+// is confirmed non-null, where passportId is guaranteed to be real.
+function ClinicalTeamDataLoader({
+  passportId,
+  onLoaded,
+}: {
+  passportId: string;
+  onLoaded: (items: ClinicalContentItem[]) => void;
+}) {
+  const { items, isLoading, loadError } = usePassportClinicalContent(passportId);
+
+  useEffect(() => {
+    if (!isLoading && !loadError) onLoaded(items);
+    // onLoaded is a setState function (stable identity), so it's safe to
+    // omit -- including it would only ever add a no-op re-run.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items, isLoading, loadError]);
+
+  return null;
 }

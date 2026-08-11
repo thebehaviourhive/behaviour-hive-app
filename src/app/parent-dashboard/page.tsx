@@ -8,7 +8,7 @@ import { useRequireRole } from "@/hooks/useRequireRole";
 import { getPassportResumeHref } from "@/lib/getPassportResumeHref";
 import { RecentUpdatesCard } from "@/components/parent/RecentUpdatesCard";
 import { QuestionnairePromptCard } from "@/components/questionnaire/QuestionnairePromptCard";
-import { FbaCompletedPromptCard } from "@/components/passport/fba-reader/FbaCompletedPromptCard";
+import { ClinicalSupportSection } from "@/components/parent/ClinicalSupportSection";
 import { QuickActionButtons } from "@/components/parent/QuickActionButtons";
 import { YourTeamCard } from "@/components/parent/YourTeamCard";
 
@@ -308,7 +308,7 @@ export default function ParentDashboardPage() {
           </section>
         )}
 
-        <FbaCompletedPromptCard />
+        <ClinicalSupportSection passportId={passportId} childName={childName} />
 
         <QuestionnairePromptCard track="parent" />
 

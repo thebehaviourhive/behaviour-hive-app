@@ -9,6 +9,7 @@ import { useFbaReport } from "@/hooks/useFbaReport";
 import { FBA_SECTIONS } from "@/lib/fba/sections";
 import { InlineErrorState } from "@/components/ui/InlineErrorState";
 import { FbaSectionsReadOnly } from "@/components/passport/fba-reader/FbaSectionsReadOnly";
+import { FbaReaderNav } from "@/components/passport/fba-reader/FbaReaderNav";
 import { ApprovalBanner } from "@/components/passport/fba-reader/ApprovalBanner";
 
 export default function FbaReaderPage() {
@@ -69,19 +70,7 @@ export default function FbaReaderPage() {
           )}
         </div>
 
-        {report && (
-          <div className="scrollbar-hide mt-3 flex gap-1.5 overflow-x-auto">
-            {FBA_SECTIONS.map((section) => (
-              <a
-                key={section.slug}
-                href={`#fba-section-${section.slug}`}
-                className="flex-shrink-0 rounded-full bg-white px-3 py-1.5 text-xs font-semibold text-brand-neutral-black/70 shadow-sm"
-              >
-                {section.number}
-              </a>
-            ))}
-          </div>
-        )}
+        {report && <FbaReaderNav sections={FBA_SECTIONS} />}
       </header>
 
       <main className="flex-1 px-4 py-6">
@@ -109,7 +98,12 @@ export default function FbaReaderPage() {
               fbaId={fbaId}
               report={report}
               afls={afls}
-              sectionClassName="scroll-mt-32"
+              // Bumped from scroll-mt-32: the sticky header is now
+              // taller (back+title row + bubble row + the new sticky
+              // title strip), so a plain-anchor or bubble-tap scroll
+              // needs more top clearance to land the section below all
+              // three, not partially under them.
+              sectionClassName="scroll-mt-40"
             />
           </div>
         )}
