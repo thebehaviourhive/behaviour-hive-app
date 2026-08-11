@@ -13,6 +13,7 @@ interface RequestRow {
   status: MyInstrumentRequest["status"];
   child_name: string;
   clinician_name: string;
+  instruction: string | null;
   created_at: string;
 }
 
@@ -24,6 +25,7 @@ function mapRow(row: RequestRow): MyInstrumentRequest {
     status: row.status,
     childName: row.child_name,
     clinicianName: row.clinician_name,
+    instruction: row.instruction,
     createdAt: row.created_at,
   };
 }

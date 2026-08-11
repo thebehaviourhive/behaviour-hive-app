@@ -175,6 +175,7 @@ export default function FbaPrintPage() {
             fbaId={fbaId}
             report={report}
             afls={afls}
+            childName={childName}
             sectionClassName="print-avoid-break"
             isPrint
           />

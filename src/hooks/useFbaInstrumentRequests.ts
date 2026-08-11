@@ -23,6 +23,7 @@ interface RequestRow {
   recipient_role: RecipientRole;
   status: InstrumentRequestStatus;
   responses_data: InstrumentResponsesData;
+  instruction: string | null;
   created_at: string;
   completed_at: string | null;
   last_reminded_at: string | null;
@@ -43,6 +44,7 @@ function mapRequest(row: RequestRow): FbaInstrumentRequest {
     recipientRole: row.recipient_role,
     status: row.status,
     responsesData: row.responses_data ?? {},
+    instruction: row.instruction,
     createdAt: row.created_at,
     completedAt: row.completed_at,
     lastRemindedAt: row.last_reminded_at,
@@ -98,7 +100,8 @@ export function useFbaInstrumentRequests(fbaId: string, passportId: string | und
 
   async function sendRequest(
     instrumentType: SendableInstrumentType,
-    recipientId: string
+    recipientId: string,
+    instruction: string
   ): Promise<string | null> {
     if (!passportId) return "Missing passport.";
 
@@ -116,6 +119,7 @@ export function useFbaInstrumentRequests(fbaId: string, passportId: string | und
       instrument_type: instrumentType,
       recipient_id: recipientId,
       status: "sent",
+      instruction: instruction.trim() ? instruction : null,
     });
 
     if (error) {

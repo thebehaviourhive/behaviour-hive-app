@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 import { InlineErrorState } from "@/components/ui/InlineErrorState";
+import { createClient } from "@/lib/supabase/client";
 import {
   INSTRUMENT_LABELS,
   RECIPIENT_ROLE_LABELS,
@@ -35,15 +36,24 @@ export function SendQuestionnaireSheet({
   candidatesError: string | null;
   onRetryCandidates: () => void;
   requests: FbaInstrumentRequest[];
-  onSend: (instrumentType: SendableInstrumentType, recipientId: string) => Promise<string | null>;
+  onSend: (instrumentType: SendableInstrumentType, recipientId: string, instruction: string) => Promise<string | null>;
 }) {
   const [instrumentType, setInstrumentType] = useState<SendableInstrumentType | null>(null);
-  const [sendingFor, setSendingFor] = useState<string | null>(null);
+  // Set once a recipient is chosen -- from that point the sheet shows
+  // the third step (review/edit the instruction, then confirm) instead
+  // of sending immediately, per the brief's "after recipient selection"
+  // ordering.
+  const [selectedRecipient, setSelectedRecipient] = useState<FbaRecipientCandidate | null>(null);
+  const [instruction, setInstruction] = useState("");
+  const [isLoadingDefault, setIsLoadingDefault] = useState(false);
+  const [isSending, setIsSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   function reset() {
     setInstrumentType(null);
-    setSendingFor(null);
+    setSelectedRecipient(null);
+    setInstruction("");
+    setIsSending(false);
     setError(null);
   }
 
@@ -52,12 +62,33 @@ export function SendQuestionnaireSheet({
     onClose();
   }
 
-  async function handleSelectRecipient(recipientId: string) {
+  // Pre-fills from the instrument's own editable-as-data default
+  // (fba_instruments.default_instruction) -- still containing the
+  // literal "[child name]" token, exactly as stored; nothing here
+  // resolves it to a real name, since this same stored text is what
+  // gets read back later by every viewer's own name-display rule.
+  async function handleSelectRecipient(candidate: FbaRecipientCandidate) {
     if (!instrumentType) return;
     setError(null);
-    setSendingFor(recipientId);
-    const result = await onSend(instrumentType, recipientId);
-    setSendingFor(null);
+    setSelectedRecipient(candidate);
+    setIsLoadingDefault(true);
+    const supabase = createClient();
+    const { data } = await supabase
+      .from("fba_instruments")
+      .select("default_instruction")
+      .eq("instrument_type", instrumentType)
+      .eq("is_active", true)
+      .maybeSingle();
+    setInstruction(data?.default_instruction ?? "");
+    setIsLoadingDefault(false);
+  }
+
+  async function handleConfirmSend() {
+    if (!instrumentType || !selectedRecipient) return;
+    setError(null);
+    setIsSending(true);
+    const result = await onSend(instrumentType, selectedRecipient.recipientId, instruction);
+    setIsSending(false);
     if (result) {
       setError(result);
       return;
@@ -94,6 +125,52 @@ export function SendQuestionnaireSheet({
             ))}
           </div>
         </>
+      ) : selectedRecipient ? (
+        <>
+          <button
+            type="button"
+            onClick={() => {
+              setSelectedRecipient(null);
+              setError(null);
+            }}
+            className="mb-1 text-sm font-semibold text-brand-prussian-blue"
+          >
+            ‹ Back
+          </button>
+          <h2 className="font-heading text-xl font-semibold text-brand-neutral-black">
+            Instructions for {selectedRecipient.fullName}
+          </h2>
+          <p className="mb-4 mt-1 text-sm text-brand-neutral-black/60">
+            Shown to them before they begin. Edit if this send should focus on something specific.
+          </p>
+
+          {isLoadingDefault ? (
+            <div className="h-32 animate-pulse rounded-2xl bg-brand-off-white" />
+          ) : (
+            <textarea
+              value={instruction}
+              onChange={(e) => setInstruction(e.target.value)}
+              rows={5}
+              placeholder="Instructions for the respondent…"
+              className="w-full resize-none rounded-2xl border border-black/10 bg-white px-4 py-3.5 text-base text-brand-neutral-black placeholder:text-black/30 focus:border-brand-prussian-blue focus:outline-none focus:ring-2 focus:ring-brand-pastel-blue"
+            />
+          )}
+
+          {error && (
+            <p role="alert" className="mt-4 text-sm font-medium text-red-600">
+              {error}
+            </p>
+          )}
+
+          <button
+            type="button"
+            onClick={handleConfirmSend}
+            disabled={isSending || isLoadingDefault}
+            className="mt-4 w-full rounded-2xl bg-brand-prussian-blue py-3.5 text-base font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {isSending ? "Sending…" : "Send"}
+          </button>
+        </>
       ) : (
         <>
           <button
@@ -128,13 +205,12 @@ export function SendQuestionnaireSheet({
             <div className="flex flex-col gap-2">
               {candidates.map((candidate) => {
                 const disabled = hasActiveRequest(candidate.recipientId);
-                const isSending = sendingFor === candidate.recipientId;
                 return (
                   <button
                     key={candidate.recipientId}
                     type="button"
-                    disabled={disabled || sendingFor !== null}
-                    onClick={() => handleSelectRecipient(candidate.recipientId)}
+                    disabled={disabled}
+                    onClick={() => handleSelectRecipient(candidate)}
                     className="flex w-full items-center justify-between rounded-2xl border border-black/5 bg-white p-4 text-left shadow-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     <span>
@@ -146,18 +222,12 @@ export function SendQuestionnaireSheet({
                       </span>
                     </span>
                     <span className="flex-shrink-0 text-xs font-semibold text-brand-neutral-black/50">
-                      {isSending ? "Sending…" : disabled ? "Already sent" : ""}
+                      {disabled ? "Already sent" : ""}
                     </span>
                   </button>
                 );
               })}
             </div>
-          )}
-
-          {error && (
-            <p role="alert" className="mt-4 text-sm font-medium text-red-600">
-              {error}
-            </p>
           )}
         </>
       )}

@@ -2,6 +2,7 @@
 
 import { useInstrumentItems } from "@/hooks/useInstrumentItems";
 import { getCategoryMaxScores, scoreInstrumentByCategory } from "@/lib/fba/instrumentScoring";
+import { resolveInstructionText } from "@/lib/fba/resolveInstruction";
 import { INSTRUMENT_LABELS, RECIPIENT_ROLE_LABELS, type FbaInstrumentRequest } from "@/lib/fba/types";
 import { HorizontalBarChart } from "../../charts/HorizontalBarChart";
 import { NarrativeField } from "../../NarrativeField";
@@ -21,6 +22,7 @@ type InstrumentResultRequest = Omit<FbaInstrumentRequest, "recipientName" | "rec
 // labelled by respondent -- the caller renders one of these per request.
 export function InstrumentResultCard({
   request,
+  childName,
   interpretation,
   onInterpretationChange,
   onInterpretationBlur,
@@ -28,6 +30,10 @@ export function InstrumentResultCard({
   showAttribution = true,
 }: {
   request: InstrumentResultRequest;
+  // Always the full name -- this is a clinical surface (clinician
+  // results view, parent reader, PDF), never the teacher-shortened
+  // form, regardless of which track is actually viewing it.
+  childName: string;
   interpretation: string;
   onInterpretationChange: (value: string) => void;
   onInterpretationBlur: () => void;
@@ -38,6 +44,7 @@ export function InstrumentResultCard({
     request.instrumentType,
     Object.keys(request.responsesData)
   );
+  const resolvedInstruction = resolveInstructionText(request.instruction, childName);
 
   return (
     <div className="rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
@@ -48,6 +55,12 @@ export function InstrumentResultCard({
         <p className="mb-3 text-sm text-brand-neutral-black/60">
           Completed by {request.recipientName} ({RECIPIENT_ROLE_LABELS[request.recipientRole]})
         </p>
+      )}
+
+      {resolvedInstruction && (
+        <div className="mb-3 rounded-r-xl border-l-4 border-brand-golden-brown bg-brand-safe-ivory/30 p-3">
+          <p className="text-sm leading-relaxed text-brand-neutral-black">{resolvedInstruction}</p>
+        </div>
       )}
 
       {isLoading ? (

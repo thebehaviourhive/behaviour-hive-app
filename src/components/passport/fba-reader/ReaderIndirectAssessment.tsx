@@ -18,6 +18,7 @@ interface RequestRow {
   instrument_type: InstrumentRequestType;
   status: InstrumentRequestStatus;
   responses_data: InstrumentResponsesData;
+  instruction: string | null;
 }
 
 // Section 7 for the parent reader (Part C). Reads fba_instrument_requests
@@ -27,7 +28,16 @@ interface RequestRow {
 // parent caller anyway). No recipient-name resolution is available
 // outside that RPC, so results render without the "Completed by X"
 // attribution line -- a deliberate simplification, not a bug.
-export function ReaderIndirectAssessment({ fbaId, content }: { fbaId: string; content: FbaContentData }) {
+export function ReaderIndirectAssessment({
+  fbaId,
+  content,
+  childName,
+}: {
+  fbaId: string;
+  content: FbaContentData;
+  // Always the full name -- this reader is itself a clinical surface.
+  childName: string;
+}) {
   const [requests, setRequests] = useState<RequestRow[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -36,7 +46,7 @@ export function ReaderIndirectAssessment({ fbaId, content }: { fbaId: string; co
     const supabase = createClient();
     supabase
       .from("fba_instrument_requests")
-      .select("id, instrument_type, status, responses_data")
+      .select("id, instrument_type, status, responses_data, instruction")
       .eq("fba_id", fbaId)
       .eq("status", "completed")
       .then(({ data, error }) => {
@@ -82,10 +92,12 @@ export function ReaderIndirectAssessment({ fbaId, content }: { fbaId: string; co
                 recipientId: "",
                 status: request.status,
                 responsesData: request.responses_data,
+                instruction: request.instruction,
                 createdAt: "",
                 completedAt: null,
                 lastRemindedAt: null,
               }}
+              childName={childName}
               interpretation={content.instrumentInterpretations?.[request.id] ?? ""}
               onInterpretationChange={() => {}}
               onInterpretationBlur={() => {}}

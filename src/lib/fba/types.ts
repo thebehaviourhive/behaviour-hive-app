@@ -234,6 +234,11 @@ export interface FbaInstrumentRequest {
   recipientRole: RecipientRole;
   status: InstrumentRequestStatus;
   responsesData: InstrumentResponsesData;
+  // The per-send instruction line, verbatim as stored -- still carrying
+  // the literal "[child name]" token if present. Null for requests sent
+  // before this field existed. See resolveInstruction.ts for how every
+  // renderer turns this into display text.
+  instruction: string | null;
   createdAt: string;
   completedAt: string | null;
   lastRemindedAt: string | null;
@@ -258,6 +263,7 @@ export interface MyInstrumentRequest {
   status: InstrumentRequestStatus;
   childName: string;
   clinicianName: string;
+  instruction: string | null;
   createdAt: string;
 }
 

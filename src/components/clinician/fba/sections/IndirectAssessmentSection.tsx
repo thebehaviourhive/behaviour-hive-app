@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { createClient } from "@/lib/supabase/client";
 import { useFbaInstrumentRequests } from "@/hooks/useFbaInstrumentRequests";
 import { NarrativeField } from "../NarrativeField";
 import { InlineErrorState } from "@/components/ui/InlineErrorState";
@@ -25,6 +26,28 @@ export function IndirectAssessmentSection({
     useFbaInstrumentRequests(fbaId, passportId);
 
   const [isSheetOpen, setIsSheetOpen] = useState(false);
+  // Self-fetched, matching the pattern already established elsewhere in
+  // this module (e.g. ReviewSection) -- needed only to resolve the
+  // instruction line's "[child name]" token on clinician-facing result
+  // cards, which always show the full name (never the teacher-shortened
+  // form, since this is a clinical surface).
+  const [childName, setChildName] = useState<string | null>(null);
+
+  useEffect(() => {
+    let isMounted = true;
+    const supabase = createClient();
+    supabase
+      .from("passports")
+      .select("child_name")
+      .eq("id", passportId)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (isMounted) setChildName(data?.child_name ?? null);
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, [passportId]);
 
   // Denormalizes a summary of the request list into content_data
   // whenever it genuinely changes, so getSectionCompleteness (a pure
@@ -190,6 +213,7 @@ export function IndirectAssessmentSection({
             <InstrumentResultCard
               key={request.id}
               request={request}
+              childName={childName ?? "the child"}
               interpretation={content.instrumentInterpretations?.[request.id] ?? ""}
               onInterpretationChange={(value) => updateInterpretation(request.id, value)}
               onInterpretationBlur={onFieldBlur}

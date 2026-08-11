@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/client";
 import { insertWithOfflineRetry } from "@/lib/waitForReconnect";
 import { useInstrumentItems } from "@/hooks/useInstrumentItems";
 import { getChildDisplayName } from "@/lib/childDisplayName";
+import { resolveInstructionText } from "@/lib/fba/resolveInstruction";
 import { INSTRUMENT_LABELS, type InstrumentResponsesData, type MyInstrumentRequest } from "@/lib/fba/types";
 
 // The Name/Date header block's two fields (MAS and, per this brief,
@@ -17,18 +18,20 @@ import { INSTRUMENT_LABELS, type InstrumentResponsesData, type MyInstrumentReque
 const HEADER_KEYS = { name: "header-name", date: "header-date" } as const;
 
 // The QABF's real scale is ['X','0','1','2','3'] -- stored values, not
-// display labels. This maps each numeric option to the friendlier
-// wording from the brief for the completion screen only; the X option
-// gets its own dedicated "Doesn't apply" treatment below rather than
-// going through this map. Any future instrument sharing this exact
-// scale shape gets the same wording; anything else falls back to its
-// own raw scale label unchanged.
+// display labels. Respondents see ONLY the written label, never the
+// stored value itself -- no "0 —", "1 —", "X —" prefix -- the number/
+// letter is a clinical scoring detail that belongs on clinician-facing
+// surfaces (results, charts, the report), not in front of the person
+// answering. The X option gets its own dedicated "Doesn't apply"
+// treatment below rather than going through this map. Any future
+// instrument sharing this exact scale shape gets the same wording;
+// anything else falls back to its own raw scale label unchanged.
 const EXCLUDED_ANSWER = "X";
 const NUMERIC_SCALE_LABELS: Record<string, string> = {
-  "0": "0 — Never",
-  "1": "1 — Rarely",
-  "2": "2 — Sometimes",
-  "3": "3 — Often",
+  "0": "Never",
+  "1": "Rarely",
+  "2": "Sometimes",
+  "3": "Often",
 };
 
 // The recipient's blind completion flow. Full-screen, not a bottom
@@ -150,14 +153,6 @@ export function QuestionnaireFlow({
     : 0;
   const allAnswered = totalItems > 0 && answeredCount === totalItems;
 
-  // Precomputes category-heading boundaries by comparing each item to
-  // its predecessor in the array, rather than mutating a running
-  // "lastCategory" variable during render.
-  const itemsWithHeadings = (items ?? []).map((item, index) => ({
-    item,
-    showHeading: Boolean(item.category) && item.category !== items?.[index - 1]?.category,
-  }));
-
   async function persist(status: "in_progress" | "completed"): Promise<string | null> {
     abortRef.current?.abort();
     const controller = new AbortController();
@@ -200,6 +195,9 @@ export function QuestionnaireFlow({
   }
 
   const childLabel = track === "teacher" ? getChildDisplayName(request.childName) : request.childName;
+  // The respondent's own name-display rule -- a teacher recipient gets
+  // the same shortened form here as everywhere else on their track.
+  const resolvedInstruction = resolveInstructionText(request.instruction, childLabel);
 
   if (isLoadingItems || isLoadingExisting) {
     return (
@@ -269,6 +267,12 @@ export function QuestionnaireFlow({
 
       <main className="flex-1 overflow-y-auto px-4 py-5">
         <div className="flex flex-col gap-6">
+          {resolvedInstruction && (
+            <div className="rounded-r-xl border-l-4 border-brand-golden-brown bg-brand-safe-ivory/30 p-4">
+              <p className="text-sm leading-relaxed text-brand-neutral-black">{resolvedInstruction}</p>
+            </div>
+          )}
+
           {hasHeaderBlock && (
             <div className="flex flex-col gap-4 rounded-2xl border border-black/10 bg-brand-off-white/40 p-4">
               <div>
@@ -298,13 +302,14 @@ export function QuestionnaireFlow({
             </div>
           )}
 
-          {itemsWithHeadings.map(({ item, showHeading }) => (
+          {/* No category heading, on purpose -- revealing which
+              function (Attention/Escape/...) an item measures would
+              prime the respondent and undermine the instrument's
+              validity. Items render in plain numbered-item-bank order;
+              categories still exist on every item for scoring, they're
+              just never SHOWN here. */}
+          {(items ?? []).map((item) => (
             <div key={item.id}>
-              {showHeading && (
-                <p className="mb-3 font-accent text-xs font-bold uppercase tracking-wide text-brand-neutral-black/40">
-                  {item.category}
-                </p>
-              )}
               <p className="mb-3 text-base font-medium text-brand-neutral-black">{item.text}</p>
               {item.answer_type === "free_text" ? (
                 <textarea
@@ -349,7 +354,7 @@ export function QuestionnaireFlow({
                           : "border-black/15 text-brand-neutral-black/50"
                       }`}
                     >
-                      X — Doesn&apos;t apply
+                      Doesn&apos;t apply
                     </button>
                   )}
                 </div>

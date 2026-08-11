@@ -98,6 +98,7 @@ export default function FbaReaderPage() {
               fbaId={fbaId}
               report={report}
               afls={afls}
+              childName={childName}
               // Bumped from scroll-mt-32: the sticky header is now
               // taller (back+title row + bubble row + the new sticky
               // title strip), so a plain-anchor or bubble-tap scroll

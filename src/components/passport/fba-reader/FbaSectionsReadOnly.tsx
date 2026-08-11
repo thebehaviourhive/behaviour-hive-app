@@ -29,12 +29,18 @@ export function FbaSectionsReadOnly({
   fbaId,
   report,
   afls,
+  childName,
   sectionClassName,
   isPrint = false,
 }: {
   fbaId: string;
   report: FbaReport;
   afls: FbaAflsData | null;
+  // Always the full name -- both callers (parent reader, print) are
+  // clinical-adjacent surfaces per the instruction-line brief, never
+  // the teacher-shortened form. Nullable only because the caller's own
+  // fetch may not have resolved yet.
+  childName: string | null;
   sectionClassName?: string;
   // Selects the AFLS results variant (print figure/table vs. the digital
   // stacked-bar/accordion) -- see AflsResultsView for the 375px
@@ -98,7 +104,11 @@ export function FbaSectionsReadOnly({
             />
           )}
           {section.kind === "indirectAssessment" && (
-            <ReaderIndirectAssessment fbaId={fbaId} content={report.contentData} />
+            <ReaderIndirectAssessment
+              fbaId={fbaId}
+              content={report.contentData}
+              childName={childName ?? "the child"}
+            />
           )}
           {section.kind === "directAssessment" && (
             <DirectAssessmentSection
