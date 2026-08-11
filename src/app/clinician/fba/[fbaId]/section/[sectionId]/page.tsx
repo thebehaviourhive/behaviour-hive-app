@@ -16,6 +16,7 @@ import { TriggersSettingEventsSection } from "@/components/clinician/fba/section
 import { IndirectAssessmentSection } from "@/components/clinician/fba/sections/IndirectAssessmentSection";
 import { DirectAssessmentSection } from "@/components/clinician/fba/sections/DirectAssessmentSection";
 import { AflsSection } from "@/components/clinician/fba/sections/AflsSection";
+import { AflsResultsView } from "@/components/clinician/fba/afls-results/AflsResultsView";
 import { RecommendationsSection } from "@/components/clinician/fba/sections/RecommendationsSection";
 import { ConclusionSection } from "@/components/clinician/fba/sections/ConclusionSection";
 import { ReviewSection } from "@/components/clinician/fba/sections/ReviewSection";
@@ -272,16 +273,22 @@ export default function FbaSectionEditorPage() {
               readOnly={readOnly}
             />
           )}
-          {section.kind === "afls" && (
-            <AflsSection
-              scoresData={aflsScores}
-              summary={aflsSummary}
-              onScoreChange={handleAflsScoreChange}
-              onSummaryChange={handleAflsSummaryChange}
-              onSummaryBlur={handleAflsSummaryBlur}
-              readOnly={readOnly}
-            />
-          )}
+          {section.kind === "afls" &&
+            (readOnly ? (
+              // Locked FBA: the new results display (honeycomb/
+              // stacked-bar + accordion breakdown), same as the parent
+              // reader -- not the scoring tool's disabled-button view.
+              <AflsResultsView scoresData={aflsScores} summary={aflsSummary} variant="digital" />
+            ) : (
+              <AflsSection
+                scoresData={aflsScores}
+                summary={aflsSummary}
+                onScoreChange={handleAflsScoreChange}
+                onSummaryChange={handleAflsSummaryChange}
+                onSummaryBlur={handleAflsSummaryBlur}
+                readOnly={readOnly}
+              />
+            ))}
           {section.kind === "recommendations" && (
             <RecommendationsSection
               content={content}

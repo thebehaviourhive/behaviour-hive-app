@@ -5,7 +5,7 @@ import { AssessmentMethodsSection } from "@/components/clinician/fba/sections/As
 import { TargetBehavioursSection } from "@/components/clinician/fba/sections/TargetBehavioursSection";
 import { TriggersSettingEventsSection } from "@/components/clinician/fba/sections/TriggersSettingEventsSection";
 import { DirectAssessmentSection } from "@/components/clinician/fba/sections/DirectAssessmentSection";
-import { AflsSection } from "@/components/clinician/fba/sections/AflsSection";
+import { AflsResultsView } from "@/components/clinician/fba/afls-results/AflsResultsView";
 import { RecommendationsSection } from "@/components/clinician/fba/sections/RecommendationsSection";
 import { ConclusionSection } from "@/components/clinician/fba/sections/ConclusionSection";
 import { ReviewSection } from "@/components/clinician/fba/sections/ReviewSection";
@@ -30,16 +30,16 @@ export function FbaSectionsReadOnly({
   report,
   afls,
   sectionClassName,
-  forceAflsExpanded = false,
+  isPrint = false,
 }: {
   fbaId: string;
   report: FbaReport;
   afls: FbaAflsData | null;
   sectionClassName?: string;
-  // The print view has no interactivity to expand an AFLS domain with --
-  // every domain must render open, or its items would simply be absent
-  // from the document.
-  forceAflsExpanded?: boolean;
+  // Selects the AFLS results variant (print figure/table vs. the digital
+  // stacked-bar/accordion) -- see AflsResultsView for the 375px
+  // reasoning behind that split.
+  isPrint?: boolean;
 }) {
   return (
     <>
@@ -111,14 +111,10 @@ export function FbaSectionsReadOnly({
             />
           )}
           {section.kind === "afls" && (
-            <AflsSection
+            <AflsResultsView
               scoresData={afls?.scoresData ?? {}}
-              summary={afls?.summary ?? ""}
-              onScoreChange={() => {}}
-              onSummaryChange={() => {}}
-              onSummaryBlur={() => {}}
-              readOnly
-              forceExpanded={forceAflsExpanded}
+              summary={afls?.summary ?? null}
+              variant={isPrint ? "print" : "digital"}
             />
           )}
           {section.kind === "recommendations" && (

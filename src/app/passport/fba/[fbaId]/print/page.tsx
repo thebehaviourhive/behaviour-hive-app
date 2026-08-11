@@ -176,7 +176,7 @@ export default function FbaPrintPage() {
             report={report}
             afls={afls}
             sectionClassName="print-avoid-break"
-            forceAflsExpanded
+            isPrint
           />
         </div>
 
