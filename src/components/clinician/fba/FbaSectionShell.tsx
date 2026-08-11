@@ -13,7 +13,10 @@ export function FbaSectionShell({
   sectionNumber,
   onBack,
   saveStatus,
+  isDirty,
+  hasLoaded,
   saveError,
+  onFlushSave,
   onCancelSave,
   readOnly,
   children,
@@ -22,7 +25,10 @@ export function FbaSectionShell({
   sectionNumber: number;
   onBack: () => void;
   saveStatus: SaveStatus;
+  isDirty: boolean;
+  hasLoaded: boolean;
   saveError: string | null;
+  onFlushSave: () => void;
   onCancelSave: () => void;
   readOnly: boolean;
   children: ReactNode;
@@ -50,7 +56,14 @@ export function FbaSectionShell({
               Read-only
             </span>
           ) : (
-            <SavedStateIndicator status={saveStatus} error={saveError} onCancel={onCancelSave} />
+            <SavedStateIndicator
+              status={saveStatus}
+              isDirty={isDirty}
+              hasLoaded={hasLoaded}
+              error={saveError}
+              onFlush={onFlushSave}
+              onCancel={onCancelSave}
+            />
           )}
         </div>
       </header>

@@ -35,31 +35,69 @@ export default function FbaSectionEditorPage() {
   const [aflsSummary, setAflsSummary] = useState("");
   const abortRef = useRef<AbortController | null>(null);
 
-  // Seeds local editable state from the loaded report/AFLS row -- a
-  // genuine sync-from-external-source effect (the fetch itself lives in
-  // useFbaReport), not a derivation that belongs in render.
+  // Single source of truth for the save icon's unsaved/saved split,
+  // independent of (but reconciled against) the hook's own saveStatus.
+  // changeVersionRef bumps on every keystroke/selection/structural
+  // edit/AFLS tap; a save "counts" as catching up to the latest change
+  // only if no newer edit landed while it was in flight -- otherwise a
+  // stale save resolving successfully would wrongly flip the icon green
+  // while a fresher, still-unsaved edit sits on screen.
+  const changeVersionRef = useRef(0);
+  const versionAtSaveStartRef = useRef(0);
+  const [isDirty, setIsDirty] = useState(false);
+
+  // Seeds local editable state from the loaded report/AFLS row exactly
+  // ONCE per mount, not on every `report`/`afls` change -- both
+  // saveContent and saveAfls create a NEW report/afls object on every
+  // successful save (that's how the hook reflects the write back), which
+  // would otherwise re-fire this effect and stomp local state with the
+  // (now slightly stale) content that was actually sent, discarding any
+  // edit made in the gap between kicking the save off and it resolving.
+  // A genuine reload (e.g. after finalizing) doesn't need this to
+  // re-seed either -- the section becomes read-only at that point, so
+  // local editable state is moot.
+  const hasSeededReportRef = useRef(false);
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (report) setContent(report.contentData);
+    if (report && !hasSeededReportRef.current) {
+      hasSeededReportRef.current = true;
+      setContent(report.contentData);
+    }
   }, [report]);
 
+  const hasSeededAflsRef = useRef(false);
   useEffect(() => {
-    if (afls) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (afls && !hasSeededAflsRef.current) {
+      hasSeededAflsRef.current = true;
       setAflsScores(afls.scoresData);
       setAflsSummary(afls.summary ?? "");
     }
   }, [afls]);
 
+  // A save only gets to clear isDirty if nothing changed while it was in
+  // flight -- otherwise a slow save resolving after a newer keystroke
+  // would wrongly flip the icon green over a fresher unsaved edit.
+  useEffect(() => {
+    if (saveStatus === "saved" && versionAtSaveStartRef.current === changeVersionRef.current) {
+      setIsDirty(false);
+    }
+  }, [saveStatus]);
+
+  function markChanged() {
+    changeVersionRef.current += 1;
+    setIsDirty(true);
+  }
+
   function triggerSave(next: FbaContentData) {
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
+    versionAtSaveStartRef.current = changeVersionRef.current;
     saveContent(next, controller);
   }
 
   function handleFieldChange(next: FbaContentData) {
     setContent(next);
+    markChanged();
   }
 
   function handleFieldBlur() {
@@ -68,6 +106,7 @@ export default function FbaSectionEditorPage() {
 
   function handleStructuralChange(next: FbaContentData) {
     setContent(next);
+    markChanged();
     triggerSave(next);
   }
 
@@ -75,6 +114,7 @@ export default function FbaSectionEditorPage() {
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
+    versionAtSaveStartRef.current = changeVersionRef.current;
     saveAfls(scores, summaryValue.trim() ? summaryValue : null, controller);
   }
 
@@ -85,15 +125,31 @@ export default function FbaSectionEditorPage() {
       : [...existing, { itemId, score }];
     const next = { ...aflsScores, [domain]: nextDomainScores };
     setAflsScores(next);
+    markChanged();
     triggerAflsSave(next, aflsSummary);
   }
 
   function handleAflsSummaryChange(value: string) {
     setAflsSummary(value);
+    markChanged();
   }
 
   function handleAflsSummaryBlur() {
     triggerAflsSave(aflsScores, aflsSummary);
+  }
+
+  // The save icon's tap target: flushes whatever's pending through the
+  // exact same save path a blur/structural edit would use. Local
+  // `content`/`aflsScores`/`aflsSummary` already reflect every keystroke
+  // (onChange, not onBlur, is what updates them), so this genuinely
+  // covers a currently-focused, not-yet-blurred field too -- there's no
+  // separate "flush" data path to keep in sync with the real one.
+  function handleFlushSave() {
+    if (section?.kind === "afls") {
+      triggerAflsSave(aflsScores, aflsSummary);
+    } else {
+      triggerSave(content);
+    }
   }
 
   function handleBack() {
@@ -130,7 +186,10 @@ export default function FbaSectionEditorPage() {
       sectionNumber={section.number}
       onBack={handleBack}
       saveStatus={saveStatus}
+      isDirty={isDirty}
+      hasLoaded={!!report}
       saveError={saveError}
+      onFlushSave={handleFlushSave}
       onCancelSave={handleCancelSave}
       readOnly={readOnly}
     >
