@@ -7,6 +7,16 @@ import { useInstrumentItems } from "@/hooks/useInstrumentItems";
 import { getChildDisplayName } from "@/lib/childDisplayName";
 import { INSTRUMENT_LABELS, type InstrumentResponsesData, type MyInstrumentRequest } from "@/lib/fba/types";
 
+// The MAS header block's two fields, stored as two extra keys inside the
+// same responses_data blob as the 16 real items -- deliberately
+// namespaced so they can never collide with a real item id ("mas-1"
+// .."mas-16"). instrumentScoring.ts only ever looks up responses by
+// iterating the ITEM BANK, never the other way round, so these two
+// extra keys are simply invisible to scoring -- no scoring-code change
+// needed. MAS-only, per the brief; not a generic per-instrument header
+// mechanism.
+const MAS_HEADER_KEYS = { name: "mas-header-name", date: "mas-header-date" } as const;
+
 // The recipient's blind completion flow. Full-screen, not a bottom
 // sheet -- deliberately distinct from ABCLogger's 85vh sheet, since the
 // brief calls for "clean, distraction-free" and this can run to 25
@@ -59,6 +69,34 @@ export function QuestionnaireFlow({
       isMounted = false;
     };
   }, [request.id]);
+
+  // MAS-only: pre-fills the header block's Name/Date once the recipient's
+  // saved progress has actually loaded (so resuming an in-progress MAS
+  // never overwrites what they already typed there) -- `?? ` in the
+  // merge below only fills a key that's genuinely absent, not one the
+  // recipient has since cleared to an empty string.
+  const hasPrefilledHeaderRef = useRef(false);
+  useEffect(() => {
+    if (isLoadingExisting || hasPrefilledHeaderRef.current) return;
+    hasPrefilledHeaderRef.current = true;
+    if (request.instrumentType !== "mas") return;
+
+    let isMounted = true;
+    const supabase = createClient();
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (!isMounted) return;
+      const fullName = (user?.user_metadata?.full_name as string | undefined) ?? "";
+      const today = new Date().toISOString().slice(0, 10);
+      setAnswers((prev) => ({
+        ...prev,
+        [MAS_HEADER_KEYS.name]: prev[MAS_HEADER_KEYS.name] ?? fullName,
+        [MAS_HEADER_KEYS.date]: prev[MAS_HEADER_KEYS.date] ?? today,
+      }));
+    });
+    return () => {
+      isMounted = false;
+    };
+  }, [isLoadingExisting, request.instrumentType]);
 
   // Body scroll lock for the lifetime of this full-screen takeover --
   // same idiom as ABCLogger, including the iOS Safari rubber-band fix.
@@ -214,6 +252,35 @@ export function QuestionnaireFlow({
 
       <main className="flex-1 overflow-y-auto px-4 py-5">
         <div className="flex flex-col gap-6">
+          {request.instrumentType === "mas" && (
+            <div className="flex flex-col gap-4 rounded-2xl border border-black/10 bg-brand-off-white/40 p-4">
+              <div>
+                <label htmlFor="mas-header-name" className="mb-1.5 block text-sm font-semibold text-brand-neutral-black">
+                  Name
+                </label>
+                <input
+                  id="mas-header-name"
+                  type="text"
+                  value={answers[MAS_HEADER_KEYS.name] ?? ""}
+                  onChange={(e) => setAnswer(MAS_HEADER_KEYS.name, e.target.value)}
+                  className="w-full rounded-2xl border border-black/10 bg-white px-4 py-3.5 text-base text-brand-neutral-black focus:border-brand-prussian-blue focus:outline-none focus:ring-2 focus:ring-brand-pastel-blue"
+                />
+              </div>
+              <div>
+                <label htmlFor="mas-header-date" className="mb-1.5 block text-sm font-semibold text-brand-neutral-black">
+                  Date
+                </label>
+                <input
+                  id="mas-header-date"
+                  type="date"
+                  value={answers[MAS_HEADER_KEYS.date] ?? ""}
+                  onChange={(e) => setAnswer(MAS_HEADER_KEYS.date, e.target.value)}
+                  className="w-full rounded-2xl border border-black/10 bg-white px-4 py-3.5 text-base text-brand-neutral-black focus:border-brand-prussian-blue focus:outline-none focus:ring-2 focus:ring-brand-pastel-blue"
+                />
+              </div>
+            </div>
+          )}
+
           {itemsWithHeadings.map(({ item, showHeading }) => (
             <div key={item.id}>
               {showHeading && (
