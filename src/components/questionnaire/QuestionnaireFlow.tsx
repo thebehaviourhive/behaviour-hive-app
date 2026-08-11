@@ -7,15 +7,29 @@ import { useInstrumentItems } from "@/hooks/useInstrumentItems";
 import { getChildDisplayName } from "@/lib/childDisplayName";
 import { INSTRUMENT_LABELS, type InstrumentResponsesData, type MyInstrumentRequest } from "@/lib/fba/types";
 
-// The MAS header block's two fields, stored as two extra keys inside the
-// same responses_data blob as the 16 real items -- deliberately
-// namespaced so they can never collide with a real item id ("mas-1"
-// .."mas-16"). instrumentScoring.ts only ever looks up responses by
-// iterating the ITEM BANK, never the other way round, so these two
-// extra keys are simply invisible to scoring -- no scoring-code change
-// needed. MAS-only, per the brief; not a generic per-instrument header
-// mechanism.
-const MAS_HEADER_KEYS = { name: "mas-header-name", date: "mas-header-date" } as const;
+// The Name/Date header block's two fields (MAS and, per this brief,
+// QABF too), stored as two extra keys inside the same responses_data
+// blob as the real items -- deliberately namespaced so they can never
+// collide with a real item id ("mas-1".."mas-16", "qabf-1".."qabf-25").
+// instrumentScoring.ts only ever looks up responses by iterating the
+// ITEM BANK, never the other way round, so these two extra keys are
+// simply invisible to scoring -- no scoring-code change needed.
+const HEADER_KEYS = { name: "header-name", date: "header-date" } as const;
+
+// The QABF's real scale is ['X','0','1','2','3'] -- stored values, not
+// display labels. This maps each numeric option to the friendlier
+// wording from the brief for the completion screen only; the X option
+// gets its own dedicated "Doesn't apply" treatment below rather than
+// going through this map. Any future instrument sharing this exact
+// scale shape gets the same wording; anything else falls back to its
+// own raw scale label unchanged.
+const EXCLUDED_ANSWER = "X";
+const NUMERIC_SCALE_LABELS: Record<string, string> = {
+  "0": "0 — Never",
+  "1": "1 — Rarely",
+  "2": "2 — Sometimes",
+  "3": "3 — Often",
+};
 
 // The recipient's blind completion flow. Full-screen, not a bottom
 // sheet -- deliberately distinct from ABCLogger's 85vh sheet, since the
@@ -70,16 +84,19 @@ export function QuestionnaireFlow({
     };
   }, [request.id]);
 
-  // MAS-only: pre-fills the header block's Name/Date once the recipient's
-  // saved progress has actually loaded (so resuming an in-progress MAS
-  // never overwrites what they already typed there) -- `?? ` in the
-  // merge below only fills a key that's genuinely absent, not one the
-  // recipient has since cleared to an empty string.
+  const hasHeaderBlock = request.instrumentType === "mas" || request.instrumentType === "qabf";
+
+  // MAS/QABF only: pre-fills the header block's Name/Date once the
+  // recipient's saved progress has actually loaded (so resuming an
+  // in-progress questionnaire never overwrites what they already typed
+  // there) -- `?? ` in the merge below only fills a key that's
+  // genuinely absent, not one the recipient has since cleared to an
+  // empty string.
   const hasPrefilledHeaderRef = useRef(false);
   useEffect(() => {
     if (isLoadingExisting || hasPrefilledHeaderRef.current) return;
     hasPrefilledHeaderRef.current = true;
-    if (request.instrumentType !== "mas") return;
+    if (!hasHeaderBlock) return;
 
     let isMounted = true;
     const supabase = createClient();
@@ -89,14 +106,14 @@ export function QuestionnaireFlow({
       const today = new Date().toISOString().slice(0, 10);
       setAnswers((prev) => ({
         ...prev,
-        [MAS_HEADER_KEYS.name]: prev[MAS_HEADER_KEYS.name] ?? fullName,
-        [MAS_HEADER_KEYS.date]: prev[MAS_HEADER_KEYS.date] ?? today,
+        [HEADER_KEYS.name]: prev[HEADER_KEYS.name] ?? fullName,
+        [HEADER_KEYS.date]: prev[HEADER_KEYS.date] ?? today,
       }));
     });
     return () => {
       isMounted = false;
     };
-  }, [isLoadingExisting, request.instrumentType]);
+  }, [isLoadingExisting, hasHeaderBlock]);
 
   // Body scroll lock for the lifetime of this full-screen takeover --
   // same idiom as ABCLogger, including the iOS Safari rubber-band fix.
@@ -252,29 +269,29 @@ export function QuestionnaireFlow({
 
       <main className="flex-1 overflow-y-auto px-4 py-5">
         <div className="flex flex-col gap-6">
-          {request.instrumentType === "mas" && (
+          {hasHeaderBlock && (
             <div className="flex flex-col gap-4 rounded-2xl border border-black/10 bg-brand-off-white/40 p-4">
               <div>
-                <label htmlFor="mas-header-name" className="mb-1.5 block text-sm font-semibold text-brand-neutral-black">
+                <label htmlFor="header-name" className="mb-1.5 block text-sm font-semibold text-brand-neutral-black">
                   Name
                 </label>
                 <input
-                  id="mas-header-name"
+                  id="header-name"
                   type="text"
-                  value={answers[MAS_HEADER_KEYS.name] ?? ""}
-                  onChange={(e) => setAnswer(MAS_HEADER_KEYS.name, e.target.value)}
+                  value={answers[HEADER_KEYS.name] ?? ""}
+                  onChange={(e) => setAnswer(HEADER_KEYS.name, e.target.value)}
                   className="w-full rounded-2xl border border-black/10 bg-white px-4 py-3.5 text-base text-brand-neutral-black focus:border-brand-prussian-blue focus:outline-none focus:ring-2 focus:ring-brand-pastel-blue"
                 />
               </div>
               <div>
-                <label htmlFor="mas-header-date" className="mb-1.5 block text-sm font-semibold text-brand-neutral-black">
+                <label htmlFor="header-date" className="mb-1.5 block text-sm font-semibold text-brand-neutral-black">
                   Date
                 </label>
                 <input
-                  id="mas-header-date"
+                  id="header-date"
                   type="date"
-                  value={answers[MAS_HEADER_KEYS.date] ?? ""}
-                  onChange={(e) => setAnswer(MAS_HEADER_KEYS.date, e.target.value)}
+                  value={answers[HEADER_KEYS.date] ?? ""}
+                  onChange={(e) => setAnswer(HEADER_KEYS.date, e.target.value)}
                   className="w-full rounded-2xl border border-black/10 bg-white px-4 py-3.5 text-base text-brand-neutral-black focus:border-brand-prussian-blue focus:outline-none focus:ring-2 focus:ring-brand-pastel-blue"
                 />
               </div>
@@ -299,20 +316,42 @@ export function QuestionnaireFlow({
                 />
               ) : (
                 <div className="flex flex-col gap-2">
-                  {(item.scale ?? []).map((option) => (
+                  {(item.scale ?? [])
+                    .filter((option) => option !== EXCLUDED_ANSWER)
+                    .map((option) => (
+                      <button
+                        key={option}
+                        type="button"
+                        onClick={() => setAnswer(item.id, option)}
+                        className={`w-full rounded-2xl border py-3.5 text-base font-semibold transition-colors ${
+                          answers[item.id] === option
+                            ? "border-brand-prussian-blue bg-brand-pastel-blue/30 text-brand-prussian-blue"
+                            : "border-black/10 bg-white text-brand-neutral-black"
+                        }`}
+                      >
+                        {NUMERIC_SCALE_LABELS[option] ?? option}
+                      </button>
+                    ))}
+
+                  {/* The X/"doesn't apply" option, when the scale has
+                      one -- visually separated (extra top margin) and
+                      styled distinctly from the numeric options
+                      (dashed border, muted/amber instead of filled), so
+                      it never reads as just another point on the same
+                      scale. */}
+                  {(item.scale ?? []).includes(EXCLUDED_ANSWER) && (
                     <button
-                      key={option}
                       type="button"
-                      onClick={() => setAnswer(item.id, option)}
-                      className={`w-full rounded-2xl border py-3.5 text-base font-semibold transition-colors ${
-                        answers[item.id] === option
-                          ? "border-brand-prussian-blue bg-brand-pastel-blue/30 text-brand-prussian-blue"
-                          : "border-black/10 bg-white text-brand-neutral-black"
+                      onClick={() => setAnswer(item.id, EXCLUDED_ANSWER)}
+                      className={`mt-1 w-full rounded-2xl border-2 border-dashed py-3 text-sm font-semibold transition-colors ${
+                        answers[item.id] === EXCLUDED_ANSWER
+                          ? "border-brand-golden-brown bg-brand-golden-brown/10 text-brand-golden-brown"
+                          : "border-black/15 text-brand-neutral-black/50"
                       }`}
                     >
-                      {option}
+                      X — Doesn&apos;t apply
                     </button>
-                  ))}
+                  )}
                 </div>
               )}
             </div>

@@ -95,13 +95,21 @@ function ScoredResults({
   request: InstrumentResultRequest;
 }) {
   const totals = scoreInstrumentByCategory(items, request.responsesData);
-  const maxes = getCategoryMaxScores(items);
-  const categories = Object.keys(maxes);
+  const maxes = getCategoryMaxScores(items, request.responsesData);
+  // From the item bank's own category order, not maxes' keys -- an
+  // all-'X' category (every item excluded) never gets a maxes entry at
+  // all, but it still needs to appear in the table as "Not applicable"
+  // rather than silently vanishing.
+  const categories = Array.from(new Set(items.map((item) => item.category).filter((c): c is string => Boolean(c))));
+  // Never a zero bar for an all-'X' category -- omitted from the chart
+  // entirely rather than rendered as an empty/zero-width bar that would
+  // read as "scored zero", which is a different, false claim.
+  const chartCategories = categories.filter((category) => (maxes[category] ?? 0) > 0);
 
   return (
     <div>
       <HorizontalBarChart
-        bars={categories.map((category) => ({
+        bars={chartCategories.map((category) => ({
           label: category,
           value: totals[category] ?? 0,
           max: maxes[category],
@@ -116,14 +124,21 @@ function ScoredResults({
             </tr>
           </thead>
           <tbody>
-            {categories.map((category) => (
-              <tr key={category} className="border-t border-black/5">
-                <td className="px-3 py-2 text-brand-neutral-black">{category}</td>
-                <td className="px-3 py-2 text-right font-semibold text-brand-neutral-black">
-                  {totals[category] ?? 0} / {maxes[category]}
-                </td>
-              </tr>
-            ))}
+            {categories.map((category) => {
+              const isNotApplicable = !(category in maxes);
+              return (
+                <tr key={category} className="border-t border-black/5">
+                  <td className="px-3 py-2 text-brand-neutral-black">{category}</td>
+                  <td className="px-3 py-2 text-right font-semibold text-brand-neutral-black">
+                    {isNotApplicable ? (
+                      <span className="font-medium italic text-brand-neutral-black/50">Not applicable</span>
+                    ) : (
+                      `${totals[category] ?? 0} / ${maxes[category]}`
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
