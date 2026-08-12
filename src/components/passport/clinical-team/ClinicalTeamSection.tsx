@@ -1,4 +1,5 @@
 import { format } from "date-fns";
+import { formatClinicianReference } from "@/lib/clinicianDisplayName";
 import { SOURCE_DOCUMENT_LABELS, type ClinicalContentItem } from "@/lib/passportClinicalContent";
 
 export type ClinicalTeamViewerRole = "parent" | "teacher" | "clinician";
@@ -10,18 +11,29 @@ function AttributionLine({
   item: ClinicalContentItem;
   viewerRole: ClinicalTeamViewerRole;
 }) {
-  const authorName = item.authorName ?? "Your Clinical Team";
+  // Every author here is a clinician (the table's only writer is
+  // approve_fba_strategies, always author_role = 'clinician') -- the
+  // formal "[Full name], [Specialty]" reference is correct for both
+  // tracks below; there's no repeat-mention case on this surface, each
+  // item card shows its own attribution once. Specialty is a
+  // professional credential, not clinical/diagnostic information about
+  // the child, so surfacing it to teachers alongside the name they
+  // already see here leaks nothing new.
+  const authorReference = item.authorName
+    ? formatClinicianReference(item.authorName, item.authorSpecialty)
+    : "Your Clinical Team";
 
-  // Confirmed decision: teachers get name only -- no source label, no
-  // date, nothing that points toward the underlying document existing.
+  // Confirmed decision: teachers get name (+ specialty) only -- no
+  // source label, no date, nothing that points toward the underlying
+  // document existing.
   if (viewerRole === "teacher") {
-    return <p className="mt-1.5 text-xs text-brand-neutral-black/40">From {authorName}</p>;
+    return <p className="mt-1.5 text-xs text-brand-neutral-black/40">From {authorReference}</p>;
   }
 
   const sourceLabel = SOURCE_DOCUMENT_LABELS[item.sourceDocumentType] ?? "Clinical Record";
   return (
     <p className="mt-1.5 text-xs text-brand-neutral-black/40">
-      From {sourceLabel} · {authorName} · {format(new Date(item.createdAt), "d MMM yyyy")}
+      From {sourceLabel} · {authorReference} · {format(new Date(item.createdAt), "d MMM yyyy")}
     </p>
   );
 }

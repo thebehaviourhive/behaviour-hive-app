@@ -78,7 +78,7 @@ async function main() {
   console.log("== Auth users ==");
   const clinician = await createUser({
     email: "fbatest.clinician@thebehaviourhive.com",
-    fullName: "Dr. Fiona Clarke",
+    fullName: "Fiona Clarke",
     role: "clinician",
   });
   const teacher = await createUser({
@@ -100,7 +100,7 @@ async function main() {
       user_id: clinician.id,
       specialty: "behavioural_psychologist",
       verification_status: "verified",
-      full_name: "Dr. Fiona Clarke",
+      full_name: "Fiona Clarke",
       review_cadence_days: 30,
     },
     "user_id"

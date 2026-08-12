@@ -6,6 +6,7 @@ import { insertWithOfflineRetry } from "@/lib/waitForReconnect";
 import { useInstrumentItems } from "@/hooks/useInstrumentItems";
 import { getChildDisplayName } from "@/lib/childDisplayName";
 import { resolveInstructionText } from "@/lib/fba/resolveInstruction";
+import { logActivity } from "@/lib/logActivity";
 import { INSTRUMENT_LABELS, type InstrumentResponsesData, type MyInstrumentRequest } from "@/lib/fba/types";
 
 // The Name/Date header block's two fields (MAS and, per this brief,
@@ -190,6 +191,29 @@ export function QuestionnaireFlow({
       setSaveError(error);
       return;
     }
+
+    // Clinician-feed-only (see the visibility matrix, migration 0049) --
+    // the actor here is this respondent (parent/teacher), not the
+    // clinician, but the clinician's own feed query scopes by which
+    // passports THEY have access to, not by actor, so this still
+    // reaches them. passport_id isn't on MyInstrumentRequest, so it's
+    // read directly off this respondent's own row -- covered by the
+    // same unconditional SELECT policy that already loads their saved
+    // progress above.
+    const supabase = createClient();
+    const [{ data: { user } }, { data: requestRow }] = await Promise.all([
+      supabase.auth.getUser(),
+      supabase.from("fba_instrument_requests").select("passport_id").eq("id", request.id).maybeSingle(),
+    ]);
+    if (user && requestRow?.passport_id) {
+      logActivity({
+        passportId: requestRow.passport_id,
+        actorId: user.id,
+        eventType: "questionnaire_completed",
+        eventDescription: `${INSTRUMENT_LABELS[request.instrumentType]} completed by ${track === "teacher" ? "Teacher" : "Parent"}`,
+      });
+    }
+
     setShowThankYou(true);
     setTimeout(onComplete, 1600);
   }

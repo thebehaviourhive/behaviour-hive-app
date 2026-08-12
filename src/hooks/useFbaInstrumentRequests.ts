@@ -2,14 +2,17 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import type {
-  FbaInstrumentRequest,
-  FbaRecipientCandidate,
-  InstrumentRequestStatus,
-  InstrumentResponsesData,
-  InstrumentRequestType,
-  RecipientRole,
-  SendableInstrumentType,
+import { logActivity } from "@/lib/logActivity";
+import {
+  INSTRUMENT_LABELS,
+  RECIPIENT_ROLE_LABELS,
+  type FbaInstrumentRequest,
+  type FbaRecipientCandidate,
+  type InstrumentRequestStatus,
+  type InstrumentResponsesData,
+  type InstrumentRequestType,
+  type RecipientRole,
+  type SendableInstrumentType,
 } from "@/lib/fba/types";
 
 interface RequestRow {
@@ -128,6 +131,24 @@ export function useFbaInstrumentRequests(fbaId: string, passportId: string | und
       }
       console.error("Failed to send questionnaire:", error);
       return "Couldn't send the questionnaire. Please try again.";
+    }
+
+    // Clinician-feed-only (see the visibility matrix, migration 0049) --
+    // "clinicians tracking their own sends is useful". Never reaches
+    // the parent or teacher feed: questionnaire_sent/completed are
+    // deliberately absent from both the parent policy's visible set
+    // and get_teacher_activity_feed()'s allow-list.
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (user) {
+      const recipientRole = candidates.find((c) => c.recipientId === recipientId)?.role;
+      logActivity({
+        passportId,
+        actorId: user.id,
+        eventType: "questionnaire_sent",
+        eventDescription: `${INSTRUMENT_LABELS[instrumentType]} sent to ${recipientRole ? RECIPIENT_ROLE_LABELS[recipientRole] : "recipient"}`,
+      });
     }
 
     await load();

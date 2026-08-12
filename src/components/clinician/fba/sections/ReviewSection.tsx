@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { logActivity } from "@/lib/logActivity";
-import { CLINICIAN_SPECIALTY_LABEL, type ClinicianSpecialty } from "@/lib/clinicianSpecialties";
+import { formatClinicianReference } from "@/lib/clinicianDisplayName";
 import { FBA_SECTIONS, getSectionCompleteness } from "@/lib/fba/sections";
 import { CompletenessDot } from "../CompletenessDot";
 import { FbaNote } from "../FbaNote";
@@ -108,22 +108,20 @@ export function ReviewSection({
       return;
     }
 
-    // "completed by [Specialty]", matching the wording ABCLogger already
-    // uses for clinician-authored activity entries.
+    // Own verified profile -- "[Full name], [Specialty]", the naming
+    // standard's formal reference shape, same as fba_started's event
+    // text.
     const { data: clinicianRow } = await supabase
       .from("clinicians")
-      .select("specialty")
+      .select("full_name, specialty")
       .eq("user_id", user.id)
       .maybeSingle();
-    const specialtyLabel = clinicianRow?.specialty
-      ? (CLINICIAN_SPECIALTY_LABEL[clinicianRow.specialty as ClinicianSpecialty] ?? "Clinician")
-      : "Clinician";
 
     logActivity({
       passportId,
       actorId: user.id,
       eventType: "fba_completed",
-      eventDescription: `Functional Behaviour Assessment completed by ${specialtyLabel}`,
+      eventDescription: `Functional Behaviour Assessment completed by ${formatClinicianReference(clinicianRow?.full_name, clinicianRow?.specialty)}`,
     });
 
     setIsFinalizing(false);

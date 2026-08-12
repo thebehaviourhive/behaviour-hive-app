@@ -23,7 +23,9 @@ export type ActivityEventType =
   | "access_revoked"
   | "fba_started"
   | "fba_completed"
-  | "clinical_content_added";
+  | "clinical_content_added"
+  | "questionnaire_sent"
+  | "questionnaire_completed";
 
 export interface ActivityLogEntry {
   id: string;
@@ -48,6 +50,11 @@ export const ACTIVITY_EVENT_ICON: Record<
   fba_started: ClinicalFileIcon,
   fba_completed: ClinicalFileIcon,
   clinical_content_added: LightbulbIcon,
+  // Clinician-feed-only (see the visibility matrix in migration 0049) --
+  // never rendered on the parent or teacher tracks, but still needs an
+  // icon since ACTIVITY_EVENT_ICON is a Record over every event type.
+  questionnaire_sent: ClipboardIcon,
+  questionnaire_completed: ClipboardIcon,
 };
 
 export function formatActivityTimestamp(isoString: string): string {

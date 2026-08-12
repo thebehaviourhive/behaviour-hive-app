@@ -10,6 +10,7 @@ interface ClinicalContentRow {
   content: { title?: string; description?: string } | null;
   author_role: string;
   author_name: string | null;
+  author_specialty: string | null;
   source_document_type: string;
   created_at: string;
 }
@@ -48,6 +49,7 @@ export function usePassportClinicalContent(passportId: string) {
         description: row.content?.description ?? "",
         authorRole: row.author_role,
         authorName: row.author_name,
+        authorSpecialty: row.author_specialty,
         sourceDocumentType: row.source_document_type,
         createdAt: row.created_at,
       }))

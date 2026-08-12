@@ -19,6 +19,10 @@ export interface ClinicalContentItem {
   description: string;
   authorRole: string;
   authorName: string | null;
+  // Nullable: a row could in principle lack a clinicians profile (see
+  // get_passport_clinical_content's LEFT JOIN) -- degrades to
+  // name-alone in that case rather than blocking on it.
+  authorSpecialty: string | null;
   sourceDocumentType: string;
   createdAt: string;
 }

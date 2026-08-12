@@ -7,6 +7,7 @@ import { format } from "date-fns";
 import { createClient } from "@/lib/supabase/client";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { logActivity } from "@/lib/logActivity";
+import { formatClinicianReference } from "@/lib/clinicianDisplayName";
 import { ClinicianBottomNav } from "@/components/clinician/ClinicianBottomNav";
 import { InlineErrorState } from "@/components/ui/InlineErrorState";
 import { BottomSheet } from "@/components/ui/BottomSheet";
@@ -174,11 +175,21 @@ export default function ClinicianFbaListPage() {
       return;
     }
 
+    // Own verified profile, not user_metadata -- "specialty from the
+    // verified profile" is the naming standard's whole point, and
+    // clinicians.full_name is guaranteed populated for any verified
+    // clinician (submit_clinician_verification requires it non-empty).
+    const { data: clinicianRow } = await supabase
+      .from("clinicians")
+      .select("full_name, specialty")
+      .eq("user_id", user.id)
+      .maybeSingle();
+
     logActivity({
       passportId: passport.passport_id,
       actorId: user.id,
       eventType: "fba_started",
-      eventDescription: `FBA started for ${passport.child_name}`,
+      eventDescription: `Functional Behaviour Assessment started by ${formatClinicianReference(clinicianRow?.full_name, clinicianRow?.specialty)}`,
     });
 
     router.push(`/clinician/fba/${data.id}`);

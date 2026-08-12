@@ -6,6 +6,7 @@ import { useCallback, useEffect, useState } from "react";
 import { format } from "date-fns";
 import { createClient } from "@/lib/supabase/client";
 import { useFbaReport } from "@/hooks/useFbaReport";
+import { formatClinicianReference } from "@/lib/clinicianDisplayName";
 import { InlineErrorState } from "@/components/ui/InlineErrorState";
 import { BrandMark } from "@/components/ui/BrandMark";
 import { FbaSectionsReadOnly } from "@/components/passport/fba-reader/FbaSectionsReadOnly";
@@ -14,6 +15,11 @@ interface TeamMemberRow {
   teacher_id: string;
   full_name: string | null;
   role: string;
+}
+
+interface ClinicianRow {
+  clinician_id: string;
+  specialty: string;
 }
 
 // The PDF export (Part F). Deliberately route-independent on role: this
@@ -42,6 +48,13 @@ export default function FbaPrintPage() {
   const [authChecked, setAuthChecked] = useState(false);
   const [childName, setChildName] = useState<string | null>(null);
   const [clinicianName, setClinicianName] = useState<string | null>(null);
+  // Nullable independently of clinicianName -- get_passport_clinicians
+  // (parent-viewer-only, same owns_passport gate get_passport_team's
+  // clinician branch already has) can legitimately return nothing while
+  // the name still resolves fine, e.g. a clinician viewing their own
+  // export, or access since revoked. Degrades to name-alone, never
+  // blocks on it.
+  const [clinicianSpecialty, setClinicianSpecialty] = useState<string | null>(null);
   const [isStandalone, setIsStandalone] = useState(false);
 
   useEffect(() => {
@@ -69,15 +82,20 @@ export default function FbaPrintPage() {
   const loadNames = useCallback(async () => {
     if (!report) return;
     const supabase = createClient();
-    const [{ data: passport }, { data: teamRows }] = await Promise.all([
+    const [{ data: passport }, { data: teamRows }, { data: clinicianRows }] = await Promise.all([
       supabase.from("passports").select("child_name").eq("id", report.passportId).maybeSingle(),
       supabase.rpc("get_passport_team", { p_passport_id: report.passportId }),
+      supabase.rpc("get_passport_clinicians", { p_passport_id: report.passportId }),
     ]);
     setChildName(passport?.child_name ?? null);
     const clinicianRow = ((teamRows ?? []) as TeamMemberRow[]).find(
       (row) => row.role === "clinician" && row.teacher_id === report.clinicianId
     );
     setClinicianName(clinicianRow?.full_name ?? null);
+    const specialtyRow = ((clinicianRows ?? []) as ClinicianRow[]).find(
+      (row) => row.clinician_id === report.clinicianId
+    );
+    setClinicianSpecialty(specialtyRow?.specialty ?? null);
   }, [report]);
 
   useEffect(() => {
@@ -165,7 +183,9 @@ export default function FbaPrintPage() {
           <p className="text-brand-neutral-black/50">Client</p>
           <p className="font-semibold text-brand-neutral-black">{childName ?? "—"}</p>
           <p className="text-brand-neutral-black/50">Completed by</p>
-          <p className="font-semibold text-brand-neutral-black">{clinicianName ?? "—"}</p>
+          <p className="font-semibold text-brand-neutral-black">
+            {clinicianName ? formatClinicianReference(clinicianName, clinicianSpecialty) : "—"}
+          </p>
           <p className="text-brand-neutral-black/50">Date completed</p>
           <p className="font-semibold text-brand-neutral-black">{completedDateLabel}</p>
         </div>

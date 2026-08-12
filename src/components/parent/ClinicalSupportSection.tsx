@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { format } from "date-fns";
 import { createClient } from "@/lib/supabase/client";
-import { getClinicianLastName } from "@/lib/clinicianDisplayName";
+import { formatClinicianReference } from "@/lib/clinicianDisplayName";
 import { QuestionnairePromptCard } from "@/components/questionnaire/QuestionnairePromptCard";
 import { ClinicalDocumentCard } from "./ClinicalDocumentCard";
 import { WhatIsAnFbaSheet } from "./WhatIsAnFbaSheet";
@@ -25,8 +25,8 @@ interface DocumentStatusRow {
 
 type FbaState =
   | { kind: "no-clinician"; passportId: string | null }
-  | { kind: "clinician-no-fba"; clinicianLastName: string }
-  | { kind: "in-progress"; clinicianLastName: string; startedAt: string }
+  | { kind: "clinician-no-fba"; clinicianReference: string }
+  | { kind: "in-progress"; clinicianReference: string; startedAt: string }
   | { kind: "completed-pending"; fbaId: string }
   | { kind: "completed-approved"; fbaId: string; completedAt: string };
 
@@ -91,13 +91,16 @@ export function ClinicalSupportSection({
         if (!status) {
           setFbaState(
             clinician
-              ? { kind: "clinician-no-fba", clinicianLastName: getClinicianLastName(clinician.full_name) }
+              ? {
+                  kind: "clinician-no-fba",
+                  clinicianReference: formatClinicianReference(clinician.full_name, clinician.specialty),
+                }
               : { kind: "no-clinician", passportId: pid }
           );
         } else if (status.status === "in_progress") {
           setFbaState({
             kind: "in-progress",
-            clinicianLastName: getClinicianLastName(clinician?.full_name),
+            clinicianReference: formatClinicianReference(clinician?.full_name, clinician?.specialty),
             startedAt: status.started_at,
           });
         } else if (status.is_approved) {
@@ -188,7 +191,7 @@ function FbaCard({
           title="Functional Behaviour Assessment"
           body={
             <p>
-              Talk to Dr. {state.clinicianLastName} about a Functional Behaviour Assessment for {childName}.
+              Talk to {state.clinicianReference} about a Functional Behaviour Assessment for {childName}.
             </p>
           }
           secondaryAction={{ label: "Find out more", onClick: onOpenInfo }}
@@ -202,8 +205,8 @@ function FbaCard({
           borderClassName="border-l-4 border-brand-pastel-blue"
           body={
             <p>
-              Dr. {state.clinicianLastName} is currently conducting {childName}&apos;s assessment.
-              We&apos;ll notify you when it&apos;s ready to review.
+              {state.clinicianReference} is currently conducting {childName}&apos;s assessment. We&apos;ll
+              notify you when it&apos;s ready to review.
             </p>
           }
           footnote={<p>Started: {format(new Date(state.startedAt), "d MMM yyyy")}</p>}
