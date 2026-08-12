@@ -20,10 +20,12 @@ import {
 // with zero extra branching here -- the caller doesn't need to pass
 // readOnly at all.
 //
-// One card per strategy: the brief's "Add Calm Card" affordance is
-// singular, so this finds at most one matching card for a given
-// strategyRef and offers "Edit"/"Delete" once it exists, rather than
-// supporting several cards per strategy.
+// Multiple cards per strategy are allowed: a strategy can carry more
+// than one Calm Card (e.g. a prevention-door card and a separate
+// deescalation-door card for the same strategy), so this lists every
+// matching card for strategyRef -- each independently tappable to
+// edit, delete, or publish/unpublish -- alongside an "Add Calm Card"
+// button that stays visible whether or not cards already exist.
 function ChipToggle({ label, isSelected, onClick }: { label: string; isSelected: boolean; onClick: () => void }) {
   return (
     <button
@@ -97,14 +99,18 @@ export function CalmCardSection({
   ) => Promise<unknown>;
   onDelete: (id: string) => Promise<unknown>;
 }) {
-  const existingCard = cards.find((c) => c.strategyRef === strategyRef) ?? null;
+  const strategyCards = cards.filter((c) => c.strategyRef === strategyRef);
+  const [editingCardId, setEditingCardId] = useState<string | null>(null);
   const [isEditorOpen, setIsEditorOpen] = useState(false);
-  const [editorState, setEditorState] = useState<CalmCardEditorState>(() => toEditorState(existingCard, suggestedTitle));
+  const [editorState, setEditorState] = useState<CalmCardEditorState>(() => toEditorState(null, suggestedTitle));
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  function openEditor() {
-    setEditorState(toEditorState(existingCard, suggestedTitle));
+  const existingCard = editingCardId ? strategyCards.find((c) => c.id === editingCardId) ?? null : null;
+
+  function openEditorFor(card: CalmCard | null) {
+    setEditingCardId(card?.id ?? null);
+    setEditorState(toEditorState(card, suggestedTitle));
     setError(null);
     setIsEditorOpen(true);
   }
@@ -182,12 +188,11 @@ export function CalmCardSection({
     }
   }
 
-  async function handleTogglePublish() {
-    if (!existingCard) return;
+  async function handleTogglePublish(card: CalmCard) {
     setIsSaving(true);
     setError(null);
     try {
-      await onUpdate(existingCard.id, { isPublished: !existingCard.isPublished });
+      await onUpdate(card.id, { isPublished: !card.isPublished });
     } catch (err) {
       console.error("Failed to toggle publish:", err);
       setError("Couldn't update this Calm Card. Please try again.");
@@ -213,28 +218,27 @@ export function CalmCardSection({
   return (
     <div className="mt-3 border-t border-black/5 pt-3">
       {!isEditorOpen && (
-        <div className="flex items-center justify-between gap-2">
-          {existingCard ? (
-            <CalmCardBadge card={existingCard} onTap={openEditor} />
-          ) : (
-            <button
-              type="button"
-              onClick={openEditor}
-              className="flex items-center gap-1.5 rounded-full border border-dashed border-calm-ink/40 px-3 py-1 text-xs font-semibold text-calm-ink"
-            >
-              <span aria-hidden>🩹</span> Add Calm Card
-            </button>
-          )}
-          {existingCard && (
-            <button
-              type="button"
-              onClick={handleTogglePublish}
-              disabled={isSaving}
-              className="text-xs font-semibold text-brand-prussian-blue underline underline-offset-2 disabled:opacity-40"
-            >
-              {existingCard.isPublished ? "Unpublish" : "Publish"}
-            </button>
-          )}
+        <div className="flex flex-col gap-1.5">
+          {strategyCards.map((card) => (
+            <div key={card.id} className="flex items-center justify-between gap-2">
+              <CalmCardBadge card={card} onTap={() => openEditorFor(card)} />
+              <button
+                type="button"
+                onClick={() => handleTogglePublish(card)}
+                disabled={isSaving}
+                className="text-xs font-semibold text-brand-prussian-blue underline underline-offset-2 disabled:opacity-40"
+              >
+                {card.isPublished ? "Unpublish" : "Publish"}
+              </button>
+            </div>
+          ))}
+          <button
+            type="button"
+            onClick={() => openEditorFor(null)}
+            className="flex w-fit items-center gap-1.5 rounded-full border border-dashed border-calm-ink/40 px-3 py-1 text-xs font-semibold text-calm-ink"
+          >
+            <span aria-hidden>🩹</span> Add Calm Card
+          </button>
         </div>
       )}
 
