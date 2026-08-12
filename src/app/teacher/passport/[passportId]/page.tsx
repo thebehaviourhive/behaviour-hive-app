@@ -11,8 +11,9 @@ import { ABCTimeline } from "@/components/abc-logger/ABCTimeline";
 import { usePassportClinicalContent } from "@/hooks/usePassportClinicalContent";
 import { ClinicalTeamSection } from "@/components/passport/clinical-team/ClinicalTeamSection";
 import { InlineErrorState } from "@/components/ui/InlineErrorState";
+import { ProgressSurface } from "@/components/progress/ProgressSurface";
 
-type TabKey = "summary" | "behaviour" | "communication" | "supports" | "incidents" | "clinicalTeam";
+type TabKey = "summary" | "behaviour" | "communication" | "supports" | "incidents" | "clinicalTeam" | "progress";
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: "summary", label: "Summary" },
@@ -21,6 +22,7 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: "supports", label: "Supports" },
   { key: "incidents", label: "Incidents" },
   { key: "clinicalTeam", label: "Clinical Team" },
+  { key: "progress", label: "Progress" },
 ];
 
 const SLEEP_LABELS: Record<string, string> = {
@@ -437,6 +439,10 @@ export default function TeacherPassportPage() {
               <ClinicalTeamSection items={clinicalContentItems} viewerRole="teacher" />
             )}
           </>
+        )}
+
+        {activeTab === "progress" && (
+          <ProgressSurface passportId={passportId} childFullName={profile.childFirstName} role="teacher" />
         )}
       </main>
 

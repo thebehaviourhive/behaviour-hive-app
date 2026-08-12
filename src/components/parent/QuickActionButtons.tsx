@@ -4,19 +4,26 @@ import {
   ClipboardIcon,
   LightbulbIcon,
   OpenBookIcon,
+  TrendUpIcon,
 } from "@/components/ui/icons";
+import { getChildFirstName } from "@/lib/childDisplayName";
 
-const ACTIONS = [
-  { label: "View Passport", href: "/passport/dashboard", Icon: OpenBookIcon },
-  { label: "ABC Log", href: "/passport/dashboard?logIncident=1", Icon: ClipboardIcon },
-  { label: "Resources", href: "/resources", Icon: LightbulbIcon },
-  { label: "Messages", href: "/messages", Icon: ChatBubbleIcon },
-];
+// 5 tiles on the existing grid-cols-2 grid -- naturally reads as a 2x3
+// layout with the 6th cell simply empty (a lone left-aligned tile in
+// row 3), which is a normal, common mobile grid pattern at 375px. No
+// column-count change needed to fit the 5th tile in.
+export function QuickActionButtons({ childName }: { childName: string }) {
+  const actions = [
+    { label: "View Passport", href: "/passport/dashboard", Icon: OpenBookIcon },
+    { label: "ABC Log", href: "/passport/dashboard?logIncident=1", Icon: ClipboardIcon },
+    { label: `${getChildFirstName(childName)}'s Progress`, href: "/passport/progress", Icon: TrendUpIcon },
+    { label: "Resources", href: "/resources", Icon: LightbulbIcon },
+    { label: "Messages", href: "/messages", Icon: ChatBubbleIcon },
+  ];
 
-export function QuickActionButtons() {
   return (
     <div className="mb-6 grid grid-cols-2 gap-3">
-      {ACTIONS.map(({ label, href, Icon }) => (
+      {actions.map(({ label, href, Icon }) => (
         <Link
           key={label}
           href={href}

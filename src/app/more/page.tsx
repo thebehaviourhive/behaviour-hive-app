@@ -8,6 +8,8 @@ import { Button } from "@/components/ui/Button";
 import { BottomNav } from "@/components/ui/BottomNav";
 import { TeacherBottomNav } from "@/components/teacher/TeacherBottomNav";
 import { ClinicianBottomNav } from "@/components/clinician/ClinicianBottomNav";
+import { TrendUpIcon } from "@/components/ui/icons";
+import { getChildFirstName } from "@/lib/childDisplayName";
 
 const CADENCE_OPTIONS = [14, 30, 60, 90] as const;
 
@@ -22,6 +24,7 @@ export default function MorePage() {
   const [reviewCadenceDays, setReviewCadenceDays] = useState<number | null>(null);
   const [isSavingCadence, setIsSavingCadence] = useState(false);
   const [cadenceError, setCadenceError] = useState<string | null>(null);
+  const [childName, setChildName] = useState<string | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -54,6 +57,17 @@ export default function MorePage() {
           setClinicianCode(clinician.clinician_code);
           setReviewCadenceDays(clinician.review_cadence_days);
         }
+      } else if (!userRole || (userRole !== "class_teacher" && userRole !== "clinician")) {
+        // Parent (the only track this More page adds a Progress entry
+        // for) -- needed just for the tile label, matching the quick-
+        // actions grid's own "[Child]'s Progress" wording.
+        const { data: passport } = await supabase
+          .from("passports")
+          .select("child_name")
+          .eq("user_id", user.id)
+          .maybeSingle();
+
+        if (isMounted) setChildName(passport?.child_name ?? null);
       }
 
       setIsReady(true);
@@ -151,6 +165,29 @@ export default function MorePage() {
                 {cadenceError}
               </p>
             )}
+          </section>
+        )}
+
+        {role !== "clinician" && role !== "class_teacher" && (
+          <section>
+            <button
+              type="button"
+              onClick={() => router.push("/passport/progress")}
+              className="flex w-full items-center gap-3 rounded-2xl border border-black/5 bg-white p-4 text-left shadow-sm transition-transform active:scale-[0.99]"
+            >
+              <span
+                aria-hidden
+                className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-brand-pastel-blue/30 text-brand-prussian-blue"
+              >
+                <TrendUpIcon className="h-5 w-5" />
+              </span>
+              <span className="flex-1 text-sm font-semibold text-brand-neutral-black">
+                {getChildFirstName(childName)}&apos;s Progress
+              </span>
+              <span aria-hidden className="text-black/30">
+                ›
+              </span>
+            </button>
           </section>
         )}
 

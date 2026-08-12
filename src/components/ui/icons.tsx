@@ -124,3 +124,12 @@ export function LockIcon(props: IconProps) {
     </Base>
   );
 }
+
+export function TrendUpIcon(props: IconProps) {
+  return (
+    <Base {...props}>
+      <path d="M4.5 16.5 9.5 11l3.5 3.5 6.5-7.5" />
+      <path d="M15.5 6.5h4.5V11" />
+    </Base>
+  );
+}

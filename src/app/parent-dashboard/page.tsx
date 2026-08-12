@@ -311,7 +311,7 @@ export default function ParentDashboardPage() {
 
         <RecentUpdatesCard passportId={passportId} />
 
-        <QuickActionButtons />
+        <QuickActionButtons childName={childName} />
 
         <section>
           <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-black/40">
