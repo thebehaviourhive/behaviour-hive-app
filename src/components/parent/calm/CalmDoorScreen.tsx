@@ -38,7 +38,7 @@ export function CalmDoorScreen({
 }) {
   return (
     <div className="flex h-full flex-col items-center justify-center gap-10 px-6 text-center">
-      <h1 className="font-heading text-3xl font-bold text-brand-prussian-blue">{childName} Calm Cards</h1>
+      <h1 className="font-heading text-3xl font-bold text-brand-prussian-blue">{childName}&apos;s Calm Cards</h1>
       <div className="flex w-full flex-col gap-5">
         <button
           type="button"
