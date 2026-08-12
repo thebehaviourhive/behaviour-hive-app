@@ -25,7 +25,8 @@ export type ActivityEventType =
   | "fba_completed"
   | "clinical_content_added"
   | "questionnaire_sent"
-  | "questionnaire_completed";
+  | "questionnaire_completed"
+  | "calm_escalation";
 
 export interface ActivityLogEntry {
   id: string;
@@ -55,6 +56,11 @@ export const ACTIVITY_EVENT_ICON: Record<
   // icon since ACTIVITY_EVENT_ICON is a Record over every event type.
   questionnaire_sent: ClipboardIcon,
   questionnaire_completed: ClipboardIcon,
+  // Clinician-feed-only, same as above -- excluded from the parent's
+  // own activity_log visibility (migration 0054) since "the parent is
+  // NOT shown that the notice fired" applies to the ordinary feed too,
+  // not just the dedicated red card (CalmEscalationNoticeList).
+  calm_escalation: ClinicalFileIcon,
 };
 
 export function formatActivityTimestamp(isoString: string): string {

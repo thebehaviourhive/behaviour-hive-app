@@ -291,6 +291,8 @@ export default function FbaSectionEditorPage() {
             ))}
           {section.kind === "recommendations" && (
             <RecommendationsSection
+              fbaId={fbaId}
+              isClinicianWorkspace
               content={content}
               onFieldChange={handleFieldChange}
               onFieldBlur={handleFieldBlur}
@@ -314,6 +316,7 @@ export default function FbaSectionEditorPage() {
               content={content}
               afls={afls}
               readOnly={readOnly}
+              isClinicianWorkspace
               onFinalized={() => {
                 reload();
                 router.push(`/clinician/fba/${fbaId}`);

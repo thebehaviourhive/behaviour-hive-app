@@ -129,6 +129,7 @@ export function FbaSectionsReadOnly({
           )}
           {section.kind === "recommendations" && (
             <RecommendationsSection
+              fbaId={fbaId}
               content={report.contentData}
               onFieldChange={noOpFieldChange}
               onFieldBlur={noOpFieldBlur}

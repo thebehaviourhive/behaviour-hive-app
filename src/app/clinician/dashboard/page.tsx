@@ -8,6 +8,7 @@ import { useRequireRole } from "@/hooks/useRequireRole";
 import { ClinicianBottomNav } from "@/components/clinician/ClinicianBottomNav";
 import { ClinicianActivityCard } from "@/components/clinician/ClinicianActivityCard";
 import { ClinicianQuickActions } from "@/components/clinician/ClinicianQuickActions";
+import { CalmEscalationNoticeList } from "@/components/clinician/CalmEscalationNoticeList";
 import { ClinicalFileIcon, LockIcon } from "@/components/ui/icons";
 import { InlineErrorState } from "@/components/ui/InlineErrorState";
 
@@ -266,6 +267,13 @@ export default function ClinicianDashboardPage() {
 
   return (
     <div className="flex min-h-full flex-1 flex-col bg-brand-off-white/40 pb-24">
+      {/* Outside the isLocked pointer-events-none wrapper below,
+          deliberately -- an unverified clinician has no active linked
+          cases (verification gates clinician_access reads throughout
+          this app), so this is never actually populated for them, but
+          the red notice must never be capable of being visually
+          suppressed by that lock state regardless. */}
+      <CalmEscalationNoticeList />
       <div className="relative flex-1">
         <div className={isLocked ? "pointer-events-none select-none" : ""}>
           <h1 className="mt-6 px-4 font-heading text-2xl font-semibold text-brand-neutral-black">

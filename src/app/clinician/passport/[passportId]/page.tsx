@@ -10,6 +10,7 @@ import { usePassportClinicalContent } from "@/hooks/usePassportClinicalContent";
 import { ClinicalTeamSection } from "@/components/passport/clinical-team/ClinicalTeamSection";
 import { InlineErrorState } from "@/components/ui/InlineErrorState";
 import { ProgressSurface } from "@/components/progress/ProgressSurface";
+import { useCalmButtonLiveStatus } from "@/hooks/useCalmButtonLiveStatus";
 
 type TabKey = "summary" | "behaviour" | "communication" | "supports" | "incidents" | "clinicalTeam" | "progress";
 
@@ -61,6 +62,7 @@ export default function ClinicianPassportPage() {
   const [activeTab, setActiveTab] = useState<TabKey>("summary");
   const [isAbcLoggerOpen, setIsAbcLoggerOpen] = useState(false);
   const [timelineRefreshKey, setTimelineRefreshKey] = useState(0);
+  const { isLive: isCalmButtonLive, isLoading: isCalmStatusLoading } = useCalmButtonLiveStatus(passportId);
   const {
     items: clinicalContentItems,
     isLoading: isLoadingClinicalContent,
@@ -194,6 +196,15 @@ export default function ClinicianPassportPage() {
         <h1 className="font-heading text-2xl font-semibold text-brand-neutral-black">
           {profile.childFullName}&apos;s Clinical File
         </h1>
+        {!isCalmStatusLoading && (
+          <p
+            className={`mt-1 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${
+              isCalmButtonLive ? "bg-calm-pill text-calm-ink" : "bg-black/5 text-black/40"
+            }`}
+          >
+            <span aria-hidden>🩹</span> Calm button {isCalmButtonLive ? "live" : "not yet live"}
+          </p>
+        )}
       </header>
 
       <div className="flex gap-1 overflow-x-auto border-b border-black/5 px-4">

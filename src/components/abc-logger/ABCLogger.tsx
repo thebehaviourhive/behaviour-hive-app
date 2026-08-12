@@ -18,8 +18,21 @@ interface ABCLoggerProps {
   passportId: string;
   childName: string;
   role: ABCLoggerRole;
-  onComplete: () => void;
+  // newLogId is optional-to-consume -- every existing caller's () => void
+  // handler stays valid as-is (a callback with fewer params is always
+  // assignable where more are expected). The Calm log-nudge (Stage 3C)
+  // is the one caller that reads it, to backfill calm_episodes.abc_log_id.
+  onComplete: (newLogId?: string) => void;
   onDismiss: () => void;
+  // Calm log-nudge prefill (Stage 3C) -- seeds the initial draft with
+  // "now" already being blankDraft()'s own default, so only the fields
+  // Calm actually knows in advance (a pre-selected door/tag reads as a
+  // behaviour guess) are worth overriding. Deliberately NOT routed
+  // through draftStorage/the resume-banner mechanism -- that's for
+  // recovering an interrupted session, a different concept from a
+  // fresh prefill, and repurposing it would show a "Resume/Discard"
+  // banner instead of silently prefilling.
+  initialPrefill?: Partial<Pick<ABCDraft, "behaviours">>;
 }
 
 // Must derive from local date components, not toISOString() (always UTC) --
@@ -79,6 +92,7 @@ export function ABCLogger({
   role,
   onComplete,
   onDismiss,
+  initialPrefill,
 }: ABCLoggerProps) {
   const config = ABC_ROLE_CONFIG[role];
 
@@ -88,7 +102,7 @@ export function ABCLogger({
   // later re-check to do, which means the recovery check belongs in these
   // initializers rather than a mount effect that would just be setting
   // this same state a moment after render anyway.
-  const [draft, setDraft] = useState<ABCDraft>(() => blankDraft(role));
+  const [draft, setDraft] = useState<ABCDraft>(() => ({ ...blankDraft(role), ...initialPrefill }));
   const [pendingDraft, setPendingDraft] = useState<ABCDraft | null>(() => loadDraft(passportId));
   const [showRecoveryBanner, setShowRecoveryBanner] = useState<boolean>(
     () => loadDraft(passportId) !== null
@@ -227,6 +241,14 @@ export function ABCLogger({
         return;
       }
 
+      // Client-generated id (abc_logs.id defaults to gen_random_uuid(), but
+      // supplying our own is equally valid and means the caller learns the
+      // new row's id without needing .select() -- see the note below on
+      // why chaining .select() here is off the table. The Calm log-nudge
+      // (Stage 3C) is the one caller that needs this, to backfill
+      // calm_episodes.abc_log_id.
+      const newLogId = crypto.randomUUID();
+
       // DO NOT chain .select() onto this insert. `authenticated` only has a
       // column-level SELECT grant on abc_logs that excludes clinical_notes
       // (migration 0021, replacing an earlier table-level grant that a
@@ -238,6 +260,7 @@ export function ABCLogger({
       // get_abc_logs() (SECURITY DEFINER) instead, never this table
       // directly.
       const { error } = await supabase.from("abc_logs").insert({
+        id: newLogId,
         passport_id: passportId,
         logged_by: user.id,
         logged_by_role: role,
@@ -317,7 +340,7 @@ export function ABCLogger({
       });
       setIsSubmitting(false);
       setShowSuccess(true);
-      setTimeout(onComplete, 900);
+      setTimeout(() => onComplete(newLogId), 900);
     } catch {
       // Belt-and-braces: covers a truly thrown exception from somewhere
       // other than the insert call itself (e.g. auth.getUser()), treated

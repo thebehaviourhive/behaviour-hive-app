@@ -10,6 +10,7 @@ import { RecentUpdatesCard } from "@/components/parent/RecentUpdatesCard";
 import { ClinicalSupportSection } from "@/components/parent/ClinicalSupportSection";
 import { QuickActionButtons } from "@/components/parent/QuickActionButtons";
 import { YourTeamCard } from "@/components/parent/YourTeamCard";
+import { CalmLogReminderCard } from "@/components/parent/calm/CalmLogReminderCard";
 
 type PassportStatus = "not_started" | "in_progress" | "complete";
 type SettledState = "settled" | "unsettled" | "dysregulated";
@@ -233,6 +234,8 @@ export default function ParentDashboardPage() {
       </header>
 
       <main className="flex flex-col gap-3 px-4 pt-3">
+        {user && <CalmLogReminderCard userId={user.id} />}
+
         <CheckInCard
           childName={childName}
           isBefore1pm={isBefore1pm}

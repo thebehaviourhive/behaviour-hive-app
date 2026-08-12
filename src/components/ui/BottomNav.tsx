@@ -1,5 +1,6 @@
 import { House, BookUser, Menu } from "lucide-react";
 import { AppBottomNav, type NavTab } from "./AppBottomNav";
+import { CalmNavButton } from "@/components/parent/calm/CalmNavButton";
 
 // Parent track's tab list. "Passport" owns every /passport/* route (the
 // section wizard as well as the dashboard); "More" owns /more; everything
@@ -43,5 +44,5 @@ export function BottomNav({ passportHref = "/passport/dashboard" }: { passportHr
     },
   ];
 
-  return <AppBottomNav tabs={tabs} />;
+  return <AppBottomNav tabs={tabs} extraSlot={<CalmNavButton />} />;
 }

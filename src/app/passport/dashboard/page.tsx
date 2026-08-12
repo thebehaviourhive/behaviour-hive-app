@@ -16,6 +16,7 @@ import { createClient } from "@/lib/supabase/client";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { getPassportResumeHref } from "@/lib/getPassportResumeHref";
 import { logActivity } from "@/lib/logActivity";
+import { clearPendingLogReminder } from "@/lib/calmCards/logReminder";
 import {
   CLINICIAN_SPECIALTY_LABEL,
   type ClinicianSpecialty,
@@ -111,6 +112,12 @@ export default function PassportDashboardPage() {
   const [clinicianRevokeError, setClinicianRevokeError] = useState<string | null>(null);
   const [isAbcLoggerOpen, setIsAbcLoggerOpen] = useState(false);
   const [timelineRefreshKey, setTimelineRefreshKey] = useState(0);
+  // Calm log-nudge backfill (Stage 3C) -- calmEpisodeId is only ever
+  // non-null when ABCLogger was opened via that specific deep link, and
+  // is what onComplete below uses to call attach_calm_episode_abc_log.
+  // calmBehaviour is the "behaviour if a chip was selected" prefill.
+  const [calmEpisodeId, setCalmEpisodeId] = useState<string | null>(null);
+  const [calmBehaviour, setCalmBehaviour] = useState<string | null>(null);
   const [institutionsError, setInstitutionsError] = useState<string | null>(null);
   const [cliniciansError, setCliniciansError] = useState<string | null>(null);
 
@@ -348,6 +355,13 @@ export default function PassportDashboardPage() {
     // that could be derived during render.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setIsAbcLoggerOpen(true);
+    // Calm log-nudge deep link (Stage 3C) -- captured into state BEFORE
+    // router.replace() strips the query string, since ABCLogger mounts
+    // after this effect runs, not during it.
+    const episodeId = searchParams.get("calmEpisodeId");
+    const behaviour = searchParams.get("behaviour");
+    if (episodeId) setCalmEpisodeId(episodeId);
+    if (behaviour) setCalmBehaviour(behaviour);
     router.replace("/passport/dashboard");
   }, [summary, searchParams, router]);
 
@@ -976,11 +990,33 @@ export default function PassportDashboardPage() {
           passportId={summary.passportId}
           childName={summary.childName}
           role="parent"
-          onComplete={() => {
+          initialPrefill={calmBehaviour ? { behaviours: [calmBehaviour] } : undefined}
+          onComplete={(newLogId) => {
             setIsAbcLoggerOpen(false);
             setTimelineRefreshKey((key) => key + 1);
+            // Calm log-nudge backfill (Stage 3C) -- fire-and-forget, same
+            // posture as logActivity: this must never block or surface an
+            // error over an ABC log that already saved successfully.
+            if (calmEpisodeId && newLogId) {
+              const supabase = createClient();
+              supabase
+                .rpc("attach_calm_episode_abc_log", { p_episode_id: calmEpisodeId, p_abc_log_id: newLogId })
+                .then(({ error }) => {
+                  if (error) console.error("Failed to attach calm episode's abc log:", error);
+                });
+              // "Clearing on logging" (constraint 3C) -- this is the
+              // [Log it] path completing, as distinct from the parent
+              // dashboard's own [Dismiss] on the reminder card itself.
+              if (user) clearPendingLogReminder(user.id);
+            }
+            setCalmEpisodeId(null);
+            setCalmBehaviour(null);
           }}
-          onDismiss={() => setIsAbcLoggerOpen(false)}
+          onDismiss={() => {
+            setIsAbcLoggerOpen(false);
+            setCalmEpisodeId(null);
+            setCalmBehaviour(null);
+          }}
         />
       )}
 

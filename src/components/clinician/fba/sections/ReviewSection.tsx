@@ -9,6 +9,7 @@ import { FBA_SECTIONS, getSectionCompleteness } from "@/lib/fba/sections";
 import { CompletenessDot } from "../CompletenessDot";
 import { FbaNote } from "../FbaNote";
 import { BottomSheet } from "@/components/ui/BottomSheet";
+import { useCalmCardsForFba } from "@/hooks/useCalmCardsForFba";
 import type { FbaAflsData, FbaContentData } from "@/lib/fba/types";
 
 // Sections that gate the [Finalize & Lock] action -- the brief's own
@@ -32,6 +33,7 @@ export function ReviewSection({
   content,
   afls,
   readOnly,
+  isClinicianWorkspace = false,
   onFinalized,
 }: {
   fbaId: string;
@@ -39,6 +41,12 @@ export function ReviewSection({
   content: FbaContentData;
   afls: FbaAflsData | null;
   readOnly: boolean;
+  // Gates the Calm Cards count line -- same reasoning as
+  // RecommendationsSection's own isClinicianWorkspace prop. This section
+  // is also reused by FbaSectionsReadOnly.tsx (the parent's FBA reader),
+  // where the count line has no business appearing (it's a clinician
+  // workflow status, not something a parent needs to see).
+  isClinicianWorkspace?: boolean;
   // Only ever called from the clinician workspace, where finalizing is
   // possible -- readOnly callers (the parent reader) never render the
   // button that would invoke this, so a no-op is a safe default rather
@@ -49,6 +57,8 @@ export function ReviewSection({
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
   const [isFinalizing, setIsFinalizing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { cards: calmCards } = useCalmCardsForFba(fbaId);
+  const publishedCalmCardCount = calmCards.filter((c) => c.isPublished).length;
 
   useEffect(() => {
     let isMounted = true;
@@ -136,6 +146,22 @@ export function ReviewSection({
           {completeCount} of {sections.length} sections complete
         </p>
       </div>
+
+      {isClinicianWorkspace && (
+        <div className="rounded-2xl border border-calm-pill bg-calm-pill/15 p-4">
+          <p className="text-sm font-semibold text-calm-ink">
+            <span aria-hidden>🩹</span> {calmCards.length} Calm Card{calmCards.length === 1 ? "" : "s"}
+            {calmCards.length > 0 && ` (${publishedCalmCardCount} published)`}
+          </p>
+          <p className="mt-0.5 text-xs text-brand-neutral-black/50">
+            {calmCards.length === 0
+              ? "Add Calm Cards from Section 12 to make this child's Calm button live for their parent."
+              : publishedCalmCardCount === 0
+                ? "Publish at least one card from Section 12 to make this child's Calm button live for their parent."
+                : "This child's Calm button is live for their parent."}
+          </p>
+        </div>
+      )}
 
       <div className="flex flex-col gap-2">
         {completions.map(({ section, state }) => (

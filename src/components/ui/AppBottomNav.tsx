@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { LucideIcon } from "lucide-react";
+import type { ReactNode } from "react";
 
 export interface NavTab {
   key: string;
@@ -21,7 +22,14 @@ export interface NavTab {
 // label, href, and a route-ownership matcher); this component owns all of
 // the shared visual and active-state logic, so a styling or behaviour fix
 // only ever needs to happen here.
-export function AppBottomNav({ tabs }: { tabs: NavTab[] }) {
+// extraSlot: an optional non-tab item appended to the same flex row --
+// the parent track's Calm button (Stage 2A) is the one caller today.
+// Deliberately NOT a NavTab: it's "an action, not a destination" (never
+// takes the active-page pill state the way Home/Passport/More do, and
+// its live/locked tap behaviour differs per state -- navigate vs open a
+// sheet), so it doesn't fit NavTab's Link+isActive model and gets its
+// own render slot instead of being shoehorned into the tabs array.
+export function AppBottomNav({ tabs, extraSlot }: { tabs: NavTab[]; extraSlot?: ReactNode }) {
   const pathname = usePathname();
 
   return (
@@ -74,6 +82,7 @@ export function AppBottomNav({ tabs }: { tabs: NavTab[] }) {
             </Link>
           );
         })}
+        {extraSlot}
       </div>
     </nav>
   );

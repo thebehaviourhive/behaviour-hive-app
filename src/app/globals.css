@@ -11,6 +11,13 @@
   --color-safe-ivory: #f1e6b2;
   --color-neutral-black: #222223;
   --color-off-white: #e5e1e6;
+
+  /* The Calm Button -- exclusive to that feature and its flow. Never
+     reused elsewhere in the app; every other red in the product means
+     something else (regulation-state alerts, delete actions), so this
+     pair stays scoped to Calm to avoid colliding with those meanings. */
+  --color-calm-pill-raw: #f6cdc9;
+  --color-calm-ink-raw: #c95f55;
 }
 
 @theme inline {
@@ -23,6 +30,9 @@
   --color-brand-safe-ivory: var(--color-safe-ivory);
   --color-brand-neutral-black: var(--color-neutral-black);
   --color-brand-off-white: var(--color-off-white);
+
+  --color-calm-pill: var(--color-calm-pill-raw);
+  --color-calm-ink: var(--color-calm-ink-raw);
 
   --font-heading: var(--font-baloo-2);
   --font-sans: var(--font-nunito-sans);
