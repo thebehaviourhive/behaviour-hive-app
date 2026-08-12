@@ -62,6 +62,15 @@ export function WhatIsAnFbaSheet({ isOpen, onClose }: { isOpen: boolean; onClose
           </p>
         </div>
 
+        <a
+          href="https://www.thebehaviourhive.com"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="mt-4 block text-center text-sm font-semibold text-brand-prussian-blue underline underline-offset-2"
+        >
+          Read the fuller explanation at thebehaviourhive.com
+        </a>
+
         <button
           type="button"
           onClick={onClose}

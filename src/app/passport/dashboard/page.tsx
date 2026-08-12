@@ -104,6 +104,7 @@ export default function PassportDashboardPage() {
   const [approvedInstitutions, setApprovedInstitutions] = useState<ApprovedInstitution[]>([]);
   const [connectedClinicians, setConnectedClinicians] = useState<ConnectedClinician[]>([]);
   const [isShareOpen, setIsShareOpen] = useState(false);
+  const [focusClinicianCodeOnOpen, setFocusClinicianCodeOnOpen] = useState(false);
   const [revokeConfirmation, setRevokeConfirmation] = useState<string | null>(null);
   const [revokeError, setRevokeError] = useState<string | null>(null);
   const [clinicianRevokeConfirmation, setClinicianRevokeConfirmation] = useState<string | null>(null);
@@ -347,6 +348,17 @@ export default function PassportDashboardPage() {
     // that could be derived during render.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setIsAbcLoggerOpen(true);
+    router.replace("/passport/dashboard");
+  }, [summary, searchParams, router]);
+
+  // Deep-link from the Clinical Support card's "Link your clinician" CTA
+  // (parent already has a passport, just no clinician linked yet) --
+  // same query-param-then-replace pattern as logIncident above.
+  useEffect(() => {
+    if (!summary || searchParams.get("openShare") !== "1") return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setIsShareOpen(true);
+    setFocusClinicianCodeOnOpen(true);
     router.replace("/passport/dashboard");
   }, [summary, searchParams, router]);
 
@@ -944,10 +956,14 @@ export default function PassportDashboardPage() {
 
       <ShareBottomSheet
         isOpen={isShareOpen}
-        onClose={() => setIsShareOpen(false)}
+        onClose={() => {
+          setIsShareOpen(false);
+          setFocusClinicianCodeOnOpen(false);
+        }}
         passportId={summary.passportId}
         childName={summary.childName}
         passportCode={summary.passportCode}
+        focusClinicianCode={focusClinicianCodeOnOpen}
         onCodeGenerated={(code) =>
           setSummary((prev) => (prev ? { ...prev, passportCode: code } : prev))
         }

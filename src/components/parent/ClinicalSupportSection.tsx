@@ -23,7 +23,7 @@ interface DocumentStatusRow {
 }
 
 type FbaState =
-  | { kind: "no-clinician" }
+  | { kind: "no-clinician"; passportId: string | null }
   | { kind: "clinician-no-fba"; clinicianLastName: string }
   | { kind: "in-progress"; clinicianLastName: string; startedAt: string }
   | { kind: "completed-pending"; fbaId: string }
@@ -49,48 +49,69 @@ export function ClinicalSupportSection({
   const [isInfoSheetOpen, setIsInfoSheetOpen] = useState(false);
 
   useEffect(() => {
-    if (!passportId) return;
+    let isMounted = true;
+
+    // No passport yet is a permanent (not transient) condition for this
+    // parent, not a "still loading" one -- resolve straight to the
+    // awareness state instead of returning early and leaving isLoading
+    // stuck at true forever. That early-return-without-resolving was the
+    // root cause of the card rendering as a stuck skeleton (visually
+    // empty) before any passport exists -- fixed here by never leaving
+    // this effect without setting both fbaState and isLoading.
+    if (!passportId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setFbaState({ kind: "no-clinician", passportId: null });
+      setIsLoading(false);
+      return;
+    }
+
     // Captured as its own const so the closure below keeps TypeScript's
     // non-null narrowing -- `passportId` itself is a prop binding, which
     // TS won't narrow inside a nested function even though it can't
     // actually change within this effect run.
     const pid = passportId;
-    let isMounted = true;
 
     async function load() {
       const supabase = createClient();
-      const [{ data: clinicianRows }, { data: statusRows, error: statusError }] = await Promise.all([
-        supabase.rpc("get_passport_clinicians", { p_passport_id: pid }),
-        supabase.rpc("get_child_clinical_document_status", { p_passport_id: pid }),
-      ]);
+      try {
+        const [{ data: clinicianRows }, { data: statusRows, error: statusError }] = await Promise.all([
+          supabase.rpc("get_passport_clinicians", { p_passport_id: pid }),
+          supabase.rpc("get_child_clinical_document_status", { p_passport_id: pid }),
+        ]);
 
-      if (!isMounted) return;
+        if (!isMounted) return;
 
-      const clinician = ((clinicianRows ?? []) as ClinicianRow[])[0] ?? null;
-      // A failed status RPC degrades to "no FBA known" rather than a
-      // broken card -- the clinician-connection signal alone still
-      // resolves a sensible (if less specific) state A/B.
-      const status = statusError ? null : (((statusRows ?? []) as DocumentStatusRow[])[0] ?? null);
+        const clinician = ((clinicianRows ?? []) as ClinicianRow[])[0] ?? null;
+        // A failed status RPC degrades to "no FBA known" rather than a
+        // broken card -- the clinician-connection signal alone still
+        // resolves a sensible (if less specific) state A/B.
+        const status = statusError ? null : (((statusRows ?? []) as DocumentStatusRow[])[0] ?? null);
 
-      if (!status) {
-        setFbaState(
-          clinician
-            ? { kind: "clinician-no-fba", clinicianLastName: getClinicianLastName(clinician.full_name) }
-            : { kind: "no-clinician" }
-        );
-      } else if (status.status === "in_progress") {
-        setFbaState({
-          kind: "in-progress",
-          clinicianLastName: getClinicianLastName(clinician?.full_name),
-          startedAt: status.started_at,
-        });
-      } else if (status.is_approved) {
-        setFbaState({ kind: "completed-approved", fbaId: status.fba_id, completedAt: status.completed_at ?? status.started_at });
-      } else {
-        setFbaState({ kind: "completed-pending", fbaId: status.fba_id });
+        if (!status) {
+          setFbaState(
+            clinician
+              ? { kind: "clinician-no-fba", clinicianLastName: getClinicianLastName(clinician.full_name) }
+              : { kind: "no-clinician", passportId: pid }
+          );
+        } else if (status.status === "in_progress") {
+          setFbaState({
+            kind: "in-progress",
+            clinicianLastName: getClinicianLastName(clinician?.full_name),
+            startedAt: status.started_at,
+          });
+        } else if (status.is_approved) {
+          setFbaState({ kind: "completed-approved", fbaId: status.fba_id, completedAt: status.completed_at ?? status.started_at });
+        } else {
+          setFbaState({ kind: "completed-pending", fbaId: status.fba_id });
+        }
+      } catch {
+        // Any unexpected exception (network failure, RPC rejection) also
+        // falls back to the awareness content -- the card must never be
+        // able to render empty, on RPC error or otherwise.
+        if (isMounted) setFbaState({ kind: "no-clinician", passportId: pid });
+      } finally {
+        if (isMounted) setIsLoading(false);
       }
-
-      setIsLoading(false);
     }
 
     load();
@@ -137,13 +158,17 @@ function FbaCard({
       return (
         <ClinicalDocumentCard
           title="Functional Behaviour Assessment"
-          body={
-            <p>
-              Learn how an FBA can identify the &quot;why&quot; behind behaviours and unlock targeted
-              support strategies.
-            </p>
-          }
-          secondaryAction={{ label: "What is an FBA?", onClick: onOpenInfo }}
+          body={<p>Find out more about an FBA for your child.</p>}
+          primaryAction={{
+            label: "Link your clinician",
+            // Can't link a clinician to a passport that doesn't exist yet --
+            // creation is the true next step when there's no passport at
+            // all. Once a passport exists, deep-link straight to the
+            // access/linking area on the passport page, landing with the
+            // clinician-code entry visible.
+            href: state.passportId ? "/passport/dashboard?openShare=1" : "/passport/welcome",
+          }}
+          secondaryAction={{ label: "Find out more", onClick: onOpenInfo }}
         />
       );
 
@@ -153,11 +178,10 @@ function FbaCard({
           title="Functional Behaviour Assessment"
           body={
             <p>
-              Talk to Dr. {state.clinicianLastName} about starting a Functional Behaviour Assessment for{" "}
-              {childName}.
+              Talk to Dr. {state.clinicianLastName} about a Functional Behaviour Assessment for {childName}.
             </p>
           }
-          secondaryAction={{ label: "What is an FBA?", onClick: onOpenInfo }}
+          secondaryAction={{ label: "Find out more", onClick: onOpenInfo }}
         />
       );
 

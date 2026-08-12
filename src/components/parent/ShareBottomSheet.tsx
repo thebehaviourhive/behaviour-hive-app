@@ -12,6 +12,7 @@ export function ShareBottomSheet({
   passportId,
   childName,
   passportCode,
+  focusClinicianCode = false,
   onCodeGenerated,
   onApproved,
   onClinicianConnected,
@@ -21,6 +22,11 @@ export function ShareBottomSheet({
   passportId: string;
   childName: string;
   passportCode: string | null;
+  // Set when this sheet was opened via the Clinical Support card's
+  // "Link your clinician" deep-link (?openShare=1) -- scrolls/focuses the
+  // clinician-code input so it's immediately visible, rather than landing
+  // on the school-code section above it.
+  focusClinicianCode?: boolean;
   onCodeGenerated: (code: string) => void;
   onApproved: () => void;
   onClinicianConnected: () => void;
@@ -63,12 +69,24 @@ export function ShareBottomSheet({
   const [isConnectingClinician, setIsConnectingClinician] = useState(false);
   const [clinicianError, setClinicianError] = useState<string | null>(null);
   const [clinicianSuccess, setClinicianSuccess] = useState<string | null>(null);
+  const clinicianCodeInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!isOpen) {
       hasStartedGenerating.current = false;
     }
   }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen || !focusClinicianCode) return;
+    // Deferred a tick so the sheet has finished its own open animation/
+    // mount before scrolling within it.
+    const timer = setTimeout(() => {
+      clinicianCodeInputRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      clinicianCodeInputRef.current?.focus();
+    }, 150);
+    return () => clearTimeout(timer);
+  }, [isOpen, focusClinicianCode]);
 
   const generateCode = useCallback(async () => {
     setIsGeneratingCode(true);
@@ -372,6 +390,7 @@ export function ShareBottomSheet({
         Enter your clinician&apos;s code
       </p>
       <input
+        ref={clinicianCodeInputRef}
         type="text"
         value={clinicianCodeInput}
         onChange={(e) => setClinicianCodeInput(e.target.value)}
