@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getChildDisplayName } from "@/lib/childDisplayName";
-import type { MyInstrumentRequest } from "@/lib/fba/types";
+import { INSTRUMENT_LABELS, type MyInstrumentRequest } from "@/lib/fba/types";
 import { QuestionnaireFlow } from "./QuestionnaireFlow";
 
 interface RequestRow {
@@ -70,31 +70,49 @@ export function QuestionnairePromptCard({ track }: { track: "parent" | "teacher"
   // both tracks (RecentUpdatesCard on parent, TeacherActivityCard on
   // teacher) -- and since this component returns null above when
   // there's nothing to show, that margin never renders as a stray gap
-  // on the far more common empty case.
-  const cardClassName = `mb-6 rounded-2xl border border-brand-off-white/50 border-t-4 border-t-brand-prussian-blue bg-white p-5 shadow-sm ${
-    track === "teacher" ? "mx-4" : ""
-  }`;
+  // on the far more common empty case. gap-3 (not a shared bordered
+  // stack) is the fix for the old merged-card look: each pending
+  // request below is its own fully separate rounded-2xl/shadow card,
+  // same as every other stacked card group on these dashboards.
+  const stackClassName = `mb-6 flex flex-col gap-3 ${track === "teacher" ? "mx-4" : ""}`;
 
   return (
     <>
-      <div className={cardClassName}>
-        {requests.map((request, index) => {
-          const childLabel = track === "teacher" ? getChildDisplayName(request.childName) : request.childName;
+      <div className={stackClassName}>
+        {requests.map((request) => {
+          const instrumentLabel = INSTRUMENT_LABELS[request.instrumentType];
+          const title =
+            track === "teacher"
+              ? `${getChildDisplayName(request.childName)}'s clinician has asked you to fill out a ${instrumentLabel} questionnaire`
+              : `Your clinician has asked you to fill out a ${instrumentLabel} questionnaire about ${request.childName}`;
           return (
-            <div key={request.id} className={index > 0 ? "mt-4 border-t border-black/5 pt-4" : ""}>
-              <p className="text-sm text-brand-neutral-black">
-                <span className="font-semibold">{request.clinicianName}</span> has asked you to
-                complete a short questionnaire about{" "}
-                <span className="font-semibold">{childLabel}</span>.
-              </p>
-              <button
-                type="button"
-                onClick={() => setActiveRequest(request)}
-                className="mt-3 w-full rounded-2xl bg-brand-prussian-blue py-3 text-sm font-semibold text-white"
+            // Golden "please act today" treatment, mirroring the
+            // morning check-in prompt card's actual styling (parent-
+            // dashboard/page.tsx's CheckInCard) -- same accent colour,
+            // border/background approach and font-semibold weight. A
+            // distinct icon (📋 vs the check-in card's ☀️) and this
+            // card's own instrument-naming copy are what keep the two
+            // visually distinguishable when both are stacked.
+            <button
+              key={request.id}
+              type="button"
+              onClick={() => setActiveRequest(request)}
+              className="flex w-full items-center gap-3 rounded-2xl border-l-4 border-brand-golden-brown bg-brand-safe-ivory/30 p-4 text-left shadow-md transition-transform active:scale-[0.99]"
+            >
+              <span
+                aria-hidden
+                className="flex h-10 w-10 flex-shrink-0 animate-pulse items-center justify-center rounded-full bg-brand-golden-brown/20 text-lg"
+              >
+                📋
+              </span>
+              <span className="flex-1 text-sm font-semibold text-brand-neutral-black">{title}</span>
+              <span
+                aria-hidden
+                className="flex-shrink-0 rounded-full bg-brand-golden-brown px-4 py-2 text-xs font-semibold text-white"
               >
                 {request.status === "in_progress" ? "Continue" : "Start"}
-              </button>
-            </div>
+              </span>
+            </button>
           );
         })}
       </div>
