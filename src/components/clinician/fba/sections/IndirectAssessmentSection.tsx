@@ -232,6 +232,7 @@ export function IndirectAssessmentSection({
         onRetryCandidates={reload}
         requests={requests}
         onSend={sendRequest}
+        childName={childName}
       />
     </div>
   );

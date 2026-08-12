@@ -4,6 +4,7 @@ import { useState } from "react";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 import { InlineErrorState } from "@/components/ui/InlineErrorState";
 import { createClient } from "@/lib/supabase/client";
+import { resolveInstructionText } from "@/lib/fba/resolveInstruction";
 import {
   INSTRUMENT_LABELS,
   RECIPIENT_ROLE_LABELS,
@@ -28,6 +29,11 @@ export function SendQuestionnaireSheet({
   onRetryCandidates,
   requests,
   onSend,
+  // Always the full name -- the instruction editor is a clinical
+  // surface, same rule as InstrumentResultCard elsewhere in this
+  // section. Nullable only because the caller's own fetch may not have
+  // resolved yet; the preview falls back to "the child" in that case.
+  childName,
 }: {
   isOpen: boolean;
   onClose: () => void;
@@ -37,6 +43,7 @@ export function SendQuestionnaireSheet({
   onRetryCandidates: () => void;
   requests: FbaInstrumentRequest[];
   onSend: (instrumentType: SendableInstrumentType, recipientId: string, instruction: string) => Promise<string | null>;
+  childName: string | null;
 }) {
   const [instrumentType, setInstrumentType] = useState<SendableInstrumentType | null>(null);
   // Set once a recipient is chosen -- from that point the sheet shows
@@ -97,6 +104,13 @@ export function SendQuestionnaireSheet({
     onClose();
   }
 
+  // Shown so the clinician never has to mentally substitute the token
+  // themselves -- reuses the exact same resolver every downstream
+  // viewer calls, so what's previewed here is provably what a
+  // clinical-surface reader will actually see (never a bespoke re-
+  // implementation that could drift from the real resolution rule).
+  const previewText = resolveInstructionText(instruction, childName ?? "the child");
+
   function hasActiveRequest(recipientId: string): boolean {
     if (!instrumentType) return false;
     return requests.some(
@@ -144,16 +158,48 @@ export function SendQuestionnaireSheet({
             Shown to them before they begin. Edit if this send should focus on something specific.
           </p>
 
+          {/* Shipped the token-textarea + live-preview fallback, not a
+              true inline non-editable chip: this codebase has no
+              contentEditable/rich-text infrastructure to build on (no
+              slate/tiptap/draft-js, no existing mention-chip component),
+              and a from-scratch atomic-chip-inside-editable-text
+              implementation carries real cross-browser risk -- caret
+              placement around the atomic node, backspace/delete
+              atomicity, IME composition, copy/paste -- particularly on
+              iOS Safari, this app's primary target, which has
+              well-documented contentEditable selection bugs. That risk
+              was disproportionate for what's meant to be a small,
+              contained fix. The preview below is driven by the exact
+              same resolveInstructionText every downstream viewer calls,
+              so it's provably what the respondent will actually see,
+              and the caption makes the token impossible to miss. */}
           {isLoadingDefault ? (
             <div className="h-32 animate-pulse rounded-2xl bg-brand-off-white" />
           ) : (
-            <textarea
-              value={instruction}
-              onChange={(e) => setInstruction(e.target.value)}
-              rows={5}
-              placeholder="Instructions for the respondent…"
-              className="w-full resize-none rounded-2xl border border-black/10 bg-white px-4 py-3.5 text-base text-brand-neutral-black placeholder:text-black/30 focus:border-brand-prussian-blue focus:outline-none focus:ring-2 focus:ring-brand-pastel-blue"
-            />
+            <>
+              <textarea
+                value={instruction}
+                onChange={(e) => setInstruction(e.target.value)}
+                rows={5}
+                placeholder="Instructions for the respondent…"
+                className="w-full resize-none rounded-2xl border border-black/10 bg-white px-4 py-3.5 text-base text-brand-neutral-black placeholder:text-black/30 focus:border-brand-prussian-blue focus:outline-none focus:ring-2 focus:ring-brand-pastel-blue"
+              />
+              {instruction.includes("[child name]") && (
+                <p className="mt-1.5 text-xs text-brand-neutral-black/50">
+                  <span className="font-semibold text-brand-prussian-blue">[child name]</span> will be
+                  replaced automatically with the child&apos;s name for each recipient -- don&apos;t type
+                  over it.
+                </p>
+              )}
+              {previewText && (
+                <div className="mt-3 rounded-2xl bg-brand-pastel-blue/15 px-4 py-3">
+                  <p className="mb-0.5 font-accent text-xs font-bold uppercase tracking-wide text-brand-neutral-black/50">
+                    Preview
+                  </p>
+                  <p className="text-sm text-brand-neutral-black">{previewText}</p>
+                </div>
+              )}
+            </>
           )}
 
           {error && (
