@@ -7,7 +7,6 @@ import { createClient } from "@/lib/supabase/client";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { getPassportResumeHref } from "@/lib/getPassportResumeHref";
 import { RecentUpdatesCard } from "@/components/parent/RecentUpdatesCard";
-import { QuestionnairePromptCard } from "@/components/questionnaire/QuestionnairePromptCard";
 import { ClinicalSupportSection } from "@/components/parent/ClinicalSupportSection";
 import { QuickActionButtons } from "@/components/parent/QuickActionButtons";
 import { YourTeamCard } from "@/components/parent/YourTeamCard";
@@ -309,8 +308,6 @@ export default function ParentDashboardPage() {
         )}
 
         <ClinicalSupportSection passportId={passportId} childName={childName} />
-
-        <QuestionnairePromptCard track="parent" />
 
         <RecentUpdatesCard passportId={passportId} />
 

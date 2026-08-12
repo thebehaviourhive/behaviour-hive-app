@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { format } from "date-fns";
 import { createClient } from "@/lib/supabase/client";
 import { getClinicianLastName } from "@/lib/clinicianDisplayName";
+import { QuestionnairePromptCard } from "@/components/questionnaire/QuestionnairePromptCard";
 import { ClinicalDocumentCard } from "./ClinicalDocumentCard";
 import { WhatIsAnFbaSheet } from "./WhatIsAnFbaSheet";
 
@@ -125,6 +126,15 @@ export function ClinicalSupportSection({
       <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-black/40">Clinical Support</h2>
 
       <div className="flex flex-col gap-3">
+        {/* Pending questionnaires now live at the top of this section,
+            above the FBA card -- moved here from their old standalone
+            slot on the dashboard. No className supplied: this div's own
+            gap-3 (matching the FBA/BSP cards' own lack of self-margin)
+            already provides correct spacing, and the section's existing
+            px-4 (from the dashboard's <main>) already provides the
+            horizontal inset. */}
+        <QuestionnairePromptCard track="parent" />
+
         {isLoading || !fbaState ? (
           <div className="h-32 animate-pulse rounded-2xl bg-white" />
         ) : (

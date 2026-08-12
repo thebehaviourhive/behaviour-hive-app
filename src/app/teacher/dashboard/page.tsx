@@ -81,6 +81,14 @@ export default function TeacherDashboardPage() {
             <StatCard label="Unopened Messages" value="0" isSubdued />
           </div>
 
+          {/* Moved here from below TeacherQuickActions -- className
+              supplies this page's own mt-4/px-4 convention (every
+              top-level sibling here self-margins, there's no shared
+              gap container), matching the stats row above and grid
+              below it. No bottom margin needed: the grid section
+              already supplies its own mt-4. */}
+          <QuestionnairePromptCard track="teacher" className="mt-4 px-4" />
+
           <section className="mt-4 grid grid-cols-2 gap-3 px-4">
             {isLoadingCheckins
               ? Array.from({ length: 6 }).map((_, i) => <MorningPupilCardSkeleton key={i} />)
@@ -103,7 +111,6 @@ export default function TeacherDashboardPage() {
           )}
 
           <TeacherQuickActions />
-          <QuestionnairePromptCard track="teacher" />
           <TeacherActivityCard />
         </>
       )}

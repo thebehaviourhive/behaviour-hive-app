@@ -32,14 +32,29 @@ function mapRow(row: RequestRow): MyInstrumentRequest {
 
 // Self-contained: fetches its own data, renders nothing while loading or
 // when there's nothing pending, and owns the completion flow's open/
-// closed state internally -- so dropping <QuestionnairePromptCard /> in
-// above a dashboard's Recent Activity card is the only integration
-// needed, with zero other wiring and zero risk to the rest of the page.
-// A load failure fails silently (logged, not shown) rather than putting
-// an alarming error card above Recent Activity for something outside
-// the recipient's control -- this is a "nice to have" prompt, not core
-// dashboard content.
-export function QuestionnairePromptCard({ track }: { track: "parent" | "teacher" }) {
+// closed state internally -- so dropping <QuestionnairePromptCard />
+// anywhere in a dashboard's layout is the only integration needed, with
+// zero other wiring and zero risk to the rest of the page. Mounted at
+// the top of ClinicalSupportSection on the parent dashboard, and
+// between the stats row and the morning grid on the teacher dashboard
+// -- see each call site for why it takes a className prop instead of
+// baking in its own outer spacing. A load failure fails silently
+// (logged, not shown) rather than putting an alarming error card
+// somewhere for something outside the recipient's control -- this is a
+// "nice to have" prompt, not core dashboard content.
+export function QuestionnairePromptCard({
+  track,
+  // Caller-supplied outer spacing/inset only -- deliberately NOT baked
+  // into this component, since it's now mounted in genuinely different
+  // layout contexts per dashboard (see call sites). Everything about
+  // each individual card (colour, icon, copy, behaviour) and the gap-3
+  // between multiple stacked ones stays exactly as built regardless of
+  // what's passed here.
+  className = "",
+}: {
+  track: "parent" | "teacher";
+  className?: string;
+}) {
   const [requests, setRequests] = useState<MyInstrumentRequest[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [activeRequest, setActiveRequest] = useState<MyInstrumentRequest | null>(null);
@@ -66,15 +81,14 @@ export function QuestionnairePromptCard({ track }: { track: "parent" | "teacher"
     return null;
   }
 
-  // mb-6 matches the sibling cards' own self-supplied bottom margin in
-  // both tracks (RecentUpdatesCard on parent, TeacherActivityCard on
-  // teacher) -- and since this component returns null above when
-  // there's nothing to show, that margin never renders as a stray gap
-  // on the far more common empty case. gap-3 (not a shared bordered
-  // stack) is the fix for the old merged-card look: each pending
-  // request below is its own fully separate rounded-2xl/shadow card,
-  // same as every other stacked card group on these dashboards.
-  const stackClassName = `mb-6 flex flex-col gap-3 ${track === "teacher" ? "mx-4" : ""}`;
+  // Since this component returns null above when there's nothing to
+  // show, the caller-supplied className never renders as a stray gap
+  // on the far more common empty case -- there's no DOM node at all for
+  // it to be attached to. gap-3 (not a shared bordered stack) is the
+  // fix for the old merged-card look: each pending request below is its
+  // own fully separate rounded-2xl/shadow card, same as every other
+  // stacked card group on these dashboards.
+  const stackClassName = `flex flex-col gap-3 ${className}`;
 
   return (
     <>
