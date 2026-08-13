@@ -12,6 +12,7 @@ import { ABCTimeline } from "@/components/abc-logger/ABCTimeline";
 import { PassportAccordion } from "@/components/passport/PassportAccordion";
 import { ClinicalTeamSection } from "@/components/passport/clinical-team/ClinicalTeamSection";
 import { usePassportClinicalContent } from "@/hooks/usePassportClinicalContent";
+import { useStrategyEffectiveness } from "@/hooks/useStrategyEffectiveness";
 import { createClient } from "@/lib/supabase/client";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { getPassportResumeHref } from "@/lib/getPassportResumeHref";
@@ -129,6 +130,16 @@ export default function PassportDashboardPage() {
   // deep link doesn't collapse the default-open section.
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(["about-your-child"]));
   const [clinicalTeamItems, setClinicalTeamItems] = useState<ClinicalContentItem[] | null>(null);
+  // Regression fix: this dashboard used to render the standalone
+  // ParentClinicalTeamCard (which owned its own useStrategyEffectiveness
+  // call), before being restructured to inline ClinicalTeamSection
+  // directly -- that restructure dropped the helpedCounts wiring
+  // entirely, silently disabling the "Helped N times" counter here even
+  // though the underlying data was always fine (confirmed live: the
+  // same strategies show correct counts in the clinician's Effectiveness
+  // view). Threaded through the same headless-loader pattern as
+  // clinicalTeamItems below, for the same rules-of-hooks reason.
+  const [helpedCounts, setHelpedCounts] = useState<Record<string, number>>({});
   const hasHandledHashRef = useRef(false);
 
   function toggleSection(id: string) {
@@ -746,7 +757,11 @@ export default function PassportDashboardPage() {
             its own accordion below is expanded), so the accordion's
             collapsed-state pill count is never stuck waiting on an
             expand to trigger the fetch. Renders nothing itself. */}
-        <ClinicalTeamDataLoader passportId={summary.passportId} onLoaded={setClinicalTeamItems} />
+        <ClinicalTeamDataLoader
+          passportId={summary.passportId}
+          onLoaded={setClinicalTeamItems}
+          onHelpedCountsLoaded={setHelpedCounts}
+        />
 
         <div className="flex flex-col gap-3">
           <PassportAccordion
@@ -954,7 +969,7 @@ export default function PassportDashboardPage() {
                 isExpanded={expandedSections.has("clinical-team")}
                 onToggle={() => toggleSection("clinical-team")}
               >
-                <ClinicalTeamSection items={clinicalTeamItems} viewerRole="parent" />
+                <ClinicalTeamSection items={clinicalTeamItems} viewerRole="parent" helpedCounts={helpedCounts} />
               </PassportAccordion>
             </ErrorBoundary>
           )}
@@ -1141,11 +1156,14 @@ function VerticalChipList({ heading, items }: { heading: string; items: string[]
 function ClinicalTeamDataLoader({
   passportId,
   onLoaded,
+  onHelpedCountsLoaded,
 }: {
   passportId: string;
   onLoaded: (items: ClinicalContentItem[]) => void;
+  onHelpedCountsLoaded: (counts: Record<string, number>) => void;
 }) {
   const { items, isLoading, loadError } = usePassportClinicalContent(passportId);
+  const { helpedCounts, isLoading: isHelpedCountsLoading } = useStrategyEffectiveness(passportId);
 
   useEffect(() => {
     if (!isLoading && !loadError) onLoaded(items);
@@ -1153,6 +1171,11 @@ function ClinicalTeamDataLoader({
     // omit -- including it would only ever add a no-op re-run.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [items, isLoading, loadError]);
+
+  useEffect(() => {
+    if (!isHelpedCountsLoading) onHelpedCountsLoaded(helpedCounts);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [helpedCounts, isHelpedCountsLoading]);
 
   return null;
 }
