@@ -6,10 +6,13 @@ import { TextField } from "@/components/ui/TextField";
 import { Checkbox } from "@/components/ui/Checkbox";
 import { createClient } from "@/lib/supabase/client";
 import { useRequireRole } from "@/hooks/useRequireRole";
+import { useRegions } from "@/hooks/useRegions";
+import { RegionMultiSelect } from "@/components/ui/RegionMultiSelect";
 
 export default function ClinicianVerifyPage() {
   const router = useRouter();
-  const { isReady } = useRequireRole("clinician");
+  const { user, isReady } = useRequireRole("clinician");
+  const { regions } = useRegions();
 
   const [fullName, setFullName] = useState("");
   const [psiNumber, setPsiNumber] = useState("");
@@ -18,6 +21,7 @@ export default function ClinicianVerifyPage() {
   const [governmentId, setGovernmentId] = useState("");
   const [gardaVetting, setGardaVetting] = useState(false);
   const [professionalIndemnity, setProfessionalIndemnity] = useState(false);
+  const [operatingCounties, setOperatingCounties] = useState<string[]>([]);
 
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -31,8 +35,14 @@ export default function ClinicianVerifyPage() {
     gardaVetting &&
     professionalIndemnity;
 
+  function toggleCounty(regionId: string) {
+    setOperatingCounties((prev) =>
+      prev.includes(regionId) ? prev.filter((id) => id !== regionId) : [...prev, regionId]
+    );
+  }
+
   async function handleSubmit() {
-    if (!isComplete) return;
+    if (!isComplete || !user) return;
 
     setError(null);
     setIsSubmitting(true);
@@ -48,13 +58,28 @@ export default function ClinicianVerifyPage() {
       p_professional_indemnity_declared: professionalIndemnity,
     });
 
-    setIsSubmitting(false);
-
     if (rpcError) {
+      setIsSubmitting(false);
       setError(rpcError.message);
       return;
     }
 
+    // Deliberately a SEPARATE, direct table update -- NOT threaded
+    // through submit_clinician_verification's own params. That RPC
+    // resets verification_status back to 'pending' on every call (same
+    // as select_clinician_specialty does on a specialty change, per
+    // migration 0029); Operating Area is location metadata, not a
+    // credential, so it must never be able to re-trigger review. Same
+    // posture as the More page's own Operating Area editor below.
+    if (operatingCounties.length > 0) {
+      const { error: countiesError } = await supabase
+        .from("clinicians")
+        .update({ operating_counties: operatingCounties })
+        .eq("user_id", user.id);
+      if (countiesError) console.error("Failed to save operating counties:", countiesError);
+    }
+
+    setIsSubmitting(false);
     router.push("/clinician/dashboard");
   }
 
@@ -110,6 +135,16 @@ export default function ClinicianVerifyPage() {
               information is used once for manual verification and is never
               displayed on your profile.
             </p>
+          </div>
+
+          <div className="my-1 h-px bg-black/10" />
+
+          <div className="flex flex-col gap-2">
+            <label className="text-sm font-semibold text-brand-neutral-black">Operating Area</label>
+            <p className="text-xs text-brand-neutral-black/50">Country</p>
+            <p className="text-sm text-brand-neutral-black">Ireland</p>
+            <p className="mt-1 text-xs text-brand-neutral-black/50">Select all counties you operate in.</p>
+            <RegionMultiSelect regions={regions} selected={operatingCounties} onToggle={toggleCounty} />
           </div>
 
           <div className="my-1 h-px bg-black/10" />

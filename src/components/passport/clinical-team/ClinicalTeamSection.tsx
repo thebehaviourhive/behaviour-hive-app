@@ -42,10 +42,18 @@ function ItemCard({
   item,
   viewerRole,
   index,
+  helpedCount,
 }: {
   item: ClinicalContentItem;
   viewerRole: ClinicalTeamViewerRole;
   index?: number;
+  // Stage 2's "small parent-visible warmth" counter -- undefined for
+  // every non-strategy item_type (trigger/setting_event never have a
+  // rating to begin with) and for the clinician/teacher call sites
+  // (neither passes this prop at all, so it never renders for them --
+  // see ClinicalTeamSection's own header comment on why this stays
+  // parent-only structurally, not just via a role check here).
+  helpedCount?: number;
 }) {
   // Strategy descriptions are newline-joined bullet lists (see
   // approve_fba_strategies' extraction) -- rendered back out as a list
@@ -67,6 +75,11 @@ function ItemCard({
       ) : (
         lines[0] && <p className="mt-1 text-sm text-brand-neutral-black/70">{lines[0]}</p>
       )}
+      {!!helpedCount && (
+        <p className="mt-2 inline-flex items-center gap-1 rounded-full bg-brand-safe-ivory/50 px-2.5 py-1 text-xs font-semibold text-brand-golden-brown">
+          <span aria-hidden>💛</span> Helped {helpedCount} time{helpedCount === 1 ? "" : "s"}
+        </p>
+      )}
       <AttributionLine item={item} viewerRole={viewerRole} />
     </div>
   );
@@ -77,11 +90,13 @@ function Group({
   items,
   viewerRole,
   numbered,
+  helpedCounts,
 }: {
   title: string;
   items: ClinicalContentItem[];
   viewerRole: ClinicalTeamViewerRole;
   numbered?: boolean;
+  helpedCounts?: Record<string, number>;
 }) {
   if (items.length === 0) return null;
   return (
@@ -89,7 +104,13 @@ function Group({
       <p className="mb-2 text-sm font-semibold text-brand-neutral-black">{title}</p>
       <div className="flex flex-col gap-2">
         {items.map((item, i) => (
-          <ItemCard key={item.id} item={item} viewerRole={viewerRole} index={numbered ? i : undefined} />
+          <ItemCard
+            key={item.id}
+            item={item}
+            viewerRole={viewerRole}
+            index={numbered ? i : undefined}
+            helpedCount={helpedCounts?.[item.id]}
+          />
         ))}
       </div>
     </div>
@@ -105,9 +126,14 @@ function Group({
 export function ClinicalTeamSection({
   items,
   viewerRole,
+  helpedCounts,
 }: {
   items: ClinicalContentItem[];
   viewerRole: ClinicalTeamViewerRole;
+  // Parent-only (Stage 2) -- only ParentClinicalTeamCard passes this;
+  // the clinician/teacher call sites of this component don't, so the
+  // counter is structurally absent for them, not conditionally hidden.
+  helpedCounts?: Record<string, number>;
 }) {
   const triggers = items.filter((item) => item.itemType === "trigger");
   const settingEvents = items.filter((item) => item.itemType === "setting_event");
@@ -119,9 +145,9 @@ export function ClinicalTeamSection({
     <div className="flex flex-col gap-6">
       <Group title="Triggers" items={triggers} viewerRole={viewerRole} />
       <Group title="Setting Events" items={settingEvents} viewerRole={viewerRole} />
-      <Group title="Home Strategies" items={home} viewerRole={viewerRole} numbered />
-      <Group title="School Strategies" items={school} viewerRole={viewerRole} numbered />
-      <Group title="Shared Strategies" items={shared} viewerRole={viewerRole} numbered />
+      <Group title="Home Strategies" items={home} viewerRole={viewerRole} numbered helpedCounts={helpedCounts} />
+      <Group title="School Strategies" items={school} viewerRole={viewerRole} numbered helpedCounts={helpedCounts} />
+      <Group title="Shared Strategies" items={shared} viewerRole={viewerRole} numbered helpedCounts={helpedCounts} />
     </div>
   );
 }

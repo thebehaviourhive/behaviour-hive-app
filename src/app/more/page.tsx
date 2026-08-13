@@ -10,6 +10,8 @@ import { TeacherBottomNav } from "@/components/teacher/TeacherBottomNav";
 import { ClinicianBottomNav } from "@/components/clinician/ClinicianBottomNav";
 import { TrendUpIcon } from "@/components/ui/icons";
 import { getChildFirstName } from "@/lib/childDisplayName";
+import { useRegions } from "@/hooks/useRegions";
+import { RegionMultiSelect } from "@/components/ui/RegionMultiSelect";
 
 const CADENCE_OPTIONS = [14, 30, 60, 90] as const;
 
@@ -25,6 +27,10 @@ export default function MorePage() {
   const [isSavingCadence, setIsSavingCadence] = useState(false);
   const [cadenceError, setCadenceError] = useState<string | null>(null);
   const [childName, setChildName] = useState<string | null>(null);
+  const [operatingCounties, setOperatingCounties] = useState<string[]>([]);
+  const [isSavingCounties, setIsSavingCounties] = useState(false);
+  const [countiesError, setCountiesError] = useState<string | null>(null);
+  const { regions } = useRegions();
 
   useEffect(() => {
     let isMounted = true;
@@ -49,13 +55,14 @@ export default function MorePage() {
       if (userRole === "clinician") {
         const { data: clinician } = await supabase
           .from("clinicians")
-          .select("clinician_code, review_cadence_days")
+          .select("clinician_code, review_cadence_days, operating_counties")
           .eq("user_id", user.id)
           .maybeSingle();
 
         if (isMounted && clinician) {
           setClinicianCode(clinician.clinician_code);
           setReviewCadenceDays(clinician.review_cadence_days);
+          setOperatingCounties(clinician.operating_counties ?? []);
         }
       } else if (!userRole || (userRole !== "class_teacher" && userRole !== "clinician")) {
         // Parent (the only track this More page adds a Progress entry
@@ -99,6 +106,29 @@ export default function MorePage() {
     }
 
     setReviewCadenceDays(days);
+  }
+
+  // Direct table update, same as handleCadenceChange above -- never
+  // touches verification_status (constraint: "do not disturb
+  // verification status"). Toggling a county writes the WHOLE next
+  // array optimistically, then rolls back on error, same pattern as
+  // the cadence control's own error handling.
+  async function handleToggleCounty(regionId: string) {
+    if (!userId) return;
+    const previous = operatingCounties;
+    const next = previous.includes(regionId)
+      ? previous.filter((id) => id !== regionId)
+      : [...previous, regionId];
+    setOperatingCounties(next);
+    setIsSavingCounties(true);
+    setCountiesError(null);
+    const supabase = createClient();
+    const { error } = await supabase.from("clinicians").update({ operating_counties: next }).eq("user_id", userId);
+    setIsSavingCounties(false);
+    if (error) {
+      setOperatingCounties(previous);
+      setCountiesError("Couldn't save your operating area. Please try again.");
+    }
   }
 
   async function handleLogout() {
@@ -163,6 +193,22 @@ export default function MorePage() {
             {cadenceError && (
               <p role="alert" className="mt-2 text-sm font-medium text-red-600">
                 {cadenceError}
+              </p>
+            )}
+
+            <div className="my-4 h-px bg-black/10" />
+
+            <p className="mb-1 font-accent text-xs font-bold uppercase tracking-wide text-brand-neutral-black/50">
+              Operating Area
+            </p>
+            <p className="mb-2 text-xs text-brand-neutral-black/50">
+              Ireland · Select all counties you operate in.
+            </p>
+            <RegionMultiSelect regions={regions} selected={operatingCounties} onToggle={handleToggleCounty} />
+            {isSavingCounties && <p className="mt-2 text-xs text-brand-neutral-black/40">Saving…</p>}
+            {countiesError && (
+              <p role="alert" className="mt-2 text-sm font-medium text-red-600">
+                {countiesError}
               </p>
             )}
           </section>

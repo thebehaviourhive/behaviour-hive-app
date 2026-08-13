@@ -9,6 +9,7 @@ import { PillMultiSelect } from "@/components/ui/PillMultiSelect";
 import { PassportProgress } from "@/components/ui/PassportProgress";
 import { createClient } from "@/lib/supabase/client";
 import { useRequireRole } from "@/hooks/useRequireRole";
+import { useRegions } from "@/hooks/useRegions";
 import { getPassportProgressPercent } from "@/lib/passportProgress";
 
 const DIAGNOSIS_OPTIONS: { value: string }[] = [
@@ -45,6 +46,8 @@ export default function PassportSectionAPage() {
   const [importantPeople, setImportantPeople] = useState("");
   const [diagnoses, setDiagnoses] = useState<string[]>([]);
   const [diagnosisOther, setDiagnosisOther] = useState("");
+  const [countyId, setCountyId] = useState<string>("");
+  const { regions } = useRegions();
 
   const [isLoadingExisting, setIsLoadingExisting] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -67,7 +70,7 @@ export default function PassportSectionAPage() {
       const { data } = await supabase
         .from("passports")
         .select(
-          "child_name, date_of_birth, school, important_people, diagnoses, diagnosis_other, passport_status"
+          "child_name, date_of_birth, school, important_people, diagnoses, diagnosis_other, county_id, passport_status"
         )
         .eq("user_id", user!.id)
         .maybeSingle();
@@ -83,6 +86,7 @@ export default function PassportSectionAPage() {
       setImportantPeople(data.important_people ?? "");
       setDiagnoses(data.diagnoses ?? []);
       setDiagnosisOther(data.diagnosis_other ?? "");
+      setCountyId(data.county_id ?? "");
       setCurrentPassportStatus(
         (data.passport_status as "not_started" | "in_progress" | "complete" | null) ??
           "not_started"
@@ -111,6 +115,7 @@ export default function PassportSectionAPage() {
       important_people: importantPeople || null,
       diagnoses: diagnoses.length > 0 ? diagnoses : null,
       diagnosis_other: diagnoses.includes("Other") ? diagnosisOther || null : null,
+      county_id: countyId || null,
       // Never downgrade an already-complete passport just because one
       // section was edited afterwards — only "upgrade" not_started/
       // in_progress to in_progress.
@@ -247,6 +252,27 @@ export default function PassportSectionAPage() {
                   className="mt-1"
                 />
               )}
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <label className="text-sm font-semibold text-brand-neutral-black">
+                Which county do you call home?
+              </label>
+              <select
+                value={countyId}
+                onChange={(e) => setCountyId(e.target.value)}
+                className="w-full rounded-xl border border-black/10 bg-white px-3 py-2.5 text-sm text-brand-neutral-black focus:border-brand-prussian-blue focus:outline-none focus:ring-2 focus:ring-brand-pastel-blue"
+              >
+                <option value="">Select a county</option>
+                {regions.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.name}
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs text-black/50">
+                This helps us understand where support is needed most.
+              </p>
             </div>
 
             {error && (

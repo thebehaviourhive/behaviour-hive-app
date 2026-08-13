@@ -7,6 +7,9 @@ import { useRequireRole } from "@/hooks/useRequireRole";
 import { getChildFirstName } from "@/lib/childDisplayName";
 import { insertWithOfflineRetry } from "@/lib/waitForReconnect";
 import { logActivity } from "@/lib/logActivity";
+import { usePassportClinicalContent } from "@/hooks/usePassportClinicalContent";
+import { useStrategyFeedbackCap } from "@/hooks/useStrategyFeedbackCap";
+import { rateStrategyContent, type StrategyFeedbackRating } from "@/lib/strategyFeedback";
 
 type SettledState = "settled" | "unsettled" | "dysregulated";
 
@@ -76,6 +79,28 @@ export default function TeacherEodPage() {
   const [showSuccess, setShowSuccess] = useState(false);
   const [successVisible, setSuccessVisible] = useState(false);
   const abortControllerRef = useRef<AbortController | null>(null);
+
+  // Stage 2's optional step 5: "did you use any of [child]'s strategies
+  // today?" -- reuses the same role-scoped RPC every other clinical-team
+  // surface reads through (a teacher viewer only ever gets strategy_school/
+  // strategy_shared/trigger/setting_event back, enforced at the RPC
+  // level, not filtered here), and the ask-cap hook from migration 0056.
+  const { items: clinicalItems } = usePassportClinicalContent(passportId);
+  const ratableStrategies = clinicalItems.filter(
+    (item) => item.itemType === "strategy_school" || item.itemType === "strategy_shared"
+  );
+  const { isEligible: underAskCap, recordPrompt } = useStrategyFeedbackCap(passportId, user?.id ?? "");
+  // Optimistic for the "Step X of Y" label only -- assumes 5 whenever
+  // there's anything ratable, regardless of whether the cap-check query
+  // has resolved yet (it's a fast background fetch well ahead of step
+  // 4, so this only ever mismatches in the rare case the cap was
+  // already hit, where the flow still correctly skips straight to
+  // success at the real decision point below).
+  const hasStrategiesToRate = ratableStrategies.length > 0;
+  const totalSteps = hasStrategiesToRate ? 5 : 4;
+  const [ratedStrategyIds, setRatedStrategyIds] = useState<string[]>([]);
+  const [expandedStrategyId, setExpandedStrategyId] = useState<string | null>(null);
+  const MAX_STRATEGY_RATINGS = 2;
 
   useEffect(() => {
     if (!user || !passportId) return;
@@ -179,6 +204,23 @@ export default function TeacherEodPage() {
       eventDescription: "End of day update from Teacher",
     });
 
+    // The core EOD submission is complete and saved at this point,
+    // exactly as before this step existed -- "the wizard's existing
+    // flow and speed otherwise untouched". Step 5 is purely additive
+    // from here: shown only when there's something to rate AND the
+    // ask-cap isn't already hit, and recordPrompt() fires the moment
+    // it's actually shown (an ask, whether or not the teacher goes on
+    // to rate anything).
+    if (hasStrategiesToRate && underAskCap) {
+      recordPrompt();
+      setStep(5);
+      return;
+    }
+
+    finishAndRedirect();
+  }
+
+  function finishAndRedirect() {
     setShowSuccess(true);
     setTimeout(() => {
       router.push("/teacher/dashboard");
@@ -187,6 +229,16 @@ export default function TeacherEodPage() {
 
   function handleCancelSubmit() {
     abortControllerRef.current?.abort();
+  }
+
+  function handleRateStrategy(itemId: string, rating: StrategyFeedbackRating) {
+    if (!user) return;
+    // Fire-and-forget -- same posture as the parent Calm rating (see
+    // strategyFeedback.ts): one tap records and the UI moves on, no
+    // confirmation screen, no waiting on the write.
+    rateStrategyContent({ passportId, strategyContentId: itemId, rating, raterId: user.id });
+    setRatedStrategyIds((prev) => [...prev, itemId]);
+    setExpandedStrategyId(null);
   }
 
   if (!isReady || isLoading) {
@@ -244,7 +296,7 @@ export default function TeacherEodPage() {
   return (
     <div className="flex min-h-full flex-1 flex-col bg-brand-off-white/40">
       <header className="flex flex-col gap-1 px-4 pt-6 pb-2">
-        <p className="text-xs font-medium text-black/40">Step {step} of 4</p>
+        <p className="text-xs font-medium text-black/40">Step {step} of {totalSteps}</p>
         <p className="text-sm font-semibold text-brand-neutral-black">{childName}</p>
       </header>
 
@@ -361,6 +413,90 @@ export default function TeacherEodPage() {
               </button>
             )}
           </StepPanel>
+
+          {/* Step 5, Stage 2's optional addition -- only ever present
+              (as a child at all) when there's something to rate, which
+              is the exact same condition totalSteps/the header label
+              above are derived from, so the slide-track math and the
+              "Step X of Y" label never disagree with how many panels
+              actually exist. */}
+          {hasStrategiesToRate && (
+            <StepPanel>
+              <StepQuestion>Did you use any of {childName}&apos;s strategies today?</StepQuestion>
+              <div className="flex flex-col gap-2.5">
+                {ratableStrategies.map((item) => {
+                  const isRated = ratedStrategyIds.includes(item.id);
+                  const isExpanded = expandedStrategyId === item.id;
+                  const isCapped = !isRated && ratedStrategyIds.length >= MAX_STRATEGY_RATINGS;
+                  return (
+                    <div key={item.id}>
+                      <button
+                        type="button"
+                        disabled={isRated || isCapped}
+                        onClick={() => setExpandedStrategyId(isExpanded ? null : item.id)}
+                        className={`w-full rounded-2xl border-2 px-4 py-3 text-left text-sm font-semibold transition-colors disabled:cursor-not-allowed ${
+                          isRated
+                            ? "border-green-200 bg-green-50 text-green-800"
+                            : isCapped
+                              ? "border-black/5 bg-black/[0.02] text-black/30"
+                              : isExpanded
+                                ? "border-brand-prussian-blue bg-brand-pastel-blue/20 text-brand-prussian-blue"
+                                : "border-black/10 bg-white text-brand-neutral-black"
+                        }`}
+                      >
+                        {item.title || "Untitled strategy"}
+                        {isRated ? " ✓" : ""}
+                      </button>
+                      {isExpanded && (
+                        <div className="mt-2 flex gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => handleRateStrategy(item.id, "helped")}
+                            className="flex-1 rounded-xl bg-brand-prussian-blue py-2.5 text-xs font-semibold text-white"
+                          >
+                            Helped
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleRateStrategy(item.id, "partly")}
+                            className="flex-1 rounded-xl border-2 border-brand-prussian-blue py-2.5 text-xs font-semibold text-brand-prussian-blue"
+                          >
+                            A little
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleRateStrategy(item.id, "not")}
+                            className="flex-1 rounded-xl border-2 border-black/10 py-2.5 text-xs font-semibold text-black/60"
+                          >
+                            Not this time
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="mt-auto flex flex-col gap-2 pt-4">
+                {ratedStrategyIds.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={finishAndRedirect}
+                    className="w-full rounded-2xl bg-brand-golden-brown py-3.5 font-heading text-base font-bold text-white"
+                  >
+                    Continue
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={finishAndRedirect}
+                  className="w-full rounded-2xl border-2 border-black/10 py-3 text-sm font-semibold text-black/60"
+                >
+                  Skip
+                </button>
+              </div>
+            </StepPanel>
+          )}
         </div>
       </div>
     </div>

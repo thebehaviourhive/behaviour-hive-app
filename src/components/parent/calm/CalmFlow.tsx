@@ -9,12 +9,14 @@ import { setPendingLogReminder } from "@/lib/calmCards/logReminder";
 import { useWakeLock } from "@/hooks/useWakeLock";
 import { cardsForDoor, orderCardsForDeck, tagsForDoor } from "@/lib/calmCards/flow";
 import type { CalmCard, CalmCardDoorType } from "@/lib/calmCards/types";
+import { rateCalmCard, type StrategyFeedbackRating } from "@/lib/strategyFeedback";
 import { CalmDoorScreen } from "./CalmDoorScreen";
 import { CalmChipScreen } from "./CalmChipScreen";
 import { CalmCardCarousel } from "./CalmCardCarousel";
 import { CalmSafetyFooter } from "./CalmSafetyFooter";
 import { CalmEscalationScreen } from "./CalmEscalationScreen";
 import { CalmLogNudgeSheet } from "./CalmLogNudgeSheet";
+import { CalmRatingSheet } from "./CalmRatingSheet";
 
 type FlowStep =
   | { kind: "door" }
@@ -61,6 +63,7 @@ export function CalmFlow({
   const router = useRouter();
   const [step, setStep] = useState<FlowStep>({ kind: "door" });
   const [isLogNudgeOpen, setIsLogNudgeOpen] = useState(false);
+  const [isRatingSheetOpen, setIsRatingSheetOpen] = useState(false);
   const [isLeaving, setIsLeaving] = useState(false);
   const [pendingEpisodeId, setPendingEpisodeId] = useState<string | null>(null);
   // Accumulated client-side across the whole session, written to
@@ -68,6 +71,17 @@ export function CalmFlow({
   // not one DB write per card shown (see migration 0054's header
   // comment on why this is a single-write substrate, not a live log).
   const cardsShownRef = useRef<string[]>([]);
+  // The card actually on screen right now -- deliberately SEPARATE
+  // state from cardsShownRef (that one is a ref: append-once/first-
+  // shown-order telemetry for calm_episodes.cards_shown, never read
+  // during render so it stays a ref; this one IS read during render,
+  // to show the rating sheet's title, so it has to be real state, not
+  // a ref -- React disallows reading ref.current at render time).
+  // Updated on every index change including swiping backward. Stage
+  // 2's rating prompt asks about THIS card -- "rate only the
+  // last-viewed card in v1" (brief's own simplification, rather than
+  // prompting once per card seen across the whole session).
+  const [currentCardId, setCurrentCardId] = useState<string | null>(null);
   useWakeLock(true);
 
   function selectDoor(door: CalmCardDoorType) {
@@ -109,6 +123,13 @@ export function CalmFlow({
   // below, not a route-change/beforeunload guess (those are unreliable
   // in an SPA and this is a "gentle", non-critical nudge, not something
   // worth chasing a hard-to-catch exit event for).
+  //
+  // Rating comes BEFORE the log nudge (brief's own ordering), and only
+  // when a card was actually viewed -- leaving from the door/chips
+  // screens (currentCardId still null) has nothing to rate, so it
+  // goes straight to the log nudge exactly as before. At most one
+  // rating ask per episode either way: this is the only call site that
+  // opens the rating sheet.
   async function handleLeave(door: CalmCardDoorType | null, tags: string[]) {
     if (!door) {
       router.push("/parent-dashboard");
@@ -118,6 +139,28 @@ export function CalmFlow({
     const episodeId = await recordEpisode(door, tags, false);
     setIsLeaving(false);
     setPendingEpisodeId(episodeId);
+    if (currentCardId) {
+      setIsRatingSheetOpen(true);
+    } else {
+      setIsLogNudgeOpen(true);
+    }
+  }
+
+  // Fire-and-forget, same "never blocks the flow" posture as
+  // recordEpisode's own error handling above -- one tap closes the
+  // sheet and moves straight to the log nudge, no confirmation screen,
+  // no waiting on the write to resolve.
+  function handleRate(rating: StrategyFeedbackRating) {
+    const cardId = currentCardId;
+    if (cardId) {
+      rateCalmCard({ passportId, calmCardId: cardId, rating, raterId: userId, calmEpisodeId: pendingEpisodeId });
+    }
+    setIsRatingSheetOpen(false);
+    setIsLogNudgeOpen(true);
+  }
+
+  function handleSkipRating() {
+    setIsRatingSheetOpen(false);
     setIsLogNudgeOpen(true);
   }
 
@@ -217,9 +260,18 @@ export function CalmFlow({
           onCardShown={(cardId) => {
             if (!cardsShownRef.current.includes(cardId)) cardsShownRef.current.push(cardId);
           }}
+          onCurrentCardChange={(cardId) => {
+            setCurrentCardId(cardId);
+          }}
           footer={<CalmSafetyFooter onTap={() => handleReachSafety(step.door, step.tags)} />}
         />
       </div>
+      <CalmRatingSheet
+        isOpen={isRatingSheetOpen}
+        cardTitle={deck.find((c) => c.id === currentCardId)?.title ?? ""}
+        onRate={handleRate}
+        onSkip={handleSkipRating}
+      />
       <CalmLogNudgeSheet isOpen={isLogNudgeOpen} onLogIt={() => handleLogIt(currentDoorAndTags[1])} onNotNow={handleNotNow} />
     </div>
   );

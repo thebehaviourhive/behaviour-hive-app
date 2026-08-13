@@ -40,6 +40,7 @@ export function CalmCardCarousel({
   childName,
   footer,
   onCardShown,
+  onCurrentCardChange,
 }: {
   cards: CalmCard[];
   childName: string;
@@ -50,6 +51,13 @@ export function CalmCardCarousel({
   // since a card can also become "shown" via the initial index=0 render,
   // which those functions never run for.
   onCardShown?: (cardId: string) => void;
+  // Fires on every index change (including the swipe-BACKWARD case
+  // onCardShown deliberately ignores, since that one is append-once/
+  // first-shown-order telemetry, not a pointer). This is the ONLY
+  // signal CalmFlow can use for "which card is on screen right now" --
+  // needed so the Stage 2 rating prompt asks about the card the parent
+  // actually left on, not just the most-recently-FIRST-shown one.
+  onCurrentCardChange?: (cardId: string) => void;
 }) {
   const [index, setIndex] = useState(0);
   const [dragOffset, setDragOffset] = useState(0);
@@ -135,6 +143,11 @@ export function CalmCardCarousel({
   useEffect(() => {
     if (card) onCardShown?.(card.id);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally keyed on card.id, not the onCardShown identity, so this doesn't re-fire for the SAME card on every parent re-render.
+  }, [card?.id]);
+
+  useEffect(() => {
+    if (card) onCurrentCardChange?.(card.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- same reasoning as onCardShown's effect above.
   }, [card?.id]);
 
   if (!card) return null;
