@@ -1,4 +1,4 @@
-import { addDays, daysBetweenInclusive, enumerateDates, weekdayIndex, WEEKDAY_SHORT_LABELS } from "./dateUtils";
+import { addDays, daysBetweenInclusive, enumerateDates } from "./dateUtils";
 import { previousRange, type DateRange } from "./range";
 import type { ComparisonAvailability } from "./comparison";
 
@@ -25,21 +25,15 @@ export function entriesInRange(entries: AbcTrendEntry[], range: DateRange): AbcT
 }
 
 // ============================================================
-// Frequency over time -- bucketed by day/week/month depending on the
-// period length, so a 7-day range reads as one bar per day while a
-// 90-day or "all time" range doesn't render dozens of single-day bars.
-// Bucket boundaries are plain calendar chunks from range.start, not an
-// invented "smart" grouping -- every incident lands in exactly one
-// bucket, and empty buckets still render at 0 (never skipped, so a
-// quiet week reads as quiet, not as missing).
+// Bucket boundaries -- bucketed by day/week/month depending on the
+// period length, so a 7-day range reads as one point per day while a
+// 90-day or "all time" range doesn't render dozens of single-day
+// points. Bucket boundaries are plain calendar chunks from range.start,
+// not an invented "smart" grouping -- every incident lands in exactly
+// one bucket. Consumed by unifiedTrends.ts's buildTrendBuckets, which
+// keeps empty buckets at a real 0 count (never skipped, so a quiet week
+// reads as quiet, not as missing).
 // ============================================================
-export interface FrequencyBucket {
-  label: string;
-  start: string;
-  end: string;
-  count: number;
-}
-
 function bucketSizeDays(periodLengthDays: number): number {
   if (periodLengthDays <= 10) return 1; // daily
   if (periodLengthDays <= 120) return 7; // weekly
@@ -60,11 +54,11 @@ export interface DateBucket {
   end: string;
 }
 
-// Shared bucket-boundary builder -- both the ABC frequency chart and
-// Stage C's cross-setting comparison chart need the exact same day/
-// week/month chunking of a range so their bars line up against the
-// same x-axis buckets. Kept here (not duplicated) so that alignment is
-// structural, not something two call sites have to keep in sync by hand.
+// Shared bucket-boundary builder -- the Unified Trends graph's incidents/
+// morning-regulation/school-regulation series all need the exact same
+// day/week/month chunking of a range so their lines land on the same
+// x-axis buckets. Kept here (not duplicated) so that alignment is
+// structural, not something call sites have to keep in sync by hand.
 export function buildDateBuckets(range: DateRange): DateBucket[] {
   const periodLength = daysBetweenInclusive(range.start, range.end);
   const size = bucketSizeDays(periodLength);
@@ -76,35 +70,6 @@ export function buildDateBuckets(range: DateRange): DateBucket[] {
     cursor = addDays(end, 1);
   }
   return buckets;
-}
-
-export function buildFrequencyBuckets(entries: AbcTrendEntry[], range: DateRange): FrequencyBucket[] {
-  const buckets: FrequencyBucket[] = buildDateBuckets(range).map((b) => ({ ...b, count: 0 }));
-  for (const entry of entries) {
-    const bucket = buckets.find((b) => withinRange(entry.incidentDate, { start: b.start, end: b.end }));
-    if (bucket) bucket.count += 1;
-  }
-  return buckets;
-}
-
-// ============================================================
-// Day-of-week incident pattern -- factual count per weekday within the
-// range, same weekday-labelling convention as regulation.ts.
-// ============================================================
-export interface WeekdayIncidentEntry {
-  weekday: string;
-  count: number;
-}
-
-export function summarizeIncidentsByWeekday(entries: AbcTrendEntry[], range: DateRange): WeekdayIncidentEntry[] {
-  const counts = new Array(7).fill(0) as number[];
-  for (const entry of entries) {
-    if (!withinRange(entry.incidentDate, range)) continue;
-    counts[weekdayIndex(entry.incidentDate)] += 1;
-  }
-  // Monday-first, matching regulation.ts's weekday presentation.
-  const order = [1, 2, 3, 4, 5, 6, 0];
-  return order.map((i) => ({ weekday: WEEKDAY_SHORT_LABELS[i], count: counts[i] }));
 }
 
 // ============================================================

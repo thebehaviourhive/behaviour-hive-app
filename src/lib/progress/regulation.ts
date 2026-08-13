@@ -1,9 +1,4 @@
-import {
-  enumerateDates,
-  isoToLocalDateString,
-  weekdayIndex,
-  WEEKDAY_SHORT_LABELS,
-} from "./dateUtils";
+import { enumerateDates, isoToLocalDateString } from "./dateUtils";
 import type { DateRange } from "./range";
 
 // Same DB enum as morning_checkins.regulation_state / teacher_updates.
@@ -97,67 +92,6 @@ export function summarizeDistribution(morningEntries: DayEntry[], range: DateRan
 export function countDataDays(morningEntries: DayEntry[], range: DateRange): number {
   const dist = summarizeDistribution(morningEntries, range);
   return dist.totalDays - dist.noData;
-}
-
-// ============================================================
-// Day-of-week pattern -- which weekday has the highest share of
-// unsettled/dysregulated mornings vs settled ones, over the range.
-// Purely descriptive (constraint 5): a rate per weekday, never a
-// predicted or causal statement.
-// ============================================================
-
-export interface WeekdayPatternEntry {
-  weekday: number;
-  label: string;
-  settledCount: number;
-  toughCount: number; // unsettled + dysregulated
-  totalCount: number;
-  settledRate: number | null; // null when totalCount === 0
-}
-
-export function summarizeByWeekday(morningEntries: DayEntry[], range: DateRange): WeekdayPatternEntry[] {
-  const calendar = buildCalendar(morningEntries, [], range);
-  const buckets: WeekdayPatternEntry[] = WEEKDAY_SHORT_LABELS.map((label, weekday) => ({
-    weekday,
-    label,
-    settledCount: 0,
-    toughCount: 0,
-    totalCount: 0,
-    settledRate: null,
-  }));
-
-  for (const day of calendar) {
-    if (!day.morning) continue;
-    const bucket = buckets[weekdayIndex(day.date)];
-    bucket.totalCount += 1;
-    if (day.morning === "settled") bucket.settledCount += 1;
-    else bucket.toughCount += 1;
-  }
-
-  for (const bucket of buckets) {
-    bucket.settledRate = bucket.totalCount > 0 ? bucket.settledCount / bucket.totalCount : null;
-  }
-
-  return buckets;
-}
-
-// Best/toughest weekday -- only among weekdays that actually have data,
-// and only when at least one does. Ties resolve to the earlier weekday
-// in the WEEKDAY order (stable, not random) so this never flips between
-// renders on identical data.
-export function bestAndToughestWeekday(pattern: WeekdayPatternEntry[]): {
-  best: WeekdayPatternEntry | null;
-  toughest: WeekdayPatternEntry | null;
-} {
-  const withData = pattern.filter((p) => p.totalCount > 0 && p.settledRate !== null);
-  if (withData.length === 0) return { best: null, toughest: null };
-  let best = withData[0];
-  let toughest = withData[0];
-  for (const entry of withData) {
-    if ((entry.settledRate as number) > (best.settledRate as number)) best = entry;
-    if ((entry.settledRate as number) < (toughest.settledRate as number)) toughest = entry;
-  }
-  return { best, toughest };
 }
 
 // ============================================================

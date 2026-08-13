@@ -9,15 +9,12 @@ import { InlineErrorState } from "@/components/ui/InlineErrorState";
 import {
   buildCalendar,
   computeStreaks,
-  summarizeByWeekday,
   summarizeDistribution,
   countDataDays,
   type DayEntry,
 } from "@/lib/progress/regulation";
 import { comparePeriods, evaluateComparisonAvailability, parentDistributionToneCopy, professionalDistributionToneCopy } from "@/lib/progress/comparison";
 import {
-  buildFrequencyBuckets,
-  summarizeIncidentsByWeekday,
   tallyCategory,
   compareFrequency,
   parentFrequencyToneCopy,
@@ -27,7 +24,11 @@ import {
 } from "@/lib/progress/abc";
 import { compareFlagTrends, currentFlagCounts, type FlagDayEntry } from "@/lib/progress/flags";
 import { strategyMarkerDates } from "@/lib/progress/strategyMarkers";
-import { buildCrossSettingBuckets } from "@/lib/progress/crossSetting";
+import {
+  buildTrendBuckets,
+  buildWeekdayTrendBuckets,
+  computeSeriesDataCounts,
+} from "@/lib/progress/unifiedTrends";
 import { daysBetweenInclusive, todayLocalDateString } from "@/lib/progress/dateUtils";
 import { meetsThreshold, resolveRange, type DateRange, type ProgressRangeKey } from "@/lib/progress/range";
 import { sparseDataCopy, singleSourceCopy, zeroDataCopy } from "@/lib/progress/emptyStateCopy";
@@ -36,15 +37,12 @@ import { RangeSelector } from "./RangeSelector";
 import { CustomDateRangeInputs } from "./CustomDateRangeInputs";
 import { RegulationCalendar } from "./RegulationCalendar";
 import { RegulationStackedBar } from "./RegulationStackedBar";
-import { DayOfWeekPattern } from "./DayOfWeekPattern";
 import { StreakCard } from "./StreakCard";
 import { ProgressEmptyState } from "./ProgressEmptyState";
-import { AbcFrequencyChart } from "./AbcFrequencyChart";
-import { AbcDayOfWeekChart } from "./AbcDayOfWeekChart";
+import { UnifiedTrendsChart } from "./UnifiedTrendsChart";
 import { AbcCategoryBreakdown } from "./AbcCategoryBreakdown";
 import { FlagTrendList } from "./FlagTrendList";
 import { ClinicianFunctionSection } from "./ClinicianFunctionSection";
-import { CrossSettingComparison } from "./CrossSettingComparison";
 
 // Card wrapper matching the established chart-card convention (see
 // DirectAssessmentSection.tsx): rounded-2xl border bg-white shadow-sm,
@@ -121,7 +119,6 @@ export function ProgressSurface({
 
   const calendar = useMemo(() => buildCalendar(morningEntries, afternoonEntries, range), [morningEntries, afternoonEntries, range]);
   const distribution = useMemo(() => summarizeDistribution(morningEntries, range), [morningEntries, range]);
-  const weekdayPattern = useMemo(() => summarizeByWeekday(morningEntries, range), [morningEntries, range]);
   const streaks = useMemo(() => computeStreaks(morningEntries, today), [morningEntries, today]);
   const comparisonAvailability = useMemo(
     () => evaluateComparisonAvailability(morningEntries, range),
@@ -129,11 +126,6 @@ export function ProgressSurface({
   );
   const comparison = useMemo(() => comparePeriods(morningEntries, range), [morningEntries, range]);
 
-  // Stage B: ABC frequency/day-of-week/categorical charts -- reads
-  // through useAbcTrendData (migration 0051), safe for all three roles
-  // since that RPC structurally never returns perceived_function.
-  const frequencyBuckets = useMemo(() => buildFrequencyBuckets(abcEntries, range), [abcEntries, range]);
-  const incidentWeekdayPattern = useMemo(() => summarizeIncidentsByWeekday(abcEntries, range), [abcEntries, range]);
   const categoryTallies: Record<AbcCategoryKind, CategoryTally[]> = useMemo(
     () => ({
       antecedents: tallyCategory(abcEntries, range, "antecedents"),
@@ -167,13 +159,38 @@ export function ProgressSurface({
   // markers.
   const strategyDates = useMemo(() => strategyMarkerDates(clinicalContentItems, range), [clinicalContentItems, range]);
 
-  // Stage C, clinician lens only -- reuses the exact same bucket
-  // boundaries as the ABC frequency chart (buildDateBuckets) so home/
-  // school/incidents line up against one shared timeline.
-  const crossSettingBuckets = useMemo(
-    () => buildCrossSettingBuckets(morningEntries, afternoonEntries, abcEntries, range),
+  // THE UNIFIED TRENDS GRAPH -- replaces the old separate incidents-
+  // over-time bars, incident day-of-week bars, and regulation
+  // day-of-week bars (see UnifiedTrendsChart.tsx / unifiedTrends.ts).
+  // Also absorbs Stage C's cross-setting comparison for the clinician
+  // lens: with all three series (incidents/morning/school) toggleable
+  // on one graph with full custom-range support, the old three-strip
+  // "Home vs school vs incidents" chart became a strict subset of what
+  // this single chart already shows -- merged into one clinician chart
+  // rather than keeping two near-identical ones, per the brief's own
+  // instruction to state that structural choice.
+  const trendBuckets = useMemo(
+    () => buildTrendBuckets(morningEntries, afternoonEntries, abcEntries, range, strategyDates),
+    [morningEntries, afternoonEntries, abcEntries, range, strategyDates]
+  );
+  const weekdayTrendBuckets = useMemo(
+    () => buildWeekdayTrendBuckets(morningEntries, afternoonEntries, abcEntries, range),
     [morningEntries, afternoonEntries, abcEntries, range]
   );
+  const trendSeriesDataCounts = useMemo(
+    () => computeSeriesDataCounts(morningEntries, afternoonEntries, abcEntries, range),
+    [morningEntries, afternoonEntries, abcEntries, range]
+  );
+  // Parent lens only: the school-regulation series is only offered when
+  // a teacher has actually logged something for this child yet ("school
+  // line available if a teacher is linked" -- same hasAfternoonData
+  // signal the existing single-source banner below already uses, rather
+  // than a new team-link-status query this presentation-only change
+  // isn't meant to add). Teacher/clinician always see all three chips,
+  // even if the school series itself is currently empty for them --
+  // it's their own scope either way, so it stays a real (if empty)
+  // series rather than being hidden outright.
+  const showSchoolSeries = role !== "parent" || hasAfternoonData;
 
   return (
     <div className="flex flex-col gap-4">
@@ -214,48 +231,33 @@ export function ProgressSurface({
             )}
           </ChartCard>
 
-          <ChartCard title="Day-of-week pattern">
-            <DayOfWeekPattern pattern={weekdayPattern} role={role} />
-          </ChartCard>
-
           {role === "parent" && <StreakCard streaks={streaks} />}
 
-          <ChartCard title="Incidents over time">
-            {hasAnyAbcData ? (
-              <>
-                <AbcFrequencyChart buckets={frequencyBuckets} strategyDates={strategyDates} />
-                {frequencyComparison && (
-                  <p className="mt-3 text-xs text-brand-neutral-black/70">
-                    {role === "parent"
-                      ? parentFrequencyToneCopy(frequencyComparison)
-                      : professionalFrequencyToneCopy(frequencyComparison)}
-                  </p>
-                )}
-              </>
-            ) : (
-              <p className="text-sm text-brand-neutral-black/50">No incidents logged in this period.</p>
+          <ChartCard title="Trends">
+            <UnifiedTrendsChart
+              role={role}
+              buckets={trendBuckets}
+              weekdayBuckets={weekdayTrendBuckets}
+              showSchoolSeries={showSchoolSeries}
+              seriesDataCounts={trendSeriesDataCounts}
+              periodLengthDays={periodLength}
+            />
+            {frequencyComparison && (
+              <p className="mt-3 text-xs text-brand-neutral-black/70">
+                {role === "parent"
+                  ? parentFrequencyToneCopy(frequencyComparison)
+                  : professionalFrequencyToneCopy(frequencyComparison)}
+              </p>
             )}
           </ChartCard>
 
           {hasAnyAbcData && (
-            <>
-              <ChartCard title="Incident day-of-week pattern">
-                <AbcDayOfWeekChart pattern={incidentWeekdayPattern} />
-              </ChartCard>
-
-              <ChartCard title="What's happening around incidents">
-                <AbcCategoryBreakdown tallies={categoryTallies} />
-              </ChartCard>
-            </>
+            <ChartCard title="What's happening around incidents">
+              <AbcCategoryBreakdown tallies={categoryTallies} />
+            </ChartCard>
           )}
 
           {role === "clinician" && <ClinicianFunctionSection passportId={passportId} range={range} />}
-
-          {role === "clinician" && (
-            <ChartCard title="Home vs school vs incidents">
-              <CrossSettingComparison buckets={crossSettingBuckets} />
-            </ChartCard>
-          )}
 
           <ChartCard title="Flags">
             {flagTrends ? (
