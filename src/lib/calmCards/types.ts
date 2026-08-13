@@ -46,6 +46,12 @@ export interface CalmCard {
   doorType: CalmCardDoorType;
   triggerTags: string[];
   isPublished: boolean;
+  // Optional tag into strategy_types (migration 0055) -- its own column,
+  // independent of whatever tag the linked FBA strategy carries. The
+  // editor pre-fills from the linked strategy's tag when strategy_ref
+  // resolves, but this is a real, separately-editable selection from
+  // there, not a derived/read-only value.
+  strategyTypeId: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -59,6 +65,7 @@ interface RawCalmCardRow {
   door_type: CalmCardDoorType;
   trigger_tags: string[] | null;
   is_published: boolean;
+  strategy_type_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -73,6 +80,7 @@ export function mapCalmCardRow(row: RawCalmCardRow): CalmCard {
     doorType: row.door_type,
     triggerTags: row.trigger_tags ?? [],
     isPublished: row.is_published,
+    strategyTypeId: row.strategy_type_id ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

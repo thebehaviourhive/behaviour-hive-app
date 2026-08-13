@@ -28,6 +28,11 @@ export interface StrategyEntry {
   id: string;
   title: string;
   details: string[];
+  // Optional tag into strategy_types (migration 0055), for cross-child
+  // grouping in the Strategy Effectiveness / Strategy Insights features.
+  // Untagged strategies remain fully valid -- they group as "Untagged"
+  // in every aggregate rather than being treated as incomplete.
+  strategyType?: string;
 }
 
 // One clinician-transcribed Open-Ended FAI interview: item id (see

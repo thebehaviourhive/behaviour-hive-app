@@ -49,6 +49,7 @@ export function useCalmCardsForFba(fbaId: string) {
     steps: string[];
     doorType: CalmCardDoorType;
     triggerTags: string[];
+    strategyTypeId?: string | null;
   }) {
     const supabase = createClient();
     const { data, error } = await supabase
@@ -60,6 +61,7 @@ export function useCalmCardsForFba(fbaId: string) {
         steps: input.steps,
         door_type: input.doorType,
         trigger_tags: input.triggerTags,
+        strategy_type_id: input.strategyTypeId ?? null,
         is_published: false,
       })
       .select("*")
@@ -73,7 +75,14 @@ export function useCalmCardsForFba(fbaId: string) {
 
   async function updateCard(
     id: string,
-    patch: Partial<{ title: string; steps: string[]; doorType: CalmCardDoorType; triggerTags: string[]; isPublished: boolean }>
+    patch: Partial<{
+      title: string;
+      steps: string[];
+      doorType: CalmCardDoorType;
+      triggerTags: string[];
+      isPublished: boolean;
+      strategyTypeId: string | null;
+    }>
   ) {
     const supabase = createClient();
     const dbPatch: Record<string, unknown> = {};
@@ -82,6 +91,7 @@ export function useCalmCardsForFba(fbaId: string) {
     if (patch.doorType !== undefined) dbPatch.door_type = patch.doorType;
     if (patch.triggerTags !== undefined) dbPatch.trigger_tags = patch.triggerTags;
     if (patch.isPublished !== undefined) dbPatch.is_published = patch.isPublished;
+    if (patch.strategyTypeId !== undefined) dbPatch.strategy_type_id = patch.strategyTypeId;
 
     const { data, error } = await supabase
       .from("fba_calm_cards")

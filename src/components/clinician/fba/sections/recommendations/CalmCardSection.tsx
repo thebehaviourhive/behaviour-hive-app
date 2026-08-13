@@ -10,6 +10,7 @@ import {
   type CalmCard,
   type CalmCardDoorType,
 } from "@/lib/calmCards/types";
+import type { StrategyTypeOption } from "@/hooks/useStrategyTypes";
 
 // Calm Card authoring, per strategy. Deliberately has NO readOnly gate
 // of its own -- unlike the surrounding RecommendationsSection content,
@@ -61,15 +62,28 @@ interface CalmCardEditorState {
   doorType: CalmCardDoorType;
   triggerTags: string[];
   freeTagInput: string;
+  strategyTypeId: string | null;
 }
 
-function toEditorState(card: CalmCard | null, suggestedTitle: string): CalmCardEditorState {
+// Judgment call 3 (migration 0055): a NEW card pre-fills from the
+// linked FBA strategy's own tag (linkedStrategyTypeId), if it has one --
+// convenient default, not an inherited/read-only value. An EXISTING
+// card always shows its own stored strategy_type_id instead, even if
+// that's since drifted from the strategy's tag (e.g. the strategy was
+// re-tagged after this card was created) -- the card's own selection
+// is what's authoritative for it from creation onward.
+function toEditorState(
+  card: CalmCard | null,
+  suggestedTitle: string,
+  linkedStrategyTypeId: string | null
+): CalmCardEditorState {
   return {
     title: card?.title ?? suggestedTitle.slice(0, TITLE_CHAR_LIMIT),
     steps: card?.steps ?? ["", ""],
     doorType: card?.doorType ?? "prevention",
     triggerTags: card?.triggerTags ?? [],
     freeTagInput: "",
+    strategyTypeId: card ? card.strategyTypeId : linkedStrategyTypeId,
   };
 }
 
@@ -78,6 +92,8 @@ export function CalmCardSection({
   suggestedTitle,
   cards,
   availableTags,
+  strategyTypeOptions,
+  linkedStrategyTypeId = null,
   onCreate,
   onUpdate,
   onDelete,
@@ -86,23 +102,37 @@ export function CalmCardSection({
   suggestedTitle: string;
   cards: CalmCard[];
   availableTags: string[];
+  strategyTypeOptions: StrategyTypeOption[];
+  // The linked FBA strategy's own tag, if any -- used only as a NEW
+  // card's default selection (judgment call 3's pre-fill).
+  linkedStrategyTypeId?: string | null;
   onCreate: (input: {
     strategyRef: string;
     title: string;
     steps: string[];
     doorType: CalmCardDoorType;
     triggerTags: string[];
+    strategyTypeId?: string | null;
   }) => Promise<unknown>;
   onUpdate: (
     id: string,
-    patch: Partial<{ title: string; steps: string[]; doorType: CalmCardDoorType; triggerTags: string[]; isPublished: boolean }>
+    patch: Partial<{
+      title: string;
+      steps: string[];
+      doorType: CalmCardDoorType;
+      triggerTags: string[];
+      isPublished: boolean;
+      strategyTypeId: string | null;
+    }>
   ) => Promise<unknown>;
   onDelete: (id: string) => Promise<unknown>;
 }) {
   const strategyCards = cards.filter((c) => c.strategyRef === strategyRef);
   const [editingCardId, setEditingCardId] = useState<string | null>(null);
   const [isEditorOpen, setIsEditorOpen] = useState(false);
-  const [editorState, setEditorState] = useState<CalmCardEditorState>(() => toEditorState(null, suggestedTitle));
+  const [editorState, setEditorState] = useState<CalmCardEditorState>(() =>
+    toEditorState(null, suggestedTitle, linkedStrategyTypeId)
+  );
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -110,7 +140,7 @@ export function CalmCardSection({
 
   function openEditorFor(card: CalmCard | null) {
     setEditingCardId(card?.id ?? null);
-    setEditorState(toEditorState(card, suggestedTitle));
+    setEditorState(toEditorState(card, suggestedTitle, linkedStrategyTypeId));
     setError(null);
     setIsEditorOpen(true);
   }
@@ -169,10 +199,12 @@ export function CalmCardSection({
           steps: trimmedSteps,
           doorType: editorState.doorType,
           triggerTags: editorState.triggerTags,
+          strategyTypeId: editorState.strategyTypeId,
         });
       } else {
         await onCreate({
           strategyRef,
+          strategyTypeId: editorState.strategyTypeId,
           title: editorState.title.trim(),
           steps: trimmedSteps,
           doorType: editorState.doorType,
@@ -310,6 +342,22 @@ export function CalmCardSection({
                 </button>
               ))}
             </div>
+          </div>
+
+          <div>
+            <label className="mb-1 block text-xs font-semibold text-brand-neutral-black">Strategy type (optional)</label>
+            <select
+              value={editorState.strategyTypeId ?? ""}
+              onChange={(e) => setEditorState((prev) => ({ ...prev, strategyTypeId: e.target.value || null }))}
+              className="w-full rounded-xl border border-black/10 bg-white px-3 py-2 text-sm text-brand-neutral-black focus:border-calm-ink focus:outline-none focus:ring-2 focus:ring-calm-pill"
+            >
+              <option value="">No strategy type</option>
+              {strategyTypeOptions.map((o) => (
+                <option key={o.id} value={o.id}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
           </div>
 
           <div>

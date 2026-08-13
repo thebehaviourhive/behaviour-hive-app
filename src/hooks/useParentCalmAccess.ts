@@ -79,6 +79,11 @@ export function useParentCalmAccess() {
             door_type: row.door_type,
             trigger_tags: row.trigger_tags,
             is_published: true,
+            // Not returned by get_my_child_calm_cards (predates
+            // migration 0055) -- the parent Calm flow never reads a
+            // card's strategy type, this is purely a placeholder to
+            // satisfy mapCalmCardRow's shared input shape.
+            strategy_type_id: null,
             created_at: "",
             updated_at: "",
           })
