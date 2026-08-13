@@ -12,6 +12,7 @@ import { InlineErrorState } from "@/components/ui/InlineErrorState";
 import { ProgressSurface } from "@/components/progress/ProgressSurface";
 import { useCalmButtonLiveStatus } from "@/hooks/useCalmButtonLiveStatus";
 import { ClinicalFileFbaTab } from "@/components/clinician/fba/ClinicalFileFbaTab";
+import { EffectivenessSurface } from "@/components/clinician/passport/EffectivenessSurface";
 
 type TabKey =
   | "summary"
@@ -21,7 +22,8 @@ type TabKey =
   | "incidents"
   | "clinicalTeam"
   | "fba"
-  | "progress";
+  | "progress"
+  | "effectiveness";
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: "summary", label: "Summary" },
@@ -32,6 +34,7 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: "clinicalTeam", label: "Clinical Team" },
   { key: "fba", label: "FBA" },
   { key: "progress", label: "Progress" },
+  { key: "effectiveness", label: "Effectiveness" },
 ];
 
 interface ClinicalProfile {
@@ -358,6 +361,8 @@ export default function ClinicianPassportPage() {
         {activeTab === "progress" && (
           <ProgressSurface passportId={passportId} childFullName={profile.childFullName} role="clinician" />
         )}
+
+        {activeTab === "effectiveness" && <EffectivenessSurface passportId={passportId} />}
       </main>
 
       <div className="fixed inset-x-0 bottom-0 border-t border-black/5 bg-white p-4">
