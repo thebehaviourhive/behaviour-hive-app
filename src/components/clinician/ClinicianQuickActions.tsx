@@ -5,6 +5,7 @@ import {
   ClipboardIcon,
   LightbulbIcon,
   OpenBookIcon,
+  TrendUpIcon,
 } from "@/components/ui/icons";
 
 const ACTIONS = [
@@ -13,6 +14,13 @@ const ACTIONS = [
   { label: "View Passports", href: "/clinician/passports", Icon: OpenBookIcon },
   { label: "Add Log", href: "/clinician/log", Icon: ClipboardIcon },
   { label: "FBAs", href: "/clinician/fba", Icon: ClinicalFileIcon },
+  // Stage 4 -- "Layer 2: caseload strategy insights". A quick-actions
+  // tile, same as every other clinician top-level route (FBAs,
+  // Passports, ...) -- ClinicianBottomNav is a hard 3-tab list
+  // (Dashboard/Passports/More) with no established precedent for a 4th
+  // persistent tab on this track, so this follows the existing pattern
+  // rather than adding one.
+  { label: "Strategy Insights", href: "/clinician/insights", Icon: TrendUpIcon },
 ];
 
 export function ClinicianQuickActions() {

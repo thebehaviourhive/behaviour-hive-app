@@ -1,6 +1,6 @@
 "use client";
 
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useRequireRole } from "@/hooks/useRequireRole";
@@ -69,10 +69,20 @@ export default function ClinicianPassportPage() {
   const params = useParams<{ passportId: string }>();
   const passportId = params.passportId;
   const { user, isReady } = useRequireRole("clinician");
+  const searchParams = useSearchParams();
 
   const [profile, setProfile] = useState<ClinicalProfile | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<TabKey>("summary");
+  // Read once at mount, e.g. from Strategy Insights' per-child drill-down
+  // linking straight into ?tab=effectiveness -- a deliberate ONE-TIME
+  // read (lazy initializer, not synced on every searchParams change), so
+  // manually switching tabs afterwards behaves exactly as it always has
+  // (plain local state, no URL sync back out). An invalid/unknown value
+  // falls back to "summary" rather than rendering nothing.
+  const [activeTab, setActiveTab] = useState<TabKey>(() => {
+    const requested = searchParams.get("tab");
+    return TABS.some((t) => t.key === requested) ? (requested as TabKey) : "summary";
+  });
   const [isAbcLoggerOpen, setIsAbcLoggerOpen] = useState(false);
   const [timelineRefreshKey, setTimelineRefreshKey] = useState(0);
   const { isLive: isCalmButtonLive, isLoading: isCalmStatusLoading } = useCalmButtonLiveStatus(passportId);
