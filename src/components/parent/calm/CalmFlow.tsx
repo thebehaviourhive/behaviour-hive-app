@@ -2,7 +2,7 @@
 
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ChevronLeft } from "lucide-react";
+import { ChevronLeft, X } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { ABC_ROLE_CONFIG } from "@/components/abc-logger/roleConfig";
 import { setPendingLogReminder } from "@/lib/calmCards/logReminder";
@@ -132,7 +132,14 @@ export function CalmFlow({
   // opens the rating sheet.
   async function handleLeave(door: CalmCardDoorType | null, tags: string[]) {
     if (!door) {
-      router.push("/parent-dashboard");
+      // Door screen's own close (X) affordance only reaches this branch
+      // -- nothing has been recorded yet at this point (no door chosen,
+      // no card viewed), so this is a pure dismiss. A genuine
+      // back-navigation, not a hardcoded destination: returns the
+      // parent to whichever screen they actually tapped Calm from
+      // (dashboard, passport, More, ...), matching the platform's own
+      // back gesture instead of second-guessing it with a fixed route.
+      router.back();
       return;
     }
     setIsLeaving(true);
@@ -195,9 +202,25 @@ export function CalmFlow({
   );
 
   if (step.kind === "door") {
+    // The door screen gets its OWN close affordance (a quiet top-right
+    // X, absolutely positioned so it never disturbs CalmDoorScreen's own
+    // centered layout) instead of the shared top-left backButton every
+    // other step uses -- an accidental nav tap must have an obvious,
+    // instant way out before a door's even been picked, without
+    // competing visually with the two doors themselves. Deeper steps
+    // (chips, carousel) keep the ordinary backButton unchanged: a parent
+    // genuinely mid-crisis navigating the deck shouldn't gain a new
+    // accidental-exit hazard next to their thumb.
     return (
-      <div className="flex h-full flex-col">
-        {backButton}
+      <div className="relative flex h-full flex-col">
+        <button
+          type="button"
+          onClick={() => handleLeave(null, [])}
+          aria-label="Close"
+          className="absolute right-1 top-1 z-10 flex h-12 w-12 items-center justify-center text-brand-neutral-black/40"
+        >
+          <X size={22} strokeWidth={2} />
+        </button>
         <div className="flex-1">
           <CalmDoorScreen childName={childName} onSelectDoor={selectDoor} />
         </div>
