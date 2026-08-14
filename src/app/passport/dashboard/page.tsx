@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { BottomNav } from "@/components/ui/BottomNav";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { InlineErrorState } from "@/components/ui/InlineErrorState";
@@ -62,6 +62,16 @@ interface PassportSummaryData {
 const CARD_CLASSNAME =
   "rounded-2xl border border-brand-off-white/50 bg-white p-5 shadow-[0_4px_20px_rgba(0,79,113,0.05)]";
 
+// Same dismiss-once localStorage convention as parent-dashboard's own
+// getDismissKey (passportCardDismissed:${userId}) -- keyed by passportId
+// here since the hint is about THIS passport's own share history, not a
+// per-user preference. Permanent once written: opening the share sheet
+// (from any of its three entry points) writes this immediately, so a
+// force-quit mid-flow still leaves the hint gone on reload.
+function getShareHintDismissKey(passportId: string) {
+  return `shareHintDismissed:${passportId}`;
+}
+
 function calculateAge(dateOfBirth: string | null | undefined): number | null {
   if (!dateOfBirth) return null;
   const dob = new Date(dateOfBirth);
@@ -107,6 +117,7 @@ export default function PassportDashboardPage() {
   const [connectedClinicians, setConnectedClinicians] = useState<ConnectedClinician[]>([]);
   const [isShareOpen, setIsShareOpen] = useState(false);
   const [focusClinicianCodeOnOpen, setFocusClinicianCodeOnOpen] = useState(false);
+  const [isShareHintDismissed, setIsShareHintDismissed] = useState(false);
   const [revokeConfirmation, setRevokeConfirmation] = useState<string | null>(null);
   const [revokeError, setRevokeError] = useState<string | null>(null);
   const [clinicianRevokeConfirmation, setClinicianRevokeConfirmation] = useState<string | null>(null);
@@ -141,6 +152,7 @@ export default function PassportDashboardPage() {
   // clinicalTeamItems below, for the same rules-of-hooks reason.
   const [helpedCounts, setHelpedCounts] = useState<Record<string, number>>({});
   const hasHandledHashRef = useRef(false);
+  const hasReadShareHintDismissRef = useRef(false);
 
   function toggleSection(id: string) {
     setExpandedSections((prev) => {
@@ -168,6 +180,38 @@ export default function PassportDashboardPage() {
     }, 350);
     return () => clearTimeout(timer);
   }, [summary]);
+
+  // Reads the dismiss flag exactly once per mount (the ref guard matters
+  // here, not just the `summary` dependency -- summary's own identity
+  // changes again once code generation resolves, and re-reading then
+  // would just read back the "true" this same session already wrote).
+  useEffect(() => {
+    if (!summary || hasReadShareHintDismissRef.current) return;
+    hasReadShareHintDismissRef.current = true;
+    setIsShareHintDismissed(
+      window.localStorage.getItem(getShareHintDismissKey(summary.passportId)) === "true"
+    );
+  }, [summary]);
+
+  // The one function every "open the share sheet" entry point calls --
+  // the header pill, the Manage Access primary button, AND the
+  // ?openShare=1 deep link below -- so the first-time hint's permanent
+  // dismissal (constraint 3) can never be missed from one entry point
+  // while wired correctly from another. Writing the flag on OPEN rather
+  // than on some later success event is deliberate: the hint's whole
+  // job is done the moment a parent finds and taps the share affordance,
+  // regardless of what they do inside the sheet next.
+  const openShareSheet = useCallback(
+    (focusClinician = false) => {
+      if (summary && !isShareHintDismissed) {
+        window.localStorage.setItem(getShareHintDismissKey(summary.passportId), "true");
+        setIsShareHintDismissed(true);
+      }
+      setIsShareOpen(true);
+      if (focusClinician) setFocusClinicianCodeOnOpen(true);
+    },
+    [summary, isShareHintDismissed]
+  );
 
   async function loadApprovedInstitutions(passportId: string) {
     setInstitutionsError(null);
@@ -382,10 +426,9 @@ export default function PassportDashboardPage() {
   useEffect(() => {
     if (!summary || searchParams.get("openShare") !== "1") return;
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setIsShareOpen(true);
-    setFocusClinicianCodeOnOpen(true);
+    openShareSheet(true);
     router.replace("/passport/dashboard");
-  }, [summary, searchParams, router]);
+  }, [summary, searchParams, router, openShareSheet]);
 
   if (!isRoleReady || isLoading) {
     return null;
@@ -523,6 +566,19 @@ export default function PassportDashboardPage() {
   const diagnosisPills = getDiagnosisPills(summary.diagnoses, summary.diagnosisOther);
   const subInfoLine = buildSubInfoLine(summary.age, summary.school);
 
+  // "Never shared" per the brief's own three-part definition: no code
+  // ever generated (passportCode is only ever set the moment the share
+  // sheet is first opened, via generateCode's auto-trigger -- see
+  // ShareBottomSheet), no approved schools, no connected clinicians.
+  // showShareHint additionally requires the dismiss flag not already
+  // set, so a passport that WAS genuinely shared but somehow lost its
+  // localStorage flag (a different device/browser) still correctly
+  // shows no cue -- the data check alone is what "a shared passport
+  // shows no cue" actually depends on.
+  const hasNeverShared =
+    !summary.passportCode && approvedInstitutions.length === 0 && connectedClinicians.length === 0;
+  const showShareHint = hasNeverShared && !isShareHintDismissed;
+
   const hasOkay = (summary.okaySignals?.length ?? 0) > 0;
   const hasHard = (summary.hardSignals?.length ?? 0) > 0;
   const hasTriggers = (summary.hardTriggers?.length ?? 0) > 0;
@@ -582,11 +638,12 @@ export default function PassportDashboardPage() {
           </p>
           <button
             type="button"
-            onClick={() => setIsShareOpen(true)}
+            onClick={() => openShareSheet()}
             aria-label="Share passport"
-            className="flex-shrink-0 rounded-full bg-white p-2 text-brand-prussian-blue shadow-sm"
+            className="flex flex-shrink-0 items-center gap-1.5 rounded-full bg-brand-prussian-blue px-4 py-2 text-sm font-bold text-white shadow-sm"
           >
             <ShareIcon />
+            Share
           </button>
         </div>
 
@@ -640,6 +697,33 @@ export default function PassportDashboardPage() {
           <ErrorBoundary fallback={fallbackCard}>
             <section className={CARD_CLASSNAME}>
               <h2 className="mb-4 font-heading text-lg font-bold text-brand-prussian-blue">Manage Access</h2>
+
+              {/* The primary door into sharing (constraint 2) -- the
+                  pinned access cards are exactly where a hunting parent
+                  looks first. Same shared sheet as the header pill, via
+                  the same openShareSheet() entry point -- one flow, two
+                  doors. showShareHint's one-time "Start here" badge
+                  (constraint 3) sits on this button specifically since
+                  it's the button most naturally in a first-time
+                  parent's eyeline, not the smaller header pill. */}
+              <div className="relative mb-4">
+                <button
+                  type="button"
+                  onClick={() => openShareSheet()}
+                  className="flex w-full items-center justify-center gap-2 rounded-2xl bg-brand-prussian-blue py-3.5 text-base font-semibold text-white"
+                >
+                  <ShareIcon />
+                  Share {summary.childName}&apos;s Passport
+                </button>
+                {showShareHint && (
+                  <span
+                    aria-hidden
+                    className="absolute -right-2 -top-2 animate-pulse rounded-full bg-brand-golden-brown px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-white shadow-sm"
+                  >
+                    Start here
+                  </span>
+                )}
+              </div>
 
               {institutionsError ? (
                 <InlineErrorState

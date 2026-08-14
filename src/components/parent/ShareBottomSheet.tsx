@@ -307,6 +307,18 @@ export function ShareBottomSheet({
       <h2 className="font-heading text-xl font-semibold text-brand-neutral-black">
         Share {childName}&apos;s Passport
       </h2>
+      {/* Comprehension-check copy (opening lines only, no flow changes):
+          a first-time parent's most common confusion is which direction
+          each code goes. Two sentences, one per concept, stated plainly
+          before either code section so it's read before either one. */}
+      <p className="mt-2 text-sm leading-relaxed text-brand-neutral-black/70">
+        Your child&apos;s passport code is the one you{" "}
+        <strong className="font-semibold text-brand-neutral-black">give</strong>{" "}
+        out — share it with a teacher and they&apos;ll enter it to connect. A clinician&apos;s
+        code works the other way:{" "}
+        <strong className="font-semibold text-brand-neutral-black">enter</strong>{" "}
+        theirs below to connect them.
+      </p>
 
       <p className="mt-4 text-sm font-semibold text-brand-neutral-black">
         Your child&apos;s passport code
