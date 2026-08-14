@@ -13,6 +13,7 @@ import { PassportAccordion } from "@/components/passport/PassportAccordion";
 import { ClinicalTeamSection } from "@/components/passport/clinical-team/ClinicalTeamSection";
 import { usePassportClinicalContent } from "@/hooks/usePassportClinicalContent";
 import { useStrategyEffectiveness } from "@/hooks/useStrategyEffectiveness";
+import { revalidateParentCalmAccess } from "@/hooks/useParentCalmAccess";
 import { createClient } from "@/lib/supabase/client";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { getPassportResumeHref } from "@/lib/getPassportResumeHref";
@@ -1081,7 +1082,15 @@ export default function PassportDashboardPage() {
           setSummary((prev) => (prev ? { ...prev, passportCode: code } : prev))
         }
         onApproved={() => loadApprovedInstitutions(summary.passportId)}
-        onClinicianConnected={() => loadConnectedClinicians(summary.passportId)}
+        onClinicianConnected={() => {
+          loadConnectedClinicians(summary.passportId);
+          // Connecting a clinician is the concrete moment the unlock
+          // sheet's own "link a clinician" journey completes -- a
+          // genuinely access-changing event worth an immediate
+          // revalidate rather than waiting for the next natural
+          // navigation (which would pick it up anyway, just later).
+          revalidateParentCalmAccess();
+        }}
       />
 
       {isAbcLoggerOpen && (
