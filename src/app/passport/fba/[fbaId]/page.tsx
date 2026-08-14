@@ -16,7 +16,7 @@ export default function FbaReaderPage() {
   const { fbaId } = useParams<{ fbaId: string }>();
   const router = useRouter();
   const { isReady } = useRequireRole("parent");
-  const { report, afls, isLoading, loadError, reload } = useFbaReport(fbaId);
+  const { report, isLoading, loadError, reload } = useFbaReport(fbaId);
 
   const [childName, setChildName] = useState<string | null>(null);
 
@@ -97,7 +97,6 @@ export default function FbaReaderPage() {
             <FbaSectionsReadOnly
               fbaId={fbaId}
               report={report}
-              afls={afls}
               childName={childName}
               // Bumped from scroll-mt-32: the sticky header is now
               // taller (back+title row + bubble row + the new sticky

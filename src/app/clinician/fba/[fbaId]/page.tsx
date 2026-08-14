@@ -7,6 +7,7 @@ import { ChevronRight } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { useFbaReport } from "@/hooks/useFbaReport";
+import { useAflsAssessmentsForFba } from "@/hooks/useAflsAssessmentsForFba";
 import { FBA_SECTIONS, getSectionCompleteness } from "@/lib/fba/sections";
 import { CompletenessDot } from "@/components/clinician/fba/CompletenessDot";
 import { InlineErrorState } from "@/components/ui/InlineErrorState";
@@ -20,7 +21,8 @@ const STATUS_LABEL: Record<string, string> = {
 export default function FbaWorkspacePage() {
   const { fbaId } = useParams<{ fbaId: string }>();
   const { isReady } = useRequireRole("clinician");
-  const { report, afls, isLoading, loadError, reload } = useFbaReport(fbaId);
+  const { report, isLoading, loadError, reload } = useFbaReport(fbaId);
+  const { assessments: aflsAssessments } = useAflsAssessmentsForFba(fbaId);
 
   const [childName, setChildName] = useState<string | null>(null);
 
@@ -89,7 +91,7 @@ export default function FbaWorkspacePage() {
               </p>
             )}
             {FBA_SECTIONS.map((section) => {
-              const completeness = getSectionCompleteness(section, report.contentData, afls);
+              const completeness = getSectionCompleteness(section, report.contentData, aflsAssessments);
               return (
                 <Link
                   key={section.slug}

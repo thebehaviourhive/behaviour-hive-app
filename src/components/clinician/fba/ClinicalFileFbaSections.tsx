@@ -6,11 +6,11 @@ import { TargetBehavioursSection } from "@/components/clinician/fba/sections/Tar
 import { TriggersSettingEventsSection } from "@/components/clinician/fba/sections/TriggersSettingEventsSection";
 import { IndirectAssessmentSection } from "@/components/clinician/fba/sections/IndirectAssessmentSection";
 import { DirectAssessmentSection } from "@/components/clinician/fba/sections/DirectAssessmentSection";
-import { AflsResultsView } from "@/components/clinician/fba/afls-results/AflsResultsView";
+import { AflsSection } from "@/components/clinician/fba/sections/AflsSection";
 import { RecommendationsSection } from "@/components/clinician/fba/sections/RecommendationsSection";
 import { ConclusionSection } from "@/components/clinician/fba/sections/ConclusionSection";
 import { ReviewSection } from "@/components/clinician/fba/sections/ReviewSection";
-import type { FbaAflsData, FbaReport } from "@/lib/fba/types";
+import type { FbaReport } from "@/lib/fba/types";
 
 // Every reused section body still expects the editor prop quartet even
 // in readOnly mode -- guaranteed never to fire, since every interactive
@@ -41,17 +41,19 @@ function noOpStructuralChange() {}
 // path to wire up. isClinicianWorkspace=true on Recommendations is what
 // surfaces Fix 1's Calm Card authoring affordances (create/edit/
 // publish/delete) even though the FBA's own content is locked --
-// CalmCardSection has no readOnly gate of its own by design.
+// CalmCardSection has no readOnly gate of its own by design. AFLS
+// (Section 11) gets the exact same treatment: AflsSection is rendered
+// live here too, not the read-only results grid -- the Clinical File
+// is where a clinician most naturally continues transcribing paper
+// assessments after the FBA locks (migration 0060's companion layer).
 export function ClinicalFileFbaSections({
   fbaId,
   passportId,
   report,
-  afls,
 }: {
   fbaId: string;
   passportId: string;
   report: FbaReport;
-  afls: FbaAflsData | null;
 }) {
   const content = report.contentData;
 
@@ -132,9 +134,7 @@ export function ClinicalFileFbaSections({
               readOnly
             />
           )}
-          {section.kind === "afls" && (
-            <AflsResultsView scoresData={afls?.scoresData ?? {}} summary={afls?.summary ?? null} variant="digital" />
-          )}
+          {section.kind === "afls" && <AflsSection fbaId={fbaId} />}
           {section.kind === "recommendations" && (
             <RecommendationsSection
               fbaId={fbaId}
@@ -160,7 +160,6 @@ export function ClinicalFileFbaSections({
               fbaId={fbaId}
               passportId={passportId}
               content={content}
-              afls={afls}
               readOnly
               isClinicianWorkspace
             />

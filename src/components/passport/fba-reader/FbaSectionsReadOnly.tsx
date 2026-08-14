@@ -5,12 +5,13 @@ import { AssessmentMethodsSection } from "@/components/clinician/fba/sections/As
 import { TargetBehavioursSection } from "@/components/clinician/fba/sections/TargetBehavioursSection";
 import { TriggersSettingEventsSection } from "@/components/clinician/fba/sections/TriggersSettingEventsSection";
 import { DirectAssessmentSection } from "@/components/clinician/fba/sections/DirectAssessmentSection";
-import { AflsResultsView } from "@/components/clinician/fba/afls-results/AflsResultsView";
+import { AflsResultsGrid } from "@/components/clinician/fba/afls-results/AflsResultsGrid";
 import { RecommendationsSection } from "@/components/clinician/fba/sections/RecommendationsSection";
 import { ConclusionSection } from "@/components/clinician/fba/sections/ConclusionSection";
 import { ReviewSection } from "@/components/clinician/fba/sections/ReviewSection";
 import { ReaderIndirectAssessment } from "./ReaderIndirectAssessment";
-import type { FbaAflsData, FbaReport } from "@/lib/fba/types";
+import { useAflsAssessmentsForFba } from "@/hooks/useAflsAssessmentsForFba";
+import type { FbaReport } from "@/lib/fba/types";
 
 // Every reused section body still expects the editor prop quartet even
 // in readOnly mode -- guaranteed never to fire, since every interactive
@@ -28,25 +29,27 @@ function noOpStructuralChange() {}
 export function FbaSectionsReadOnly({
   fbaId,
   report,
-  afls,
   childName,
   sectionClassName,
   isPrint = false,
 }: {
   fbaId: string;
   report: FbaReport;
-  afls: FbaAflsData | null;
   // Always the full name -- both callers (parent reader, print) are
   // clinical-adjacent surfaces per the instruction-line brief, never
   // the teacher-shortened form. Nullable only because the caller's own
   // fetch may not have resolved yet.
   childName: string | null;
   sectionClassName?: string;
-  // Selects the AFLS results variant (print figure/table vs. the digital
-  // stacked-bar/accordion) -- see AflsResultsView for the 375px
-  // reasoning behind that split.
+  // Selects the AFLS grid's print treatment (full-width, break-inside
+  // avoided per domain) vs. the same grid's ordinary digital layout.
   isPrint?: boolean;
 }) {
+  // Self-fetched, matching the Calm Cards precedent -- see
+  // ClinicalFileFbaTab's own header comment for why this isn't threaded
+  // down from a parent fetch.
+  const { assessments: aflsAssessments } = useAflsAssessmentsForFba(fbaId);
+
   return (
     <>
       {FBA_SECTIONS.map((section) => (
@@ -120,13 +123,7 @@ export function FbaSectionsReadOnly({
               readOnly
             />
           )}
-          {section.kind === "afls" && (
-            <AflsResultsView
-              scoresData={afls?.scoresData ?? {}}
-              summary={afls?.summary ?? null}
-              variant={isPrint ? "print" : "digital"}
-            />
-          )}
+          {section.kind === "afls" && <AflsResultsGrid assessments={aflsAssessments} isPrint={isPrint} />}
           {section.kind === "recommendations" && (
             <RecommendationsSection
               fbaId={fbaId}
@@ -151,7 +148,6 @@ export function FbaSectionsReadOnly({
               fbaId={fbaId}
               passportId={report.passportId}
               content={report.contentData}
-              afls={afls}
               readOnly
             />
           )}

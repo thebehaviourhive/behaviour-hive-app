@@ -1,4 +1,5 @@
-import type { FbaAflsData, FbaContentData } from "./types";
+import { AFLS_TOTAL_TASKS } from "./types";
+import type { AflsAssessment, FbaContentData } from "./types";
 
 export type SectionCompleteness = "empty" | "partial" | "complete";
 
@@ -76,15 +77,10 @@ export function getFbaSection(slug: string): FbaSectionDef | undefined {
   return FBA_SECTIONS.find((s) => s.slug === slug);
 }
 
-// Total AFLS items across all 8 domains (8 domains x 8 items, seeded in
-// migration 0040) -- used to tell "partially scored" apart from "fully
-// scored" for section 11's completeness pill.
-const TOTAL_AFLS_ITEMS = 64;
-
 export function getSectionCompleteness(
   section: FbaSectionDef,
   content: FbaContentData,
-  afls: FbaAflsData | null
+  aflsAssessments: AflsAssessment[]
 ): SectionCompleteness {
   switch (section.kind) {
     case "clientProfile":
@@ -157,10 +153,16 @@ export function getSectionCompleteness(
     }
 
     case "afls": {
-      if (!afls) return "empty";
-      const scored = Object.values(afls.scoresData ?? {}).reduce((n, items) => n + items.length, 0);
-      if (scored === 0) return "empty";
-      return scored >= TOTAL_AFLS_ITEMS ? "complete" : "partial";
+      // Multiple assessments over time (migration 0060) -- "complete"
+      // means at least one is fully scored (every task has an entry,
+      // numeric or "NA"); "partial" means at least one assessment
+      // exists with SOME scoring; "empty" means no assessments, or
+      // assessments that exist but have nothing recorded yet.
+      if (aflsAssessments.length === 0) return "empty";
+      const hasComplete = aflsAssessments.some((a) => Object.keys(a.scores ?? {}).length >= AFLS_TOTAL_TASKS);
+      if (hasComplete) return "complete";
+      const hasAnyScoring = aflsAssessments.some((a) => Object.keys(a.scores ?? {}).length > 0);
+      return hasAnyScoring ? "partial" : "empty";
     }
 
     case "recommendations": {

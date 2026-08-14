@@ -16,24 +16,20 @@ import { TriggersSettingEventsSection } from "@/components/clinician/fba/section
 import { IndirectAssessmentSection } from "@/components/clinician/fba/sections/IndirectAssessmentSection";
 import { DirectAssessmentSection } from "@/components/clinician/fba/sections/DirectAssessmentSection";
 import { AflsSection } from "@/components/clinician/fba/sections/AflsSection";
-import { AflsResultsView } from "@/components/clinician/fba/afls-results/AflsResultsView";
 import { RecommendationsSection } from "@/components/clinician/fba/sections/RecommendationsSection";
 import { ConclusionSection } from "@/components/clinician/fba/sections/ConclusionSection";
 import { ReviewSection } from "@/components/clinician/fba/sections/ReviewSection";
-import type { AflsScoresData, AflsScoreValue, FbaContentData } from "@/lib/fba/types";
+import type { FbaContentData } from "@/lib/fba/types";
 
 export default function FbaSectionEditorPage() {
   const { fbaId, sectionId } = useParams<{ fbaId: string; sectionId: string }>();
   const router = useRouter();
   const { isReady } = useRequireRole("clinician");
-  const { report, afls, isLoading, loadError, reload, saveContent, saveAfls, saveStatus, saveError } =
-    useFbaReport(fbaId);
+  const { report, isLoading, loadError, reload, saveContent, saveStatus, saveError } = useFbaReport(fbaId);
 
   const section = getFbaSection(sectionId);
 
   const [content, setContent] = useState<FbaContentData>({});
-  const [aflsScores, setAflsScores] = useState<AflsScoresData>({});
-  const [aflsSummary, setAflsSummary] = useState("");
   const abortRef = useRef<AbortController | null>(null);
 
   // Single source of truth for the save icon's unsaved/saved split,
@@ -64,15 +60,6 @@ export default function FbaSectionEditorPage() {
       setContent(report.contentData);
     }
   }, [report]);
-
-  const hasSeededAflsRef = useRef(false);
-  useEffect(() => {
-    if (afls && !hasSeededAflsRef.current) {
-      hasSeededAflsRef.current = true;
-      setAflsScores(afls.scoresData);
-      setAflsSummary(afls.summary ?? "");
-    }
-  }, [afls]);
 
   // A save only gets to clear isDirty if nothing changed while it was in
   // flight -- otherwise a slow save resolving after a newer keystroke
@@ -111,44 +98,12 @@ export default function FbaSectionEditorPage() {
     triggerSave(next);
   }
 
-  function triggerAflsSave(scores: AflsScoresData, summaryValue: string) {
-    abortRef.current?.abort();
-    const controller = new AbortController();
-    abortRef.current = controller;
-    versionAtSaveStartRef.current = changeVersionRef.current;
-    saveAfls(scores, summaryValue.trim() ? summaryValue : null, controller);
-  }
-
-  function handleAflsScoreChange(domain: string, itemId: string, score: AflsScoreValue) {
-    const existing = aflsScores[domain] ?? [];
-    const nextDomainScores = existing.some((s) => s.itemId === itemId)
-      ? existing.map((s) => (s.itemId === itemId ? { ...s, score } : s))
-      : [...existing, { itemId, score }];
-    const next = { ...aflsScores, [domain]: nextDomainScores };
-    setAflsScores(next);
-    markChanged();
-    triggerAflsSave(next, aflsSummary);
-  }
-
-  function handleAflsSummaryChange(value: string) {
-    setAflsSummary(value);
-    markChanged();
-  }
-
-  function handleAflsSummaryBlur() {
-    triggerAflsSave(aflsScores, aflsSummary);
-  }
-
-  // The save icon's tap target: flushes whatever's pending through the
-  // exact same save path a blur/structural edit would use. Local
-  // `content`/`aflsScores`/`aflsSummary` already reflect every keystroke
-  // (onChange, not onBlur, is what updates them), so this genuinely
-  // covers a currently-focused, not-yet-blurred field too -- there's no
-  // separate "flush" data path to keep in sync with the real one.
+  // AFLS assessments each auto-save themselves independently (one tap
+  // per chip, no shared "content" blob to flush) -- see AflsSection's
+  // own save wiring. The generic flush only ever applies to the other
+  // 13 sections' content_data path.
   function handleFlushSave() {
-    if (section?.kind === "afls") {
-      triggerAflsSave(aflsScores, aflsSummary);
-    } else {
+    if (section?.kind !== "afls") {
       triggerSave(content);
     }
   }
@@ -179,7 +134,10 @@ export default function FbaSectionEditorPage() {
     );
   }
 
-  const readOnly = report?.status === "completed";
+  // AFLS stays editable even after the FBA is completed -- companion
+  // layer, same posture as Calm Cards (migration 0060/0053): the paper
+  // assessment may be conducted and transcribed after the FBA locks.
+  const readOnly = report?.status === "completed" && section.kind !== "afls";
 
   return (
     <FbaSectionShell
@@ -188,7 +146,11 @@ export default function FbaSectionEditorPage() {
       onBack={handleBack}
       saveStatus={saveStatus}
       isDirty={isDirty}
-      hasLoaded={!!report}
+      // AFLS manages its own per-assessment save indicator inline
+      // (see AflsSection) rather than the shared header one -- passing
+      // hasLoaded=false here is what keeps SavedStateIndicator from
+      // rendering anything for this section kind.
+      hasLoaded={!!report && section.kind !== "afls"}
       saveError={saveError}
       onFlushSave={handleFlushSave}
       onCancelSave={handleCancelSave}
@@ -273,22 +235,7 @@ export default function FbaSectionEditorPage() {
               readOnly={readOnly}
             />
           )}
-          {section.kind === "afls" &&
-            (readOnly ? (
-              // Locked FBA: the new results display (honeycomb/
-              // stacked-bar + accordion breakdown), same as the parent
-              // reader -- not the scoring tool's disabled-button view.
-              <AflsResultsView scoresData={aflsScores} summary={aflsSummary} variant="digital" />
-            ) : (
-              <AflsSection
-                scoresData={aflsScores}
-                summary={aflsSummary}
-                onScoreChange={handleAflsScoreChange}
-                onSummaryChange={handleAflsSummaryChange}
-                onSummaryBlur={handleAflsSummaryBlur}
-                readOnly={readOnly}
-              />
-            ))}
+          {section.kind === "afls" && <AflsSection fbaId={fbaId} />}
           {section.kind === "recommendations" && (
             <RecommendationsSection
               fbaId={fbaId}
@@ -314,7 +261,6 @@ export default function FbaSectionEditorPage() {
               fbaId={fbaId}
               passportId={report.passportId}
               content={content}
-              afls={afls}
               readOnly={readOnly}
               isClinicianWorkspace
               onFinalized={() => {

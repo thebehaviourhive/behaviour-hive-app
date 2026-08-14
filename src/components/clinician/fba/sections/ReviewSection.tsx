@@ -10,7 +10,8 @@ import { CompletenessDot } from "../CompletenessDot";
 import { FbaNote } from "../FbaNote";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 import { useCalmCardsForFba } from "@/hooks/useCalmCardsForFba";
-import type { FbaAflsData, FbaContentData } from "@/lib/fba/types";
+import { useAflsAssessmentsForFba } from "@/hooks/useAflsAssessmentsForFba";
+import type { FbaContentData } from "@/lib/fba/types";
 
 // Sections that gate the [Finalize & Lock] action -- the brief's own
 // floor ("the narratives, target behaviours, and recommendations at
@@ -31,7 +32,6 @@ export function ReviewSection({
   fbaId,
   passportId,
   content,
-  afls,
   readOnly,
   isClinicianWorkspace = false,
   onFinalized,
@@ -39,7 +39,6 @@ export function ReviewSection({
   fbaId: string;
   passportId: string;
   content: FbaContentData;
-  afls: FbaAflsData | null;
   readOnly: boolean;
   // Gates the Calm Cards count line -- same reasoning as
   // RecommendationsSection's own isClinicianWorkspace prop. This section
@@ -59,6 +58,10 @@ export function ReviewSection({
   const [error, setError] = useState<string | null>(null);
   const { cards: calmCards } = useCalmCardsForFba(fbaId);
   const publishedCalmCardCount = calmCards.filter((c) => c.isPublished).length;
+  // AFLS assessments are read-only INFORMATION here (a completeness
+  // signal, same as calmCards above) -- ReviewSection never edits them
+  // itself, so only the list is needed, not the CRUD functions.
+  const { assessments: aflsAssessments } = useAflsAssessmentsForFba(fbaId);
 
   useEffect(() => {
     let isMounted = true;
@@ -79,13 +82,13 @@ export function ReviewSection({
   const sections = FBA_SECTIONS.filter((section) => section.kind !== "review");
   const completions = sections.map((section) => ({
     section,
-    state: getSectionCompleteness(section, content, afls),
+    state: getSectionCompleteness(section, content, aflsAssessments),
   }));
   const completeCount = completions.filter((c) => c.state === "complete").length;
 
   const requiredSections = sections.filter((s) => REQUIRED_SECTION_SLUGS.includes(s.slug));
   const requiredComplete = requiredSections.every(
-    (s) => getSectionCompleteness(s, content, afls) === "complete"
+    (s) => getSectionCompleteness(s, content, aflsAssessments) === "complete"
   );
 
   async function handleFinalize() {

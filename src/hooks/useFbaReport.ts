@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { insertWithOfflineRetry } from "@/lib/waitForReconnect";
-import type { AflsScoresData, FbaAflsData, FbaContentData, FbaReport, FbaStatus } from "@/lib/fba/types";
+import type { FbaContentData, FbaReport, FbaStatus } from "@/lib/fba/types";
 
 interface FbaReportRow {
   id: string;
@@ -14,13 +14,6 @@ interface FbaReportRow {
   created_at: string;
   updated_at: string;
   completed_at: string | null;
-}
-
-interface FbaAflsRow {
-  id: string;
-  fba_id: string;
-  scores_data: AflsScoresData;
-  summary: string | null;
 }
 
 function mapReport(row: FbaReportRow): FbaReport {
@@ -36,20 +29,17 @@ function mapReport(row: FbaReportRow): FbaReport {
   };
 }
 
-function mapAfls(row: FbaAflsRow): FbaAflsData {
-  return {
-    id: row.id,
-    fbaId: row.fba_id,
-    scoresData: row.scores_data ?? {},
-    summary: row.summary,
-  };
-}
-
 export type SaveStatus = "idle" | "saving" | "waiting-for-connection" | "saved" | "error";
 
+// AFLS REBUILD (migration 0060): AFLS scoring no longer lives here --
+// afls_assessments is its own multi-row-per-FBA table with its own
+// CRUD hook (useAflsAssessmentsForFba), matching the Calm Cards
+// precedent (useCalmCardsForFba) of a self-contained hook rather than
+// threading everything through this one. Callers that need AFLS
+// completeness (the workspace section list, ReviewSection, the parent
+// reader/PDF) each call that hook directly.
 export function useFbaReport(fbaId: string) {
   const [report, setReport] = useState<FbaReport | null>(null);
-  const [afls, setAfls] = useState<FbaAflsData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
@@ -60,10 +50,11 @@ export function useFbaReport(fbaId: string) {
     setLoadError(null);
     const supabase = createClient();
 
-    const [{ data: reportRow, error: reportError }, { data: aflsRow, error: aflsError }] = await Promise.all([
-      supabase.from("fba_reports").select("*").eq("id", fbaId).maybeSingle(),
-      supabase.from("fba_afls_data").select("*").eq("fba_id", fbaId).maybeSingle(),
-    ]);
+    const { data: reportRow, error: reportError } = await supabase
+      .from("fba_reports")
+      .select("*")
+      .eq("id", fbaId)
+      .maybeSingle();
 
     if (reportError) {
       console.error("Failed to load FBA report:", reportError);
@@ -73,12 +64,6 @@ export function useFbaReport(fbaId: string) {
     }
 
     setReport(reportRow ? mapReport(reportRow as FbaReportRow) : null);
-    if (aflsError) {
-      console.error("Failed to load AFLS data:", aflsError);
-      // Non-fatal -- AFLS just hasn't been started yet in the common
-      // case, and the section 11 editor creates the row on first save.
-    }
-    setAfls(aflsRow ? mapAfls(aflsRow as FbaAflsRow) : null);
     setIsLoading(false);
   }, [fbaId]);
 
@@ -122,48 +107,5 @@ export function useFbaReport(fbaId: string) {
     [fbaId, report?.status]
   );
 
-  const saveAfls = useCallback(
-    async (nextScores: AflsScoresData, nextSummary: string | null, controller?: AbortController) => {
-      setSaveError(null);
-      const supabase = createClient();
-
-      const result = await insertWithOfflineRetry(
-        () =>
-          afls
-            ? supabase
-                .from("fba_afls_data")
-                .update({ scores_data: nextScores, summary: nextSummary })
-                .eq("id", afls.id)
-            : supabase
-                .from("fba_afls_data")
-                .insert({ fba_id: fbaId, scores_data: nextScores, summary: nextSummary }),
-        setSaveStatus,
-        controller?.signal
-      );
-
-      if (result === "cancelled") {
-        setSaveStatus("idle");
-        return;
-      }
-      if (result) {
-        setSaveStatus("error");
-        setSaveError(result);
-        return;
-      }
-
-      setAfls((prev) =>
-        prev
-          ? { ...prev, scoresData: nextScores, summary: nextSummary }
-          : { id: "", fbaId, scoresData: nextScores, summary: nextSummary }
-      );
-      // A fresh insert doesn't carry back the real row id -- reload once
-      // so later saves target the correct row via update rather than
-      // repeatedly inserting.
-      if (!afls) await load();
-      setSaveStatus("saved");
-    },
-    [afls, fbaId, load]
-  );
-
-  return { report, afls, isLoading, loadError, reload: load, saveContent, saveAfls, saveStatus, saveError };
+  return { report, isLoading, loadError, reload: load, saveContent, saveStatus, saveError };
 }

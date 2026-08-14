@@ -6,7 +6,7 @@ import { createClient } from "@/lib/supabase/client";
 import { InlineErrorState } from "@/components/ui/InlineErrorState";
 import { FbaSectionsReadOnly } from "@/components/passport/fba-reader/FbaSectionsReadOnly";
 import { ClinicalFileFbaSections } from "./ClinicalFileFbaSections";
-import type { AflsScoresData, FbaAflsData, FbaContentData, FbaReport } from "@/lib/fba/types";
+import type { FbaContentData, FbaReport } from "@/lib/fba/types";
 
 interface FbaReportRow {
   id: string;
@@ -17,13 +17,6 @@ interface FbaReportRow {
   created_at: string;
   updated_at: string;
   completed_at: string | null;
-}
-
-interface FbaAflsRow {
-  id: string;
-  fba_id: string;
-  scores_data: AflsScoresData;
-  summary: string | null;
 }
 
 type ViewMode = "clinical" | "family";
@@ -45,9 +38,13 @@ type ViewMode = "clinical" | "family";
 // migration 0040), but multiple completed ones can accumulate over
 // time, so this resolves to the most recently completed row -- the
 // current report -- rather than an arbitrary one.
+//
+// AFLS REBUILD (migration 0060): no longer fetches AFLS data itself --
+// both ClinicalFileFbaSections (via AflsSection) and FbaSectionsReadOnly
+// self-fetch afls_assessments through their own hook, matching the Calm
+// Cards precedent of independent, un-threaded fetches.
 export function ClinicalFileFbaTab({ passportId, childName }: { passportId: string; childName: string }) {
   const [report, setReport] = useState<FbaReport | null | undefined>(undefined);
-  const [afls, setAfls] = useState<FbaAflsData | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [view, setView] = useState<ViewMode>("clinical");
 
@@ -86,16 +83,6 @@ export function ClinicalFileFbaTab({ passportId, childName }: { passportId: stri
       updatedAt: row.updated_at,
       completedAt: row.completed_at,
     });
-
-    const { data: aflsRow } = await supabase
-      .from("fba_afls_data")
-      .select("*")
-      .eq("fba_id", row.id)
-      .maybeSingle();
-    if (aflsRow) {
-      const a = aflsRow as FbaAflsRow;
-      setAfls({ id: a.id, fbaId: a.fba_id, scoresData: a.scores_data ?? {}, summary: a.summary });
-    }
   }, [passportId]);
 
   useEffect(() => {
@@ -157,9 +144,9 @@ export function ClinicalFileFbaTab({ passportId, childName }: { passportId: stri
 
       <div className="flex flex-col gap-10">
         {view === "clinical" ? (
-          <ClinicalFileFbaSections fbaId={report.id} passportId={passportId} report={report} afls={afls} />
+          <ClinicalFileFbaSections fbaId={report.id} passportId={passportId} report={report} />
         ) : (
-          <FbaSectionsReadOnly fbaId={report.id} report={report} afls={afls} childName={childName} />
+          <FbaSectionsReadOnly fbaId={report.id} report={report} childName={childName} />
         )}
       </div>
     </div>

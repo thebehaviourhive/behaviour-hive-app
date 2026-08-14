@@ -146,22 +146,49 @@ export interface FbaReport {
   completedAt: string | null;
 }
 
-export type AflsScoreValue = "independent" | "assisted" | "unable" | "na";
+// AFLS REBUILD (migration 0060): the real 225-task item bank replaces
+// the old universal independent/assisted/unable/na 4-state pick. Each
+// task now scores numerically against ITS OWN scale (0..maxScore,
+// maxScore is 2 or 4) -- a task-specific range, not a fixed one --
+// plus an "NA" option gated by naRule where the paper protocol calls
+// for it. fba_afls_data (the old one-row-per-FBA qualitative table) is
+// gone; afls_assessments (multi-row per FBA) is its replacement.
 
-export interface AflsItemScore {
-  itemId: string;
-  score: AflsScoreValue;
-}
+export type AflsNaRule = "male_na" | "female_na" | "na_if_talks";
 
-// Keyed by domain name (matches fba_instruments' AFLS "category" field
-// exactly, so scoring can look an item up by domain without translation).
-export type AflsScoresData = Record<string, AflsItemScore[]>;
+// Shown as a small hint next to a task's chips when naRule is present
+// -- never auto-applied from any profile field (there is no sex/gender
+// field on the passport by design); the clinician taps NA manually,
+// per the paper protocol.
+export const AFLS_NA_RULE_HINTS: Record<AflsNaRule, string> = {
+  male_na: "NA for male learners",
+  female_na: "NA for female learners",
+  na_if_talks: "NA if learner communicates by talking",
+};
 
-export interface FbaAflsData {
+// One task's recorded value: a point score from 0..maxScore, or the
+// literal "NA". A task with no entry at all is "unscored" -- a
+// display-only third state, never itself stored.
+export type AflsTaskScore = number | "NA";
+
+// Keyed by task code (e.g. "SM6"), matching fba_instruments' AFLS item
+// `id` field exactly. Unscored tasks are simply absent -- partial
+// assessments are valid, per the brief.
+export type AflsScores = Record<string, AflsTaskScore>;
+
+// One row of afls_assessments -- one transcribed paper assessment.
+// Multiple per FBA over time (the paper protocol's own repeated-
+// assessment design).
+export interface AflsAssessment {
   id: string;
   fbaId: string;
-  scoresData: AflsScoresData;
-  summary: string | null;
+  // yyyy-mm-dd. Editable -- paper assessments are transcribed
+  // retrospectively, so this rarely matches the day it's typed in.
+  assessmentDate: string;
+  assessorName: string;
+  scores: AflsScores;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface InstrumentItem {
@@ -169,7 +196,13 @@ export interface InstrumentItem {
   text: string;
   answer_type: "rating_scale" | "free_text" | "afls_scale" | "date";
   scale?: string[];
+  // For AFLS items, this is the domain CODE (e.g. "SM"), not the
+  // display name -- see AFLS_DOMAINS below for the code -> name map.
   category?: string;
+  // AFLS items only: the task's own 0..maxScore scale (2 or 4).
+  maxScore?: number;
+  // AFLS items only: which learners this task doesn't apply to, if any.
+  naRule?: AflsNaRule;
 }
 
 export interface FbaInstrument {
@@ -183,16 +216,24 @@ export interface FbaInstrument {
   attribution?: string | null;
 }
 
-export const AFLS_DOMAINS = [
-  "Self-Management",
-  "Basic Communication",
-  "Dressing",
-  "Toileting",
-  "Grooming",
-  "Bathing",
-  "Health/Safety & First Aid",
-  "Nighttime Routines",
-] as const;
+// The 8 fixed domains from the paper protocol itself -- structural
+// identity (code + display name + order), not clinical item content,
+// so this stays a code constant even though item text/scales are data.
+// Display names match scripts/afls/afls_items.json verbatim.
+export const AFLS_DOMAINS: { code: string; name: string }[] = [
+  { code: "SM", name: "Self-Management" },
+  { code: "BC", name: "Basic Communication" },
+  { code: "DR", name: "Dressing" },
+  { code: "TL", name: "Toileting" },
+  { code: "GR", name: "Grooming" },
+  { code: "BT", name: "Bathing" },
+  { code: "HS", name: "Health, Safety & First Aid" },
+  { code: "NR", name: "Nighttime Routines" },
+];
+
+// Total tasks across all 8 domains (migration 0060) -- used to tell
+// "partially scored" apart from "fully scored" for completeness.
+export const AFLS_TOTAL_TASKS = 225;
 
 // ============================================================
 // Stage 2 -- the questionnaire engine

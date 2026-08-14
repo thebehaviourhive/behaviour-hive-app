@@ -24,7 +24,7 @@ interface ClinicianRow {
 
 // The PDF export (Part F). Deliberately route-independent on role: this
 // page is reached from both the clinician workspace and the parent
-// reader, and RLS on fba_reports/fba_afls_data already scopes what each
+// reader, and RLS on fba_reports/afls_assessments already scopes what each
 // caller can see -- so rather than gate on one specific role via
 // useRequireRole, this just checks *someone* is signed in and lets the
 // query results speak (an unauthorized fbaId simply loads no report).
@@ -43,7 +43,7 @@ interface ClinicianRow {
 export default function FbaPrintPage() {
   const { fbaId } = useParams<{ fbaId: string }>();
   const router = useRouter();
-  const { report, afls, isLoading, loadError } = useFbaReport(fbaId);
+  const { report, isLoading, loadError } = useFbaReport(fbaId);
 
   const [authChecked, setAuthChecked] = useState(false);
   const [childName, setChildName] = useState<string | null>(null);
@@ -194,7 +194,6 @@ export default function FbaPrintPage() {
           <FbaSectionsReadOnly
             fbaId={fbaId}
             report={report}
-            afls={afls}
             childName={childName}
             sectionClassName="print-avoid-break"
             isPrint
