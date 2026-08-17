@@ -1,11 +1,158 @@
-import { ComingSoonPage } from "@/components/parent/ComingSoonPage";
-import { ChatBubbleIcon } from "@/components/ui/icons";
+"use client";
 
+import { useEffect, useState } from "react";
+import Link from "next/link";
+import { Plus } from "lucide-react";
+import { createClient } from "@/lib/supabase/client";
+import { useRequireRole } from "@/hooks/useRequireRole";
+import { useMessageThread } from "@/hooks/useMessageThread";
+import { useMessageCategories } from "@/hooks/useMessageCategories";
+import { BottomNav } from "@/components/ui/BottomNav";
+import { InlineErrorState } from "@/components/ui/InlineErrorState";
+import { MessageList } from "@/components/messages/MessageList";
+import { ComposeMessageSheet } from "@/components/messages/ComposeMessageSheet";
+
+// Parent's Messages home -- Stage 1: this feature's core lifecycle,
+// built end-to-end on the track that already has the "Messages" quick
+// action wired to /messages. Per-track polish (Stage 2) comes later;
+// this is the real thing, not a preview of it.
 export default function MessagesPage() {
+  const { user, isReady: isRoleReady } = useRequireRole("parent");
+  const [passportId, setPassportId] = useState<string | null>(null);
+  const [childName, setChildName] = useState<string | null>(null);
+  const [institutionPhone, setInstitutionPhone] = useState<string | null>(null);
+  const [isLoadingPassport, setIsLoadingPassport] = useState(true);
+  const [passportLoadError, setPassportLoadError] = useState<string | null>(null);
+  const [isComposeOpen, setIsComposeOpen] = useState(false);
+
+  useEffect(() => {
+    if (!user) return;
+    let isMounted = true;
+
+    async function load() {
+      const supabase = createClient();
+      const { data: passport, error } = await supabase
+        .from("passports")
+        .select("id, child_name")
+        .eq("user_id", user!.id)
+        .maybeSingle();
+
+      if (!isMounted) return;
+      if (error) {
+        console.error("Failed to load passport for Messages:", error);
+        setPassportLoadError("Couldn't load Messages.");
+        setIsLoadingPassport(false);
+        return;
+      }
+
+      setPassportId(passport?.id ?? null);
+      setChildName(passport?.child_name ?? null);
+
+      if (passport?.id) {
+        // Best-effort: the emergency footer's tap-to-call is a nicety,
+        // never a blocker -- no institution link, or no phone on file,
+        // just means the footer falls back to plain text.
+        const { data: link } = await supabase
+          .from("passport_institution_links")
+          .select("institution_id")
+          .eq("passport_id", passport.id)
+          .eq("approved_by_parent", true)
+          .limit(1)
+          .maybeSingle();
+
+        if (link?.institution_id) {
+          const { data: institution } = await supabase
+            .from("institutions")
+            .select("phone")
+            .eq("id", link.institution_id)
+            .maybeSingle();
+          if (isMounted) setInstitutionPhone(institution?.phone ?? null);
+        }
+      }
+
+      setIsLoadingPassport(false);
+    }
+
+    load();
+    return () => {
+      isMounted = false;
+    };
+  }, [user]);
+
+  const { messages, candidates, nameById, isLoading, loadError, refresh } = useMessageThread(passportId);
+  const { categories } = useMessageCategories("parent");
+
+  if (!isRoleReady || isLoadingPassport) {
+    return null;
+  }
+
   return (
-    <ComingSoonPage
-      Icon={ChatBubbleIcon}
-      body="We are building a secure messaging hub for you and your team."
-    />
+    <div className="flex min-h-full flex-1 flex-col bg-brand-safe-ivory pb-24">
+      <header className="flex items-center justify-between gap-3 px-4 pt-6 pb-2">
+        <div className="flex items-center gap-3">
+          <Link
+            href="/parent-dashboard"
+            aria-label="Back"
+            className="flex h-8 w-8 flex-shrink-0 items-center justify-center text-2xl leading-none text-brand-prussian-blue"
+          >
+            ‹
+          </Link>
+          <h1 className="font-heading text-2xl font-semibold text-brand-prussian-blue">Messages</h1>
+        </div>
+        {passportId && (
+          <button
+            type="button"
+            onClick={() => setIsComposeOpen(true)}
+            className="flex items-center gap-1.5 rounded-full bg-brand-prussian-blue py-2 pl-3 pr-3.5 text-sm font-semibold text-white"
+          >
+            <Plus size={16} strokeWidth={2.5} aria-hidden />
+            New
+          </button>
+        )}
+      </header>
+
+      <main className="flex-1 px-4 py-2">
+        {passportLoadError ? (
+          <InlineErrorState message={passportLoadError} onRetry={() => window.location.reload()} />
+        ) : !passportId ? (
+          <div className="flex flex-col items-center gap-3 py-12 text-center">
+            <p className="text-sm text-brand-neutral-black/70">
+              Build {childName ?? "your child"}&apos;s passport first to start messaging their team.
+            </p>
+            <Link
+              href="/passport/welcome"
+              className="text-sm font-semibold text-brand-prussian-blue underline underline-offset-2"
+            >
+              Get started
+            </Link>
+          </div>
+        ) : loadError ? (
+          <InlineErrorState message={loadError} onRetry={() => refresh()} />
+        ) : user ? (
+          <MessageList
+            messages={messages}
+            currentUserId={user.id}
+            nameById={nameById}
+            isLoading={isLoading}
+            onChanged={refresh}
+          />
+        ) : null}
+      </main>
+
+      {passportId && user && (
+        <ComposeMessageSheet
+          isOpen={isComposeOpen}
+          onClose={() => setIsComposeOpen(false)}
+          passportId={passportId}
+          childName={childName ?? "your child"}
+          candidates={candidates}
+          categories={categories}
+          institutionPhone={institutionPhone}
+          onSent={refresh}
+        />
+      )}
+
+      <BottomNav />
+    </div>
   );
 }
