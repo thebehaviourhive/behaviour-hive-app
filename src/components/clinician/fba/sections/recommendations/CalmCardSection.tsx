@@ -11,6 +11,7 @@ import {
   type CalmCardDoorType,
 } from "@/lib/calmCards/types";
 import type { StrategyTypeOption } from "@/hooks/useStrategyTypes";
+import { StrategyUpdatePrompt } from "@/components/clinician/StrategyUpdatePrompt";
 
 // Calm Card authoring, per strategy. Deliberately has NO readOnly gate
 // of its own -- unlike the surrounding RecommendationsSection content,
@@ -94,6 +95,7 @@ export function CalmCardSection({
   availableTags,
   strategyTypeOptions,
   linkedStrategyTypeId = null,
+  passportId,
   onCreate,
   onUpdate,
   onDelete,
@@ -106,6 +108,10 @@ export function CalmCardSection({
   // The linked FBA strategy's own tag, if any -- used only as a NEW
   // card's default selection (judgment call 3's pre-fill).
   linkedStrategyTypeId?: string | null;
+  // Stage 3B: only needed to offer "Notify the team?" right after a
+  // draft -> published transition (never on unpublish -- see
+  // handleTogglePublish).
+  passportId: string;
   onCreate: (input: {
     strategyRef: string;
     title: string;
@@ -135,6 +141,9 @@ export function CalmCardSection({
   );
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Stage 3B: "Notify the team?" right after a draft -> published
+  // transition -- never on unpublish.
+  const [isNotifyOpen, setIsNotifyOpen] = useState(false);
 
   const existingCard = editingCardId ? strategyCards.find((c) => c.id === editingCardId) ?? null : null;
 
@@ -221,10 +230,14 @@ export function CalmCardSection({
   }
 
   async function handleTogglePublish(card: CalmCard) {
+    const isPublishing = !card.isPublished;
     setIsSaving(true);
     setError(null);
     try {
-      await onUpdate(card.id, { isPublished: !card.isPublished });
+      await onUpdate(card.id, { isPublished: isPublishing });
+      // Draft -> published only, never on unpublish (the brief's own
+      // "publishing/unpublishing-TO-published" phrasing).
+      if (isPublishing) setIsNotifyOpen(true);
     } catch (err) {
       console.error("Failed to toggle publish:", err);
       setError("Couldn't update this Calm Card. Please try again.");
@@ -426,6 +439,12 @@ export function CalmCardSection({
           )}
         </div>
       )}
+
+      <StrategyUpdatePrompt
+        isOpen={isNotifyOpen}
+        onClose={() => setIsNotifyOpen(false)}
+        passportId={passportId}
+      />
     </div>
   );
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, type Ref } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { ABC_ROLE_DISPLAY_LABEL, type ABCLoggerRole } from "./roleConfig";
 import { loadDraft } from "./draftStorage";
@@ -8,6 +8,11 @@ import { loadDraft } from "./draftStorage";
 interface ABCTimelineProps {
   passportId: string;
   viewerRole: ABCLoggerRole;
+  // Stage 3A: "View log" on an incident-note message deep-links here.
+  // Scrolls to and highlights the matching card once logs have loaded;
+  // also forces both filter rows back to "All" so a stale filter
+  // selection can never hide the very card someone was sent to see.
+  highlightLogId?: string | null;
 }
 
 interface RawAbcLogRow {
@@ -79,12 +84,13 @@ function formatDateTime(date: string, time: string): string {
   return `${dateLabel} · ${timeLabel}`;
 }
 
-export function ABCTimeline({ passportId, viewerRole }: ABCTimelineProps) {
+export function ABCTimeline({ passportId, viewerRole, highlightLogId }: ABCTimelineProps) {
   const [logs, setLogs] = useState<ABCLogRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [intensityFilter, setIntensityFilter] = useState<IntensityFilter>("all");
   const [reporterFilter, setReporterFilter] = useState<ReporterFilter>("all");
+  const highlightRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -154,6 +160,24 @@ export function ABCTimeline({ passportId, viewerRole }: ABCTimelineProps) {
     };
   }, [passportId]);
 
+  // A deep-linked log must never be hidden by a stale filter selection
+  // left over from a previous visit to this timeline.
+  useEffect(() => {
+    if (!highlightLogId) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setIntensityFilter("all");
+    setReporterFilter("all");
+  }, [highlightLogId]);
+
+  useEffect(() => {
+    if (!highlightLogId || isLoading) return;
+    // Deferred a tick so the cards have painted before scrolling.
+    const timer = setTimeout(() => {
+      highlightRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 150);
+    return () => clearTimeout(timer);
+  }, [highlightLogId, isLoading, logs]);
+
   const filteredLogs = logs.filter((log) => {
     if (intensityFilter !== "all" && getIntensityBadge(log.intensity).filterValue !== intensityFilter) {
       return false;
@@ -220,7 +244,12 @@ export function ABCTimeline({ passportId, viewerRole }: ABCTimelineProps) {
       ) : (
         <div className="flex flex-col gap-3">
           {filteredLogs.map((log) => (
-            <ABCLogCard key={log.id} log={log} />
+            <ABCLogCard
+              key={log.id}
+              log={log}
+              isHighlighted={log.id === highlightLogId}
+              cardRef={log.id === highlightLogId ? highlightRef : undefined}
+            />
           ))}
         </div>
       )}
@@ -228,11 +257,24 @@ export function ABCTimeline({ passportId, viewerRole }: ABCTimelineProps) {
   );
 }
 
-function ABCLogCard({ log }: { log: ABCLogRow }) {
+function ABCLogCard({
+  log,
+  isHighlighted,
+  cardRef,
+}: {
+  log: ABCLogRow;
+  isHighlighted?: boolean;
+  cardRef?: Ref<HTMLDivElement>;
+}) {
   const badge = getIntensityBadge(log.intensity);
 
   return (
-    <div className="rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
+    <div
+      ref={cardRef}
+      className={`rounded-2xl border bg-white p-4 shadow-sm transition-colors ${
+        isHighlighted ? "border-brand-golden-brown ring-2 ring-brand-golden-brown/40" : "border-black/5"
+      }`}
+    >
       <div className="flex items-center justify-between gap-2">
         <p className="text-sm font-semibold text-brand-neutral-black">
           {formatDateTime(log.incidentDate, log.incidentTime)}

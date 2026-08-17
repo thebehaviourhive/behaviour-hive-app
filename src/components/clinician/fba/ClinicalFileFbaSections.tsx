@@ -138,6 +138,7 @@ export function ClinicalFileFbaSections({
           {section.kind === "recommendations" && (
             <RecommendationsSection
               fbaId={fbaId}
+              passportId={passportId}
               isClinicianWorkspace
               content={content}
               onFieldChange={noOpFieldChange}

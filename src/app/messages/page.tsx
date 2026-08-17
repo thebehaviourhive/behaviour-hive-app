@@ -72,7 +72,7 @@ export default function MessagesPage() {
   }
 
   return (
-    <div className="flex min-h-full flex-1 flex-col bg-brand-safe-ivory pb-24">
+    <div className="flex min-h-full flex-1 flex-col bg-brand-off-white/40 pb-24">
       <header className="flex items-center justify-between gap-3 px-4 pt-6 pb-2">
         <div className="flex items-center gap-3">
           <Link
@@ -120,6 +120,8 @@ export default function MessagesPage() {
             nameById={nameById}
             isLoading={isLoading}
             onChanged={refresh}
+            childName={childName ?? "your child"}
+            viewerRole="parent"
             emptyOpenMessage={
               <>
                 Send quick updates the school can acknowledge when they have a

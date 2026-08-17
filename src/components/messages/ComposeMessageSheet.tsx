@@ -24,6 +24,12 @@ export function ComposeMessageSheet({
   categories,
   institutionPhone,
   onSent,
+  initialCategoryId,
+  initialRecipientIds,
+  initialBody,
+  bodyPlaceholder,
+  abcLogId,
+  strategyUpdate,
 }: {
   isOpen: boolean;
   onClose: () => void;
@@ -35,6 +41,20 @@ export function ComposeMessageSheet({
   categories: MessageCategory[];
   institutionPhone: string | null;
   onSent: () => void;
+  // Stage 3 integrations: a sensible starting selection, still fully
+  // adjustable via the normal chip pickers below -- none of these lock
+  // anything.
+  initialCategoryId?: string;
+  initialRecipientIds?: string[];
+  // A real, pre-filled, editable value (Stage 3B's strategy-update
+  // template) -- distinct from `bodyPlaceholder`, which is just ghost
+  // text in an empty field (Stage 3A's "All settled now…" hint).
+  initialBody?: string;
+  bodyPlaceholder?: string;
+  // Stamped onto the message at send time (Stage 3A/3B) -- see
+  // send_message's own validation for what these unlock.
+  abcLogId?: string;
+  strategyUpdate?: boolean;
 }) {
   const [selectedRecipientIds, setSelectedRecipientIds] = useState<string[]>([]);
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
@@ -44,16 +64,27 @@ export function ComposeMessageSheet({
   const [sendError, setSendError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (isOpen) return;
-    // Reset on close, not on open -- avoids a visible flash of empty
-    // state while the sheet's own close animation/unmount is still
-    // playing.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setSelectedRecipientIds([]);
-    setSelectedCategoryId(null);
-    setBody("");
-    setResponseRequired(false);
-    setSendError(null);
+    if (!isOpen) {
+      // Reset on close, not left until next open -- avoids a visible
+      // flash of the PREVIOUS open's content while this sheet's own
+      // close animation is still playing.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setSelectedRecipientIds([]);
+      setSelectedCategoryId(null);
+      setBody("");
+      setResponseRequired(false);
+      setSendError(null);
+      return;
+    }
+    // Opening: seed from whatever prefill this call site offered.
+    // Deliberately depends only on [isOpen], not on the prefill props
+    // themselves -- they're read once at the moment of opening, so a
+    // parent re-render while the sheet is already open (e.g. candidates
+    // refreshing) never clobbers an in-progress edit.
+    setSelectedRecipientIds(initialRecipientIds ?? []);
+    setSelectedCategoryId(initialCategoryId ?? null);
+    setBody(initialBody ?? "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
 
   function toggleRecipient(id: string) {
@@ -74,6 +105,8 @@ export function ComposeMessageSheet({
       p_body: body.trim() ? body.trim() : null,
       p_response_required: responseRequired,
       p_recipient_ids: selectedRecipientIds,
+      p_abc_log_id: abcLogId ?? null,
+      p_strategy_update: strategyUpdate ?? false,
     });
 
     setIsSending(false);
@@ -159,12 +192,21 @@ export function ComposeMessageSheet({
         value={body}
         onChange={(e) => setBody(e.target.value.slice(0, BODY_MAX))}
         rows={3}
-        placeholder="A few words, if the category chip alone doesn't say it all…"
+        placeholder={bodyPlaceholder ?? "A few words, if the category chip alone doesn't say it all…"}
         className="mt-1.5 w-full resize-none rounded-xl border border-black/10 bg-white px-4 py-3 text-base text-brand-neutral-black placeholder:text-black/30 focus:border-brand-prussian-blue focus:outline-none focus:ring-2 focus:ring-brand-pastel-blue"
       />
-      <p className="mt-1 text-right text-xs text-brand-neutral-black/40">
-        {body.length}/{BODY_MAX}
-      </p>
+      <div className="mt-1 flex items-center justify-between gap-2">
+        {body.includes("{{childName}}") ? (
+          <p className="text-xs text-brand-neutral-black/40">
+            {"{{childName}}"} shows correctly for each recipient.
+          </p>
+        ) : (
+          <span />
+        )}
+        <p className="flex-shrink-0 text-xs text-brand-neutral-black/40">
+          {body.length}/{BODY_MAX}
+        </p>
+      </div>
 
       {/* Response Required: deliberately the visual exception, not the
           default -- small, outlined, off by default, with its own

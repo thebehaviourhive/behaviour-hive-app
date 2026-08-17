@@ -1,6 +1,6 @@
 "use client";
 
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useRequireRole } from "@/hooks/useRequireRole";
@@ -13,6 +13,10 @@ import { ClinicalTeamSection } from "@/components/passport/clinical-team/Clinica
 import { InlineErrorState } from "@/components/ui/InlineErrorState";
 import { ProgressSurface } from "@/components/progress/ProgressSurface";
 import { TeacherPassportMessagesTab } from "@/components/teacher/TeacherPassportMessagesTab";
+import { useMessageRecipientCandidates } from "@/hooks/useMessageRecipientCandidates";
+import { useMessageCategories } from "@/hooks/useMessageCategories";
+import { fetchApprovedInstitutionPhone } from "@/lib/messages/institutionPhone";
+import { ComposeMessageSheet } from "@/components/messages/ComposeMessageSheet";
 
 type TabKey =
   | "summary"
@@ -85,14 +89,45 @@ export default function TeacherPassportPage() {
   const params = useParams<{ passportId: string }>();
   const passportId = params.passportId;
   const { user, isReady } = useRequireRole("class_teacher");
+  const searchParams = useSearchParams();
 
   const [profile, setProfile] = useState<ClassroomProfile | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<TabKey>("summary");
+  // Read once at mount, e.g. an incident-note message's "View log"
+  // linking straight into ?tab=incidents (same convention as the
+  // clinician passport page's own ?tab= deep-link).
+  const [activeTab, setActiveTab] = useState<TabKey>(() => {
+    const requested = searchParams.get("tab");
+    return TABS.some((t) => t.key === requested) ? (requested as TabKey) : "summary";
+  });
   const [isLedgerOpen, setIsLedgerOpen] = useState(false);
   const [isAbcLoggerOpen, setIsAbcLoggerOpen] = useState(false);
   const [timelineRefreshKey, setTimelineRefreshKey] = useState(0);
   const [hasSubmittedEodToday, setHasSubmittedEodToday] = useState(false);
+  // Stage 3A: the same deep-link's ?logId, handed to ABCTimeline to
+  // scroll to and highlight that one card.
+  const highlightAbcLogId = searchParams.get("logId");
+  const [composeAbcLogId, setComposeAbcLogId] = useState<string | null>(null);
+  const [messagesInstitutionPhone, setMessagesInstitutionPhone] = useState<string | null>(null);
+  const { candidates: messageCandidates } = useMessageRecipientCandidates(passportId);
+  const { categories: messageCategories } = useMessageCategories("class_teacher");
+  const incidentNoteCategoryId = messageCategories.find((category) => category.label === "Incident note")?.id;
+  // Teacher-logged -> the parent, per the brief's sensible default
+  // (still adjustable via the compose sheet's normal recipient picker).
+  const defaultIncidentRecipientIds = messageCandidates
+    .filter((candidate) => candidate.role === "parent")
+    .map((candidate) => candidate.recipientId);
+
+  useEffect(() => {
+    let isMounted = true;
+    fetchApprovedInstitutionPhone(createClient(), passportId).then((phone) => {
+      if (isMounted) setMessagesInstitutionPhone(phone);
+    });
+    return () => {
+      isMounted = false;
+    };
+  }, [passportId]);
+
   const {
     items: clinicalContentItems,
     isLoading: isLoadingClinicalContent,
@@ -431,6 +466,7 @@ export default function TeacherPassportPage() {
             key={timelineRefreshKey}
             passportId={passportId}
             viewerRole="class_teacher"
+            highlightLogId={highlightAbcLogId}
           />
         )}
 
@@ -515,12 +551,31 @@ export default function TeacherPassportPage() {
           passportId={passportId}
           childName={profile.childFirstName}
           role="class_teacher"
+          onOfferMessage={(newLogId) => setComposeAbcLogId(newLogId)}
           onComplete={() => {
             setIsAbcLoggerOpen(false);
             setTimelineRefreshKey((key) => key + 1);
             setActiveTab("incidents");
           }}
           onDismiss={() => setIsAbcLoggerOpen(false)}
+        />
+      )}
+
+      {/* Stage 3A: "Also send a message about this?" */}
+      {composeAbcLogId && incidentNoteCategoryId && (
+        <ComposeMessageSheet
+          isOpen={Boolean(composeAbcLogId)}
+          onClose={() => setComposeAbcLogId(null)}
+          passportId={passportId}
+          childName={profile.childFirstName}
+          candidates={messageCandidates}
+          categories={messageCategories}
+          institutionPhone={messagesInstitutionPhone}
+          onSent={() => setTimelineRefreshKey((key) => key + 1)}
+          initialCategoryId={incidentNoteCategoryId}
+          initialRecipientIds={defaultIncidentRecipientIds}
+          bodyPlaceholder="All settled now — just so you know…"
+          abcLogId={composeAbcLogId}
         />
       )}
     </div>

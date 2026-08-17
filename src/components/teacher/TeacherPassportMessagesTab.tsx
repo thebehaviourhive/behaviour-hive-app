@@ -63,6 +63,8 @@ export function TeacherPassportMessagesTab({
           nameById={nameById}
           isLoading={isLoading}
           onChanged={refresh}
+          childName={childName}
+          viewerRole="class_teacher"
         />
       )}
 

@@ -24,6 +24,10 @@ import {
   type ClinicianSpecialty,
 } from "@/lib/clinicianSpecialties";
 import type { ClinicalContentItem } from "@/lib/passportClinicalContent";
+import { useMessageRecipientCandidates } from "@/hooks/useMessageRecipientCandidates";
+import { useMessageCategories } from "@/hooks/useMessageCategories";
+import { fetchApprovedInstitutionPhone } from "@/lib/messages/institutionPhone";
+import { ComposeMessageSheet } from "@/components/messages/ComposeMessageSheet";
 
 interface ApprovedInstitution {
   institutionId: string;
@@ -133,6 +137,46 @@ export default function PassportDashboardPage() {
   const [calmBehaviour, setCalmBehaviour] = useState<string | null>(null);
   const [institutionsError, setInstitutionsError] = useState<string | null>(null);
   const [cliniciansError, setCliniciansError] = useState<string | null>(null);
+  // Stage 3A: "View log" on an incident-note message deep-links here as
+  // #abc-log-<id> -- parsed once on mount (the page's own generic hash
+  // effect elsewhere still fires too and harmlessly no-ops, since no
+  // element literally has this id; the real scroll+highlight is
+  // ABCTimeline's own ref-based mechanism, driven by this parsed value).
+  const [highlightAbcLogId, setHighlightAbcLogId] = useState<string | null>(null);
+  // Non-null while the "Also send a message about this?" compose sheet
+  // is open, scoped to the just-saved log's id.
+  const [composeAbcLogId, setComposeAbcLogId] = useState<string | null>(null);
+  const [messagesInstitutionPhone, setMessagesInstitutionPhone] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const match = window.location.hash.match(/^#abc-log-(.+)$/);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (match) setHighlightAbcLogId(match[1]);
+  }, []);
+
+  // Stage 3A compose prefill data -- fetched whenever a passport is
+  // known, ready before "Also send a message about this?" is ever
+  // tapped rather than fetched fresh at that moment.
+  const { candidates: messageCandidates } = useMessageRecipientCandidates(summary?.passportId ?? null);
+  const { categories: messageCategories } = useMessageCategories("parent");
+  const incidentNoteCategoryId = messageCategories.find((category) => category.label === "Incident note")?.id;
+  // Parent-logged -> linked teacher(s), per the brief's sensible default
+  // (still adjustable via the compose sheet's normal recipient picker).
+  const defaultIncidentRecipientIds = messageCandidates
+    .filter((candidate) => candidate.role === "class_teacher")
+    .map((candidate) => candidate.recipientId);
+
+  useEffect(() => {
+    if (!summary?.passportId) return;
+    let isMounted = true;
+    fetchApprovedInstitutionPhone(createClient(), summary.passportId).then((phone) => {
+      if (isMounted) setMessagesInstitutionPhone(phone);
+    });
+    return () => {
+      isMounted = false;
+    };
+  }, [summary?.passportId]);
 
   // Accordion state: "About Your Child" is expanded by default, every
   // other section starts collapsed -- independent toggling, so opening
@@ -1063,7 +1107,12 @@ export default function PassportDashboardPage() {
         <ErrorBoundary fallback={fallbackCard}>
           <section className="mt-2 mb-6">
             <h2 className="mb-4 font-heading text-xl font-bold text-brand-prussian-blue">Incident Timeline</h2>
-            <ABCTimeline key={timelineRefreshKey} passportId={summary.passportId} viewerRole="parent" />
+            <ABCTimeline
+              key={timelineRefreshKey}
+              passportId={summary.passportId}
+              viewerRole="parent"
+              highlightLogId={highlightAbcLogId}
+            />
           </section>
         </ErrorBoundary>
       </main>
@@ -1099,6 +1148,7 @@ export default function PassportDashboardPage() {
           childName={summary.childName}
           role="parent"
           initialPrefill={calmBehaviour ? { behaviours: [calmBehaviour] } : undefined}
+          onOfferMessage={(newLogId) => setComposeAbcLogId(newLogId)}
           onComplete={(newLogId) => {
             setIsAbcLoggerOpen(false);
             setTimelineRefreshKey((key) => key + 1);
@@ -1125,6 +1175,26 @@ export default function PassportDashboardPage() {
             setCalmEpisodeId(null);
             setCalmBehaviour(null);
           }}
+        />
+      )}
+
+      {/* Stage 3A: "Also send a message about this?" -- pre-configured,
+          not locked; every field below is still the normal adjustable
+          compose sheet. */}
+      {composeAbcLogId && incidentNoteCategoryId && (
+        <ComposeMessageSheet
+          isOpen={Boolean(composeAbcLogId)}
+          onClose={() => setComposeAbcLogId(null)}
+          passportId={summary.passportId}
+          childName={summary.childName}
+          candidates={messageCandidates}
+          categories={messageCategories}
+          institutionPhone={messagesInstitutionPhone}
+          onSent={() => setTimelineRefreshKey((key) => key + 1)}
+          initialCategoryId={incidentNoteCategoryId}
+          initialRecipientIds={defaultIncidentRecipientIds}
+          bodyPlaceholder="All settled now — just so you know…"
+          abcLogId={composeAbcLogId}
         />
       )}
 

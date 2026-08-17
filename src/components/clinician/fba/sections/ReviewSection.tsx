@@ -11,6 +11,7 @@ import { FbaNote } from "../FbaNote";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 import { useCalmCardsForFba } from "@/hooks/useCalmCardsForFba";
 import { useAflsAssessmentsForFba } from "@/hooks/useAflsAssessmentsForFba";
+import { StrategyUpdatePrompt } from "@/components/clinician/StrategyUpdatePrompt";
 import type { FbaContentData } from "@/lib/fba/types";
 
 // Sections that gate the [Finalize & Lock] action -- the brief's own
@@ -56,6 +57,10 @@ export function ReviewSection({
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
   const [isFinalizing, setIsFinalizing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Stage 3B: "Notify the team?" shown right after a successful
+  // finalize, before navigating away (onFinalized fires once this
+  // closes, whichever way -- Not now or after a successful send).
+  const [isNotifyOpen, setIsNotifyOpen] = useState(false);
   const { cards: calmCards } = useCalmCardsForFba(fbaId);
   const publishedCalmCardCount = calmCards.filter((c) => c.isPublished).length;
   // AFLS assessments are read-only INFORMATION here (a completeness
@@ -139,7 +144,7 @@ export function ReviewSection({
 
     setIsFinalizing(false);
     setIsConfirmOpen(false);
-    onFinalized?.();
+    setIsNotifyOpen(true);
   }
 
   return (
@@ -239,6 +244,15 @@ export function ReviewSection({
               Cancel
             </button>
           </BottomSheet>
+
+          <StrategyUpdatePrompt
+            isOpen={isNotifyOpen}
+            onClose={() => {
+              setIsNotifyOpen(false);
+              onFinalized?.();
+            }}
+            passportId={passportId}
+          />
         </>
       )}
     </div>

@@ -127,6 +127,7 @@ export function FbaSectionsReadOnly({
           {section.kind === "recommendations" && (
             <RecommendationsSection
               fbaId={fbaId}
+              passportId={report.passportId}
               content={report.contentData}
               onFieldChange={noOpFieldChange}
               onFieldBlur={noOpFieldBlur}

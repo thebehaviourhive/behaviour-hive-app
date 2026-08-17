@@ -20,6 +20,8 @@ interface RawMessageRow {
   response_required: boolean;
   status: ThreadMessage["status"];
   created_at: string;
+  abc_log_id: string | null;
+  strategy_update: boolean;
   category: { label: string } | { label: string }[] | null;
   recipients: {
     id: string;
@@ -63,6 +65,7 @@ export function useMessageThread(passportId: string | null) {
         .from("messages")
         .select(
           `id, passport_id, sender_id, sender_role, category_id, body, response_required, status, created_at,
+           abc_log_id, strategy_update,
            category:message_categories(label),
            recipients:message_recipients(id, recipient_id, recipient_role, acknowledged_at),
            replies:message_replies(id, author_id, body, created_at)`
@@ -111,6 +114,8 @@ export function useMessageThread(passportId: string | null) {
         responseRequired: row.response_required,
         status: row.status,
         createdAt: row.created_at,
+        abcLogId: row.abc_log_id,
+        strategyUpdate: row.strategy_update,
         recipients: (row.recipients ?? []).map((r) => ({
           id: r.id,
           recipientId: r.recipient_id,

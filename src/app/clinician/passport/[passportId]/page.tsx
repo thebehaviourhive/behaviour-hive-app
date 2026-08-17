@@ -347,6 +347,7 @@ export default function ClinicianPassportPage() {
             key={timelineRefreshKey}
             passportId={passportId}
             viewerRole="clinician"
+            highlightLogId={searchParams.get("logId")}
           />
         )}
 

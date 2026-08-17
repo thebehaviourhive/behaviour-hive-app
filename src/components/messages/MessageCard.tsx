@@ -1,10 +1,13 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { format } from "date-fns";
 import { createClient } from "@/lib/supabase/client";
 import { insertWithOfflineRetry } from "@/lib/waitForReconnect";
-import { ROLE_LABEL, type ThreadMessage } from "@/types/messages";
+import { renderMessageBody } from "@/lib/messages/messageBodyTokens";
+import { ROLE_LABEL, type MessageRecipient, type MessageRole, type ThreadMessage } from "@/types/messages";
+import { AbcLogReference } from "./AbcLogReference";
 
 type AckPhase = "idle" | "saving" | "waiting-for-connection" | "error";
 
@@ -19,6 +22,29 @@ function formatTime(iso: string): string {
   return format(new Date(iso), "d MMM, HH:mm");
 }
 
+// Teacher's own scoped Clinical Team tab is keyed "clinicalTeam" on all
+// three passport pages (parent's is a dashboard section, not a route of
+// its own, so it gets the hash convention instead) -- never a wider
+// view, never the FBA itself.
+function buildStrategyHref(viewerRole: MessageRole, passportId: string): string {
+  if (viewerRole === "parent") return "/passport/dashboard#clinical-team";
+  if (viewerRole === "class_teacher") return `/teacher/passport/${passportId}?tab=clinicalTeam`;
+  return `/clinician/passport/${passportId}?tab=clinicalTeam`;
+}
+
+// The Stage 3B payoff: "✓ Sarah Murphy · Aoife Ryan (not yet)" -- one
+// compact line rather than the generic sender-receipts list below, only
+// for the clinician's own strategy-update sends (their Clinical File
+// tab is where this is meant to be read, per the brief).
+function formatStrategyReceipt(recipients: MessageRecipient[], nameById: Map<string, string>): string {
+  return recipients
+    .map((recipient) => {
+      const name = nameById.get(recipient.recipientId) ?? ROLE_LABEL[recipient.recipientRole];
+      return recipient.acknowledgedAt ? `✓ ${name}` : `${name} (not yet)`;
+    })
+    .join(" · ");
+}
+
 // Shared card -- one implementation for every viewing role. What renders
 // depends only on the viewer's relationship to THIS message (sender /
 // recipient / neither) and its own state, never on which app track is
@@ -29,11 +55,22 @@ export function MessageCard({
   currentUserId,
   nameById,
   onChanged,
+  childName,
+  viewerRole,
 }: {
   message: ThreadMessage;
   currentUserId: string;
   nameById: Map<string, string>;
   onChanged: () => void;
+  // The viewer's own display-rules form of the child's name (redacted
+  // for teachers, full for parent/clinician) -- used only to render the
+  // {{childName}} token in an auto-generated body (see
+  // messageBodyTokens.ts), never to widen what this card shows.
+  childName: string;
+  // Which track is hosting this card -- decides where "View log" /
+  // "View strategies" point (each role's OWN scoped surface), nothing
+  // else.
+  viewerRole: MessageRole;
 }) {
   const isSender = message.senderId === currentUserId;
   const ownRecipient = message.recipients.find((r) => r.recipientId === currentUserId) ?? null;
@@ -138,25 +175,55 @@ export function MessageCard({
         <span className="font-normal text-brand-neutral-black/40"> · {ROLE_LABEL[message.senderRole]}</span>
       </p>
       {message.body && (
-        <p className="mt-1 text-sm leading-relaxed text-brand-neutral-black/80">{message.body}</p>
+        <p className="mt-1 text-sm leading-relaxed text-brand-neutral-black/80">
+          {renderMessageBody(message.body, childName)}
+        </p>
       )}
       <p className="mt-1.5 text-xs text-brand-neutral-black/40">{formatTime(message.createdAt)}</p>
 
+      {/* Stage 3A: reuses the viewer's own existing scoped log view --
+          never renders any log content itself. */}
+      {message.abcLogId && (
+        <AbcLogReference passportId={message.passportId} abcLogId={message.abcLogId} viewerRole={viewerRole} />
+      )}
+      {/* Stage 3B: same principle -- links to the viewer's own scoped
+          Clinical Team surface, never a wider view, never the FBA. */}
+      {message.strategyUpdate && (
+        <Link
+          href={buildStrategyHref(viewerRole, message.passportId)}
+          className="mt-2 inline-block text-xs font-semibold text-brand-prussian-blue underline underline-offset-2"
+        >
+          View strategies
+        </Link>
+      )}
+
       {/* Sender's own view: a compact delivery/ack receipt per recipient
           -- what a sender actually wants to know ("did this land?"),
-          without exposing every recipient's raw row to every recipient. */}
+          without exposing every recipient's raw row to every recipient.
+          Strategy-update sends get the compact "✓ Name · Name (not
+          yet)" line instead (the Stage 3B payoff, meant to be read on
+          the clinician's own Clinical File tab) -- purely informational
+          either way, never a nudge to chase anyone. */}
       {isSender && message.recipients.length > 0 && (
-        <div className="mt-3 flex flex-col gap-1 border-t border-black/5 pt-3">
-          {message.recipients.map((recipient) => (
-            <p key={recipient.id} className="text-xs text-brand-neutral-black/50">
-              {nameById.get(recipient.recipientId) ?? ROLE_LABEL[recipient.recipientRole]}:{" "}
-              {recipient.acknowledgedAt ? (
-                <span className="font-medium text-green-700">Acknowledged · {formatTime(recipient.acknowledgedAt)}</span>
-              ) : (
-                "Not yet acknowledged"
-              )}
+        <div className="mt-3 border-t border-black/5 pt-3">
+          {message.strategyUpdate ? (
+            <p className="text-xs text-brand-neutral-black/60">
+              {formatStrategyReceipt(message.recipients, nameById)}
             </p>
-          ))}
+          ) : (
+            <div className="flex flex-col gap-1">
+              {message.recipients.map((recipient) => (
+                <p key={recipient.id} className="text-xs text-brand-neutral-black/50">
+                  {nameById.get(recipient.recipientId) ?? ROLE_LABEL[recipient.recipientRole]}:{" "}
+                  {recipient.acknowledgedAt ? (
+                    <span className="font-medium text-green-700">Acknowledged · {formatTime(recipient.acknowledgedAt)}</span>
+                  ) : (
+                    "Not yet acknowledged"
+                  )}
+                </p>
+              ))}
+            </div>
+          )}
         </div>
       )}
 

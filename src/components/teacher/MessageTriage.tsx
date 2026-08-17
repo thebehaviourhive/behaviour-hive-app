@@ -85,6 +85,8 @@ export function MessageTriage({
                     currentUserId={currentUserId}
                     nameById={nameById}
                     onChanged={onChanged}
+                    childName={group.displayName}
+                    viewerRole="class_teacher"
                   />
                 ))}
               </div>

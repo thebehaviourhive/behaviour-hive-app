@@ -239,6 +239,7 @@ export default function FbaSectionEditorPage() {
           {section.kind === "recommendations" && (
             <RecommendationsSection
               fbaId={fbaId}
+              passportId={report.passportId}
               isClinicianWorkspace
               content={content}
               onFieldChange={handleFieldChange}

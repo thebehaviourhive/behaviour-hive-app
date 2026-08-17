@@ -24,6 +24,16 @@ interface ABCLoggerProps {
   // is the one caller that reads it, to backfill calm_episodes.abc_log_id.
   onComplete: (newLogId?: string) => void;
   onDismiss: () => void;
+  // Stage 3A: the confirmation step's optional "Also send a message
+  // about this?" affordance -- parent/teacher only (clinician-authored
+  // logs are clinical workspace activity, excluded by the brief).
+  // Omit this prop and the confirmation screen behaves exactly as
+  // before (checkmark, auto-dismiss); passing it is what turns that
+  // screen into one that waits for an explicit tap instead. Declining
+  // (tapping Done) still leads to the exact same onComplete(newLogId)
+  // call the timeout used to make -- logging itself is unaffected
+  // either way.
+  onOfferMessage?: (newLogId: string) => void;
   // Calm log-nudge prefill (Stage 3C) -- seeds the initial draft with
   // "now" already being blankDraft()'s own default, so only the fields
   // Calm actually knows in advance (a pre-selected door/tag reads as a
@@ -92,6 +102,7 @@ export function ABCLogger({
   role,
   onComplete,
   onDismiss,
+  onOfferMessage,
   initialPrefill,
 }: ABCLoggerProps) {
   const config = ABC_ROLE_CONFIG[role];
@@ -114,6 +125,11 @@ export function ABCLogger({
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [localSaveMessage, setLocalSaveMessage] = useState<string | null>(null);
   const [showSuccess, setShowSuccess] = useState(false);
+  const [savedLogId, setSavedLogId] = useState<string | null>(null);
+  // The confirmation step only waits for an explicit tap when there's
+  // something to tap -- clinician-authored logs (no onOfferMessage
+  // passed at all) keep the original auto-dismiss behaviour untouched.
+  const canOfferMessage = role !== "clinician" && Boolean(onOfferMessage);
 
   useEffect(() => {
     if (!isAutosaveEnabled) return;
@@ -339,8 +355,18 @@ export function ABCLogger({
         eventDescription: `ABC incident logged by ${roleLabel}`,
       });
       setIsSubmitting(false);
+      setSavedLogId(newLogId);
       setShowSuccess(true);
-      setTimeout(() => onComplete(newLogId), 900);
+      // Clinician (nothing to offer): unchanged, auto-dismisses after
+      // 900ms exactly as before. Parent/teacher: the screen now shows a
+      // genuine choice (send a message, or Done) instead of a timer --
+      // an auto-dismiss racing a button someone might be reading would
+      // undermine the choice, so it's replaced with an explicit tap
+      // either way. Declining is still exactly one tap (Done), calling
+      // the same onComplete(newLogId) the timeout used to.
+      if (!canOfferMessage) {
+        setTimeout(() => onComplete(newLogId), 900);
+      }
     } catch {
       // Belt-and-braces: covers a truly thrown exception from somewhere
       // other than the insert call itself (e.g. auth.getUser()), treated
@@ -363,13 +389,34 @@ export function ABCLogger({
         <div className="mx-auto mt-3 h-1.5 w-12 flex-shrink-0 rounded-full bg-black/10" />
 
         {showSuccess && (
-          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 rounded-t-2xl bg-white">
+          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 rounded-t-2xl bg-white px-8 text-center">
             <span aria-hidden className="text-4xl">
               ✅
             </span>
             <p className="font-heading text-lg font-semibold text-brand-prussian-blue">
               Log saved!
             </p>
+            {canOfferMessage && savedLogId && (
+              <div className="mt-2 flex w-full max-w-xs flex-col gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    onOfferMessage?.(savedLogId);
+                    onComplete(savedLogId);
+                  }}
+                  className="w-full rounded-2xl bg-brand-prussian-blue py-3 text-sm font-semibold text-white"
+                >
+                  Also send a message about this
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onComplete(savedLogId)}
+                  className="w-full py-2 text-sm font-semibold text-brand-neutral-black/50"
+                >
+                  Done
+                </button>
+              </div>
+            )}
           </div>
         )}
 

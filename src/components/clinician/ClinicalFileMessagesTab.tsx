@@ -9,6 +9,7 @@ import { fetchApprovedInstitutionPhone } from "@/lib/messages/institutionPhone";
 import { MessageList } from "@/components/messages/MessageList";
 import { ComposeMessageSheet } from "@/components/messages/ComposeMessageSheet";
 import { InlineErrorState } from "@/components/ui/InlineErrorState";
+import { StrategyUpdatePrompt } from "@/components/clinician/StrategyUpdatePrompt";
 
 // The Clinical File's Messages tab -- the per-case mid-day signal.
 // Chronological, category-chipped, no charts (that's future ticket->
@@ -33,6 +34,7 @@ export function ClinicalFileMessagesTab({
   const { categories } = useMessageCategories("clinician");
   const [institutionPhone, setInstitutionPhone] = useState<string | null>(null);
   const [isComposeOpen, setIsComposeOpen] = useState(false);
+  const [isStrategyUpdateOpen, setIsStrategyUpdateOpen] = useState(false);
 
   useEffect(() => {
     let isMounted = true;
@@ -49,14 +51,28 @@ export function ClinicalFileMessagesTab({
 
   return (
     <div>
-      <button
-        type="button"
-        onClick={() => setIsComposeOpen(true)}
-        className="mb-3 flex items-center gap-1.5 rounded-full bg-brand-prussian-blue py-2 pl-3 pr-3.5 text-sm font-semibold text-white"
-      >
-        <Plus size={16} strokeWidth={2.5} aria-hidden />
-        New message
-      </button>
+      <div className="mb-3 flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={() => setIsComposeOpen(true)}
+          className="flex items-center gap-1.5 rounded-full bg-brand-prussian-blue py-2 pl-3 pr-3.5 text-sm font-semibold text-white"
+        >
+          <Plus size={16} strokeWidth={2.5} aria-hidden />
+          New message
+        </button>
+        {/* The standing manual affordance (3B): if a "Notify the team?"
+            prompt was ever dismissed with [Not now], this is how the
+            moment isn't lost. Always available, not just after a
+            dismissal -- a clinician can send a strategy update whenever
+            it's warranted, not only right after finalizing/publishing. */}
+        <button
+          type="button"
+          onClick={() => setIsStrategyUpdateOpen(true)}
+          className="flex items-center gap-1.5 rounded-full border border-brand-prussian-blue px-3.5 py-2 text-sm font-semibold text-brand-prussian-blue"
+        >
+          Send strategy update
+        </button>
+      </div>
 
       {loadError ? (
         <InlineErrorState message={loadError} onRetry={() => refresh()} />
@@ -67,6 +83,8 @@ export function ClinicalFileMessagesTab({
           nameById={nameById}
           isLoading={isLoading}
           onChanged={refresh}
+          childName={childName}
+          viewerRole="clinician"
           emptyOpenMessage="No open messages for this case."
         />
       )}
@@ -79,6 +97,14 @@ export function ClinicalFileMessagesTab({
         candidates={candidates}
         categories={categories}
         institutionPhone={institutionPhone}
+        onSent={refresh}
+      />
+
+      <StrategyUpdatePrompt
+        isOpen={isStrategyUpdateOpen}
+        onClose={() => setIsStrategyUpdateOpen(false)}
+        passportId={passportId}
+        skipAsk
         onSent={refresh}
       />
     </div>

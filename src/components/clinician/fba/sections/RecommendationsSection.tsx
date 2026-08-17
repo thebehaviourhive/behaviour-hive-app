@@ -140,13 +140,18 @@ function LockedStrategyTypeSelect({
 // below is gated.
 export function RecommendationsSection({
   fbaId,
+  // Stage 3B: threaded down to CalmCardSection so a publish action can
+  // offer "Notify the team?" -- Calm Cards aren't FBA content (see the
+  // comment above CalmCardSection's own usage below), so this is
+  // another separate required prop, same shape as fbaId.
+  passportId,
   isClinicianWorkspace = false,
   content,
   onFieldChange,
   onFieldBlur,
   onStructuralChange,
   readOnly,
-}: FbaSectionBodyProps & { fbaId: string; isClinicianWorkspace?: boolean }) {
+}: FbaSectionBodyProps & { fbaId: string; passportId: string; isClinicianWorkspace?: boolean }) {
   const { cards, createCard, updateCard, deleteCard } = useCalmCardsForFba(fbaId);
   const { options: strategyTypeOptions } = useStrategyTypes();
 
@@ -210,6 +215,7 @@ export function RecommendationsSection({
                     availableTags={availableTags}
                     strategyTypeOptions={strategyTypeOptions}
                     linkedStrategyTypeId={entry.strategyType ?? null}
+                    passportId={passportId}
                     onCreate={createCard}
                     onUpdate={updateCard}
                     onDelete={deleteCard}

@@ -57,4 +57,9 @@ export interface ThreadMessage {
   createdAt: string;
   recipients: MessageRecipient[];
   replies: MessageReply[];
+  // Stage 3A: set when this message references an ABC incident log.
+  abcLogId: string | null;
+  // Stage 3B: set on clinician-sent "Strategy update" messages -- drives
+  // the compact per-recipient receipt view on the Clinical File tab.
+  strategyUpdate: boolean;
 }

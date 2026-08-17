@@ -3,7 +3,7 @@
 import { useState, type ReactNode } from "react";
 import { MessageCard } from "./MessageCard";
 import { MessageCardSkeleton } from "./MessageCardSkeleton";
-import type { ThreadMessage } from "@/types/messages";
+import type { MessageRole, ThreadMessage } from "@/types/messages";
 
 type View = "open" | "archived";
 
@@ -21,6 +21,8 @@ export function MessageList({
   nameById,
   isLoading,
   onChanged,
+  childName,
+  viewerRole,
   emptyOpenMessage = "No open messages.",
   emptyArchivedMessage = "Nothing archived yet.",
   footer,
@@ -30,6 +32,11 @@ export function MessageList({
   nameById: Map<string, string>;
   isLoading: boolean;
   onChanged: () => void;
+  // This surface's own child (MessageList is always mounted scoped to
+  // one passport -- the cross-child case is MessageTriage, which
+  // renders MessageCard directly with a per-group name instead).
+  childName: string;
+  viewerRole: MessageRole;
   // Per-surface empty-state copy (2A wants a warmer, contract-explaining
   // line for parents; teacher/clinician keep the plain defaults).
   emptyOpenMessage?: ReactNode;
@@ -86,6 +93,8 @@ export function MessageList({
               currentUserId={currentUserId}
               nameById={nameById}
               onChanged={onChanged}
+              childName={childName}
+              viewerRole={viewerRole}
             />
           ))
         )}
