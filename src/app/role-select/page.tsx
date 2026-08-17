@@ -77,18 +77,11 @@ export default function RoleSelectPage() {
 
     setIsSubmitting(false);
 
-    if (selectedRole === "parent") {
-      router.push("/consent");
-      return;
-    }
-
-    if (selectedRole === "class_teacher") {
-      router.push("/teacher/join-institution");
-      return;
-    }
-
-    // Clinician goes through the same GDPR consent screen as parents,
-    // then on to the clinician-only specialty-select step.
+    // All three roles go through the same consent screen (its own copy
+    // and post-accept destination now branch per role -- see
+    // src/app/consent/page.tsx); teachers previously skipped consent
+    // entirely and went straight to join-institution, which /consent
+    // now forwards them to itself once they accept.
     router.push("/consent");
   }
 
