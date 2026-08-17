@@ -3,14 +3,11 @@
 import { useState } from "react";
 import { MessageCard } from "@/components/messages/MessageCard";
 import { MessageCardSkeleton } from "@/components/messages/MessageCardSkeleton";
+import { isOpenStatus } from "@/lib/messages/messageStatus";
 import type { TriageGroup } from "@/hooks/useMessageTriage";
-import type { MessageRole, ThreadMessage } from "@/types/messages";
+import type { MessageRole } from "@/types/messages";
 
 type View = "open" | "archived";
-
-function isOpenStatus(status: ThreadMessage["status"]): boolean {
-  return status === "open" || status === "in_discussion";
-}
 
 // The cross-caseload triage view -- shared by the teacher track (Stage 2)
 // and the clinician track (Change 1). viewerRole is the one thing that

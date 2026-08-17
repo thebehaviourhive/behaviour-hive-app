@@ -247,6 +247,7 @@ export function ABCTimeline({ passportId, viewerRole, highlightLogId }: ABCTimel
             <ABCLogCard
               key={log.id}
               log={log}
+              viewerRole={viewerRole}
               isHighlighted={log.id === highlightLogId}
               cardRef={log.id === highlightLogId ? highlightRef : undefined}
             />
@@ -259,14 +260,22 @@ export function ABCTimeline({ passportId, viewerRole, highlightLogId }: ABCTimel
 
 function ABCLogCard({
   log,
+  viewerRole,
   isHighlighted,
   cardRef,
 }: {
   log: ABCLogRow;
+  viewerRole: ABCLoggerRole;
   isHighlighted?: boolean;
   cardRef?: Ref<HTMLDivElement>;
 }) {
   const badge = getIntensityBadge(log.intensity);
+  // Governance change: a teacher's visible set is now only their own
+  // logs plus ones explicitly shared with them via an incident message
+  // -- so for a teacher viewer, any row NOT logged by a teacher is, by
+  // construction, a shared one. Labelled subtly (not a status pill like
+  // intensity) so it reads as provenance, not as an alert.
+  const isSharedWithTeacher = viewerRole === "class_teacher" && log.loggedByRole !== "class_teacher";
 
   return (
     <div
@@ -279,11 +288,18 @@ function ABCLogCard({
         <p className="text-sm font-semibold text-brand-neutral-black">
           {formatDateTime(log.incidentDate, log.incidentTime)}
         </p>
-        <span
-          className={`flex-shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${badge.className}`}
-        >
-          {badge.label}
-        </span>
+        <div className="flex flex-shrink-0 items-center gap-1.5">
+          {isSharedWithTeacher && (
+            <span className="rounded-full bg-brand-off-white px-2.5 py-1 text-xs font-semibold text-brand-neutral-black/50">
+              Shared by {ABC_ROLE_DISPLAY_LABEL[log.loggedByRole]}
+            </span>
+          )}
+          <span
+            className={`rounded-full px-2.5 py-1 text-xs font-semibold ${badge.className}`}
+          >
+            {badge.label}
+          </span>
+        </div>
       </div>
 
       <p className="mt-2 text-sm text-brand-neutral-black/80">

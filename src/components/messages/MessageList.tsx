@@ -3,13 +3,10 @@
 import { useState, type ReactNode } from "react";
 import { MessageCard } from "./MessageCard";
 import { MessageCardSkeleton } from "./MessageCardSkeleton";
+import { isOpenStatus } from "@/lib/messages/messageStatus";
 import type { MessageRole, ThreadMessage } from "@/types/messages";
 
 type View = "open" | "archived";
-
-function isOpenStatus(status: ThreadMessage["status"]): boolean {
-  return status === "open" || status === "in_discussion";
-}
 
 export function MessageList({
   messages,

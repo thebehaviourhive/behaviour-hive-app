@@ -48,11 +48,13 @@ function buildStrategyHref(viewerRole: MessageRole, passportId: string): string 
   return `/clinician/passport/${passportId}?tab=clinicalTeam`;
 }
 
-// The Stage 3B payoff: "✓ Sarah Murphy · Aoife Ryan (not yet)" -- one
-// compact line rather than the generic sender-receipts list below, only
-// for the clinician's own strategy-update sends (their Clinical File
-// tab is where this is meant to be read, per the brief).
-function formatStrategyReceipt(recipients: MessageRecipient[], nameById: Map<string, string>): string {
+// The Stage 3B payoff, generalized (Part 1 refinements): "✓ Sarah Murphy
+// · Aoife Ryan (not yet)" -- one compact line, originally built just for
+// clinician strategy-update sends, now reused for every multi-recipient
+// message so a partially-acknowledged thread explains itself on the
+// sender's own expanded card without them needing to parse a
+// per-recipient list.
+function formatRecipientReceipt(recipients: MessageRecipient[], nameById: Map<string, string>): string {
   return recipients
     .map((recipient) => {
       const name = nameById.get(recipient.recipientId) ?? ROLE_LABEL[recipient.recipientRole];
@@ -255,15 +257,19 @@ export function MessageCard({
           {/* Sender's own view: a compact delivery/ack receipt per
               recipient -- what a sender actually wants to know ("did this
               land?"), without exposing every recipient's raw row to every
-              recipient. Strategy-update sends get the compact "✓ Name ·
-              Name (not yet)" line instead (the Stage 3B payoff, meant to
-              be read on the clinician's own Clinical File tab) -- purely
-              informational either way, never a nudge to chase anyone. */}
+              recipient. Multi-recipient sends (strategy updates always
+              were; Part 1 refinements extends this to every multi-
+              recipient message) get the compact "✓ Name · Name (not yet)"
+              line so a partially-acknowledged thread explains itself at a
+              glance -- purely informational either way, never a nudge to
+              chase anyone. A single recipient keeps the fuller
+              name+timestamp line below; there's no "partial" state to
+              summarise for just one person. */}
           {isSender && message.recipients.length > 0 && (
             <div className="mt-3 border-t border-black/5 pt-3">
-              {message.strategyUpdate ? (
+              {message.strategyUpdate || message.recipients.length > 1 ? (
                 <p className="text-xs text-brand-neutral-black/60">
-                  {formatStrategyReceipt(message.recipients, nameById)}
+                  {formatRecipientReceipt(message.recipients, nameById)}
                 </p>
               ) : (
                 <div className="flex flex-col gap-1">
