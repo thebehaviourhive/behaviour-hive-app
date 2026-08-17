@@ -7,10 +7,6 @@ import type { MessageRole, ThreadMessage } from "@/types/messages";
 
 type View = "open" | "archived";
 
-// open/in_discussion = still needs someone's attention; acknowledged/
-// closed = resolved. The archive toggle switches between those two
-// buckets rather than showing everything at once, so a long-lived
-// passport's list doesn't drown active items in old resolved ones.
 function isOpenStatus(status: ThreadMessage["status"]): boolean {
   return status === "open" || status === "in_discussion";
 }
@@ -32,25 +28,19 @@ export function MessageList({
   nameById: Map<string, string>;
   isLoading: boolean;
   onChanged: () => void;
-  // This surface's own child (MessageList is always mounted scoped to
-  // one passport -- the cross-child case is MessageTriage, which
-  // renders MessageCard directly with a per-group name instead).
   childName: string;
   viewerRole: MessageRole;
-  // Per-surface empty-state copy (2A wants a warmer, contract-explaining
-  // line for parents; teacher/clinician keep the plain defaults).
   emptyOpenMessage?: ReactNode;
   emptyArchivedMessage?: ReactNode;
-  // Rendered once, below the list -- e.g. the parent surface's
-  // disclosure line. Never per-card; this is "at the list foot", not a
-  // repeated badge.
   footer?: ReactNode;
 }) {
   const [view, setView] = useState<View>("open");
+  // Change 4: one open card at a time -- lifted here so expanding a new
+  // card automatically collapses whichever one was open, which is also
+  // exactly what makes batch-ack fast (expand, Acknowledge, expand the
+  // next one, no extra collapse tap needed).
+  const [expandedMessageId, setExpandedMessageId] = useState<string | null>(null);
 
-  // Already ascending (oldest-first) from useMessageThread -- the
-  // brief's own ordering choice, so the longest-outstanding open item
-  // surfaces first rather than getting buried under newer ones.
   const filtered = messages.filter((message) =>
     view === "open" ? isOpenStatus(message.status) : !isOpenStatus(message.status)
   );
@@ -95,6 +85,10 @@ export function MessageList({
               onChanged={onChanged}
               childName={childName}
               viewerRole={viewerRole}
+              isExpanded={expandedMessageId === message.id}
+              onToggleExpand={() =>
+                setExpandedMessageId((current) => (current === message.id ? null : message.id))
+              }
             />
           ))
         )}

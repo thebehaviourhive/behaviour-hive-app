@@ -3,8 +3,8 @@
 import { useState } from "react";
 import { MessageCard } from "@/components/messages/MessageCard";
 import { MessageCardSkeleton } from "@/components/messages/MessageCardSkeleton";
-import type { TriageGroup } from "@/hooks/useTeacherMessageTriage";
-import type { ThreadMessage } from "@/types/messages";
+import type { TriageGroup } from "@/hooks/useMessageTriage";
+import type { MessageRole, ThreadMessage } from "@/types/messages";
 
 type View = "open" | "archived";
 
@@ -12,27 +12,32 @@ function isOpenStatus(status: ThreadMessage["status"]): boolean {
   return status === "open" || status === "in_discussion";
 }
 
-// The teacher triage view: every linked pupil's messages in one list,
-// grouped by child, one shared Open/Archived toggle rather than one per
-// child (a teacher with a full class doesn't want to flip N toggles).
-// Each card is the same shared MessageCard the parent surface uses --
-// acknowledging here is the identical one-tap optimistic action, so a
-// teacher genuinely can clear five messages in five taps without
-// leaving this screen.
+// The cross-caseload triage view -- shared by the teacher track (Stage 2)
+// and the clinician track (Change 1). viewerRole is the one thing that
+// differs per caller: it's what lets MessageCard tell "my own traffic"
+// apart from "viewing only" rows within the very same group (a clinician
+// group can contain both; a teacher group never does, since a teacher's
+// RLS-visible rows are only ever their own sent/received messages).
 export function MessageTriage({
   groups,
   currentUserId,
   nameById,
   isLoading,
   onChanged,
+  viewerRole,
 }: {
   groups: TriageGroup[];
   currentUserId: string;
   nameById: Map<string, string>;
   isLoading: boolean;
   onChanged: () => void;
+  viewerRole: MessageRole;
 }) {
   const [view, setView] = useState<View>("open");
+  // Change 4: one open card at a time across the WHOLE triage view (not
+  // per group) -- expanding a card in one child's group collapses
+  // whichever card was open, even if it was in a different group.
+  const [expandedMessageId, setExpandedMessageId] = useState<string | null>(null);
 
   const visibleGroups = groups
     .map((group) => ({
@@ -86,7 +91,11 @@ export function MessageTriage({
                     nameById={nameById}
                     onChanged={onChanged}
                     childName={group.displayName}
-                    viewerRole="class_teacher"
+                    viewerRole={viewerRole}
+                    isExpanded={expandedMessageId === message.id}
+                    onToggleExpand={() =>
+                      setExpandedMessageId((current) => (current === message.id ? null : message.id))
+                    }
                   />
                 ))}
               </div>

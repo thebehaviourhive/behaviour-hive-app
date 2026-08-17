@@ -5,12 +5,12 @@ import { Plus } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { useTeacherPassports } from "@/hooks/useTeacherPassports";
-import { useTeacherMessageTriage } from "@/hooks/useTeacherMessageTriage";
+import { useMessageTriage } from "@/hooks/useMessageTriage";
 import { useMessageThread } from "@/hooks/useMessageThread";
 import { useMessageCategories } from "@/hooks/useMessageCategories";
 import { TeacherBottomNav } from "@/components/teacher/TeacherBottomNav";
 import { InlineErrorState } from "@/components/ui/InlineErrorState";
-import { MessageTriage } from "@/components/teacher/MessageTriage";
+import { MessageTriage } from "@/components/messages/MessageTriage";
 import { ComposeMessageSheet } from "@/components/messages/ComposeMessageSheet";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 
@@ -25,7 +25,7 @@ export default function TeacherMessagesPage() {
   const { isLoading: isLoadingPassports, institutionId, passports, error } = useTeacherPassports(
     user?.id ?? null
   );
-  const { groups, nameById, isLoading, loadError, refresh } = useTeacherMessageTriage(passports);
+  const { groups, nameById, isLoading, loadError, refresh } = useMessageTriage(passports);
 
   const [institutionPhone, setInstitutionPhone] = useState<string | null>(null);
   const [isPickerOpen, setIsPickerOpen] = useState(false);
@@ -83,6 +83,7 @@ export default function TeacherMessagesPage() {
             nameById={nameById}
             isLoading={isLoading}
             onChanged={refresh}
+            viewerRole="class_teacher"
           />
         ) : null}
       </main>

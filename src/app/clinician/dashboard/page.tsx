@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useRequireRole } from "@/hooks/useRequireRole";
+import { useMessagesAwaitingActionCount } from "@/hooks/useMessagesAwaitingActionCount";
 import { ClinicianBottomNav } from "@/components/clinician/ClinicianBottomNav";
 import { ClinicianActivityCard } from "@/components/clinician/ClinicianActivityCard";
 import { ClinicianQuickActions } from "@/components/clinician/ClinicianQuickActions";
@@ -86,6 +87,7 @@ async function fetchClinicianProfile(
 export default function ClinicianDashboardPage() {
   const router = useRouter();
   const { user, isReady } = useRequireRole("clinician");
+  const messagesAwaitingCount = useMessagesAwaitingActionCount(user?.id ?? null);
 
   const [profile, setProfile] = useState<ClinicianProfile | null>(null);
   const [isLoadingProfile, setIsLoadingProfile] = useState(true);
@@ -315,7 +317,11 @@ export default function ClinicianDashboardPage() {
                 value={isLoadingStats ? "…" : stats.activeFbas}
                 href="/clinician/fba"
               />
-              <StatCard label="Open Messages" value={isLoadingStats ? "…" : stats.openMessages} />
+              <StatCard
+                label="Open Messages"
+                value={isLoadingStats ? "…" : stats.openMessages}
+                href="/clinician/messages"
+              />
             </div>
           )}
 
@@ -323,7 +329,7 @@ export default function ClinicianDashboardPage() {
             <ClinicianActivityCard />
           </div>
 
-          <ClinicianQuickActions />
+          <ClinicianQuickActions messagesAwaitingCount={messagesAwaitingCount} />
         </div>
 
         {reviewState === "not_submitted" && (

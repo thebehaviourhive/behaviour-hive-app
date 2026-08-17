@@ -7,6 +7,7 @@ import {
   TrendUpIcon,
 } from "@/components/ui/icons";
 import { getChildFirstName } from "@/lib/childDisplayName";
+import { CountBadge } from "@/components/messages/CountBadge";
 
 // 5 tiles on the existing grid-cols-2 grid -- naturally reads as a 2x3
 // layout with the 6th cell simply empty (a lone left-aligned tile in
@@ -14,42 +15,36 @@ import { getChildFirstName } from "@/lib/childDisplayName";
 // column-count change needed to fit the 5th tile in.
 export function QuickActionButtons({
   childName,
-  messagesOpenCount,
+  messagesAwaitingCount,
 }: {
   childName: string;
-  // undefined = still loading / not fetched (renders no hint, same as
-  // 0); the zero-urgency rule applies to every role, so this is always
-  // quiet grey text, never a badge or a colour.
-  messagesOpenCount?: number;
+  // Change 3: replaces the old ad-hoc "N open" subtitle text with the
+  // precise get_messages_awaiting_action_count() figure, rendered as a
+  // corner badge instead of a line of text. null/undefined = still
+  // loading / not fetched (renders no badge, same as a genuine 0).
+  messagesAwaitingCount?: number | null;
 }) {
   const actions = [
-    { label: "View Passport", href: "/passport/dashboard", Icon: OpenBookIcon, hint: null },
-    { label: "ABC Log", href: "/passport/dashboard?logIncident=1", Icon: ClipboardIcon, hint: null },
-    { label: `${getChildFirstName(childName)}'s Progress`, href: "/passport/progress", Icon: TrendUpIcon, hint: null },
-    { label: "Resources", href: "/resources", Icon: LightbulbIcon, hint: null },
-    {
-      label: "Messages",
-      href: "/messages",
-      Icon: ChatBubbleIcon,
-      hint: messagesOpenCount ? `${messagesOpenCount} open` : null,
-    },
+    { label: "View Passport", href: "/passport/dashboard", Icon: OpenBookIcon },
+    { label: "ABC Log", href: "/passport/dashboard?logIncident=1", Icon: ClipboardIcon },
+    { label: `${getChildFirstName(childName)}'s Progress`, href: "/passport/progress", Icon: TrendUpIcon },
+    { label: "Resources", href: "/resources", Icon: LightbulbIcon },
+    { label: "Messages", href: "/messages", Icon: ChatBubbleIcon },
   ];
 
   return (
     <div className="mb-6 grid grid-cols-2 gap-3">
-      {actions.map(({ label, href, Icon, hint }) => (
+      {actions.map(({ label, href, Icon }) => (
         <Link
           key={label}
           href={href}
-          className="flex flex-col items-center justify-center rounded-2xl border border-brand-off-white/50 bg-white p-4 text-center shadow-sm transition-colors active:bg-brand-safe-ivory"
+          className="relative flex flex-col items-center justify-center rounded-2xl border border-brand-off-white/50 bg-white p-4 text-center shadow-sm transition-colors active:bg-brand-safe-ivory"
         >
+          {label === "Messages" && <CountBadge count={messagesAwaitingCount} />}
           <Icon className="mb-2 h-8 w-8 text-brand-prussian-blue" />
           <span className="font-sans text-sm font-bold text-brand-neutral-black">
             {label}
           </span>
-          {hint && (
-            <span className="mt-0.5 font-sans text-xs text-brand-neutral-black/40">{hint}</span>
-          )}
         </Link>
       ))}
     </div>

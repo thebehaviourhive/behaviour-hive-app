@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useRequireRole } from "@/hooks/useRequireRole";
+import { useMessagesAwaitingActionCount } from "@/hooks/useMessagesAwaitingActionCount";
 import { useTeacherPassports } from "@/hooks/useTeacherPassports";
 import { useTeacherMorningCheckins, type MorningPupilStatus } from "@/hooks/useTeacherMorningCheckins";
 import { TeacherBottomNav } from "@/components/teacher/TeacherBottomNav";
@@ -27,6 +28,7 @@ function getGreeting(): string {
 export default function TeacherDashboardPage() {
   const router = useRouter();
   const { user, isReady } = useRequireRole("class_teacher");
+  const messagesAwaitingCount = useMessagesAwaitingActionCount(user?.id ?? null);
 
   const [isAddChildOpen, setIsAddChildOpen] = useState(false);
   const [selectedPupil, setSelectedPupil] = useState<MorningPupilStatus | null>(null);
@@ -142,7 +144,7 @@ export default function TeacherDashboardPage() {
             </Link>
           )}
 
-          <TeacherQuickActions />
+          <TeacherQuickActions messagesAwaitingCount={messagesAwaitingCount} />
           <TeacherActivityCard />
         </>
       )}

@@ -42,20 +42,20 @@ export interface TriageGroup {
   messages: ThreadMessage[];
 }
 
-// The teacher triage view's data source: every message across every
-// linked pupil the teacher is actually a participant in (RLS enforces
-// that on the query itself -- a teacher never sees non-participant
-// traffic here either, same rule as the single-passport hook). Grouped
-// by child, oldest-first within each group.
-export function useTeacherMessageTriage(passports: { passportId: string; displayName: string }[]) {
+// The cross-caseload triage view's data source -- shared by the teacher
+// track (redacted display names) and the clinician track (full names).
+// Entirely role-agnostic: it takes a plain {passportId, displayName}[]
+// and lets RLS (can_view_message) decide what each caller actually sees
+// per passport -- a teacher's rows are their own sent/received traffic
+// only, a clinician's rows also include the read-only parent<->teacher
+// stream for that case (MessageCard renders that distinction, not this
+// hook).
+export function useMessageTriage(passports: { passportId: string; displayName: string }[]) {
   const [messagesByPassport, setMessagesByPassport] = useState<Map<string, ThreadMessage[]>>(new Map());
   const [nameById, setNameById] = useState<Map<string, string>>(new Map());
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  // Stable key so the effect doesn't re-fire on every render just
-  // because useTeacherPassports handed back a structurally-identical
-  // but reference-new array.
   const idsKey = passports.map((p) => p.passportId).sort().join(",");
 
   const refresh = useCallback(async () => {
@@ -140,9 +140,6 @@ export function useTeacherMessageTriage(passports: { passportId: string; display
   }, [refresh]);
 
   const groups = useMemo<TriageGroup[]>(() => {
-    // Stable alphabetical order -- NOT re-sorted by triage urgency, so a
-    // group a teacher is mid-way through acknowledging never jumps
-    // position between taps (constraint: five taps in the corridor).
     return passports
       .map((p) => ({ passportId: p.passportId, displayName: p.displayName, messages: messagesByPassport.get(p.passportId) ?? [] }))
       .filter((g) => g.messages.length > 0)
