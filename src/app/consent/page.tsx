@@ -47,41 +47,49 @@ const CONSENT_CARDS: Record<ConsentRole, ConsentCard[]> = {
     {
       icon: "🔒",
       iconBg: "bg-brand-pastel-blue/40",
-      title:
-        "I'll use what families share with me only to support their child at school, and keep it confidential.",
+      title: "I will keep information shared with me confidential.",
     },
     {
       icon: "👁",
       iconBg: "bg-brand-safe-ivory/60",
-      title: "I understand families control my access and can end it at any time.",
+      title:
+        "I understand that everything I record becomes part of the child's record and is visible to their families and clinical team.",
     },
     {
       icon: "🛡",
       iconBg: "bg-brand-prussian-blue/10",
       title:
-        "I understand what I record — check-ins, updates, incident logs, messages — becomes part of the child's record, visible to their family and clinical team.",
+        "I understand that my personal information will be handled in accordance with The Behaviour Hive's privacy policy.",
     },
   ],
   clinician: [
     {
       icon: "🔒",
       iconBg: "bg-brand-pastel-blue/40",
-      title:
-        "I'll access children's information only for the clinical care of children whose families have linked me, in line with my professional obligations.",
+      title: "I will keep information shared with me confidential.",
     },
     {
       icon: "👁",
       iconBg: "bg-brand-safe-ivory/60",
       title:
-        "I confirm my professional credentials are accurate, and I understand families control my access and can revoke it at any time.",
+        "I understand that my personal information will be handled in accordance with The Behaviour Hive's privacy policy.",
     },
     {
       icon: "🛡",
       iconBg: "bg-brand-prussian-blue/10",
-      title:
-        "I understand the clinical content I create and publish becomes part of the child's record — visible to their family and, where scoped for school, their teachers.",
+      title: "I understand the clinical content I create and publish becomes part of the child's record.",
     },
   ],
+};
+
+// The required checkbox's own wording -- parent's is the original,
+// unchanged. Teacher/clinician get the brief's exact replacement text;
+// each keeps the same bold "Required" suffix treatment as before (a
+// visual/structural element, not part of the reworded sentence itself).
+const REQUIRED_CONSENT_LABEL: Record<ConsentRole, string> = {
+  parent: "I agree to Behaviour Hive storing and processing my child's data.",
+  class_teacher: "I agree to The Behaviour Hive storing and processing my inputs.",
+  clinician: "I agree to The Behaviour Hive storing and processing my inputs and data.",
 };
 
 // The footer link/subline -- parent's is the original standalone privacy
@@ -157,11 +165,18 @@ export default function ConsentPage() {
     setError(null);
     setIsSubmitting(true);
 
+    // marketing_accepted stays a single boolean column (no schema change
+    // -- see 0001_create_consents_table.sql) that this screen has always
+    // written unconditionally; teacher/clinician just never got a UI to
+    // opt in with, so their rows honestly record "false" rather than
+    // carrying forward whatever marketingConsent's default happens to
+    // be. This is an append-only audit table (one row per acceptance
+    // event), so existing accounts' prior rows are untouched either way.
     const supabase = createClient();
     const { error: insertError } = await supabase.from("consents").insert({
       user_id: userId,
       consent_version: CONSENT_VERSION,
-      marketing_accepted: marketingConsent,
+      marketing_accepted: role === "parent" ? marketingConsent : false,
     });
 
     setIsSubmitting(false);
@@ -221,18 +236,23 @@ export default function ConsentPage() {
               required
               label={
                 <>
-                  I agree to Behaviour Hive storing and processing my
-                  child&apos;s data.{" "}
-                  <span className="font-semibold">Required</span>
+                  {REQUIRED_CONSENT_LABEL[role]} <span className="font-semibold">Required</span>
                 </>
               }
             />
-            <Checkbox
-              id="marketing-consent"
-              checked={marketingConsent}
-              onChange={setMarketingConsent}
-              label="I'd like to receive tips and updates by email."
-            />
+            {/* Marketing opt-in: parent-only. Teacher/clinician tracks
+                dropped this second checkbox entirely -- the single
+                required checkbox above is the whole consent step for
+                those roles now, so there's no second row to leave
+                orphaned spacing where it used to sit. */}
+            {role === "parent" && (
+              <Checkbox
+                id="marketing-consent"
+                checked={marketingConsent}
+                onChange={setMarketingConsent}
+                label="I'd like to receive tips and updates by email."
+              />
+            )}
           </div>
 
           {error && (
