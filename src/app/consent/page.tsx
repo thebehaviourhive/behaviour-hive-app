@@ -5,7 +5,10 @@ import { useEffect, useState } from "react";
 import { BrandMark } from "@/components/ui/BrandMark";
 import { Button } from "@/components/ui/Button";
 import { Checkbox } from "@/components/ui/Checkbox";
+import { BottomSheet } from "@/components/ui/BottomSheet";
+import { PrivacyPolicyContent } from "@/components/PrivacyPolicyContent";
 import { createClient } from "@/lib/supabase/client";
+import { hasConsented } from "@/lib/hasConsented";
 
 const CONSENT_VERSION = 1;
 
@@ -92,25 +95,37 @@ const REQUIRED_CONSENT_LABEL: Record<ConsentRole, string> = {
   clinician: "I agree to The Behaviour Hive storing and processing my inputs and data.",
 };
 
+// Where accepting consent (or resuming with it already given) sends each
+// role next -- the one place this branching lives, so checkAccess'
+// resume check and handleAccept's post-write routing can never drift
+// apart.
+function getPostConsentDestination(role: ConsentRole): string {
+  if (role === "clinician") return "/clinician/specialty";
+  if (role === "class_teacher") return "/teacher/join-institution";
+  return "/parent-dashboard";
+}
+
 // The footer link/subline -- parent's is the original standalone privacy
-// link; teacher/clinician get the new subline sentence with the same
+// copy; teacher/clinician get the new subline sentence with the same
 // link treatment (weight/colour) applied to just the "privacy policy"
-// substring, per the brief.
-function ConsentFooter({ role }: { role: ConsentRole }) {
+// substring, per the brief. CRITICAL BUG fix: this is now a button that
+// opens the in-app sheet below, not an <a href> that navigates away from
+// the consent screen -- see the sheet's own comment for why that mattered.
+function ConsentFooter({ role, onOpenPrivacy }: { role: ConsentRole; onOpenPrivacy: () => void }) {
   if (role === "parent") {
     return (
-      <a href="/privacy" className="font-semibold text-brand-prussian-blue">
+      <button type="button" onClick={onOpenPrivacy} className="font-semibold text-brand-prussian-blue">
         Read our privacy policy
-      </a>
+      </button>
     );
   }
 
   return (
     <>
       By creating an account you agree to the full terms listed in our{" "}
-      <a href="/privacy" className="font-semibold text-brand-prussian-blue">
+      <button type="button" onClick={onOpenPrivacy} className="font-semibold text-brand-prussian-blue">
         privacy policy
-      </a>
+      </button>
       .
     </>
   );
@@ -125,6 +140,7 @@ export default function ConsentPage() {
   const [marketingConsent, setMarketingConsent] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isPrivacyOpen, setIsPrivacyOpen] = useState(false);
 
   useEffect(() => {
     let isMounted = true;
@@ -148,6 +164,18 @@ export default function ConsentPage() {
         return;
       }
 
+      // CRITICAL BUG fix: someone who already has a consents row (real
+      // prior completion, not this bug) shouldn't be made to sit through
+      // the form again just because they landed on this URL -- resume
+      // sends them straight to their next step, same destination
+      // handleAccept itself would send a fresh acceptance to.
+      if (await hasConsented(supabase, user.id)) {
+        if (!isMounted) return;
+        router.replace(getPostConsentDestination(userRole));
+        return;
+      }
+
+      if (!isMounted) return;
       setUserId(user.id);
       setRole(userRole);
       setIsReady(true);
@@ -186,15 +214,7 @@ export default function ConsentPage() {
       return;
     }
 
-    if (role === "clinician") {
-      router.push("/clinician/specialty");
-      return;
-    }
-    if (role === "class_teacher") {
-      router.push("/teacher/join-institution");
-      return;
-    }
-    router.push("/parent-dashboard");
+    router.push(getPostConsentDestination(role));
   }
 
   if (!isReady || !role) {
@@ -271,10 +291,29 @@ export default function ConsentPage() {
           </Button>
 
           <p className="mt-4 text-center text-xs text-black/50">
-            <ConsentFooter role={role} />
+            <ConsentFooter role={role} onOpenPrivacy={() => setIsPrivacyOpen(true)} />
           </p>
         </div>
       </div>
+
+      {/* CRITICAL BUG fix: the privacy policy opens as a sheet OVER this
+          screen instead of navigating to /privacy -- the consent
+          screen's own React state (the ticked/unticked checkbox, this
+          whole component) never unmounts, so there's nothing for a
+          Back/dismiss action to "skip past" the way a full page
+          navigation could. Matches the sheet pattern already used
+          throughout onboarding-adjacent flows (ComposeMessageSheet,
+          ShareBottomSheet, CalmUnlockSheet, etc.) rather than inventing
+          a new overlay treatment. */}
+      <BottomSheet isOpen={isPrivacyOpen} onClose={() => setIsPrivacyOpen(false)}>
+        <h2 className="mb-4 font-heading text-xl font-semibold text-brand-neutral-black">
+          Privacy Policy
+        </h2>
+        <PrivacyPolicyContent />
+        <Button type="button" onClick={() => setIsPrivacyOpen(false)} className="mt-5">
+          Close
+        </Button>
+      </BottomSheet>
     </main>
   );
 }
