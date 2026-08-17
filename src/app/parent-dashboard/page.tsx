@@ -74,6 +74,7 @@ export default function ParentDashboardPage() {
   const [hasTeacherUpdateToday, setHasTeacherUpdateToday] = useState(false);
   const [teacherUpdate, setTeacherUpdate] = useState<TeacherUpdateData | null>(null);
   const [isPassportCardDismissed, setIsPassportCardDismissed] = useState(false);
+  const [messagesOpenCount, setMessagesOpenCount] = useState<number | undefined>(undefined);
 
   useEffect(() => {
     if (!user) return;
@@ -148,6 +149,20 @@ export default function ParentDashboardPage() {
       // passportRow.id, which that batch is what resolves in the first
       // place.
       if (passportRow?.id) {
+        // Quiet dashboard hint (2A): a single cheap count query, same
+        // "open" definition MessageList's own Open tab uses. Quiet grey
+        // text only -- no badge, no colour -- the zero-urgency rule
+        // applies to every role, not just teachers.
+        supabase
+          .from("messages")
+          .select("id", { count: "exact", head: true })
+          .eq("passport_id", passportRow.id)
+          .in("status", ["open", "in_discussion"])
+          .then(({ count, error: countError }) => {
+            if (!isMounted || countError) return;
+            setMessagesOpenCount(count ?? 0);
+          });
+
         const { data: todaysUpdate } = await supabase
           .from("teacher_updates")
           .select("settled_state, energy_level, flags, heads_up, teacher_id")
@@ -314,7 +329,7 @@ export default function ParentDashboardPage() {
 
         <RecentUpdatesCard passportId={passportId} />
 
-        <QuickActionButtons childName={childName} />
+        <QuickActionButtons childName={childName} messagesOpenCount={messagesOpenCount} />
 
         <section>
           <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-black/40">

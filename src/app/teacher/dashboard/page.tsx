@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { createClient } from "@/lib/supabase/client";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { useTeacherPassports } from "@/hooks/useTeacherPassports";
 import { useTeacherMorningCheckins, type MorningPupilStatus } from "@/hooks/useTeacherMorningCheckins";
@@ -42,6 +43,33 @@ export default function TeacherDashboardPage() {
     user?.id ?? null
   );
 
+  // "Unopened Messages" goes live (Stage 2): count of open messages
+  // addressed to this teacher, across every linked pupil -- the same
+  // rows the triage view's own Open tab surfaces. Neutral styling only
+  // (no isAlert) -- explicitly NOT the Red Alerts treatment, per the
+  // zero-urgency rule.
+  const [unopenedMessagesCount, setUnopenedMessagesCount] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!user) return;
+    let isMounted = true;
+    async function loadUnopenedCount() {
+      const supabase = createClient();
+      const { count, error: countError } = await supabase
+        .from("message_recipients")
+        .select("id, messages!inner(status)", { count: "exact", head: true })
+        .eq("recipient_id", user!.id)
+        .is("acknowledged_at", null)
+        .neq("messages.status", "closed");
+      if (!isMounted || countError) return;
+      setUnopenedMessagesCount(count ?? 0);
+    }
+    loadUnopenedCount();
+    return () => {
+      isMounted = false;
+    };
+  }, [user]);
+
   const teacherFullName = user?.user_metadata?.full_name as string | undefined;
   const firstName = teacherFullName ? teacherFullName.split(" ")[0] : "there";
 
@@ -78,7 +106,11 @@ export default function TeacherDashboardPage() {
               value={isLoadingCheckins ? "…" : redAlertCount}
               isAlert={!isLoadingCheckins && redAlertCount > 0}
             />
-            <StatCard label="Unopened Messages" value="0" isSubdued />
+            <StatCard
+              label="Unopened Messages"
+              value={unopenedMessagesCount ?? "…"}
+              href="/teacher/messages"
+            />
           </div>
 
           {/* Moved here from below TeacherQuickActions -- className
@@ -139,14 +171,21 @@ function StatCard({
   value,
   isAlert,
   isSubdued,
+  href,
 }: {
   label: string;
   value: string | number;
   isAlert?: boolean;
   isSubdued?: boolean;
+  // Optional tap-through (e.g. Unopened Messages -> the triage view).
+  // Deliberately styled identically to a non-alert card either way --
+  // this must never borrow the Red Alerts treatment (zero-urgency rule
+  // applies to every stat, not just teacher-facing ones).
+  href?: string;
 }) {
-  return (
-    <div className="min-w-[130px] flex-shrink-0 rounded-xl border border-brand-off-white bg-white p-4 shadow-sm">
+  const className = "min-w-[130px] flex-shrink-0 rounded-xl border border-brand-off-white bg-white p-4 shadow-sm";
+  const content = (
+    <>
       <p className="font-accent text-xs uppercase text-brand-neutral-black/60">{label}</p>
       <p
         className={`mt-1 font-heading text-2xl font-bold ${
@@ -159,8 +198,18 @@ function StatCard({
       >
         {value}
       </p>
-    </div>
+    </>
   );
+
+  if (href) {
+    return (
+      <Link href={href} className={className}>
+        {content}
+      </Link>
+    );
+  }
+
+  return <div className={className}>{content}</div>;
 }
 
 function EmptyState({

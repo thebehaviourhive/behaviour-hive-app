@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { MessageCard } from "./MessageCard";
+import { MessageCardSkeleton } from "./MessageCardSkeleton";
 import type { ThreadMessage } from "@/types/messages";
 
 type View = "open" | "archived";
@@ -20,12 +21,23 @@ export function MessageList({
   nameById,
   isLoading,
   onChanged,
+  emptyOpenMessage = "No open messages.",
+  emptyArchivedMessage = "Nothing archived yet.",
+  footer,
 }: {
   messages: ThreadMessage[];
   currentUserId: string;
   nameById: Map<string, string>;
   isLoading: boolean;
   onChanged: () => void;
+  // Per-surface empty-state copy (2A wants a warmer, contract-explaining
+  // line for parents; teacher/clinician keep the plain defaults).
+  emptyOpenMessage?: ReactNode;
+  emptyArchivedMessage?: ReactNode;
+  // Rendered once, below the list -- e.g. the parent surface's
+  // disclosure line. Never per-card; this is "at the list foot", not a
+  // repeated badge.
+  footer?: ReactNode;
 }) {
   const [view, setView] = useState<View>("open");
 
@@ -58,10 +70,13 @@ export function MessageList({
 
       <div className="mt-3 flex flex-col gap-3">
         {isLoading ? (
-          <p className="py-8 text-center text-sm text-brand-neutral-black/40">Loading…</p>
+          <>
+            <MessageCardSkeleton />
+            <MessageCardSkeleton />
+          </>
         ) : filtered.length === 0 ? (
           <p className="py-8 text-center text-sm text-brand-neutral-black/40">
-            {view === "open" ? "No open messages." : "Nothing archived yet."}
+            {view === "open" ? emptyOpenMessage : emptyArchivedMessage}
           </p>
         ) : (
           filtered.map((message) => (
@@ -75,6 +90,8 @@ export function MessageList({
           ))
         )}
       </div>
+
+      {!isLoading && footer}
     </div>
   );
 }

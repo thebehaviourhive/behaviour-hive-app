@@ -79,6 +79,11 @@ async function main() {
     fullName: "Parent Msgtest",
     role: "parent",
   });
+  const parent2 = await createUser({
+    email: "msgtest.parent2@thebehaviourhive.com",
+    fullName: "Parent Two Msgtest",
+    role: "parent",
+  });
   const teacher1 = await createUser({
     email: "msgtest.teacher1@thebehaviourhive.com",
     fullName: "Teacher One Msgtest",
@@ -154,6 +159,45 @@ async function main() {
     "passport_id,teacher_id"
   );
 
+  console.log("== Second passport (Stage 2 triage: teacher1 needs >=2 pupils) ==");
+  const passport2 = await upsert(
+    "passports",
+    {
+      user_id: parent2.id,
+      child_name: "Test Child Messages Two",
+      date_of_birth: "2018-02-20",
+      school: "Messages Test School",
+      diagnoses: ["ADHD"],
+      diagnosis_other: null,
+      section_a_complete: true,
+      passport_status: "complete",
+    },
+    "user_id"
+  );
+  console.log("passport2:", passport2.id);
+
+  await insertIfNotExists(
+    "passport_institution_links",
+    { passport_id: passport2.id, institution_id: institution.id },
+    {
+      passport_id: passport2.id,
+      institution_id: institution.id,
+      approved_by_parent: true,
+      parent_approved_at: new Date().toISOString(),
+    }
+  );
+  await upsert(
+    "passport_access",
+    {
+      passport_id: passport2.id,
+      teacher_id: teacher1.id,
+      institution_id: institution.id,
+      is_active: true,
+      linked_at: new Date().toISOString(),
+    },
+    "passport_id,teacher_id"
+  );
+
   console.log("== teacher2: institution staff only, deliberately NOT linked to the passport ==");
   await insertIfNotExists(
     "institution_staff",
@@ -177,7 +221,9 @@ async function main() {
     passwordHint: PASSWORD,
     institutionId: institution.id,
     passportId: passport.id,
+    passportId2: passport2.id,
     parent: { id: parent.id, email: parent.email },
+    parent2: { id: parent2.id, email: parent2.email },
     teacher1: { id: teacher1.id, email: teacher1.email },
     teacher2: { id: teacher2.id, email: teacher2.email },
     clinician1: { id: clinician1.id, email: clinician1.email },

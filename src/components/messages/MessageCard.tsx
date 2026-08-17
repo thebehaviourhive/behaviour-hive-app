@@ -115,9 +115,22 @@ export function MessageCard({
         <span className="rounded-full bg-brand-off-white px-2.5 py-1 text-xs font-semibold text-brand-neutral-black/70">
           {message.categoryLabel}
         </span>
-        <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${status.className}`}>
-          {status.label}
-        </span>
+        <div className="flex items-center gap-1.5">
+          {/* The read-only rule, made visible: shown whenever the viewer
+              can see this message (can_view_message) without being its
+              sender or recipient -- the clinician's parent<->teacher
+              mid-day signal, or a parent reading traffic they weren't
+              party to. No acknowledge/reply affordance ever renders for
+              them below, this badge is why. */}
+          {!isParticipant && (
+            <span className="rounded-full bg-black/5 px-2.5 py-1 text-xs font-semibold text-brand-neutral-black/50">
+              Viewing only
+            </span>
+          )}
+          <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${status.className}`}>
+            {status.label}
+          </span>
+        </div>
       </div>
 
       <p className="mt-2.5 text-sm font-semibold text-brand-neutral-black">
@@ -173,8 +186,11 @@ export function MessageCard({
       )}
 
       {/* Reply thread: structurally absent unless response_required --
-          never rendered otherwise, regardless of card/thread state. */}
-      {message.responseRequired && (
+          never rendered otherwise, regardless of card/thread state. Also
+          skipped for a non-participant "Viewing only" viewer when there's
+          nothing to show them yet (no replies, nothing to act on) -- no
+          point in an empty bordered box. */}
+      {message.responseRequired && (message.replies.length > 0 || isParticipant) && (
         <div className="mt-3 border-t border-black/5 pt-3">
           {message.replies.length > 0 && (
             <div className="mb-3 flex flex-col gap-2.5">

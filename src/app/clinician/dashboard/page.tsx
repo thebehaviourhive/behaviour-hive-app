@@ -31,6 +31,7 @@ interface Stats {
   weeklyLogs: number;
   reviewsDue: number;
   activeFbas: number;
+  openMessages: number;
 }
 
 function getGreeting(): string {
@@ -96,6 +97,7 @@ export default function ClinicianDashboardPage() {
     weeklyLogs: 0,
     reviewsDue: 0,
     activeFbas: 0,
+    openMessages: 0,
   });
   const [isLoadingStats, setIsLoadingStats] = useState(true);
   const [statsError, setStatsError] = useState<string | null>(null);
@@ -166,6 +168,7 @@ export default function ClinicianDashboardPage() {
       { data: cadenceRow, error: cadenceError },
       { data: caseRows, error: caseRowsError },
       { count: activeFbas, error: activeFbasError },
+      { count: openMessages, error: openMessagesError },
     ] = await Promise.all([
       supabase
         .from("clinician_access")
@@ -193,9 +196,22 @@ export default function ClinicianDashboardPage() {
         .select("id", { count: "exact", head: true })
         .eq("clinician_id", user.id)
         .in("status", ["draft", "in_progress"]),
+      // Same "open" definition as every other Messages surface: this
+      // clinician is a recipient, hasn't acknowledged, and it isn't
+      // closed. Trivially cheap (one indexed count query) -- no tap-
+      // through destination exists yet (messages live per-case in the
+      // Clinical File, not a caseload-wide triage page), so this is
+      // informational only, same as Active Cases/Weekly Logs.
+      supabase
+        .from("message_recipients")
+        .select("id, messages!inner(status)", { count: "exact", head: true })
+        .eq("recipient_id", user.id)
+        .is("acknowledged_at", null)
+        .neq("messages.status", "closed"),
     ]);
 
-    const firstError = activeCasesError ?? weeklyLogsError ?? cadenceError ?? caseRowsError ?? activeFbasError;
+    const firstError =
+      activeCasesError ?? weeklyLogsError ?? cadenceError ?? caseRowsError ?? activeFbasError ?? openMessagesError;
     if (firstError) {
       console.error("Failed to load clinician stats:", firstError);
       setStatsError("Couldn't load your stats.");
@@ -213,6 +229,7 @@ export default function ClinicianDashboardPage() {
       weeklyLogs: weeklyLogs ?? 0,
       reviewsDue,
       activeFbas: activeFbas ?? 0,
+      openMessages: openMessages ?? 0,
     });
     setIsLoadingStats(false);
   }, [user, profile]);
@@ -298,6 +315,7 @@ export default function ClinicianDashboardPage() {
                 value={isLoadingStats ? "…" : stats.activeFbas}
                 href="/clinician/fba"
               />
+              <StatCard label="Open Messages" value={isLoadingStats ? "…" : stats.openMessages} />
             </div>
           )}
 

@@ -7,15 +7,17 @@ import { createClient } from "@/lib/supabase/client";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { useMessageThread } from "@/hooks/useMessageThread";
 import { useMessageCategories } from "@/hooks/useMessageCategories";
+import { fetchApprovedInstitutionPhone } from "@/lib/messages/institutionPhone";
+import { getChildFirstName } from "@/lib/childDisplayName";
 import { BottomNav } from "@/components/ui/BottomNav";
 import { InlineErrorState } from "@/components/ui/InlineErrorState";
 import { MessageList } from "@/components/messages/MessageList";
 import { ComposeMessageSheet } from "@/components/messages/ComposeMessageSheet";
 
-// Parent's Messages home -- Stage 1: this feature's core lifecycle,
-// built end-to-end on the track that already has the "Messages" quick
-// action wired to /messages. Per-track polish (Stage 2) comes later;
-// this is the real thing, not a preview of it.
+// Parent's Messages home. Stage 2 upgrades: disclosure line (the
+// transparency the clinician read-only visibility rule promised), a
+// warmer contract-explaining empty state, and the archive toggle/list
+// itself now carry loading skeletons via the shared MessageList.
 export default function MessagesPage() {
   const { user, isReady: isRoleReady } = useRequireRole("parent");
   const [passportId, setPassportId] = useState<string | null>(null);
@@ -49,25 +51,8 @@ export default function MessagesPage() {
       setChildName(passport?.child_name ?? null);
 
       if (passport?.id) {
-        // Best-effort: the emergency footer's tap-to-call is a nicety,
-        // never a blocker -- no institution link, or no phone on file,
-        // just means the footer falls back to plain text.
-        const { data: link } = await supabase
-          .from("passport_institution_links")
-          .select("institution_id")
-          .eq("passport_id", passport.id)
-          .eq("approved_by_parent", true)
-          .limit(1)
-          .maybeSingle();
-
-        if (link?.institution_id) {
-          const { data: institution } = await supabase
-            .from("institutions")
-            .select("phone")
-            .eq("id", link.institution_id)
-            .maybeSingle();
-          if (isMounted) setInstitutionPhone(institution?.phone ?? null);
-        }
+        const phone = await fetchApprovedInstitutionPhone(supabase, passport.id);
+        if (isMounted) setInstitutionPhone(phone);
       }
 
       setIsLoadingPassport(false);
@@ -135,6 +120,20 @@ export default function MessagesPage() {
             nameById={nameById}
             isLoading={isLoading}
             onChanged={refresh}
+            emptyOpenMessage={
+              <>
+                Send quick updates the school can acknowledge when they have a
+                moment — no replies expected.
+              </>
+            }
+            footer={
+              // The transparency the clinician read-only visibility rule
+              // promised, stated once at the list foot -- not per card.
+              <p className="mt-5 px-1 text-center text-xs leading-relaxed text-brand-neutral-black/40">
+                {getChildFirstName(childName)}&apos;s clinical team can see messages
+                about {getChildFirstName(childName)} to help them spot patterns.
+              </p>
+            }
           />
         ) : null}
       </main>

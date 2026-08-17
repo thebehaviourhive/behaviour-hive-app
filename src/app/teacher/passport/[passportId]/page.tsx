@@ -12,8 +12,17 @@ import { usePassportClinicalContent } from "@/hooks/usePassportClinicalContent";
 import { ClinicalTeamSection } from "@/components/passport/clinical-team/ClinicalTeamSection";
 import { InlineErrorState } from "@/components/ui/InlineErrorState";
 import { ProgressSurface } from "@/components/progress/ProgressSurface";
+import { TeacherPassportMessagesTab } from "@/components/teacher/TeacherPassportMessagesTab";
 
-type TabKey = "summary" | "behaviour" | "communication" | "supports" | "incidents" | "clinicalTeam" | "progress";
+type TabKey =
+  | "summary"
+  | "behaviour"
+  | "communication"
+  | "supports"
+  | "incidents"
+  | "clinicalTeam"
+  | "messages"
+  | "progress";
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: "summary", label: "Summary" },
@@ -22,6 +31,7 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: "supports", label: "Supports" },
   { key: "incidents", label: "Incidents" },
   { key: "clinicalTeam", label: "Clinical Team" },
+  { key: "messages", label: "Messages" },
   { key: "progress", label: "Progress" },
 ];
 
@@ -439,6 +449,14 @@ export default function TeacherPassportPage() {
               <ClinicalTeamSection items={clinicalContentItems} viewerRole="teacher" />
             )}
           </>
+        )}
+
+        {activeTab === "messages" && user && (
+          <TeacherPassportMessagesTab
+            passportId={passportId}
+            childName={profile.childFirstName}
+            userId={user.id}
+          />
         )}
 
         {activeTab === "progress" && (
