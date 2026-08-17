@@ -234,21 +234,19 @@ export default function ParentDashboardPage() {
         <h1 className="font-heading text-2xl font-semibold text-brand-neutral-black">
           {getGreeting()}, {firstName}
         </h1>
-        {/* NAV + HEADER refinements: a persistent, quiet link to Messages
-            -- deliberately no badge, no count, no indicator (the dashboard
+        {/* NAV + HEADER refinements: a persistent link to Messages --
+            deliberately no badge, no count, no indicator (the dashboard
             quick-action tile keeps the live count; this is purely a
-            shortcut). Follows the passport header's share-pill placement
-            (top-right of the header row) but at utility weight, not
-            primary-action weight -- no fill, no shadow, just a muted icon
-            -- so it never competes with the greeting or the daily card
-            below it. h-11 w-11 keeps the tap target at 44px even though
-            the icon itself renders smaller. */}
+            shortcut). A circular Prussian Blue backing gives it presence
+            without reading as a second primary action -- solid but small
+            (44x44, unchanged tap target), so it stays visually quieter
+            than the golden daily-update card immediately below it. */}
         <Link
           href="/messages"
           aria-label="Messages"
-          className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full text-brand-neutral-black/40 transition-colors active:bg-black/5"
+          className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-brand-prussian-blue text-white shadow-sm transition-colors active:bg-brand-prussian-blue/90"
         >
-          <ChatBubbleIcon className="h-6 w-6" />
+          <ChatBubbleIcon className="h-5 w-5" />
         </Link>
       </header>
 

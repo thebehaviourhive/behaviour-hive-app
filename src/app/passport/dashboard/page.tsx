@@ -677,20 +677,16 @@ export default function PassportDashboardPage() {
   return (
     <div className="flex min-h-full flex-1 flex-col bg-brand-off-white/40 pb-24">
       <header className="px-4 pt-8 pb-6">
-        <div className="flex items-start justify-between gap-3">
-          <p className="font-accent text-sm uppercase tracking-wide text-brand-neutral-black">
-            The Behavioural Passport Of
-          </p>
-          <button
-            type="button"
-            onClick={() => openShareSheet()}
-            aria-label="Share passport"
-            className="flex flex-shrink-0 items-center gap-1.5 rounded-full bg-brand-prussian-blue px-4 py-2 text-sm font-bold text-white shadow-sm"
-          >
-            <ShareIcon />
-            Share
-          </button>
-        </div>
+        {/* Header Share pill removed (UI refinements round) -- the
+            Manage Access card's "Share [child]'s Passport" button below
+            is now the sole canonical entry point; it calls the exact
+            same openShareSheet() as this pill used to, so the sheet
+            itself and the ?openShare=1 deep link (FBA card, Calm unlock
+            sheet) are entirely unaffected. Child identity remains the
+            header's sole anchor. */}
+        <p className="font-accent text-sm uppercase tracking-wide text-brand-neutral-black">
+          The Behavioural Passport Of
+        </p>
 
         <h1 className="mt-1 font-heading text-4xl font-bold leading-tight text-brand-prussian-blue">
           {summary.childName}
