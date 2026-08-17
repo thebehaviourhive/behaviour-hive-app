@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { ChatBubbleIcon, ClipboardIcon, LightbulbIcon, PeopleIcon } from "@/components/ui/icons";
-import { CountBadge } from "@/components/messages/CountBadge";
+import { CountBadge } from "@/components/ui/CountBadge";
 
 const ACTIONS = [
   { label: "Students", href: "/teacher/students", Icon: PeopleIcon },

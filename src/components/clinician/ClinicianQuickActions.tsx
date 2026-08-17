@@ -7,7 +7,7 @@ import {
   OpenBookIcon,
   TrendUpIcon,
 } from "@/components/ui/icons";
-import { CountBadge } from "@/components/messages/CountBadge";
+import { CountBadge } from "@/components/ui/CountBadge";
 
 const ACTIONS = [
   { label: "Resources", href: "/clinician/resources", Icon: LightbulbIcon },

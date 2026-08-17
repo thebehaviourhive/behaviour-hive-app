@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
+import { CountBadge } from "./CountBadge";
 
 export interface NavTab {
   key: string;
@@ -15,6 +16,11 @@ export interface NavTab {
   // rather than a link, matching the existing fallback behaviour.
   href: string | undefined;
   isActive: (pathname: string) => boolean;
+  // The Messages waiting-count badge (teacher + clinician tracks only,
+  // see NAV + HEADER refinements) -- same source, same rules as the
+  // dashboard stat: Prussian Blue, absent at 0, never red. Omit for tabs
+  // that never carry one.
+  badgeCount?: number | null;
 }
 
 // The single shared bottom-nav renderer for all three tracks (parent,
@@ -45,12 +51,15 @@ export function AppBottomNav({ tabs, extraSlot }: { tabs: NavTab[]; extraSlot?: 
                 isActive ? "bg-brand-pastel-blue" : ""
               }`}
             >
-              <Icon
-                aria-hidden
-                size={24}
-                strokeWidth={2}
-                className={isActive ? "text-brand-prussian-blue" : "text-brand-neutral-black/40"}
-              />
+              <span className="relative flex">
+                <Icon
+                  aria-hidden
+                  size={24}
+                  strokeWidth={2}
+                  className={isActive ? "text-brand-prussian-blue" : "text-brand-neutral-black/40"}
+                />
+                <CountBadge count={tab.badgeCount} size="small" />
+              </span>
               <span
                 className={`font-sans text-[10px] leading-none ${
                   isActive

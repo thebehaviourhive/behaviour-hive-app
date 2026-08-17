@@ -7,7 +7,7 @@ import {
   TrendUpIcon,
 } from "@/components/ui/icons";
 import { getChildFirstName } from "@/lib/childDisplayName";
-import { CountBadge } from "@/components/messages/CountBadge";
+import { CountBadge } from "@/components/ui/CountBadge";
 
 // 5 tiles on the existing grid-cols-2 grid -- naturally reads as a 2x3
 // layout with the 6th cell simply empty (a lone left-aligned tile in
