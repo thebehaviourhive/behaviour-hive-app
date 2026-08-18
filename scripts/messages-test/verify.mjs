@@ -55,7 +55,22 @@ async function main() {
     .select("id, label, allowed_sender_roles")
     .eq("is_active", true)
     .order("sort_order");
-  check("10 active categories seeded", !categoriesError && categories.length === 10, categoriesError);
+  // 11, not 10: migration 0062 (Messages Stage 3) added "Incident note"
+  // after this suite was first written. Assert the real current set
+  // rather than a stale headcount, so a genuine future drift (a
+  // category silently added/removed/deactivated) still fails loudly.
+  const expectedActiveLabels = [
+    "Schedule change", "Collection/drop-off", "Incident note", "Forgotten item",
+    "Medication note", "Sleep/morning heads-up", "Wellbeing note", "School supplies",
+    "Contact me when you can", "Strategy update", "Other",
+  ];
+  check(
+    "11 active categories seeded, matching the expected set",
+    !categoriesError &&
+      categories.length === expectedActiveLabels.length &&
+      expectedActiveLabels.every((label) => categories.some((c) => c.label === label)),
+    categoriesError || categories.map((c) => c.label)
+  );
   const scheduleChange = categories.find((c) => c.label === "Schedule change");
   const wellbeingNote = categories.find((c) => c.label === "Wellbeing note");
   const strategyUpdate = categories.find((c) => c.label === "Strategy update");
