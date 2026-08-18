@@ -14,9 +14,15 @@ interface TeamMember {
 const ROLE_STYLE: Record<string, string> = {
   clinician: "bg-brand-golden-brown/10 text-brand-golden-brown",
 };
+// FIX: 'sna' had no entry here -- get_passport_team has returned real
+// role='sna' rows since migration 0065, but this map's ?? "Teacher"
+// fallback (below) silently mislabeled every SNA team member as
+// "Teacher" instead of "SNA". Caught while verifying the exact card
+// this phase's brief calls out by name.
 const ROLE_LABEL: Record<string, string> = {
   class_teacher: "Teacher",
   clinician: "Clinician",
+  sna: "SNA",
 };
 
 function getInitials(fullName: string): string {
@@ -33,9 +39,12 @@ function getLastName(fullName: string): string {
 
 function sortTeam(members: TeamMember[]): TeamMember[] {
   return [...members].sort((a, b) => {
-    const aIsTeacher = a.role === "class_teacher" ? 0 : 1;
-    const bIsTeacher = b.role === "class_teacher" ? 0 : 1;
-    if (aIsTeacher !== bIsTeacher) return aIsTeacher - bIsTeacher;
+    // School staff (class_teacher, sna) group together ahead of
+    // clinicians -- same reasoning as the label fix above, just for
+    // ordering: sna is school staff, not a bucket-with-clinicians role.
+    const aIsSchoolStaff = a.role === "class_teacher" || a.role === "sna" ? 0 : 1;
+    const bIsSchoolStaff = b.role === "class_teacher" || b.role === "sna" ? 0 : 1;
+    if (aIsSchoolStaff !== bIsSchoolStaff) return aIsSchoolStaff - bIsSchoolStaff;
     return getLastName(a.fullName).localeCompare(getLastName(b.fullName));
   });
 }

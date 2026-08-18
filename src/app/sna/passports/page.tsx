@@ -9,6 +9,7 @@ import { getChildDisplayName } from "@/lib/childDisplayName";
 import { AddChildSheet } from "@/components/teacher/AddChildSheet";
 import { SnaBottomNav } from "@/components/sna/SnaBottomNav";
 import { PeopleIcon } from "@/components/ui/icons";
+import { QuestionnairePromptCard } from "@/components/questionnaire/QuestionnairePromptCard";
 
 // SNA's "Passports home" -- per the brief, this single page IS the SNA
 // track's roster (there's no separate Students page the way the
@@ -103,6 +104,8 @@ export default function SnaPassportsPage() {
           </button>
         )}
       </header>
+
+      <QuestionnairePromptCard track="sna" className="px-4 pb-4" />
 
       {passports.length > 0 && (
         <div className="sticky top-0 z-[1] bg-brand-off-white/40 px-4 pb-4">

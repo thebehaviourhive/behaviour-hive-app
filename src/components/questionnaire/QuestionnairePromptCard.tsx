@@ -52,7 +52,7 @@ export function QuestionnairePromptCard({
   // what's passed here.
   className = "",
 }: {
-  track: "parent" | "teacher";
+  track: "parent" | "teacher" | "sna";
   className?: string;
 }) {
   const [requests, setRequests] = useState<MyInstrumentRequest[]>([]);
@@ -96,7 +96,7 @@ export function QuestionnairePromptCard({
         {requests.map((request) => {
           const instrumentLabel = INSTRUMENT_LABELS[request.instrumentType];
           const title =
-            track === "teacher"
+            track === "teacher" || track === "sna"
               ? `${getChildDisplayName(request.childName)}'s clinician has asked you to fill out a ${instrumentLabel} questionnaire`
               : `Your clinician has asked you to fill out a ${instrumentLabel} questionnaire about ${request.childName}`;
           return (

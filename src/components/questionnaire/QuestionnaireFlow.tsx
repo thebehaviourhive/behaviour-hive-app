@@ -18,6 +18,15 @@ import { INSTRUMENT_LABELS, type InstrumentResponsesData, type MyInstrumentReque
 // simply invisible to scoring -- no scoring-code change needed.
 const HEADER_KEYS = { name: "header-name", date: "header-date" } as const;
 
+// The activity-log attribution label per track -- SNA gets its own
+// label (not lumped into "Teacher") so the passport's activity history
+// records who actually completed it.
+const TRACK_ACTIVITY_LABEL: Record<"parent" | "teacher" | "sna", string> = {
+  parent: "Parent",
+  teacher: "Teacher",
+  sna: "SNA",
+};
+
 // The QABF's real scale is ['X','0','1','2','3'] -- stored values, not
 // display labels. Respondents see ONLY the written label, never the
 // stored value itself -- no "0 —", "1 —", "X —" prefix -- the number/
@@ -48,7 +57,7 @@ export function QuestionnaireFlow({
   onComplete,
 }: {
   request: MyInstrumentRequest;
-  track: "parent" | "teacher";
+  track: "parent" | "teacher" | "sna";
   onClose: () => void;
   onComplete: () => void;
 }) {
@@ -210,7 +219,7 @@ export function QuestionnaireFlow({
         passportId: requestRow.passport_id,
         actorId: user.id,
         eventType: "questionnaire_completed",
-        eventDescription: `${INSTRUMENT_LABELS[request.instrumentType]} completed by ${track === "teacher" ? "Teacher" : "Parent"}`,
+        eventDescription: `${INSTRUMENT_LABELS[request.instrumentType]} completed by ${TRACK_ACTIVITY_LABEL[track]}`,
       });
     }
 
@@ -218,9 +227,11 @@ export function QuestionnaireFlow({
     setTimeout(onComplete, 1600);
   }
 
-  const childLabel = track === "teacher" ? getChildDisplayName(request.childName) : request.childName;
-  // The respondent's own name-display rule -- a teacher recipient gets
-  // the same shortened form here as everywhere else on their track.
+  const childLabel =
+    track === "teacher" || track === "sna" ? getChildDisplayName(request.childName) : request.childName;
+  // The respondent's own name-display rule -- a teacher or SNA
+  // recipient gets the same shortened form here as everywhere else on
+  // their track.
   const resolvedInstruction = resolveInstructionText(request.instruction, childLabel);
 
   if (isLoadingItems || isLoadingExisting) {
