@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 
-const SELF_SERVICE_ROLES = ["parent", "class_teacher", "clinician"] as const;
+const SELF_SERVICE_ROLES = ["parent", "class_teacher", "clinician", "sna"] as const;
 type SelfServiceRole = (typeof SELF_SERVICE_ROLES)[number];
 
 function isSelfServiceRole(value: unknown): value is SelfServiceRole {

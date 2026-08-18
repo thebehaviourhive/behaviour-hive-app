@@ -6,10 +6,15 @@ import { BrandMark } from "@/components/ui/BrandMark";
 import { Button } from "@/components/ui/Button";
 import { createClient } from "@/lib/supabase/client";
 
-type Role = "parent" | "class_teacher" | "clinician";
+// "school_staff" is a UI-only sentinel, never written anywhere -- it
+// exists purely to route Continue to the School Staff sub-select
+// instead of calling /api/set-role directly. The two real roles that
+// screen can produce (class_teacher, sna) are the only values that
+// ever reach set-role for this branch. See ROLES below.
+type SelectableValue = "parent" | "school_staff" | "clinician";
 
 const ROLES: {
-  value: Role;
+  value: SelectableValue;
   icon: string;
   title: string;
   subtitle: string;
@@ -21,10 +26,10 @@ const ROLES: {
     subtitle: "Building a passport for my child",
   },
   {
-    value: "class_teacher",
+    value: "school_staff",
     icon: "🏫",
-    title: "Class teacher",
-    subtitle: "Supporting children in school",
+    title: "School staff",
+    subtitle: "Class teacher or SNA supporting children in school",
   },
   {
     value: "clinician",
@@ -34,20 +39,28 @@ const ROLES: {
   },
 ];
 
-const ROLE_LABELS: Record<Role, string> = {
+const ROLE_LABELS: Record<SelectableValue, string> = {
   parent: "parent / carer",
-  class_teacher: "class teacher",
+  school_staff: "school staff",
   clinician: "clinician",
 };
 
 export default function RoleSelectPage() {
   const router = useRouter();
-  const [selectedRole, setSelectedRole] = useState<Role | null>(null);
+  const [selectedRole, setSelectedRole] = useState<SelectableValue | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   async function handleContinue() {
     if (!selectedRole) return;
+
+    // School staff never writes a role here -- the sub-select screen is
+    // where the real class_teacher/sna choice happens and set-role gets
+    // called. Never write a placeholder role.
+    if (selectedRole === "school_staff") {
+      router.push("/role-select/school-staff");
+      return;
+    }
 
     setError(null);
     setIsSubmitting(true);
@@ -77,8 +90,8 @@ export default function RoleSelectPage() {
 
     setIsSubmitting(false);
 
-    // All three roles go through the same consent screen (its own copy
-    // and post-accept destination now branch per role -- see
+    // All roles go through the same consent screen (its own copy and
+    // post-accept destination now branch per role -- see
     // src/app/consent/page.tsx); teachers previously skipped consent
     // entirely and went straight to join-institution, which /consent
     // now forwards them to itself once they accept.
@@ -161,9 +174,11 @@ export default function RoleSelectPage() {
           >
             {isSubmitting
               ? "Saving…"
-              : selectedRole
-                ? `Continue as ${ROLE_LABELS[selectedRole]}`
-                : "Continue"}
+              : selectedRole === "school_staff"
+                ? "Continue"
+                : selectedRole
+                  ? `Continue as ${ROLE_LABELS[selectedRole]}`
+                  : "Continue"}
           </Button>
         </div>
       </div>

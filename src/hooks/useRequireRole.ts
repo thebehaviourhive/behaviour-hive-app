@@ -7,10 +7,18 @@ import { createClient } from "@/lib/supabase/client";
 import { getPostAuthRedirect } from "@/lib/roleRedirect";
 import { hasConsented } from "@/lib/hasConsented";
 
-export function useRequireRole(role: string) {
+export function useRequireRole(role: string | string[]) {
   const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
   const [isReady, setIsReady] = useState(false);
+
+  // A caller passing an inline array literal (e.g. useRequireRole(["class_teacher", "sna"]))
+  // gets a new array reference every render -- using that directly as a dependency
+  // would re-fire this effect (and its network calls) every render, forever.
+  // Joining to a string gives a value that's stable across renders as long as the
+  // actual allowed roles don't change, which is all the effect needs to depend on.
+  const allowedRoles = Array.isArray(role) ? role : [role];
+  const roleKey = allowedRoles.join(",");
 
   useEffect(() => {
     let isMounted = true;
@@ -29,7 +37,7 @@ export function useRequireRole(role: string) {
       }
 
       const userRole = user.app_metadata?.role;
-      if (userRole !== role) {
+      if (!userRole || !roleKey.split(",").includes(userRole)) {
         router.replace(getPostAuthRedirect(userRole));
         return;
       }
@@ -57,7 +65,7 @@ export function useRequireRole(role: string) {
     return () => {
       isMounted = false;
     };
-  }, [router, role]);
+  }, [router, roleKey]);
 
   return { user, isReady };
 }

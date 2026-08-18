@@ -8,9 +8,19 @@ import { TextField } from "@/components/ui/TextField";
 import { createClient } from "@/lib/supabase/client";
 import { useRequireRole } from "@/hooks/useRequireRole";
 
+// School staff dashboard, by role -- the one place this destination
+// lives, so the "already joined" resume check and the post-join
+// routing below can never drift apart. class_teacher's destination is
+// the pre-existing one, byte-identical; sna's is new (Phase 3 builds
+// its real content -- see src/app/sna/dashboard/page.tsx).
+function getStaffDashboardDestination(role: string | undefined): string {
+  return role === "sna" ? "/sna/dashboard" : "/teacher/dashboard";
+}
+
 export default function TeacherJoinInstitutionPage() {
   const router = useRouter();
-  const { user, isReady } = useRequireRole("class_teacher");
+  const { user, isReady } = useRequireRole(["class_teacher", "sna"]);
+  const staffRole = user?.app_metadata?.role as string | undefined;
 
   const [code, setCode] = useState("");
   const [isChecking, setIsChecking] = useState(true);
@@ -32,7 +42,7 @@ export default function TeacherJoinInstitutionPage() {
       if (!isMounted) return;
 
       if (data) {
-        router.replace("/teacher/dashboard");
+        router.replace(getStaffDashboardDestination(staffRole));
         return;
       }
       setIsChecking(false);
@@ -42,7 +52,7 @@ export default function TeacherJoinInstitutionPage() {
     return () => {
       isMounted = false;
     };
-  }, [user, router]);
+  }, [user, router, staffRole]);
 
   async function handleJoin() {
     if (!user || !code.trim()) return;
@@ -75,10 +85,15 @@ export default function TeacherJoinInstitutionPage() {
       return;
     }
 
+    // staffRole comes from the server-set app_metadata claim
+    // useRequireRole already verified is one of class_teacher/sna --
+    // never a client-suppliable value, and the DB's own self-link policy
+    // (current_user_role() = role, migration 0033/0065) enforces this
+    // independently even if it somehow weren't.
     const { error: staffError } = await supabase.from("institution_staff").insert({
       institution_id: institution.id,
       user_id: user.id,
-      role: "class_teacher",
+      role: staffRole,
     });
 
     setIsSaving(false);
@@ -88,7 +103,7 @@ export default function TeacherJoinInstitutionPage() {
       return;
     }
 
-    router.push("/teacher/dashboard");
+    router.push(getStaffDashboardDestination(staffRole));
   }
 
   if (!isReady || isChecking) {

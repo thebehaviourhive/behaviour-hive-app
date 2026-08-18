@@ -12,7 +12,7 @@ import { hasConsented } from "@/lib/hasConsented";
 
 const CONSENT_VERSION = 1;
 
-type ConsentRole = "parent" | "class_teacher" | "clinician";
+type ConsentRole = "parent" | "class_teacher" | "clinician" | "sna";
 
 interface ConsentCard {
   icon: string;
@@ -20,6 +20,30 @@ interface ConsentCard {
   title: string;
   description?: string;
 }
+
+// The class_teacher track's cards -- SNA reuses this verbatim (per
+// decision: SNA gets the teacher consent screen/copy unchanged), so
+// it's pulled out to a shared constant rather than duplicated, keeping
+// the two tracks impossible to drift apart by accident.
+const CLASS_TEACHER_CONSENT_CARDS: ConsentCard[] = [
+  {
+    icon: "🔒",
+    iconBg: "bg-brand-pastel-blue/40",
+    title: "I will keep information shared with me confidential.",
+  },
+  {
+    icon: "👁",
+    iconBg: "bg-brand-safe-ivory/60",
+    title:
+      "I understand that everything I record becomes part of the child's record and is visible to their families and clinical team.",
+  },
+  {
+    icon: "🛡",
+    iconBg: "bg-brand-prussian-blue/10",
+    title:
+      "I understand that my personal information will be handled in accordance with The Behaviour Hive's privacy policy.",
+  },
+];
 
 // Onboarding consent copy, per track (structure/logic below is fully
 // shared -- only these three cards + the footer text differ by role).
@@ -46,25 +70,8 @@ const CONSENT_CARDS: Record<ConsentRole, ConsentCard[]> = {
       description: "Registered with the Data Protection Commission.",
     },
   ],
-  class_teacher: [
-    {
-      icon: "🔒",
-      iconBg: "bg-brand-pastel-blue/40",
-      title: "I will keep information shared with me confidential.",
-    },
-    {
-      icon: "👁",
-      iconBg: "bg-brand-safe-ivory/60",
-      title:
-        "I understand that everything I record becomes part of the child's record and is visible to their families and clinical team.",
-    },
-    {
-      icon: "🛡",
-      iconBg: "bg-brand-prussian-blue/10",
-      title:
-        "I understand that my personal information will be handled in accordance with The Behaviour Hive's privacy policy.",
-    },
-  ],
+  class_teacher: CLASS_TEACHER_CONSENT_CARDS,
+  sna: CLASS_TEACHER_CONSENT_CARDS,
   clinician: [
     {
       icon: "🔒",
@@ -89,9 +96,12 @@ const CONSENT_CARDS: Record<ConsentRole, ConsentCard[]> = {
 // unchanged. Teacher/clinician get the brief's exact replacement text;
 // each keeps the same bold "Required" suffix treatment as before (a
 // visual/structural element, not part of the reworded sentence itself).
+// SNA reuses the class_teacher wording verbatim, same reasoning as the
+// cards above.
 const REQUIRED_CONSENT_LABEL: Record<ConsentRole, string> = {
   parent: "I agree to Behaviour Hive storing and processing my child's data.",
   class_teacher: "I agree to The Behaviour Hive storing and processing my inputs.",
+  sna: "I agree to The Behaviour Hive storing and processing my inputs.",
   clinician: "I agree to The Behaviour Hive storing and processing my inputs and data.",
 };
 
@@ -101,7 +111,9 @@ const REQUIRED_CONSENT_LABEL: Record<ConsentRole, string> = {
 // apart.
 function getPostConsentDestination(role: ConsentRole): string {
   if (role === "clinician") return "/clinician/specialty";
-  if (role === "class_teacher") return "/teacher/join-institution";
+  // SNA shares the teacher's institution-linking flow -- same
+  // "extend, don't fork" table (institution_staff), same screen.
+  if (role === "class_teacher" || role === "sna") return "/teacher/join-institution";
   return "/parent-dashboard";
 }
 
@@ -159,7 +171,12 @@ export default function ConsentPage() {
       }
 
       const userRole = user.app_metadata?.role;
-      if (userRole !== "parent" && userRole !== "clinician" && userRole !== "class_teacher") {
+      if (
+        userRole !== "parent" &&
+        userRole !== "clinician" &&
+        userRole !== "class_teacher" &&
+        userRole !== "sna"
+      ) {
         router.replace("/");
         return;
       }
