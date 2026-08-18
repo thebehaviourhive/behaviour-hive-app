@@ -111,50 +111,19 @@ function ScoredResults({
   const maxes = getCategoryMaxScores(items, request.responsesData);
   // From the item bank's own category order, not maxes' keys -- an
   // all-'X' category (every item excluded) never gets a maxes entry at
-  // all, but it still needs to appear in the table as "Not applicable"
-  // rather than silently vanishing.
+  // all, but it still needs to appear (as "Not applicable", via
+  // HorizontalBarChart's own max<=0 handling) rather than silently
+  // vanishing. This IS the results presentation now -- one chart, no
+  // second table repeating the same totals underneath it.
   const categories = Array.from(new Set(items.map((item) => item.category).filter((c): c is string => Boolean(c))));
-  // Never a zero bar for an all-'X' category -- omitted from the chart
-  // entirely rather than rendered as an empty/zero-width bar that would
-  // read as "scored zero", which is a different, false claim.
-  const chartCategories = categories.filter((category) => (maxes[category] ?? 0) > 0);
 
   return (
-    <div>
-      <HorizontalBarChart
-        bars={chartCategories.map((category) => ({
-          label: category,
-          value: totals[category] ?? 0,
-          max: maxes[category],
-        }))}
-      />
-      <div className="mt-4 overflow-hidden rounded-xl border border-black/5">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="bg-brand-off-white/60 text-left">
-              <th className="px-3 py-2 font-semibold text-brand-neutral-black/70">Category</th>
-              <th className="px-3 py-2 text-right font-semibold text-brand-neutral-black/70">Total</th>
-            </tr>
-          </thead>
-          <tbody>
-            {categories.map((category) => {
-              const isNotApplicable = !(category in maxes);
-              return (
-                <tr key={category} className="border-t border-black/5">
-                  <td className="px-3 py-2 text-brand-neutral-black">{category}</td>
-                  <td className="px-3 py-2 text-right font-semibold text-brand-neutral-black">
-                    {isNotApplicable ? (
-                      <span className="font-medium italic text-brand-neutral-black/50">Not applicable</span>
-                    ) : (
-                      `${totals[category] ?? 0} / ${maxes[category]}`
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-    </div>
+    <HorizontalBarChart
+      bars={categories.map((category) => ({
+        label: category,
+        value: totals[category] ?? 0,
+        max: maxes[category] ?? 0,
+      }))}
+    />
   );
 }

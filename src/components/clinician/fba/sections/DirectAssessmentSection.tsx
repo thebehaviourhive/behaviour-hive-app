@@ -4,7 +4,7 @@ import { useEffect, useMemo } from "react";
 import { format } from "date-fns";
 import { useAbcLogs } from "@/hooks/useAbcLogs";
 import { useDailyPatterns } from "@/hooks/useDailyPatterns";
-import { countByFunction, tallyAntecedents, tallyConsequences } from "@/lib/fba/abcAnalysis";
+import { countByFunction, tallyAntecedents, tallyBehaviours, tallyConsequences } from "@/lib/fba/abcAnalysis";
 import { NarrativeField } from "../NarrativeField";
 import { InlineErrorState } from "@/components/ui/InlineErrorState";
 import { HorizontalBarChart } from "../charts/HorizontalBarChart";
@@ -69,6 +69,7 @@ export function DirectAssessmentSection({
 
   const functionBars = countByFunction(filteredLogs, tags);
   const antecedentTally = tallyAntecedents(filteredLogs);
+  const behaviourTally = tallyBehaviours(filteredLogs);
   const consequenceTally = tallyConsequences(filteredLogs);
   const taggedCount = filteredLogs.filter((log) => tags[log.id]).length;
 
@@ -154,9 +155,15 @@ export function DirectAssessmentSection({
               <HorizontalBarChart bars={functionBars} />
             </div>
 
+            {/* Clinical convention: Antecedent -> Behaviour -> Consequence. */}
             <div className="mb-4 rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
               <p className="mb-3 text-sm font-bold text-brand-neutral-black">Antecedents</p>
               <PieChart data={antecedentTally} />
+            </div>
+
+            <div className="mb-4 rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
+              <p className="mb-3 text-sm font-bold text-brand-neutral-black">Behaviours</p>
+              <PieChart data={behaviourTally} />
             </div>
 
             <div className="mb-4 rounded-2xl border border-black/5 bg-white p-4 shadow-sm">

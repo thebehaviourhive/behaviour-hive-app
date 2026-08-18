@@ -59,6 +59,10 @@ export function tallyAntecedents(logs: AbcLogSummary[]): { label: string; count:
   return tallyCategorical(logs.map((l) => l.antecedents));
 }
 
+export function tallyBehaviours(logs: AbcLogSummary[]): { label: string; count: number }[] {
+  return tallyCategorical(logs.map((l) => l.behaviours));
+}
+
 export function tallyConsequences(logs: AbcLogSummary[]): { label: string; count: number }[] {
   return tallyCategorical(logs.map((l) => l.consequences));
 }

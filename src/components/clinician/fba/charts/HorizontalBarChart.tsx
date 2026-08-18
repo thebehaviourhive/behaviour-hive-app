@@ -21,7 +21,28 @@ export function HorizontalBarChart({
   return (
     <div className="flex flex-col gap-3">
       {bars.map((bar) => {
-        const pct = bar.max > 0 ? Math.min(100, Math.round((bar.value / bar.max) * 100)) : 0;
+        // max <= 0 means there's no valid denominator at all (e.g. the
+        // QABF category where every item was marked excluded/"X") --
+        // rendering a 0%-width bar here would read as a false "scored
+        // zero" claim, so this renders as an inert "Not applicable" row
+        // instead: label, no bar track, no value/max text. This is the
+        // one state a caller can't express via `valueLabel` (which only
+        // reformats a real value), so it's handled unconditionally here
+        // rather than left for every caller to remember.
+        if (bar.max <= 0) {
+          return (
+            <div key={bar.label}>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-sm font-medium text-brand-neutral-black">{bar.label}</span>
+                <span className="flex-shrink-0 text-sm font-medium italic text-brand-neutral-black/50">
+                  Not applicable
+                </span>
+              </div>
+            </div>
+          );
+        }
+
+        const pct = Math.min(100, Math.round((bar.value / bar.max) * 100));
         return (
           <div key={bar.label}>
             <div className="mb-1 flex items-center justify-between gap-2">
