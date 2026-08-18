@@ -49,7 +49,7 @@ interface ABCLogRow {
 }
 
 type IntensityFilter = "all" | "mild" | "moderate" | "severe";
-type ReporterFilter = "all" | "parent" | "class_teacher" | "clinician";
+type ReporterFilter = "all" | "parent" | "class_teacher" | "clinician" | "sna";
 
 function truncate(text: string, max = 30): string {
   return text.length > max ? `${text.slice(0, max)}…` : text;
@@ -235,6 +235,11 @@ export function ABCTimeline({ passportId, viewerRole, highlightLogId }: ABCTimel
           isActive={reporterFilter === "clinician"}
           onClick={() => setReporterFilter("clinician")}
         />
+        <FilterPill
+          label="SNA"
+          isActive={reporterFilter === "sna"}
+          onClick={() => setReporterFilter("sna")}
+        />
       </div>
 
       {filteredLogs.length === 0 ? (
@@ -270,12 +275,14 @@ function ABCLogCard({
   cardRef?: Ref<HTMLDivElement>;
 }) {
   const badge = getIntensityBadge(log.intensity);
-  // Governance change: a teacher's visible set is now only their own
-  // logs plus ones explicitly shared with them via an incident message
-  // -- so for a teacher viewer, any row NOT logged by a teacher is, by
-  // construction, a shared one. Labelled subtly (not a status pill like
-  // intensity) so it reads as provenance, not as an alert.
-  const isSharedWithTeacher = viewerRole === "class_teacher" && log.loggedByRole !== "class_teacher";
+  // Governance change: a teacher's (and, per the same rule, an SNA's)
+  // visible set is now only their own logs plus ones explicitly shared
+  // with them via an incident message -- so for either viewer, any row
+  // NOT logged by that same role is, by construction, a shared one.
+  // Labelled subtly (not a status pill like intensity) so it reads as
+  // provenance, not as an alert.
+  const isSharedWithTeacher =
+    (viewerRole === "class_teacher" || viewerRole === "sna") && log.loggedByRole !== viewerRole;
 
   return (
     <div

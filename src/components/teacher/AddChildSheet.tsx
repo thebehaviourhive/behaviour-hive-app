@@ -14,6 +14,14 @@ export function AddChildSheet({
   institutionId,
   institutionCode,
   onAdded,
+  // Phase 1's passport_access self-link/reactivate policies (migration
+  // 0065) require actor_role = current_user_role() -- the column
+  // defaults to 'class_teacher', which is exactly right for every
+  // existing call site of this component and needs no change there.
+  // SNA call sites pass 'sna' explicitly; without it, an SNA's insert
+  // would default to 'class_teacher' and fail that check (fails closed,
+  // not open -- see 0065's own §12 comment).
+  actorRole = "class_teacher",
 }: {
   isOpen: boolean;
   onClose: () => void;
@@ -22,6 +30,7 @@ export function AddChildSheet({
   institutionId: string;
   institutionCode: string | null;
   onAdded: () => void;
+  actorRole?: "class_teacher" | "sna";
 }) {
   const [passportCode, setPassportCode] = useState("");
   const [isSaving, setIsSaving] = useState(false);
@@ -119,6 +128,7 @@ export function AddChildSheet({
           teacher_id: teacherId,
           institution_id: institutionId,
           is_active: true,
+          actor_role: actorRole,
         });
 
     setIsSaving(false);

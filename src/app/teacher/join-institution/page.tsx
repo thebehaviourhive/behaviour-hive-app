@@ -8,13 +8,13 @@ import { TextField } from "@/components/ui/TextField";
 import { createClient } from "@/lib/supabase/client";
 import { useRequireRole } from "@/hooks/useRequireRole";
 
-// School staff dashboard, by role -- the one place this destination
-// lives, so the "already joined" resume check and the post-join
-// routing below can never drift apart. class_teacher's destination is
-// the pre-existing one, byte-identical; sna's is new (Phase 3 builds
-// its real content -- see src/app/sna/dashboard/page.tsx).
+// School staff home, by role -- the one place this destination lives,
+// so the "already joined" resume check and the post-join routing below
+// can never drift apart. class_teacher's destination is the
+// pre-existing one, byte-identical; sna's is the Phase 3 Passports home
+// (src/app/sna/passports/page.tsx).
 function getStaffDashboardDestination(role: string | undefined): string {
-  return role === "sna" ? "/sna/dashboard" : "/teacher/dashboard";
+  return role === "sna" ? "/sna/passports" : "/teacher/dashboard";
 }
 
 export default function TeacherJoinInstitutionPage() {

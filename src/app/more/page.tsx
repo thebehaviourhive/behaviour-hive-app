@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/Button";
 import { BottomNav } from "@/components/ui/BottomNav";
 import { TeacherBottomNav } from "@/components/teacher/TeacherBottomNav";
 import { ClinicianBottomNav } from "@/components/clinician/ClinicianBottomNav";
+import { SnaBottomNav } from "@/components/sna/SnaBottomNav";
 import { TrendUpIcon } from "@/components/ui/icons";
 import { getChildFirstName } from "@/lib/childDisplayName";
 import { useRegions } from "@/hooks/useRegions";
@@ -64,10 +65,19 @@ export default function MorePage() {
           setReviewCadenceDays(clinician.review_cadence_days);
           setOperatingCounties(clinician.operating_counties ?? []);
         }
-      } else if (!userRole || (userRole !== "class_teacher" && userRole !== "clinician")) {
+      } else if (userRole === "parent") {
         // Parent (the only track this More page adds a Progress entry
         // for) -- needed just for the tile label, matching the quick-
         // actions grid's own "[Child]'s Progress" wording.
+        //
+        // FIX: this used to be a negative catch-all
+        // (`!userRole || (userRole !== "class_teacher" && userRole !==
+        // "clinician")`) rather than an explicit "role === parent"
+        // check -- harmless while parent was genuinely the only other
+        // track, but it silently misclassified SNA (and would
+        // misclassify any future role) as parent-like, running a
+        // pointless `passports` query scoped to `user_id = auth.uid()`
+        // that can never match an SNA's own row.
         const { data: passport } = await supabase
           .from("passports")
           .select("child_name")
@@ -214,7 +224,12 @@ export default function MorePage() {
           </section>
         )}
 
-        {role !== "clinician" && role !== "class_teacher" && (
+        {/* FIX: was `role !== "clinician" && role !== "class_teacher"` --
+            the same negative-catch-all bug as above, which would have
+            rendered this parent-only "[Child]'s Progress" tile (linking
+            to /passport/progress, a useRequireRole("parent")-gated page)
+            for an SNA viewer too, sending them into a redirect bounce. */}
+        {role === "parent" && (
           <section>
             <button
               type="button"
@@ -288,10 +303,16 @@ export default function MorePage() {
         </div>
       </BottomSheet>
 
+      {/* FIX: sna previously fell through to the generic parent
+          <BottomNav /> (Home/Passport/More, none of which resolve
+          correctly for an SNA) since this was an if/else chain with no
+          sna branch at all. */}
       {role === "class_teacher" ? (
         <TeacherBottomNav />
       ) : role === "clinician" ? (
         <ClinicianBottomNav />
+      ) : role === "sna" ? (
+        <SnaBottomNav />
       ) : (
         <BottomNav />
       )}

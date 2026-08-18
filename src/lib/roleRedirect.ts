@@ -5,7 +5,7 @@ export function getPostAuthRedirect(role: string | null | undefined): string {
     case "class_teacher":
       return "/teacher/dashboard";
     case "sna":
-      return "/sna/dashboard";
+      return "/sna/passports";
     case "clinician":
       return "/clinician/dashboard";
     default:

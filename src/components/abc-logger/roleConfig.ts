@@ -4,7 +4,7 @@
 //
 // Everything that reads from these (ABCLogger's step content, ABCTimeline's
 // footer/reporter-filter labels) picks up a new entry automatically.
-export type ABCLoggerRole = "parent" | "class_teacher" | "clinician";
+export type ABCLoggerRole = "parent" | "class_teacher" | "clinician" | "sna";
 
 export interface ABCChipStepConfig {
   label: string;
@@ -109,6 +109,49 @@ export const ABC_ROLE_CONFIG: Record<ABCLoggerRole, ABCRoleConfig> = {
       label: "Why do you think this happened? (optional)",
     },
   },
+  // SNA reuses the class_teacher config verbatim -- same non-clinical,
+  // school-context wording, same "extend, don't fork" reasoning applied
+  // to onboarding/consent copy also applies here.
+  sna: {
+    intensityLabel: "Intensity Level",
+    antecedent: {
+      label: "Antecedent (Trigger)",
+      helper: "What was the immediate context or setting event in the classroom?",
+      options: [
+        "Task demand placed",
+        "Transition to new activity",
+        "Denied access to item or activity",
+        "Sensory overload",
+        "Other",
+      ],
+    },
+    behaviour: {
+      label: "Observable Behaviour",
+      helper: "Select the objective, measurable actions observed.",
+      options: [
+        "Physical aggression",
+        "Elopement (leaving area)",
+        "Vocal outburst",
+        "Property destruction",
+        "Other",
+      ],
+    },
+    consequence: {
+      label: "Consequence (Outcome)",
+      helper: "What was the immediate response or environmental change?",
+      options: [
+        "Task removed or delayed",
+        "1:1 attention given",
+        "Planned ignoring",
+        "Access to tangible provided",
+        "Other",
+      ],
+    },
+    step4Extra: {
+      type: "perceivedFunction",
+      label: "Why do you think this happened? (optional)",
+    },
+  },
   clinician: {
     intensityLabel: "Intensity Level",
     antecedent: {
@@ -157,4 +200,5 @@ export const ABC_ROLE_DISPLAY_LABEL: Record<ABCLoggerRole, string> = {
   parent: "Parent",
   class_teacher: "Teacher",
   clinician: "Clinician",
+  sna: "SNA",
 };
