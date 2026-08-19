@@ -28,6 +28,7 @@ import { useMessageRecipientCandidates } from "@/hooks/useMessageRecipientCandid
 import { useMessageCategories } from "@/hooks/useMessageCategories";
 import { fetchApprovedInstitutionPhone } from "@/lib/messages/institutionPhone";
 import { ComposeMessageSheet } from "@/components/messages/ComposeMessageSheet";
+import { IMPORTANT_PEOPLE_TITLE } from "@/lib/passportCopy";
 
 interface ApprovedInstitution {
   institutionId: string;
@@ -903,7 +904,7 @@ export default function PassportDashboardPage() {
                 {summary.importantPeople && (
                   <div>
                     <h3 className="font-accent text-xs font-bold uppercase tracking-[0.1em] text-brand-neutral-black/60">
-                      Important People
+                      {IMPORTANT_PEOPLE_TITLE}
                     </h3>
                     <p className="mt-1 text-sm text-brand-neutral-black">{summary.importantPeople}</p>
                   </div>

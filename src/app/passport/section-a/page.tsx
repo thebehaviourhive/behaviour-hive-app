@@ -11,6 +11,7 @@ import { createClient } from "@/lib/supabase/client";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { useRegions } from "@/hooks/useRegions";
 import { getPassportProgressPercent } from "@/lib/passportProgress";
+import { IMPORTANT_PEOPLE_TITLE } from "@/lib/passportCopy";
 
 const DIAGNOSIS_OPTIONS: { value: string }[] = [
   { value: "ADHD (Attention Deficit Hyperactivity Disorder)" },
@@ -220,7 +221,7 @@ export default function PassportSectionAPage() {
 
             <div className="flex flex-col gap-1.5">
               <TextField
-                label="Important people in my life"
+                label={IMPORTANT_PEOPLE_TITLE}
                 type="text"
                 placeholder="Mum, Dad, Gran, Ms. O'Brien"
                 value={importantPeople}
