@@ -56,13 +56,19 @@ function DomainCard({
   domainName,
   items,
   scores,
+  comment,
   onScoreTap,
+  onCommentChange,
+  onCommentBlur,
 }: {
   domainCode: string;
   domainName: string;
   items: InstrumentItem[];
   scores: AflsScores;
+  comment: string;
   onScoreTap: (taskCode: string, value: AflsTaskScore) => void;
+  onCommentChange: (domainCode: string, value: string) => void;
+  onCommentBlur: () => void;
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const scoredCount = items.filter((item) => scores[item.id] !== undefined).length;
@@ -133,6 +139,31 @@ function DomainCard({
               </div>
             );
           })}
+
+          {/* CHANGE 3 (2026-08-21): per-domain clinician comment, at
+              the END of the domain's own section -- placed here (the
+              editable transcription view) rather than only in the
+              read-only results grid, since this is where the
+              clinician actually reviews a domain once they've
+              finished scoring it. Follows this file's own established
+              autosave convention: local draft state lifted to the
+              parent (draftComments/draftCommentsRef, mirroring
+              draftScores), save fired on blur through the same
+              queueSave chain scores/assessor already use, status
+              reflected by the single shared InlineSaveStatus above. */}
+          <div className="px-3.5 py-3">
+            <label className="mb-1 block text-xs font-semibold text-brand-neutral-black">
+              Comments on {domainName}
+            </label>
+            <textarea
+              rows={3}
+              value={comment}
+              onChange={(e) => onCommentChange(domainCode, e.target.value)}
+              onBlur={() => onCommentBlur()}
+              placeholder="Add any clinical notes for this domain…"
+              className="w-full rounded-xl border border-black/10 bg-white px-3 py-2 text-sm text-brand-neutral-black focus:border-brand-prussian-blue focus:outline-none focus:ring-2 focus:ring-brand-pastel-blue"
+            />
+          </div>
         </div>
       )}
     </div>
@@ -145,6 +176,7 @@ export function AflsSection({ fbaId }: { fbaId: string }) {
     useAflsAssessmentsForFba(fbaId);
   const [openAssessmentId, setOpenAssessmentId] = useState<string | null>(null);
   const [draftScores, setDraftScores] = useState<AflsScores>({});
+  const [draftComments, setDraftComments] = useState<Record<string, string>>({});
   const [draftDate, setDraftDate] = useState("");
   const [draftAssessor, setDraftAssessor] = useState("");
   const [status, setStatus] = useState<InlineStatus>("idle");
@@ -166,6 +198,7 @@ export function AflsSection({ fbaId }: { fbaId: string }) {
   // updates aren't visible to same-tick closures) -- see handleScoreTap.
   const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
   const draftScoresRef = useRef<AflsScores>({});
+  const draftCommentsRef = useRef<Record<string, string>>({});
 
   const openAssessment = openAssessmentId ? assessments.find((a) => a.id === openAssessmentId) ?? null : null;
 
@@ -173,6 +206,8 @@ export function AflsSection({ fbaId }: { fbaId: string }) {
     setOpenAssessmentId(assessment.id);
     setDraftScores(assessment.scores);
     draftScoresRef.current = assessment.scores;
+    setDraftComments(assessment.domainComments ?? {});
+    draftCommentsRef.current = assessment.domainComments ?? {};
     setDraftDate(assessment.assessmentDate);
     setDraftAssessor(assessment.assessorName);
     setStatus("idle");
@@ -184,7 +219,12 @@ export function AflsSection({ fbaId }: { fbaId: string }) {
   // starts running, so it always sees the truly-latest draft state.
   function queueSave(
     assessmentId: string,
-    buildPatch: () => Partial<{ assessmentDate: string; assessorName: string; scores: AflsScores }>
+    buildPatch: () => Partial<{
+      assessmentDate: string;
+      assessorName: string;
+      scores: AflsScores;
+      domainComments: Record<string, string>;
+    }>
   ) {
     const token = ++saveTokenRef.current;
     setStatus("saving");
@@ -220,6 +260,23 @@ export function AflsSection({ fbaId }: { fbaId: string }) {
     const id = openAssessmentId;
     const assessorName = draftAssessor;
     queueSave(id, () => ({ assessorName }));
+  }
+
+  // Draft state updates synchronously (same reasoning as
+  // handleScoreTap's own comment on draftScoresRef) so a fast blur
+  // right after typing never races a save that read a stale value.
+  // Save itself is blur-triggered, not per-keystroke -- matches
+  // handleAssessorBlur exactly, just keyed per domain.
+  function handleCommentChange(domainCode: string, value: string) {
+    const next = { ...draftCommentsRef.current, [domainCode]: value };
+    draftCommentsRef.current = next;
+    setDraftComments(next);
+  }
+
+  function handleCommentBlur() {
+    if (!openAssessmentId) return;
+    const id = openAssessmentId;
+    queueSave(id, () => ({ domainComments: draftCommentsRef.current }));
   }
 
   // Fetched fresh at creation time, not speculatively on mount --
@@ -330,7 +387,10 @@ export function AflsSection({ fbaId }: { fbaId: string }) {
               domainName={domain.name}
               items={itemsByDomain[domain.code] ?? []}
               scores={draftScores}
+              comment={draftComments[domain.code] ?? ""}
               onScoreTap={handleScoreTap}
+              onCommentChange={handleCommentChange}
+              onCommentBlur={handleCommentBlur}
             />
           ))}
         </div>

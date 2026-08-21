@@ -10,6 +10,7 @@ interface AflsAssessmentRow {
   assessment_date: string;
   assessor_name: string;
   scores: AflsScores;
+  domain_comments: Record<string, string>;
   created_at: string;
   updated_at: string;
 }
@@ -21,6 +22,7 @@ function mapRow(row: AflsAssessmentRow): AflsAssessment {
     assessmentDate: row.assessment_date,
     assessorName: row.assessor_name,
     scores: row.scores ?? {},
+    domainComments: row.domain_comments ?? {},
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -84,13 +86,19 @@ export function useAflsAssessmentsForFba(fbaId: string) {
 
   async function updateAssessment(
     id: string,
-    patch: Partial<{ assessmentDate: string; assessorName: string; scores: AflsScores }>
+    patch: Partial<{
+      assessmentDate: string;
+      assessorName: string;
+      scores: AflsScores;
+      domainComments: Record<string, string>;
+    }>
   ): Promise<AflsAssessment> {
     const supabase = createClient();
     const dbPatch: Record<string, unknown> = {};
     if (patch.assessmentDate !== undefined) dbPatch.assessment_date = patch.assessmentDate;
     if (patch.assessorName !== undefined) dbPatch.assessor_name = patch.assessorName;
     if (patch.scores !== undefined) dbPatch.scores = patch.scores;
+    if (patch.domainComments !== undefined) dbPatch.domain_comments = patch.domainComments;
 
     const { data, error } = await supabase
       .from("afls_assessments")

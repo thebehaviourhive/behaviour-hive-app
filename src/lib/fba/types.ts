@@ -187,6 +187,12 @@ export interface AflsAssessment {
   assessmentDate: string;
   assessorName: string;
   scores: AflsScores;
+  // CHANGE 3 (2026-08-21, migration 0066): free-text clinician
+  // narrative per domain, keyed by AFLS domain CODE (e.g. "SM") --
+  // same keying convention as `scores`' task codes. A missing key
+  // means no comment recorded for that domain, same "absent = not yet
+  // touched" convention as an unscored task.
+  domainComments: Record<string, string>;
   createdAt: string;
   updatedAt: string;
 }

@@ -109,6 +109,7 @@ function AflsDomainCard({
   domainName,
   items,
   scores,
+  comment,
   isPrint,
   onCellTap,
 }: {
@@ -116,6 +117,7 @@ function AflsDomainCard({
   domainName: string;
   items: InstrumentItem[];
   scores: Record<string, AflsTaskScore>;
+  comment: string;
   isPrint: boolean;
   onCellTap: (item: InstrumentItem) => void;
 }) {
@@ -137,6 +139,18 @@ function AflsDomainCard({
           <AflsCell key={item.id} item={item} score={scores[item.id]} onTap={() => onCellTap(item)} />
         ))}
       </div>
+      {/* CHANGE 3 (2026-08-21): the clinical narrative parents/print
+          actually read, same posture as every other FBA narrative
+          field on this reader -- rendered only when there's something
+          to show, never an empty "Comments" heading. */}
+      {comment.trim() && (
+        <div className="mt-3 border-t border-black/10 pt-2.5 print:border-black/20">
+          <p className="text-xs font-semibold text-brand-neutral-black/60 print:text-black">
+            Comments on {domainName}
+          </p>
+          <p className="mt-1 whitespace-pre-wrap text-sm text-brand-neutral-black print:text-black">{comment}</p>
+        </div>
+      )}
     </div>
   );
 }
@@ -209,6 +223,7 @@ export function AflsResultsGrid({ assessments, isPrint = false }: { assessments:
             domainName={domain.name}
             items={itemsByDomain[domain.code] ?? []}
             scores={assessment.scores}
+            comment={assessment.domainComments?.[domain.code] ?? ""}
             isPrint={isPrint}
             onCellTap={(item) => setSelectedCell({ item, score: assessment.scores[item.id] })}
           />
