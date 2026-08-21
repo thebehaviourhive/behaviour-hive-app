@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type Ref } from "react";
+import { ChevronDown } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { ABC_ROLE_DISPLAY_LABEL, type ABCLoggerRole } from "./roleConfig";
 import { loadDraft } from "./draftStorage";
@@ -21,6 +22,7 @@ interface RawAbcLogRow {
   logged_by_role: string;
   incident_date: string;
   incident_time: string;
+  duration_minutes: number | null;
   intensity: number;
   antecedents: string[] | null;
   antecedent_other: string | null;
@@ -28,6 +30,13 @@ interface RawAbcLogRow {
   behaviour_other: string | null;
   consequences: string[] | null;
   consequence_other: string | null;
+  // Already role-gated server-side by get_abc_logs() itself (SQL CASE:
+  // null unless the caller is a verified, actively-linked clinician) --
+  // this component's job is only to render whatever comes back, never
+  // to re-derive who's "allowed" to see it. clinical_notes isn't in
+  // this list at all because the RPC never selects it for any caller.
+  perceived_function: string | null;
+  general_notes: string | null;
   sync_status: string | null;
 }
 
@@ -37,6 +46,7 @@ interface ABCLogRow {
   loggedByRole: ABCLoggerRole;
   incidentDate: string;
   incidentTime: string;
+  durationMinutes: number | null;
   intensity: number;
   antecedents: string[];
   antecedentOther: string | null;
@@ -44,6 +54,8 @@ interface ABCLogRow {
   behaviourOther: string | null;
   consequences: string[];
   consequenceOther: string | null;
+  perceivedFunction: string | null;
+  generalNotes: string | null;
   syncStatus: "synced" | "pending";
   isLocalOnly: boolean;
 }
@@ -60,6 +72,14 @@ function formatChain(items: string[], otherText: string | null): string {
   const first = items[0] === "Other" && otherText ? otherText : items[0];
   const label = truncate(first);
   return items.length > 1 ? `${label} +${items.length - 1} more` : label;
+}
+
+// Expanded-detail counterpart to formatChain -- every item spelled out
+// in full, no truncation, matching AbcIncidentCard's own formatList
+// (the pattern being generalised here).
+function formatList(items: string[], otherText: string | null): string {
+  if (items.length === 0) return "—";
+  return items.map((item) => (item === "Other" && otherText ? otherText : item)).join(", ");
 }
 
 function getIntensityBadge(intensity: number): {
@@ -115,6 +135,7 @@ export function ABCTimeline({ passportId, viewerRole, highlightLogId }: ABCTimel
         loggedByRole: row.logged_by_role as ABCLoggerRole,
         incidentDate: row.incident_date,
         incidentTime: row.incident_time,
+        durationMinutes: row.duration_minutes,
         intensity: row.intensity,
         antecedents: row.antecedents ?? [],
         antecedentOther: row.antecedent_other,
@@ -122,6 +143,8 @@ export function ABCTimeline({ passportId, viewerRole, highlightLogId }: ABCTimel
         behaviourOther: row.behaviour_other,
         consequences: row.consequences ?? [],
         consequenceOther: row.consequence_other,
+        perceivedFunction: row.perceived_function,
+        generalNotes: row.general_notes,
         syncStatus: (row.sync_status as "synced" | "pending") ?? "synced",
         isLocalOnly: false,
       }));
@@ -138,6 +161,7 @@ export function ABCTimeline({ passportId, viewerRole, highlightLogId }: ABCTimel
           loggedByRole: localDraft.role,
           incidentDate: localDraft.incidentDate,
           incidentTime: localDraft.incidentTime,
+          durationMinutes: localDraft.durationMinutes ? Number(localDraft.durationMinutes) : null,
           intensity: localDraft.intensity ?? 1,
           antecedents: localDraft.antecedents,
           antecedentOther: localDraft.antecedentOther || null,
@@ -145,6 +169,13 @@ export function ABCTimeline({ passportId, viewerRole, highlightLogId }: ABCTimel
           behaviourOther: localDraft.behaviourOther || null,
           consequences: localDraft.consequences,
           consequenceOther: localDraft.consequenceOther || null,
+          // A pending local draft is always the current device's own
+          // not-yet-synced entry -- perceivedFunction reflects whatever
+          // this same viewer already typed for it (no role gate needed
+          // here the way get_abc_logs()'s SQL CASE applies server-side;
+          // it's this person's own in-progress draft either way).
+          perceivedFunction: localDraft.perceivedFunction,
+          generalNotes: localDraft.generalNotes || null,
           syncStatus: "pending",
           isLocalOnly: true,
         });
@@ -274,6 +305,13 @@ function ABCLogCard({
   isHighlighted?: boolean;
   cardRef?: Ref<HTMLDivElement>;
 }) {
+  // Generalised from AbcIncidentCard (the FBA workspace's clinician-only
+  // card, which already had this) rather than forked per track -- one
+  // expand/collapse implementation, shared by every viewerRole. A
+  // deep-linked card (Messages' "View log", or a highlighted deep link
+  // more generally) opens pre-expanded, since the whole point of that
+  // link is to show the detail, not just confirm the card exists.
+  const [isExpanded, setIsExpanded] = useState(Boolean(isHighlighted));
   const badge = getIntensityBadge(log.intensity);
   // Governance change: a teacher's (and, per the same rule, an SNA's)
   // visible set is now only their own logs plus ones explicitly shared
@@ -291,7 +329,11 @@ function ABCLogCard({
         isHighlighted ? "border-brand-golden-brown ring-2 ring-brand-golden-brown/40" : "border-black/5"
       }`}
     >
-      <div className="flex items-center justify-between gap-2">
+      <button
+        type="button"
+        onClick={() => setIsExpanded((prev) => !prev)}
+        className="flex w-full items-center justify-between gap-2 text-left"
+      >
         <p className="text-sm font-semibold text-brand-neutral-black">
           {formatDateTime(log.incidentDate, log.incidentTime)}
         </p>
@@ -306,8 +348,11 @@ function ABCLogCard({
           >
             {badge.label}
           </span>
+          <ChevronDown
+            className={`h-4 w-4 flex-shrink-0 text-brand-neutral-black/30 transition-transform ${isExpanded ? "rotate-180" : ""}`}
+          />
         </div>
-      </div>
+      </button>
 
       <p className="mt-2 text-sm text-brand-neutral-black/80">
         {formatChain(log.antecedents, log.antecedentOther)}
@@ -316,6 +361,31 @@ function ABCLogCard({
         {" → "}
         {formatChain(log.consequences, log.consequenceOther)}
       </p>
+
+      {isExpanded && (
+        // Full detail, exactly what this viewer's own get_abc_logs()
+        // response already contains for this row -- nothing re-fetched,
+        // nothing re-gated here. perceivedFunction is already null in
+        // the payload itself for a non-clinician viewer (the RPC's own
+        // SQL CASE), so it's structurally absent for teacher/SNA/parent,
+        // not hidden by a role check in this component; clinical_notes
+        // was never selected by the RPC for anyone, so there's no field
+        // to accidentally render at all.
+        <div className="mt-3 flex flex-col gap-2 border-t border-black/5 pt-3 text-sm">
+          <DetailRow label="Antecedent" value={formatList(log.antecedents, log.antecedentOther)} />
+          <DetailRow label="Behaviour" value={formatList(log.behaviours, log.behaviourOther)} />
+          <DetailRow label="Consequence" value={formatList(log.consequences, log.consequenceOther)} />
+          <DetailRow label="Intensity" value={`${log.intensity} / 5`} />
+          <DetailRow
+            label="Duration"
+            value={log.durationMinutes ? `${log.durationMinutes} min` : "Not recorded"}
+          />
+          {log.perceivedFunction && (
+            <DetailRow label="Perceived function (at time of logging)" value={log.perceivedFunction} />
+          )}
+          {log.generalNotes && <DetailRow label="Notes" value={log.generalNotes} />}
+        </div>
+      )}
 
       <div className="mt-3 flex items-center justify-between gap-2">
         <p className="font-accent text-xs text-brand-neutral-black/60">
@@ -328,6 +398,15 @@ function ABCLogCard({
           </span>
         )}
       </div>
+    </div>
+  );
+}
+
+function DetailRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <p className="text-xs font-semibold text-brand-neutral-black/50">{label}</p>
+      <p className="text-brand-neutral-black">{value}</p>
     </div>
   );
 }
