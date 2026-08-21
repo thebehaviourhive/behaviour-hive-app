@@ -5,37 +5,14 @@ import { useEffect, useState, type FormEvent } from "react";
 import { BrandMark } from "@/components/ui/BrandMark";
 import { Button } from "@/components/ui/Button";
 import { TextField } from "@/components/ui/TextField";
-import { PillMultiSelect } from "@/components/ui/PillMultiSelect";
 import { PassportProgress } from "@/components/ui/PassportProgress";
+import { DiagnosisSelect } from "@/components/passport/DiagnosisSelect";
 import { createClient } from "@/lib/supabase/client";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { useRegions } from "@/hooks/useRegions";
 import { getPassportProgressPercent } from "@/lib/passportProgress";
 import { IMPORTANT_PEOPLE_TITLE } from "@/lib/passportCopy";
-
-const DIAGNOSIS_OPTIONS: { value: string }[] = [
-  { value: "ADHD (Attention Deficit Hyperactivity Disorder)" },
-  { value: "Anxiety" },
-  { value: "ASD (Autism Spectrum Disorder)" },
-  { value: "Apraxia" },
-  { value: "Autism" },
-  { value: "DLD (Developmental Language Disorder)" },
-  { value: "DMDD (Disruptive Mood Dysregulation Disorder)" },
-  { value: "Dyscalculia" },
-  { value: "Dysgraphia" },
-  { value: "Dyslexia" },
-  { value: "Dyspraxia" },
-  { value: "FASD (Foetal Alcohol Spectrum Disorder)" },
-  { value: "GDD (Global Developmental Delay)" },
-  { value: "Intellectual Disability" },
-  { value: "No Formal Diagnosis" },
-  { value: "ODD (Oppositional Defiant Disorder)" },
-  { value: "PDA (Pathological Demand Avoidance)" },
-  { value: "Physical Disability" },
-  { value: "SPD (Sensory Processing Disorder)" },
-  { value: "Tourette Syndrome" },
-  { value: "Other" },
-];
+import { DIAGNOSIS_OTHER } from "@/lib/diagnosisOptions";
 
 export default function PassportSectionAPage() {
   const router = useRouter();
@@ -115,7 +92,7 @@ export default function PassportSectionAPage() {
       school: school || null,
       important_people: importantPeople || null,
       diagnoses: diagnoses.length > 0 ? diagnoses : null,
-      diagnosis_other: diagnoses.includes("Other") ? diagnosisOther || null : null,
+      diagnosis_other: diagnoses.includes(DIAGNOSIS_OTHER) ? diagnosisOther || null : null,
       county_id: countyId || null,
       // Never downgrade an already-complete passport just because one
       // section was edited afterwards — only "upgrade" not_started/
@@ -237,22 +214,12 @@ export default function PassportSectionAPage() {
               <label className="text-sm font-semibold text-brand-neutral-black">
                 Diagnosis
               </label>
-              <PillMultiSelect
-                options={DIAGNOSIS_OPTIONS}
+              <DiagnosisSelect
                 selected={diagnoses}
                 onToggle={toggleDiagnosis}
+                otherValue={diagnosisOther}
+                onOtherChange={setDiagnosisOther}
               />
-
-              {diagnoses.includes("Other") && (
-                <TextField
-                  label="Please specify"
-                  type="text"
-                  placeholder="Diagnosis not listed above"
-                  value={diagnosisOther}
-                  onChange={(e) => setDiagnosisOther(e.target.value)}
-                  className="mt-1"
-                />
-              )}
             </div>
 
             <div className="flex flex-col gap-1.5">

@@ -695,8 +695,14 @@ export default function PassportDashboardPage() {
 
         {diagnosisPills.length > 0 ? (
           <>
+            {/* FIX: was "Diagnoses and neurotypes" -- read oddly once
+                Awaiting Diagnosis/No diagnosis became real selectable
+                values (a passport showing only "No diagnosis" under a
+                "Diagnoses" label reads as self-contradictory). This
+                label now covers a real diagnosis, a neurotype, or a
+                status equally naturally. */}
             <p className="mt-4 mb-2 font-accent text-xs font-bold uppercase tracking-widest text-brand-neutral-black/60">
-              Diagnoses and neurotypes
+              Diagnoses, neurotypes &amp; status
             </p>
             <div className="flex flex-wrap gap-2">
               {diagnosisPills.map((pill) => (
