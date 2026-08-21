@@ -19,14 +19,31 @@ export function cellStateFor(score: AflsTaskScore | undefined): AflsCellState {
   return "scored";
 }
 
-// 0..1, how "full" a scored cell's fill should read -- score 0 still
-// reports intensity 0 but is a DISTINCT state from "unscored" (a real,
-// recorded zero vs. nothing recorded at all), which the caller must
-// render differently (see AflsResultsGrid's off-white-with-outline vs.
-// dashed-transparent treatment).
-export function cellIntensity(score: number, maxScore: number): number {
-  if (maxScore <= 0) return 0;
-  return Math.min(Math.max(score / maxScore, 0), 1);
+// CHANGE 1 (2026-08-21): clinical traffic-light colour coding replaces
+// the old Prussian-intensity fill ramp entirely. Exact generic
+// colours, deliberately NOT brand tokens -- this is the clinical
+// result itself, not app chrome. Shared between AflsResultsGrid (cell
+// fills) and AflsResultsLegend (swatches) so the two can never drift
+// apart.
+export const AFLS_CELL_COLORS = {
+  na: "#FFDAB9",
+  zero: "#FF0000",
+  mid: "#90EE90",
+  max: "#006400",
+} as const;
+
+// A scored cell falls into exactly one of three discrete tiers
+// against its OWN max score (2 or 4) -- "zero" (failed the task
+// entirely), "max" (fully independent), or "mid" (everything between,
+// i.e. still needs some support/prompting). NA and unscored are their
+// own separate states (see cellStateFor above), never tiers of
+// "scored".
+export type AflsScoreTier = "zero" | "mid" | "max";
+
+export function cellTierFor(score: number, maxScore: number): AflsScoreTier {
+  if (score <= 0) return "zero";
+  if (maxScore > 0 && score >= maxScore) return "max";
+  return "mid";
 }
 
 export interface DomainPoints {

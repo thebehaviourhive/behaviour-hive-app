@@ -3,7 +3,15 @@
 import { useState } from "react";
 import { useAflsItemBank } from "@/hooks/useAflsItemBank";
 import { AFLS_DOMAINS } from "@/lib/fba/types";
-import { cellIntensity, cellStateFor, computeDomainPoints, formatDomainSummary, isAflsResultsEmpty } from "@/lib/fba/aflsResults";
+import {
+  AFLS_CELL_COLORS,
+  cellStateFor,
+  cellTierFor,
+  computeDomainPoints,
+  formatDomainSummary,
+  isAflsResultsEmpty,
+  type AflsScoreTier,
+} from "@/lib/fba/aflsResults";
 import { InlineErrorState } from "@/components/ui/InlineErrorState";
 import { FbaNote } from "../FbaNote";
 import { BottomSheet } from "@/components/ui/BottomSheet";
@@ -17,28 +25,37 @@ import type { AflsAssessment, AflsTaskScore, InstrumentItem } from "@/lib/fba/ty
 // one shared component for both, `isPrint` only changing layout/
 // interactivity, exactly the same 375px-first posture the rest of this
 // module already uses (see FbaSectionsReadOnly's own isPrint prop).
-function selectedCellClasses(state: ReturnType<typeof cellStateFor>, intensity: number): { style?: React.CSSProperties; className: string } {
+// CHANGE 1 (2026-08-21): text colour is chosen per swatch for
+// legibility, never by tempering the four specified hexes themselves.
+// White on dark green measures ~7.4:1 contrast; black everywhere else,
+// INCLUDING on the red -- black-on-#FF0000 measures ~5.3:1 (clears
+// WCAG AA's 4.5:1 for this cell's small bold text), where white-on-red
+// would only measure ~4.0:1, marginally short of AA. So red keeps its
+// exact hex and just gets black text instead.
+function selectedCellClasses(
+  state: ReturnType<typeof cellStateFor>,
+  tier: AflsScoreTier | null
+): { style?: React.CSSProperties; className: string } {
   if (state === "unscored") {
     return { className: "border border-dashed border-black/25 bg-transparent text-brand-neutral-black/40" };
   }
   if (state === "na") {
-    return {
-      className: "border border-black/20 text-brand-neutral-black/70",
-      style: {
-        backgroundImage:
-          "repeating-linear-gradient(45deg, rgba(34,34,35,0.28) 0, rgba(34,34,35,0.28) 1.5px, transparent 1.5px, transparent 5px)",
-      },
-    };
+    return { className: "border border-black/10 text-black", style: { backgroundColor: AFLS_CELL_COLORS.na } };
   }
-  // Scored, including a real zero: off-white outline at zero, ramping
-  // to full Prussian Blue at max -- text flips to white once the fill
-  // is dark enough to need it, never colour alone (score 0 keeps a
-  // solid border, distinct from unscored's dashed-transparent).
-  const bg = intensity === 0 ? "rgba(229, 225, 230, 1)" : `rgba(0, 79, 113, ${intensity})`;
-  return {
-    className: `border border-black/10 ${intensity > 0.55 ? "text-white" : "text-brand-neutral-black"}`,
-    style: { backgroundColor: bg },
-  };
+  // Scored: exactly one of three discrete traffic-light tiers, never a
+  // continuous ramp. "zero" and "max" are the two clinically
+  // load-bearing extremes (cannot do vs. independent) -- also why
+  // AflsCell layers a shape glyph on top of them: their grayscale luma
+  // (~0.30 vs ~0.23) sits close enough that colour alone isn't a safe
+  // distinguisher on a black-and-white print, where mixing up "fail"
+  // and "independent" would be a real clinical-reading error.
+  if (tier === "zero") {
+    return { className: "border border-black/10 text-black", style: { backgroundColor: AFLS_CELL_COLORS.zero } };
+  }
+  if (tier === "max") {
+    return { className: "border border-black/10 text-white", style: { backgroundColor: AFLS_CELL_COLORS.max } };
+  }
+  return { className: "border border-black/10 text-black", style: { backgroundColor: AFLS_CELL_COLORS.mid } };
 }
 
 function AflsCell({
@@ -51,8 +68,8 @@ function AflsCell({
   onTap: () => void;
 }) {
   const state = cellStateFor(score);
-  const intensity = state === "scored" ? cellIntensity(score as number, item.maxScore ?? 0) : 0;
-  const { className, style } = selectedCellClasses(state, intensity);
+  const tier = state === "scored" ? cellTierFor(score as number, item.maxScore ?? 0) : null;
+  const { className, style } = selectedCellClasses(state, tier);
   return (
     <button
       type="button"
@@ -60,10 +77,29 @@ function AflsCell({
       aria-label={`${item.id}: ${item.text} -- ${
         state === "unscored" ? "not yet scored" : state === "na" ? "N/A" : `${score}/${item.maxScore}`
       }`}
-      className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md text-[8.5px] font-bold leading-none transition-colors ${className}`}
+      className={`relative flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md text-[8.5px] font-bold leading-none transition-colors ${className}`}
       style={style}
     >
       {item.id}
+      {/* Shape glyph, redundant with colour -- see selectedCellClasses'
+          comment. aria-hidden since the button's own aria-label
+          already states the score/state in words. */}
+      {tier === "zero" && (
+        <span
+          aria-hidden="true"
+          className="absolute -right-1 -top-1 flex h-3 w-3 items-center justify-center rounded-full bg-white text-[7px] font-black leading-none text-red-700 ring-1 ring-black/10"
+        >
+          ✕
+        </span>
+      )}
+      {tier === "max" && (
+        <span
+          aria-hidden="true"
+          className="absolute -right-1 -top-1 flex h-3 w-3 items-center justify-center rounded-full bg-white text-[7px] font-black leading-none text-green-800 ring-1 ring-black/10"
+        >
+          ✓
+        </span>
+      )}
     </button>
   );
 }
@@ -159,7 +195,13 @@ export function AflsResultsGrid({ assessments, isPrint = false }: { assessments:
         </div>
       )}
 
-      <div className={`flex flex-col gap-3 ${isPrint ? "print:gap-2" : ""}`}>
+      {/* print-color-exact (globals.css): forces the four semantic
+          fills to actually survive print/PDF export -- without it,
+          most browsers strip background colours on print by default,
+          which would silently drop the clinical signal itself, not
+          just look worse. Declared once here since the property
+          inherits to every cell/badge underneath. */}
+      <div className={`print-color-exact flex flex-col gap-3 ${isPrint ? "print:gap-2" : ""}`}>
         {AFLS_DOMAINS.map((domain) => (
           <AflsDomainCard
             key={domain.code}

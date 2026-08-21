@@ -59,6 +59,21 @@ body {
   display: none;
 }
 
+/* AFLS results grid (Change 1, 2026-08-21): forces the browser to
+   actually print background colours instead of stripping them, which
+   is the default in most browsers unless the user has "print
+   background graphics" switched on. Declared outside @media print
+   since the property only takes effect while printing; it's an
+   inherited property, so one class on the grid's wrapper covers every
+   cell/badge inside it. Needed once the AFLS grid's fill became the
+   clinical signal itself (red/dark-green/etc), not decorative tinting
+   -- losing it on export would silently drop clinical meaning. */
+.print-color-exact {
+  -webkit-print-color-adjust: exact;
+  color-adjust: exact;
+  print-color-adjust: exact;
+}
+
 /* FBA PDF export (Part F) -- the print page reuses the same on-screen
    components and layout, then relies entirely on print media rules to
    turn it into a paginated A4 document. `.no-print` hides interactive/
