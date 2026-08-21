@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Baloo_2, Nunito_Sans, Quicksand } from "next/font/google";
 import { Analytics } from "@vercel/analytics/next";
+import { SpeedInsights } from "@vercel/speed-insights/next";
 import "./globals.css";
 import PreventPinchZoom from "./PreventPinchZoom";
 
@@ -64,6 +65,7 @@ export default function RootLayout({
         <PreventPinchZoom />
         {children}
         <Analytics />
+        <SpeedInsights />
       </body>
     </html>
   );
