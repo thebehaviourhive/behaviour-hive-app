@@ -315,16 +315,23 @@ async function main() {
     );
   }
 
-  console.log("== Clinician profile (left pending -- capture-clinician.mjs verifies it live) ==");
-  await upsert(
+  console.log("== Clinician profile (created pending on first run only) ==");
+  // insertIfNotExists, not upsert(): a plain upsert re-applies
+  // verification_status: "pending" on EVERY run, silently un-verifying
+  // the demo clinician if seed.mjs is ever re-run after
+  // video/prepare.mjs (or capture-clinician.mjs's live flow) has
+  // verified it -- a real footgun for anyone re-seeding before a demo.
+  // This only sets the pending default the first time the row is
+  // created; an existing row (verified or not) is left untouched.
+  await insertIfNotExists(
     "clinicians",
+    { user_id: clinician.id },
     {
       user_id: clinician.id,
       specialty: "behavioural_psychologist",
       verification_status: "pending",
       review_cadence_days: 30,
-    },
-    "user_id"
+    }
   );
 
   console.log("== Linking Dr. Emma Walsh to Alfie ==");
