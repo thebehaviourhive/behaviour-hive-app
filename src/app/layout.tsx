@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Baloo_2, Nunito_Sans, Quicksand } from "next/font/google";
+import { Analytics } from "@vercel/analytics/next";
 import "./globals.css";
 import PreventPinchZoom from "./PreventPinchZoom";
 
@@ -61,6 +62,7 @@ export default function RootLayout({
       <body className="min-h-full flex flex-col">
         <PreventPinchZoom />
         {children}
+        <Analytics />
       </body>
     </html>
   );
