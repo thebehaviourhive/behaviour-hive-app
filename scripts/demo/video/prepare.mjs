@@ -34,8 +34,15 @@
 //    teacher track's hero-beat ABC log succeeds but a later step
 //    doesn't) leaves real rows behind for Alfie specifically. This
 //    also clears Alfie's OWN today morning_checkins/abc_logs/
-//    teacher_updates/EOD strategy_feedback, so every fresh attempt --
-//    not just the first -- genuinely starts with today clean.
+//    teacher_updates/EOD strategy_feedback/activity_log, so every
+//    fresh attempt -- not just the first -- genuinely starts with
+//    today clean. activity_log is easy to miss (it's what drives the
+//    "Recent Activity" feed, a separate table from the four content
+//    tables above) -- caught only by watching the actual composited
+//    video: a stale "End of day update... 16 mins ago" from an
+//    earlier take was still sitting at the top of the teacher's
+//    Recent Activity at the SYNC 1 moment, before that take's own EOD
+//    had even happened yet.
 //
 // Run with: node --env-file=.env.local scripts/demo/video/prepare.mjs
 
@@ -99,9 +106,23 @@ async function main() {
     .eq("context", "eod")
     .gte("created_at", todayStartIso())
     .select("id");
+  // activity_log is a SEPARATE table from the four above, driving the
+  // "Recent Activity" feed the teacher's dashboard and clinician's
+  // dashboard both render -- missing this let a stale entry from an
+  // earlier take's own hero-beat ABC log / EOD update sit at the top
+  // of Recent Activity in an otherwise-clean take (caught visually:
+  // "End of day update... 16 mins ago" showing at the SYNC 1 moment,
+  // well before that take's own EOD had even happened yet).
+  const { data: delActivity } = await supabase
+    .from("activity_log")
+    .delete()
+    .eq("passport_id", alfieId)
+    .gte("created_at", todayStartIso())
+    .select("id");
   console.log(
     `  deleted for Alfie: ${delCheckins?.length ?? 0} check-in(s), ${delAbc?.length ?? 0} ABC log(s), ` +
-      `${delEod?.length ?? 0} EOD update(s), ${delRatings?.length ?? 0} today EOD rating(s)`
+      `${delEod?.length ?? 0} EOD update(s), ${delRatings?.length ?? 0} today EOD rating(s), ` +
+      `${delActivity?.length ?? 0} activity_log entr${delActivity?.length === 1 ? "y" : "ies"}`
   );
 
   console.log("== Verifying Dr. Emma Walsh (approve_clinician RPC, no UI) ==");
@@ -187,6 +208,14 @@ async function main() {
     .gte("submitted_at", todayStartIso());
   if (todayEodError) throw todayEodError;
   console.log(`  Alfie's EOD updates dated today: ${todayEod?.length ?? 0} (expect 0)`);
+
+  const { data: todayActivity, error: todayActivityError } = await supabase
+    .from("activity_log")
+    .select("id")
+    .eq("passport_id", creds.parentHero.passportId)
+    .gte("created_at", todayStartIso());
+  if (todayActivityError) throw todayActivityError;
+  console.log(`  Alfie's activity_log entries dated today: ${todayActivity?.length ?? 0} (expect 0)`);
 
   const { data: finalClinicianRow, error: finalClinicianError } = await supabase
     .from("clinicians")

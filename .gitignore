@@ -58,3 +58,5 @@ scripts/demo/video/raw/
 scripts/demo/video/raw-*/
 scripts/demo/video/node_modules/
 scripts/demo/video/.auth/
+scripts/demo/video/plate.png
+scripts/demo/video/plate-coords.json
