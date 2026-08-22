@@ -65,22 +65,29 @@ export async function runParentTrack({ t0, browser, outDir, overruns }) {
   if (!page.url().includes("/parent-dashboard")) {
     await page.goto(`${BASE_URL}/parent-dashboard`, { waitUntil: "domcontentloaded" });
   }
+  // Brief hold on the confirmation, THEN start the slow navigation
+  // (correction: move the work earlier, into this window's own tail,
+  // rather than starting it fresh at beat 32 -- the page load is what
+  // overran, not anything after it). #clinical-team is not cosmetic:
+  // the section only auto-expands on a fresh mount that already has
+  // the hash (a same-page Link click to it afterwards does NOT
+  // re-trigger that one-time effect -- confirmed live, that's why the
+  // first take landed on the collapsed "Manage Access" area instead of
+  // the strategy cards). Going straight there also removes the
+  // separate "tap View strategies" step entirely.
+  await humanPause(3000);
+  await page.goto(`${BASE_URL}/passport/dashboard#clinical-team`, { waitUntil: "domcontentloaded" });
   await beat(31);
 
   // ---- 32-48: Opens Alfie's passport, holds on strategies ----
-  await page.goto(`${BASE_URL}/passport/dashboard`, { waitUntil: "domcontentloaded" });
+  // Already there and already expanded from the early navigation above
+  // -- this window is just settling/scrolling, no new navigation.
   await humanPause(600);
-  const clinicalTeamHeading = page.getByText("Your Team", { exact: false }).first();
+  const clinicalTeamHeading = page.getByText("From your Clinical Team", { exact: false }).first();
   await clinicalTeamHeading.scrollIntoViewIfNeeded().catch(() => {});
   await beat(47);
 
   // ---- 48-58: SYNC 2 -- "From your Clinical Team" strategies ----
-  const strategiesLink = page.getByRole("link", { name: /View strategies on Passport/i }).first();
-  if (await strategiesLink.isVisible().catch(() => false)) {
-    await tapWithCursor(page, strategiesLink);
-    await humanPause(600);
-  }
-  await page.getByText(/Home Strategies|Clinical Team/i).first().scrollIntoViewIfNeeded().catch(() => {});
   await beat(57);
 
   // ---- 58-72: Holds on the "Helped N times" counter ----
@@ -96,7 +103,7 @@ export async function runParentTrack({ t0, browser, outDir, overruns }) {
   // the count the teacher's EOD rating just added.
   await page.goto(`${BASE_URL}/parent-dashboard`, { waitUntil: "domcontentloaded" });
   await humanPause(400);
-  await page.goto(`${BASE_URL}/passport/dashboard`, { waitUntil: "domcontentloaded" });
+  await page.goto(`${BASE_URL}/passport/dashboard#clinical-team`, { waitUntil: "domcontentloaded" });
   await page.getByText(/Helped \d+ time/i).first().scrollIntoViewIfNeeded().catch(() => {});
   await beat(81);
 
