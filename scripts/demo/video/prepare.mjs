@@ -2,7 +2,7 @@
 // scripts/demo/seed.mjs pipeline rather than forking it. Run AFTER
 // seed.mjs. Idempotent -- safe to re-run any number of times.
 //
-// Two corrections seed.mjs's own output doesn't give us for free:
+// Three corrections seed.mjs's own output doesn't give us for free:
 //
 // 1. seed.mjs's core phase gives 4 of the 5 non-hero pupils (Zara,
 //    Noah, Mia, Cian -- not Ruby) a morning check-in dated TODAY, so
@@ -22,6 +22,20 @@
 //    directly against the row seed.mjs already created -- no UI, no
 //    row deletion, no risk of clobbering the county/operating-area
 //    data the feature-guide phase sets separately.
+//
+// 3. seed.mjs links Dr. Walsh to Alfie ONLY, so her caseload is a
+//    single row -- the beat sheet's "Caseload, Alfie's row among
+//    others" needs more than that to be literally true on screen.
+//    Links two more of the five siblings (access only, no extra
+//    clinical workup -- they're not otherwise part of Alfie's story)
+//    so the caseload list has real neighbouring rows.
+//
+// 4. A take that fails partway through a recording attempt (e.g. the
+//    teacher track's hero-beat ABC log succeeds but a later step
+//    doesn't) leaves real rows behind for Alfie specifically. This
+//    also clears Alfie's OWN today morning_checkins/abc_logs/
+//    teacher_updates/EOD strategy_feedback, so every fresh attempt --
+//    not just the first -- genuinely starts with today clean.
 //
 // Run with: node --env-file=.env.local scripts/demo/video/prepare.mjs
 
@@ -51,6 +65,45 @@ async function main() {
   if (deleteError) throw deleteError;
   console.log(`  deleted ${deleted?.length ?? 0} today check-in(s) among the 5 siblings`);
 
+  // Alfie's OWN today activity also needs clearing, not just the
+  // siblings' -- a take that fails partway through (e.g. the teacher
+  // track crashes after the hero-beat ABC log but before the EOD step)
+  // leaves real rows behind, and the NEXT attempt would start with
+  // "today" already dirty for the one child the whole video hinges on
+  // being clean at t=0. Every table any beat can write to for Alfie
+  // gets the same treatment.
+  console.log("== Clearing Alfie's own today activity (from any previous partial take) ==");
+  const alfieId = creds.parentHero.passportId;
+  const { data: delCheckins } = await supabase
+    .from("morning_checkins")
+    .delete()
+    .eq("passport_id", alfieId)
+    .gte("checked_in_at", todayStartIso())
+    .select("id");
+  const { data: delAbc } = await supabase
+    .from("abc_logs")
+    .delete()
+    .eq("passport_id", alfieId)
+    .gte("created_at", todayStartIso())
+    .select("id");
+  const { data: delEod } = await supabase
+    .from("teacher_updates")
+    .delete()
+    .eq("passport_id", alfieId)
+    .gte("submitted_at", todayStartIso())
+    .select("id");
+  const { data: delRatings } = await supabase
+    .from("strategy_feedback")
+    .delete()
+    .eq("passport_id", alfieId)
+    .eq("context", "eod")
+    .gte("created_at", todayStartIso())
+    .select("id");
+  console.log(
+    `  deleted for Alfie: ${delCheckins?.length ?? 0} check-in(s), ${delAbc?.length ?? 0} ABC log(s), ` +
+      `${delEod?.length ?? 0} EOD update(s), ${delRatings?.length ?? 0} today EOD rating(s)`
+  );
+
   console.log("== Verifying Dr. Emma Walsh (approve_clinician RPC, no UI) ==");
   const { data: clinicianRow, error: clinicianLookupError } = await supabase
     .from("clinicians")
@@ -71,6 +124,22 @@ async function main() {
     console.log("  verified");
   }
 
+  console.log("== Giving Dr. Walsh a real caseload (Alfie + 2 neighbours) ==");
+  const caseloadNeighbours = creds.otherParents.filter((p) => p.key === "doyle" || p.key === "oconnor");
+  for (const neighbour of caseloadNeighbours) {
+    const { error: linkError } = await supabase.from("clinician_access").upsert(
+      {
+        passport_id: neighbour.passportId,
+        clinician_id: creds.clinician.id,
+        is_active: true,
+        linked_at: new Date().toISOString(),
+      },
+      { onConflict: "passport_id,clinician_id" }
+    );
+    if (linkError) throw linkError;
+  }
+  console.log(`  linked: ${caseloadNeighbours.map((p) => p.fullName).join(", ")}`);
+
   console.log("\n== Verification ==");
   const { data: access, error: accessError } = await supabase
     .from("passport_access")
@@ -86,6 +155,13 @@ async function main() {
     .eq("passport_id", creds.parentHero.passportId);
   if (clinicianAccessError) throw clinicianAccessError;
   console.log(`  Alfie <-> clinician link present: ${(clinicianAccess?.length ?? 0) > 0}`);
+
+  const { data: fullCaseload, error: fullCaseloadError } = await supabase
+    .from("clinician_access")
+    .select("passport_id")
+    .eq("clinician_id", creds.clinician.id);
+  if (fullCaseloadError) throw fullCaseloadError;
+  console.log(`  clinician caseload size: ${fullCaseload?.length ?? 0} (expect 3)`);
 
   const allSixPassportIds = [creds.parentHero.passportId, ...nonHeroPassportIds];
   const { data: todayCheckins, error: todayError } = await supabase

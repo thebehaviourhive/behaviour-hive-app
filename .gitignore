@@ -46,3 +46,15 @@ scripts/demo/.demo-credentials.json
 
 # fba-test rig credentials (throwaway accounts for FBA module verification)
 scripts/fba-test/.credentials.json
+
+# three-track backup demo video: rendered/raw output is tens of MB and
+# regenerable from the committed scripts -- never belongs in the repo,
+# and would get pulled into every Vercel build if it were. The nested
+# node_modules (ffmpeg-static, isolated from the root package.json so
+# Vercel never installs it) and saved Playwright auth states are
+# likewise throwaway/regenerable.
+scripts/demo/video/out/
+scripts/demo/video/raw/
+scripts/demo/video/raw-*/
+scripts/demo/video/node_modules/
+scripts/demo/video/.auth/

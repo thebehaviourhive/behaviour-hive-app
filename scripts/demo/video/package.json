@@ -1,0 +1,8 @@
+{
+  "name": "behaviour-hive-demo-video",
+  "private": true,
+  "description": "Isolated tooling for the three-track backup demo video. Deliberately NOT a dependency of the root package.json -- Vercel installs every root devDependency on every production build, and ffmpeg-static alone is ~80MB. This nested package.json keeps that weight (and its own node_modules) out of the app entirely; it's only ever installed and run from a developer's machine.",
+  "dependencies": {
+    "ffmpeg-static": "^5.2.0"
+  }
+}
