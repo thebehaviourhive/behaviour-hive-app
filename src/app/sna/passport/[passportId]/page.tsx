@@ -70,6 +70,7 @@ interface ClassroomProfile {
   afterDistress: string[];
   afterDistressOther: string | null;
   sensorySeeks: string[];
+  sensorySeeksOther: string | null;
   sensoryAvoids: string[];
   sensoryAvoidsOther: string | null;
   todayContext: TodayContext | null;
@@ -153,7 +154,7 @@ export default function SnaPassportPage() {
         supabase
           .from("passport_section_d")
           .select(
-            "before_behaviour, before_behaviour_other, during_distress, during_distress_other, after_distress, after_distress_other, sensory_seeks, sensory_avoids, sensory_avoids_other"
+            "before_behaviour, before_behaviour_other, during_distress, during_distress_other, after_distress, after_distress_other, sensory_seeks, sensory_seeks_other, sensory_avoids, sensory_avoids_other"
           )
           .eq("passport_id", passportId)
           .maybeSingle(),
@@ -196,6 +197,7 @@ export default function SnaPassportPage() {
         afterDistress: Array.isArray(sectionD?.after_distress) ? sectionD.after_distress : [],
         afterDistressOther: sectionD?.after_distress_other ?? null,
         sensorySeeks: Array.isArray(sectionD?.sensory_seeks) ? sectionD.sensory_seeks : [],
+        sensorySeeksOther: sectionD?.sensory_seeks_other ?? null,
         sensoryAvoids: Array.isArray(sectionD?.sensory_avoids) ? sectionD.sensory_avoids : [],
         sensoryAvoidsOther: sectionD?.sensory_avoids_other ?? null,
         todayContext: checkin
@@ -386,7 +388,10 @@ export default function SnaPassportPage() {
             />
 
             <SectionHeading>Sensory Seeks</SectionHeading>
-            <CardList items={profile.sensorySeeks} emptyText="Nothing recorded yet." />
+            <CardList
+              items={appendOther(profile.sensorySeeks, profile.sensorySeeksOther)}
+              emptyText="Nothing recorded yet."
+            />
 
             <SectionHeading>Sensory Avoids</SectionHeading>
             <CardList

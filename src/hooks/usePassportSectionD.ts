@@ -12,6 +12,7 @@ export interface SectionDRecord {
   after_distress: string[] | null;
   after_distress_other: string | null;
   sensory_seeks: string[] | null;
+  sensory_seeks_other: string | null;
   sensory_avoids: string[] | null;
   sensory_avoids_other: string | null;
   section_d_complete: boolean;
@@ -25,6 +26,7 @@ const EMPTY_RECORD: SectionDRecord = {
   after_distress: null,
   after_distress_other: null,
   sensory_seeks: null,
+  sensory_seeks_other: null,
   sensory_avoids: null,
   sensory_avoids_other: null,
   section_d_complete: false,
@@ -47,7 +49,7 @@ export function usePassportSectionD() {
         supabase
           .from("passport_section_d")
           .select(
-            "before_behaviour, before_behaviour_other, during_distress, during_distress_other, after_distress, after_distress_other, sensory_seeks, sensory_avoids, sensory_avoids_other, section_d_complete"
+            "before_behaviour, before_behaviour_other, during_distress, during_distress_other, after_distress, after_distress_other, sensory_seeks, sensory_seeks_other, sensory_avoids, sensory_avoids_other, section_d_complete"
           )
           .eq("user_id", user!.id)
           .maybeSingle(),

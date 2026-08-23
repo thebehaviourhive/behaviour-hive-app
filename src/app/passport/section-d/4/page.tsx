@@ -12,25 +12,88 @@ import { getPassportProgressPercent } from "@/lib/passportProgress";
 import { createClient } from "@/lib/supabase/client";
 import { logActivity } from "@/lib/logActivity";
 
-const SENSORY_OPTIONS = [
-  { value: "Touch" },
-  { value: "Sound" },
-  { value: "Visual Stimulus" },
-  { value: "Smell" },
-  { value: "Taste/Mouth Feel" },
-  { value: "Deep Pressure" },
-  { value: "Movement (Vestibular)" },
-  { value: "Proprioception" },
-  { value: "Interoception" },
+// Vocabulary refresh (2026-08): specific observable behaviour, replacing
+// the original broad modality categories (Touch, Sound, Proprioception,
+// ...). Deliberately a different vocabulary than the ABC Incident
+// Logger's own sensory-signals block (roleConfig.ts's
+// SENSORY_SOUGHT_OPTIONS/SENSORY_AVOIDED_OPTIONS) even though the two
+// lists happen to share most entries -- this is a one-time profile
+// field, that's a per-incident one; kept as separate constants
+// deliberately, not a shared import, so either can evolve without
+// silently changing the other.
+const OTHER_SENSORY_OPTION = "Other, please describe";
+
+// The avoided list previously stored a bare "Other" (no companion
+// wording) -- a legacy value distinct from the new OTHER_SENSORY_OPTION
+// string. Both are treated as "the Other pill" for deciding whether to
+// show the free-text box, so a legacy record's existing description
+// isn't hidden just because its stored option text predates this
+// refresh; the sought list never had an Other option pre-refresh, so
+// only ever sees the new string, but the same check costs nothing to
+// share.
+function isOtherSelected(selected: string[]): boolean {
+  return selected.includes(OTHER_SENSORY_OPTION) || selected.includes("Other");
+}
+
+const SENSORY_SOUGHT_OPTIONS = [
+  { value: "Movement (vestibular)" },
+  { value: "Deep pressure" },
+  { value: "Rough housing" },
+  { value: "Touching everything" },
+  { value: "Messy play" },
+  { value: "Fidgeting" },
+  { value: "Rubbing their skin" },
+  { value: "Chewing items" },
+  { value: "Mouthing items" },
+  { value: "Vocal stimming" },
+  { value: "Seeking noise" },
+  { value: "Staring at moving items" },
+  { value: "Seeking light" },
+  { value: "Smelling things" },
+  { value: "Holding urine or bowels" },
+  { value: "Overeating" },
+  { value: OTHER_SENSORY_OPTION },
 ];
 
-const SENSORY_AVOIDS_OPTIONS = [...SENSORY_OPTIONS, { value: "Other" }];
+const SENSORY_AVOIDS_OPTIONS = [
+  { value: "Covering ears" },
+  { value: "Fleeing crowded areas" },
+  { value: "Refusing specific clothing" },
+  { value: "Not wanting to be touched" },
+  { value: "Wanting to be clean" },
+  { value: "Eating selective foods (textures, temperatures, colours)" },
+  { value: "Avoiding swings" },
+  { value: "Anxious on uneven surfaces" },
+  { value: "Motion sickness" },
+  { value: "Avoiding eye contact" },
+  { value: "Covering eyes" },
+  { value: "Avoiding certain smells" },
+  { value: "Using bathroom often" },
+  { value: OTHER_SENSORY_OPTION },
+];
+
+// A selected value the CURRENT option list doesn't contain -- i.e. a
+// legacy selection from before this vocabulary refresh -- still needs
+// to render as a pill (visible and removable), not silently vanish
+// from PillMultiSelect (which only ever renders entries from `options`).
+// Appending it as an extra, unlabelled-as-such option achieves that
+// without touching PillMultiSelect itself, which is shared by seven
+// other passport-section pages this task has no reason to affect.
+function withLegacySelections(
+  options: { value: string }[],
+  selected: string[]
+): { value: string }[] {
+  const known = new Set(options.map((o) => o.value));
+  const legacy = selected.filter((v) => !known.has(v));
+  return [...options, ...legacy.map((value) => ({ value }))];
+}
 
 export default function PassportSectionDPage4() {
   const router = useRouter();
   const { user, passportId, record, isReady, save } = usePassportSectionD();
 
   const [sensorySeeks, setSensorySeeks] = useState<string[]>([]);
+  const [sensorySeeksOther, setSensorySeeksOther] = useState("");
   const [sensoryAvoids, setSensoryAvoids] = useState<string[]>([]);
   const [sensoryAvoidsOther, setSensoryAvoidsOther] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -40,6 +103,7 @@ export default function PassportSectionDPage4() {
   if (isReady && !hasHydrated) {
     setHasHydrated(true);
     setSensorySeeks(record.sensory_seeks ?? []);
+    setSensorySeeksOther(record.sensory_seeks_other ?? "");
     setSensoryAvoids(record.sensory_avoids ?? []);
     setSensoryAvoidsOther(record.sensory_avoids_other ?? "");
   }
@@ -59,10 +123,9 @@ export default function PassportSectionDPage4() {
   function buildUpdates() {
     return {
       sensory_seeks: sensorySeeks.length > 0 ? sensorySeeks : null,
+      sensory_seeks_other: isOtherSelected(sensorySeeks) ? sensorySeeksOther || null : null,
       sensory_avoids: sensoryAvoids.length > 0 ? sensoryAvoids : null,
-      sensory_avoids_other: sensoryAvoids.includes("Other")
-        ? sensoryAvoidsOther || null
-        : null,
+      sensory_avoids_other: isOtherSelected(sensoryAvoids) ? sensoryAvoidsOther || null : null,
     };
   }
 
@@ -177,10 +240,20 @@ export default function PassportSectionDPage4() {
                 rocks back and forth to calm themselves)
               </p>
               <PillMultiSelect
-                options={SENSORY_OPTIONS}
+                options={withLegacySelections(SENSORY_SOUGHT_OPTIONS, sensorySeeks)}
                 selected={sensorySeeks}
                 onToggle={toggleSeeks}
               />
+
+              {isOtherSelected(sensorySeeks) && (
+                <TextField
+                  label="Please specify"
+                  type="text"
+                  value={sensorySeeksOther}
+                  onChange={(e) => setSensorySeeksOther(e.target.value)}
+                  className="mt-1"
+                />
+              )}
             </div>
 
             <div className="flex flex-col gap-2">
@@ -192,12 +265,12 @@ export default function PassportSectionDPage4() {
                 does not like loud noises)
               </p>
               <PillMultiSelect
-                options={SENSORY_AVOIDS_OPTIONS}
+                options={withLegacySelections(SENSORY_AVOIDS_OPTIONS, sensoryAvoids)}
                 selected={sensoryAvoids}
                 onToggle={toggleAvoids}
               />
 
-              {sensoryAvoids.includes("Other") && (
+              {isOtherSelected(sensoryAvoids) && (
                 <TextField
                   label="Please specify"
                   type="text"
