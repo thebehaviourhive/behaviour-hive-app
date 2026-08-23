@@ -1,11 +1,16 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { ChevronDown } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import {
   ABC_ROLE_CONFIG,
   ABC_ROLE_DISPLAY_LABEL,
+  OTHER_OPTION,
   PERCEIVED_FUNCTION_OPTIONS,
+  PERCEIVED_FUNCTION_QUESTION,
+  SENSORY_SOUGHT_OPTIONS,
+  SENSORY_AVOIDED_OPTIONS,
   type ABCLoggerRole,
 } from "./roleConfig";
 import { loadDraft, saveDraft, clearDraft, type ABCDraft } from "./draftStorage";
@@ -75,8 +80,13 @@ function blankDraft(role: ABCLoggerRole): ABCDraft {
     behaviourOther: "",
     consequences: [],
     consequenceOther: "",
+    sensorySought: [],
+    sensorySoughtOther: "",
+    sensoryAvoided: [],
+    sensoryAvoidedOther: "",
     generalNotes: "",
     perceivedFunction: null,
+    perceivedFunctionOther: "",
     isDraft: false,
     syncStatus: "synced",
     savedAt: new Date().toISOString(),
@@ -95,6 +105,8 @@ function intensityColor(level: number): string {
   const b = Math.round(from.b + (to.b - from.b) * t);
   return `rgb(${r}, ${g}, ${b})`;
 }
+
+type MultiSelectField = "antecedents" | "behaviours" | "consequences" | "sensorySought" | "sensoryAvoided";
 
 export function ABCLogger({
   passportId,
@@ -173,7 +185,7 @@ export function ABCLogger({
     setDraft((prev) => ({ ...prev, ...patch }));
   }
 
-  function toggleChip(field: "antecedents" | "behaviours" | "consequences", option: string) {
+  function toggleChip(field: MultiSelectField, option: string) {
     setDraft((prev) => {
       const current = prev[field];
       const next = current.includes(option)
@@ -206,17 +218,26 @@ export function ABCLogger({
       case 2:
         return (
           draft.antecedents.length > 0 &&
-          (!draft.antecedents.includes("Other") || draft.antecedentOther.trim() !== "")
+          (!draft.antecedents.includes(OTHER_OPTION) || draft.antecedentOther.trim() !== "")
         );
       case 3:
         return (
           draft.behaviours.length > 0 &&
-          (!draft.behaviours.includes("Other") || draft.behaviourOther.trim() !== "")
+          (!draft.behaviours.includes(OTHER_OPTION) || draft.behaviourOther.trim() !== "")
         );
       case 4:
         return (
           draft.consequences.length > 0 &&
-          (!draft.consequences.includes("Other") || draft.consequenceOther.trim() !== "")
+          (!draft.consequences.includes(OTHER_OPTION) || draft.consequenceOther.trim() !== "") &&
+          // Sensory signals and the "Why" question are both optional in
+          // full, but same rule as every other step here: picking
+          // "Other (please describe)" within either still means the
+          // description text isn't optional -- an unlabelled "Other"
+          // isn't useful data, whether the surrounding section itself
+          // was required or not.
+          (!draft.sensorySought.includes(OTHER_OPTION) || draft.sensorySoughtOther.trim() !== "") &&
+          (!draft.sensoryAvoided.includes(OTHER_OPTION) || draft.sensoryAvoidedOther.trim() !== "") &&
+          (draft.perceivedFunction !== "other" || draft.perceivedFunctionOther.trim() !== "")
         );
       default:
         return false;
@@ -285,19 +306,29 @@ export function ABCLogger({
         duration_minutes: draft.durationMinutes ? Number(draft.durationMinutes) : null,
         intensity: draft.intensity,
         antecedents: draft.antecedents,
-        antecedent_other: draft.antecedents.includes("Other")
+        antecedent_other: draft.antecedents.includes(OTHER_OPTION)
           ? draft.antecedentOther.trim() || null
           : null,
         behaviours: draft.behaviours,
-        behaviour_other: draft.behaviours.includes("Other")
+        behaviour_other: draft.behaviours.includes(OTHER_OPTION)
           ? draft.behaviourOther.trim() || null
           : null,
         consequences: draft.consequences,
-        consequence_other: draft.consequences.includes("Other")
+        consequence_other: draft.consequences.includes(OTHER_OPTION)
           ? draft.consequenceOther.trim() || null
+          : null,
+        sensory_sought: draft.sensorySought.length > 0 ? draft.sensorySought : null,
+        sensory_sought_other: draft.sensorySought.includes(OTHER_OPTION)
+          ? draft.sensorySoughtOther.trim() || null
+          : null,
+        sensory_avoided: draft.sensoryAvoided.length > 0 ? draft.sensoryAvoided : null,
+        sensory_avoided_other: draft.sensoryAvoided.includes(OTHER_OPTION)
+          ? draft.sensoryAvoidedOther.trim() || null
           : null,
         general_notes: draft.generalNotes.trim() || null,
         perceived_function: draft.perceivedFunction,
+        perceived_function_other:
+          draft.perceivedFunction === "other" ? draft.perceivedFunctionOther.trim() || null : null,
       });
 
       if (error) {
@@ -479,6 +510,8 @@ export function ABCLogger({
                 onToggle={(option) => toggleChip("antecedents", option)}
                 otherValue={draft.antecedentOther}
                 onOtherChange={(value) => updateDraft({ antecedentOther: value })}
+                alwaysShowDetail
+                detailHelper="Add a little more detail if helpful — e.g. 'removed TV remote'"
               />
             )}
             {draft.step === 3 && (
@@ -497,6 +530,7 @@ export function ABCLogger({
                 config={config}
                 draft={draft}
                 onToggleConsequence={(option) => toggleChip("consequences", option)}
+                onToggleSensory={(field, option) => toggleChip(field, option)}
                 updateDraft={updateDraft}
               />
             )}
@@ -621,6 +655,8 @@ function StepChips({
   onToggle,
   otherValue,
   onOtherChange,
+  alwaysShowDetail = false,
+  detailHelper,
 }: {
   title: string;
   helper: string;
@@ -629,7 +665,17 @@ function StepChips({
   onToggle: (option: string) => void;
   otherValue: string;
   onOtherChange: (value: string) => void;
+  // Antecedent/Consequence: the free-text box is always visible and
+  // genuinely optional, doubling as both "describe Other" (when Other's
+  // selected, still required, same as before) and general extra detail
+  // (when it's not). Behaviour step doesn't set this -- its "Other" box
+  // stays exactly as it was, gated behind selecting Other.
+  alwaysShowDetail?: boolean;
+  detailHelper?: string;
 }) {
+  const isOtherSelected = selected.includes(OTHER_OPTION);
+  const showDetailBox = alwaysShowDetail || isOtherSelected;
+
   return (
     <div>
       <label className="block text-sm font-semibold text-brand-neutral-black">{title}</label>
@@ -646,14 +692,19 @@ function StepChips({
         ))}
       </div>
 
-      {selected.includes("Other") && (
-        <input
-          type="text"
-          value={otherValue}
-          onChange={(e) => onOtherChange(e.target.value)}
-          placeholder="Please describe..."
-          className="mt-3 w-full rounded-xl border border-black/10 px-4 py-3 text-sm text-brand-neutral-black placeholder:text-black/30 focus:border-brand-prussian-blue focus:outline-none focus:ring-2 focus:ring-brand-pastel-blue"
-        />
+      {showDetailBox && (
+        <div className="mt-3">
+          {alwaysShowDetail && detailHelper && (
+            <p className="mb-1.5 text-xs text-brand-neutral-black/50">{detailHelper}</p>
+          )}
+          <input
+            type="text"
+            value={otherValue}
+            onChange={(e) => onOtherChange(e.target.value)}
+            placeholder={isOtherSelected ? "Please describe..." : "Optional"}
+            className="w-full rounded-xl border border-black/10 px-4 py-3 text-sm text-brand-neutral-black placeholder:text-black/30 focus:border-brand-prussian-blue focus:outline-none focus:ring-2 focus:ring-brand-pastel-blue"
+          />
+        </div>
       )}
     </div>
   );
@@ -663,13 +714,17 @@ function StepConsequence({
   config,
   draft,
   onToggleConsequence,
+  onToggleSensory,
   updateDraft,
 }: {
   config: (typeof ABC_ROLE_CONFIG)[ABCLoggerRole];
   draft: ABCDraft;
   onToggleConsequence: (option: string) => void;
+  onToggleSensory: (field: "sensorySought" | "sensoryAvoided", option: string) => void;
   updateDraft: (patch: Partial<ABCDraft>) => void;
 }) {
+  const [isSensoryExpanded, setIsSensoryExpanded] = useState(false);
+
   return (
     <div className="flex flex-col gap-5">
       <StepChips
@@ -680,12 +735,110 @@ function StepConsequence({
         onToggle={onToggleConsequence}
         otherValue={draft.consequenceOther}
         onOtherChange={(value) => updateDraft({ consequenceOther: value })}
+        alwaysShowDetail
+        detailHelper="Add a little more detail if helpful — e.g. 'removed TV remote'"
       />
 
-      {config.step4Extra.type === "notes" ? (
+      {/* Sensory signals -- new, optional, collapsed by default. Deliberately
+          distinct from the passport's own Section D "Sensory areas sought/
+          avoided" (a one-time profile field, broader modality categories) --
+          this captures specific observable behaviour around THIS incident,
+          which the helper copy below says explicitly so the two don't read
+          as the same question asked twice. */}
+      <div className="rounded-xl border border-black/10">
+        <button
+          type="button"
+          onClick={() => setIsSensoryExpanded((prev) => !prev)}
+          className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left"
+        >
+          <span className="text-sm font-semibold text-brand-neutral-black">
+            Sensory signals (optional)
+          </span>
+          <ChevronDown
+            className={`h-4 w-4 flex-shrink-0 text-brand-neutral-black/40 transition-transform ${isSensoryExpanded ? "rotate-180" : ""}`}
+          />
+        </button>
+
+        {isSensoryExpanded && (
+          <div className="flex flex-col gap-5 border-t border-black/5 px-4 pb-4 pt-4">
+            <p className="text-sm text-brand-neutral-black/60">
+              What sensory-seeking or avoiding did you notice around this incident?
+            </p>
+
+            <StepChips
+              title="Sensory areas sought"
+              helper="Select any that applied around this incident."
+              options={SENSORY_SOUGHT_OPTIONS}
+              selected={draft.sensorySought}
+              onToggle={(option) => onToggleSensory("sensorySought", option)}
+              otherValue={draft.sensorySoughtOther}
+              onOtherChange={(value) => updateDraft({ sensorySoughtOther: value })}
+            />
+
+            <StepChips
+              title="Sensory areas avoided"
+              helper="Select any that applied around this incident."
+              options={SENSORY_AVOIDED_OPTIONS}
+              selected={draft.sensoryAvoided}
+              onToggle={(option) => onToggleSensory("sensoryAvoided", option)}
+              otherValue={draft.sensoryAvoidedOther}
+              onOtherChange={(value) => updateDraft({ sensoryAvoidedOther: value })}
+            />
+          </div>
+        )}
+      </div>
+
+      {/* "Why do you think this happened?" -- perceived_function. Available
+          to every role now (previously teacher/SNA/clinician only). The
+          helper copy is deliberately honest about protection model (i):
+          this stays clinician-only to read back, regardless of who
+          authors the log, so nobody -- including the person answering --
+          is told or shown something that later turns out untrue. */}
+      <div>
+        <label className="mb-1.5 block text-sm font-semibold text-brand-neutral-black">
+          {PERCEIVED_FUNCTION_QUESTION.label}
+        </label>
+        <p className="mb-3 text-sm text-brand-neutral-black/60">{PERCEIVED_FUNCTION_QUESTION.helper}</p>
+        <div className="flex flex-wrap gap-2">
+          {PERCEIVED_FUNCTION_OPTIONS.map((option) => (
+            <ChipButton
+              key={option.value}
+              label={option.label}
+              isSelected={draft.perceivedFunction === option.value}
+              onClick={() =>
+                updateDraft({
+                  perceivedFunction: draft.perceivedFunction === option.value ? null : option.value,
+                  // Clears any leftover "other" text the moment that
+                  // option is deselected -- otherwise switching away from
+                  // "Other" and back to null would silently resubmit
+                  // stale text alongside a null perceived_function.
+                  ...(option.value === "other" && draft.perceivedFunction === "other"
+                    ? { perceivedFunctionOther: "" }
+                    : {}),
+                })
+              }
+            />
+          ))}
+        </div>
+        {draft.perceivedFunction === "other" && (
+          <input
+            type="text"
+            value={draft.perceivedFunctionOther}
+            onChange={(e) => updateDraft({ perceivedFunctionOther: e.target.value })}
+            placeholder="Please describe..."
+            className="mt-3 w-full rounded-xl border border-black/10 px-4 py-3 text-sm text-brand-neutral-black placeholder:text-black/30 focus:border-brand-prussian-blue focus:outline-none focus:ring-2 focus:ring-brand-pastel-blue"
+          />
+        )}
+      </div>
+
+      {/* Parent-only, pre-existing free-text box -- unaffected by this
+          refresh, never had a per-role "either/or" with perceivedFunction
+          to begin with in spirit (only in implementation, which is what
+          split this out to its own config field). */}
+      {config.notesLabel && (
         <div>
           <label className="mb-1.5 block text-sm font-semibold text-brand-neutral-black">
-            {config.step4Extra.label}
+            {config.notesLabel}
           </label>
           <textarea
             value={draft.generalNotes}
@@ -694,26 +847,6 @@ function StepConsequence({
             placeholder="Optional"
             className="w-full rounded-xl border border-black/10 px-4 py-3 text-sm text-brand-neutral-black placeholder:text-black/30 focus:border-brand-prussian-blue focus:outline-none focus:ring-2 focus:ring-brand-pastel-blue"
           />
-        </div>
-      ) : (
-        <div>
-          <label className="mb-2 block text-sm font-semibold text-brand-neutral-black">
-            {config.step4Extra.label}
-          </label>
-          <div className="flex flex-wrap gap-2">
-            {PERCEIVED_FUNCTION_OPTIONS.map((option) => (
-              <ChipButton
-                key={option.value}
-                label={option.label}
-                isSelected={draft.perceivedFunction === option.value}
-                onClick={() =>
-                  updateDraft({
-                    perceivedFunction: draft.perceivedFunction === option.value ? null : option.value,
-                  })
-                }
-              />
-            ))}
-          </div>
         </div>
       )}
     </div>

@@ -3,7 +3,12 @@
 import { useEffect, useRef, useState, type Ref } from "react";
 import { ChevronDown } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
-import { ABC_ROLE_DISPLAY_LABEL, type ABCLoggerRole } from "./roleConfig";
+import {
+  ABC_ROLE_DISPLAY_LABEL,
+  OTHER_OPTION,
+  PERCEIVED_FUNCTION_LABELS,
+  type ABCLoggerRole,
+} from "./roleConfig";
 import { loadDraft } from "./draftStorage";
 
 interface ABCTimelineProps {
@@ -30,12 +35,20 @@ interface RawAbcLogRow {
   behaviour_other: string | null;
   consequences: string[] | null;
   consequence_other: string | null;
+  sensory_sought: string[] | null;
+  sensory_avoided: string[] | null;
+  sensory_sought_other: string | null;
+  sensory_avoided_other: string | null;
   // Already role-gated server-side by get_abc_logs() itself (SQL CASE:
   // null unless the caller is a verified, actively-linked clinician) --
   // this component's job is only to render whatever comes back, never
   // to re-derive who's "allowed" to see it. clinical_notes isn't in
   // this list at all because the RPC never selects it for any caller.
+  // perceived_function_other follows the identical gate (migration
+  // 0067) -- always null in the payload for a non-clinician viewer,
+  // same as perceived_function itself.
   perceived_function: string | null;
+  perceived_function_other: string | null;
   general_notes: string | null;
   sync_status: string | null;
 }
@@ -54,7 +67,12 @@ interface ABCLogRow {
   behaviourOther: string | null;
   consequences: string[];
   consequenceOther: string | null;
+  sensorySought: string[];
+  sensoryAvoided: string[];
+  sensorySoughtOther: string | null;
+  sensoryAvoidedOther: string | null;
   perceivedFunction: string | null;
+  perceivedFunctionOther: string | null;
   generalNotes: string | null;
   syncStatus: "synced" | "pending";
   isLocalOnly: boolean;
@@ -69,7 +87,7 @@ function truncate(text: string, max = 30): string {
 
 function formatChain(items: string[], otherText: string | null): string {
   if (items.length === 0) return "—";
-  const first = items[0] === "Other" && otherText ? otherText : items[0];
+  const first = items[0] === OTHER_OPTION && otherText ? otherText : items[0];
   const label = truncate(first);
   return items.length > 1 ? `${label} +${items.length - 1} more` : label;
 }
@@ -79,7 +97,17 @@ function formatChain(items: string[], otherText: string | null): string {
 // (the pattern being generalised here).
 function formatList(items: string[], otherText: string | null): string {
   if (items.length === 0) return "—";
-  return items.map((item) => (item === "Other" && otherText ? otherText : item)).join(", ");
+  return items.map((item) => (item === OTHER_OPTION && otherText ? otherText : item)).join(", ");
+}
+
+// The "Why" question stores a short code (attention/escape/tangible/
+// automatic/other), not display text -- unlike antecedents/behaviours/
+// consequences, which store the real option string. Maps back to the
+// same label shown at logging time, with the free-text description
+// appended when the code is "other".
+function formatPerceivedFunction(value: string, otherText: string | null): string {
+  const label = PERCEIVED_FUNCTION_LABELS[value] ?? value;
+  return value === "other" && otherText ? otherText : label;
 }
 
 function getIntensityBadge(intensity: number): {
@@ -143,7 +171,12 @@ export function ABCTimeline({ passportId, viewerRole, highlightLogId }: ABCTimel
         behaviourOther: row.behaviour_other,
         consequences: row.consequences ?? [],
         consequenceOther: row.consequence_other,
+        sensorySought: row.sensory_sought ?? [],
+        sensoryAvoided: row.sensory_avoided ?? [],
+        sensorySoughtOther: row.sensory_sought_other,
+        sensoryAvoidedOther: row.sensory_avoided_other,
         perceivedFunction: row.perceived_function,
+        perceivedFunctionOther: row.perceived_function_other,
         generalNotes: row.general_notes,
         syncStatus: (row.sync_status as "synced" | "pending") ?? "synced",
         isLocalOnly: false,
@@ -169,12 +202,20 @@ export function ABCTimeline({ passportId, viewerRole, highlightLogId }: ABCTimel
           behaviourOther: localDraft.behaviourOther || null,
           consequences: localDraft.consequences,
           consequenceOther: localDraft.consequenceOther || null,
-          // A pending local draft is always the current device's own
-          // not-yet-synced entry -- perceivedFunction reflects whatever
-          // this same viewer already typed for it (no role gate needed
-          // here the way get_abc_logs()'s SQL CASE applies server-side;
-          // it's this person's own in-progress draft either way).
-          perceivedFunction: localDraft.perceivedFunction,
+          sensorySought: localDraft.sensorySought,
+          sensoryAvoided: localDraft.sensoryAvoided,
+          sensorySoughtOther: localDraft.sensorySoughtOther || null,
+          sensoryAvoidedOther: localDraft.sensoryAvoidedOther || null,
+          // A pending local draft never went through get_abc_logs()'s own
+          // SQL CASE (it hasn't synced yet), so the same clinician-only
+          // gate is applied here in JS instead -- otherwise a non-
+          // clinician author would see their own "Why" answer echoed back
+          // for the few seconds before it syncs, then have it vanish the
+          // moment the real, gated row replaces this local one. Same rule
+          // (protection model (i)), same viewer, no exception for "it's
+          // only local".
+          perceivedFunction: viewerRole === "clinician" ? localDraft.perceivedFunction : null,
+          perceivedFunctionOther: viewerRole === "clinician" ? localDraft.perceivedFunctionOther || null : null,
           generalNotes: localDraft.generalNotes || null,
           syncStatus: "pending",
           isLocalOnly: true,
@@ -189,7 +230,7 @@ export function ABCTimeline({ passportId, viewerRole, highlightLogId }: ABCTimel
     return () => {
       isMounted = false;
     };
-  }, [passportId]);
+  }, [passportId, viewerRole]);
 
   // A deep-linked log must never be hidden by a stale filter selection
   // left over from a previous visit to this timeline.
@@ -380,8 +421,24 @@ function ABCLogCard({
             label="Duration"
             value={log.durationMinutes ? `${log.durationMinutes} min` : "Not recorded"}
           />
+          {log.sensorySought.length > 0 && (
+            <DetailRow label="Sensory areas sought" value={formatList(log.sensorySought, log.sensorySoughtOther)} />
+          )}
+          {log.sensoryAvoided.length > 0 && (
+            <DetailRow label="Sensory areas avoided" value={formatList(log.sensoryAvoided, log.sensoryAvoidedOther)} />
+          )}
+          {/* perceivedFunction is already null in the payload for a
+              non-clinician viewer (get_abc_logs()'s own SQL CASE) --
+              structurally absent, not hidden by a role check here, and
+              that now applies to every role including the log's own
+              author (protection model (i)). Value is a short code, not
+              display text, so it's mapped through formatPerceivedFunction
+              rather than rendered raw. */}
           {log.perceivedFunction && (
-            <DetailRow label="Perceived function (at time of logging)" value={log.perceivedFunction} />
+            <DetailRow
+              label="Why (shared with the clinical team)"
+              value={formatPerceivedFunction(log.perceivedFunction, log.perceivedFunctionOther)}
+            />
           )}
           {log.generalNotes && <DetailRow label="Notes" value={log.generalNotes} />}
         </div>

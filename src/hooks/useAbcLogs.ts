@@ -18,7 +18,12 @@ interface RawAbcLogRow {
   behaviour_other: string | null;
   consequences: string[] | null;
   consequence_other: string | null;
+  sensory_sought: string[] | null;
+  sensory_avoided: string[] | null;
+  sensory_sought_other: string | null;
+  sensory_avoided_other: string | null;
   perceived_function: string | null;
+  perceived_function_other: string | null;
   general_notes: string | null;
 }
 
@@ -67,7 +72,12 @@ export function useAbcLogs(passportId: string) {
             behaviourOther: row.behaviour_other,
             consequences: row.consequences ?? [],
             consequenceOther: row.consequence_other,
+            sensorySought: row.sensory_sought ?? [],
+            sensoryAvoided: row.sensory_avoided ?? [],
+            sensorySoughtOther: row.sensory_sought_other,
+            sensoryAvoidedOther: row.sensory_avoided_other,
             perceivedFunction: row.perceived_function,
+            perceivedFunctionOther: row.perceived_function_other,
             generalNotes: row.general_notes,
           }))
         );

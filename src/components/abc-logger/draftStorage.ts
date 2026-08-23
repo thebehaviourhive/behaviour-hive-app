@@ -20,8 +20,13 @@ export interface ABCDraft {
   behaviourOther: string;
   consequences: string[];
   consequenceOther: string;
+  sensorySought: string[];
+  sensorySoughtOther: string;
+  sensoryAvoided: string[];
+  sensoryAvoidedOther: string;
   generalNotes: string;
   perceivedFunction: string | null;
+  perceivedFunctionOther: string;
   isDraft: boolean;
   syncStatus: "pending" | "synced";
   savedAt: string;

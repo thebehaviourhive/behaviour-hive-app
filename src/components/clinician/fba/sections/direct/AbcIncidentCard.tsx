@@ -2,7 +2,12 @@
 
 import { useState } from "react";
 import { ChevronDown } from "lucide-react";
-import { ABC_ROLE_DISPLAY_LABEL, type ABCLoggerRole } from "@/components/abc-logger/roleConfig";
+import {
+  ABC_ROLE_DISPLAY_LABEL,
+  OTHER_OPTION,
+  PERCEIVED_FUNCTION_LABELS,
+  type ABCLoggerRole,
+} from "@/components/abc-logger/roleConfig";
 import { ABC_FUNCTION_LABELS, ABC_FUNCTION_OPTIONS, type AbcHypothesisedFunction } from "@/lib/fba/types";
 import type { AbcLogSummary } from "@/lib/fba/abcAnalysis";
 
@@ -12,9 +17,20 @@ function truncate(text: string, max = 30): string {
 
 function formatChain(items: string[], otherText: string | null): string {
   if (items.length === 0) return "—";
-  const first = items[0] === "Other" && otherText ? otherText : items[0];
+  const first = items[0] === OTHER_OPTION && otherText ? otherText : items[0];
   const label = truncate(first);
   return items.length > 1 ? `${label} +${items.length - 1} more` : label;
+}
+
+// The "Why" question stores a short code (attention/escape/tangible/
+// automatic/other), not display text -- see ABCTimeline.tsx's identical
+// helper, duplicated rather than shared since these two files already
+// each keep their own local formatChain/formatList/formatDateTime
+// rather than a shared module (the pattern being followed here, not
+// introduced by it).
+function formatPerceivedFunction(value: string, otherText: string | null): string {
+  const label = PERCEIVED_FUNCTION_LABELS[value] ?? value;
+  return value === "other" && otherText ? otherText : label;
 }
 
 function formatDateTime(date: string, time: string): string {
@@ -27,7 +43,7 @@ function formatDateTime(date: string, time: string): string {
 
 function formatList(items: string[], otherText: string | null): string {
   if (items.length === 0) return "—";
-  return items.map((item) => (item === "Other" && otherText ? otherText : item)).join(", ");
+  return items.map((item) => (item === OTHER_OPTION && otherText ? otherText : item)).join(", ");
 }
 
 // Read-only by construction -- this view must never let a clinician edit
@@ -86,8 +102,17 @@ export function AbcIncidentCard({
             label="Duration"
             value={log.durationMinutes ? `${log.durationMinutes} min` : "Not recorded"}
           />
+          {log.sensorySought.length > 0 && (
+            <DetailRow label="Sensory areas sought" value={formatList(log.sensorySought, log.sensorySoughtOther)} />
+          )}
+          {log.sensoryAvoided.length > 0 && (
+            <DetailRow label="Sensory areas avoided" value={formatList(log.sensoryAvoided, log.sensoryAvoidedOther)} />
+          )}
           {log.perceivedFunction && (
-            <DetailRow label="Perceived function (at time of logging)" value={log.perceivedFunction} />
+            <DetailRow
+              label="Perceived function (at time of logging)"
+              value={formatPerceivedFunction(log.perceivedFunction, log.perceivedFunctionOther)}
+            />
           )}
           {log.generalNotes && <DetailRow label="Notes" value={log.generalNotes} />}
         </div>

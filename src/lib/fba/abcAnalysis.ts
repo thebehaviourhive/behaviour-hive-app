@@ -14,7 +14,12 @@ export interface AbcLogSummary {
   behaviourOther: string | null;
   consequences: string[];
   consequenceOther: string | null;
+  sensorySought: string[];
+  sensoryAvoided: string[];
+  sensorySoughtOther: string | null;
+  sensoryAvoidedOther: string | null;
   perceivedFunction: string | null;
+  perceivedFunctionOther: string | null;
   generalNotes: string | null;
 }
 
