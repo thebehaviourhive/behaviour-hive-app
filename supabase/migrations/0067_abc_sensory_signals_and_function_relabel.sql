@@ -23,11 +23,15 @@
    'sensory' is renamed to 'automatic' -- the same clinical concept
    (self-regulation / automatic reinforcement), just a value that reads
    clearly against the new plain-English question copy ("To regulate
-   themselves"). Existing rows are updated in place below (a value-
-   preserving relabel, not a semantic change) before the CHECK is
-   swapped to the new allowed set, which also admits 'other' for the
-   first time -- paired with a new nullable perceived_function_other
-   free-text column, the same pattern antecedent_other/behaviour_other/
+   themselves"). The CHECK is widened in TWO steps around the relabel,
+   not one: first to a transitional superset covering both the old and
+   new values (so the relabel UPDATE itself doesn't get rejected by a
+   constraint that doesn't know the new value yet, and so existing
+   'sensory' rows don't get rejected by one that's already dropped it),
+   then tightened to the final set once no row holds 'sensory' any
+   more. The final set also admits 'other' for the first time --
+   paired with a new nullable perceived_function_other free-text
+   column, the same pattern antecedent_other/behaviour_other/
    consequence_other already use.
 
    Access to perceived_function (and now perceived_function_other) is
@@ -51,16 +55,34 @@ alter table public.abc_logs
   add column if not exists sensory_avoided_other text;
 
 -- =====================================================================
--- 2a. Relabel existing 'sensory' rows to 'automatic' BEFORE the CHECK
---     is swapped (so there's never a moment where a row's stored value
---     isn't covered by whichever constraint is currently in force).
+-- 2a. Widen the CHECK to a TRANSITIONAL superset FIRST -- both the old
+--     value ('sensory') and the new ones ('automatic', 'other') valid
+--     at once. Required ordering, not a style choice: ADD CONSTRAINT
+--     validates every existing row against the new rule immediately,
+--     so a constraint that doesn't yet include 'sensory' would reject
+--     existing untouched rows; a constraint added AFTER the relabel
+--     UPDATE below would just as reliably reject that UPDATE itself,
+--     since it'd still be writing 'automatic' under the OLD, narrower
+--     constraint. Only a superset that already covers BOTH states lets
+--     the relabel run safely in between the two ALTERs.
+-- =====================================================================
+alter table public.abc_logs
+  drop constraint if exists abc_logs_perceived_function_check;
+alter table public.abc_logs
+  add constraint abc_logs_perceived_function_check
+  check (perceived_function in ('escape', 'attention', 'tangible', 'sensory', 'automatic', 'other'));
+
+-- =====================================================================
+-- 2b. Relabel existing 'sensory' rows to 'automatic' -- safe now, both
+--     values are valid under the transitional constraint above.
 -- =====================================================================
 update public.abc_logs
   set perceived_function = 'automatic'
   where perceived_function = 'sensory';
 
 -- =====================================================================
--- 2b. Widen the CHECK constraint.
+-- 2c. Tighten to the FINAL set -- 'sensory' retired. Safe now: no row
+--     holds it any more after 2b.
 -- =====================================================================
 alter table public.abc_logs
   drop constraint if exists abc_logs_perceived_function_check;
@@ -69,7 +91,7 @@ alter table public.abc_logs
   check (perceived_function in ('escape', 'attention', 'tangible', 'automatic', 'other'));
 
 -- =====================================================================
--- 2c. New free-text column for when 'other' is picked.
+-- 2d. New free-text column for when 'other' is picked.
 -- =====================================================================
 alter table public.abc_logs
   add column if not exists perceived_function_other text;
