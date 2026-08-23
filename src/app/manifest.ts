@@ -7,7 +7,15 @@ export default function manifest(): MetadataRoute.Manifest {
     description: "The Behaviour Hive",
     start_url: "/",
     display: "standalone",
-    background_color: "#E5E1E6",
+    // PWA cold-start fix: this was the off-white app background, but
+    // the actual first thing a cold launch shows (both the OS's own
+    // manifest-driven splash, where supported, and the inline branded
+    // shell in layout.tsx) is Prussian Blue with the white logo -- the
+    // same colour src/app/loading.tsx already uses. Matching it here
+    // means no colour jump between "OS splash" and "app's own loading
+    // state"; a real apple-touch-startup-image set (layout.tsx) covers
+    // iOS, which mostly ignores this field for its own splash.
+    background_color: "#004F71",
     theme_color: "#004F71",
     icons: [
       {
