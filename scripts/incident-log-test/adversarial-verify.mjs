@@ -121,6 +121,8 @@ async function main() {
   const parent2 = await signedInClient("incverify.parent2@thebehaviourhive.com");
 
   const { data: loc } = await admin.from("incident_locations").select("id").eq("value", "Classroom").is("institution_id", null).single();
+  const { data: bruisingType } = await admin.from("incident_injury_types").select("id").eq("value", "Bruising").is("institution_id", null).single();
+  const { data: rednessType } = await admin.from("incident_injury_types").select("id").eq("value", "Redness").is("institution_id", null).single();
 
   console.log(`\n== CHECK B: incident for a child whose parent has never opened the app ==`);
   // A passport_institution_links row can only ever be INSERTED by the
@@ -577,9 +579,23 @@ async function main() {
       .single();
     record("Owning teacher can record an injury pre-signoff", !injuryInsertErr, injuryInsertErr?.message);
 
-    const { error: markInsertErr } = await teacherA
+    // -- Migration 0076: a marker with no type, or an invalid type, is --
+    // structurally impossible now, not just discouraged by the UI.
+    const { error: nullTypeErr } = await teacherA
       .from("incident_body_marks")
-      .insert({ injury_id: injuryRow.id, view: "front", x: 0.4, y: 0.6, injury_type: "Bruising" });
+      .insert({ injury_id: injuryRow.id, view: "front", x: 0.4, y: 0.6, injury_type_id: null });
+    record("A body mark with NO injury_type_id is REJECTED (not null constraint)", Boolean(nullTypeErr), nullTypeErr?.message);
+
+    const { error: bogusTypeErr } = await teacherA
+      .from("incident_body_marks")
+      .insert({ injury_id: injuryRow.id, view: "front", x: 0.4, y: 0.6, injury_type_id: "00000000-0000-0000-0000-000000000000" });
+    record("A body mark with an injury_type_id NOT in the vocabulary is REJECTED (foreign key)", Boolean(bogusTypeErr), bogusTypeErr?.message);
+
+    const { data: markRow, error: markInsertErr } = await teacherA
+      .from("incident_body_marks")
+      .insert({ injury_id: injuryRow.id, view: "front", x: 0.4, y: 0.6, injury_type_id: bruisingType.id })
+      .select()
+      .single();
     record("Owning teacher can place a body-map marker pre-signoff", !markInsertErr, markInsertErr?.message);
 
     const { data: statusAfterMark } = await teacherA.rpc("get_attestation_status", { p_incident_staff_id: teacherBStaffId });
@@ -606,12 +622,27 @@ async function main() {
     const { data: statusAfterMove } = await teacherA.rpc("get_attestation_status", { p_incident_staff_id: teacherBStaffId });
     record("Status flips to 'stale' again purely from MOVING the marker -- position is hashed, not just presence", statusAfterMove === "stale", statusAfterMove);
 
+    // Renew, then change the TYPE alone ("Change type" in the proposal) --
+    // proves injury_type_id itself is hashed, not just position.
+    const { error: preTypeChangeRenewErr } = await teacherB.rpc("attest_to_incident", {
+      p_incident_staff_id: teacherBStaffId,
+      p_addendum: "Re-confirming after the marker was moved.",
+    });
+    record("Renewal after the marker move succeeds", !preTypeChangeRenewErr, preTypeChangeRenewErr?.message);
+    const { error: typeChangeErr } = await teacherA
+      .from("incident_body_marks")
+      .update({ injury_type_id: rednessType.id })
+      .eq("id", markRow.id);
+    record("Owning teacher can change a marker's injury type pre-signoff", !typeChangeErr, typeChangeErr?.message);
+    const { data: statusAfterTypeChange } = await teacherA.rpc("get_attestation_status", { p_incident_staff_id: teacherBStaffId });
+    record("Status flips to 'stale' purely from changing a marker's injury type", statusAfterTypeChange === "stale", statusAfterTypeChange);
+
     // Final renewal so teacherB is clean going into CHECK 7's sign-off.
     const { error: finalRenewErr } = await teacherB.rpc("attest_to_incident", {
       p_incident_staff_id: teacherBStaffId,
-      p_addendum: "Re-confirming after the marker was moved to its final position.",
+      p_addendum: "Re-confirming after the marker's type was corrected.",
     });
-    record("Final renewal (after the marker move) succeeds", !finalRenewErr, finalRenewErr?.message);
+    record("Final renewal (after the marker's type change) succeeds", !finalRenewErr, finalRenewErr?.message);
     const { data: statusFinal } = await teacherA.rpc("get_attestation_status", { p_incident_staff_id: teacherBStaffId });
     record("teacherB is 'current' again going into sign-off", statusFinal === "current", statusFinal);
 
