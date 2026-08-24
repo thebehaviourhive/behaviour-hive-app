@@ -767,6 +767,37 @@ async function main() {
     record("Notice INVISIBLE to parent", (byParentNotice?.length ?? 0) === 0, `rows=${byParentNotice?.length}`);
   }
 
+  console.log(`\n== CHECK H: parent RPC excludes staff injury records entirely (asked three times -- live proof, not a re-quote of the SQL) ==`);
+  {
+    const { data: staffInjury, error: staffInjuryErr } = await admin
+      .from("incident_injuries")
+      .insert({ incident_id: incidentId, injured_party_type: "staff", free_text_name: "SNA Test (injured)" })
+      .select()
+      .single();
+    record("Fixture: a staff injury record exists on this same incident", !staffInjuryErr, staffInjuryErr?.message);
+
+    const { data: p1Rows } = await parent1.rpc("get_parent_incidents", { p_passport_id: child1 });
+    const row = p1Rows?.[0];
+    const injuriesJson = JSON.stringify(row?.injuries ?? []);
+    record(
+      "Parent's own get_parent_incidents() injuries array does NOT contain the staff injury's name anywhere in it",
+      !injuriesJson.includes("SNA Test (injured)"),
+      injuriesJson
+    );
+    record(
+      "Parent's injuries array STILL contains their own child's student injury (exclusion isn't just blanket-empty)",
+      (row?.injuries?.length ?? 0) >= 1,
+      injuriesJson
+    );
+
+    const { data: directStaffInjury } = await parent1.from("incident_injuries").select("*").eq("id", staffInjury.id);
+    record(
+      "Parent direct .select() on the staff injury row returns nothing (no policy grants it, defence in depth)",
+      (directStaffInjury?.length ?? 0) === 0,
+      `rows=${directStaffInjury?.length}`
+    );
+  }
+
   console.log(`\n== CHECK 10: two-child cap ==`);
   {
     const { data: p3 } = await admin.from("passports").insert({ user_id: parent3Id, child_name: "Verify Child Three", passport_status: "complete" }).select().single();

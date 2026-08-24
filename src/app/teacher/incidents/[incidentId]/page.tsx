@@ -10,6 +10,7 @@ import { TextField } from "@/components/ui/TextField";
 import { Textarea } from "@/components/ui/Textarea";
 import { PillSingleSelect } from "@/components/ui/PillSingleSelect";
 import { PillMultiSelect } from "@/components/ui/PillMultiSelect";
+import { BodyMapCard, type InjuryTypeOption } from "@/components/incident-log/body-map/BodyMapCard";
 
 // School Incident Log -- Phase 3 stage two, built in sections per
 // explicit instruction: category & narrative first (this round), then
@@ -166,6 +167,21 @@ function blankRestrictivePracticeRecord(): RestrictivePracticeRecord {
   };
 }
 
+interface InjuryRecordState {
+  id: string;
+  injuredPartyType: "student" | "staff";
+  passportId: string | null;
+  staffUserId: string | null;
+  partyName: string;
+  injuryTypes: string[];
+  injuryNotes: string;
+  firstAiderCalled: boolean;
+  firstAiderName: string;
+  doctorAmbulanceCalled: boolean;
+  remainedOnSite: boolean | null;
+  remainedDetail: string;
+}
+
 function formatDateTime(value: string): string {
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return value;
@@ -199,6 +215,13 @@ export default function IncidentRecordPage() {
   // Keyed by passport_id -- a restrictive-practice record belongs to one
   // named child, not the incident as a whole (0068 Part 7).
   const [restrictivePracticesByChild, setRestrictivePracticesByChild] = useState<Record<string, RestrictivePracticeRecord[]>>({});
+
+  const [injuryTypeOptions, setInjuryTypeOptions] = useState<InjuryTypeOption[]>([]);
+  const [injuries, setInjuries] = useState<InjuryRecordState[]>([]);
+  const [isAddingInjury, setIsAddingInjury] = useState(false);
+  const [newInjuryParty, setNewInjuryParty] = useState<{ type: "student"; passportId: string; name: string } | null>(null);
+  const [newInjuryStaffName, setNewInjuryStaffName] = useState("");
+  const [addInjuryError, setAddInjuryError] = useState<string | null>(null);
 
   const [category, setCategory] = useState<Category | null>(null);
   const [party, setParty] = useState<Party | null>(null);
@@ -251,6 +274,8 @@ export default function IncidentRecordPage() {
         { data: disengagementTypes },
         { data: resultTypes },
         { data: restrictivePracticeRows },
+        { data: injuryTypeRows },
+        { data: injuryRows },
       ] = await Promise.all([
         supabase
           .from("incident_children")
@@ -279,6 +304,14 @@ export default function IncidentRecordPage() {
             "id, passport_id, planning_status, reason_codes, disengagement_codes, hold_type, hold_position, hold_level, result_codes, total_procedures, staff_initials, ncse_report_complete"
           )
           .eq("incident_id", params.incidentId),
+        supabase.from("incident_injury_types").select("id, value").or(institutionOrGlobal).eq("is_active", true).order("sort_order"),
+        supabase
+          .from("incident_injuries")
+          .select(
+            "id, injured_party_type, passport_id, staff_user_id, free_text_name, injury_types, injury_notes, first_aider_called, first_aider_name, doctor_ambulance_called, remained_on_site, remained_detail"
+          )
+          .eq("incident_id", params.incidentId)
+          .order("created_at", { ascending: true }),
       ]);
 
       if (!isMounted) return;
@@ -345,6 +378,27 @@ export default function IncidentRecordPage() {
         byChild[row.passport_id] = [...(byChild[row.passport_id] ?? []), record];
       }
       setRestrictivePracticesByChild(byChild);
+
+      setInjuryTypeOptions((injuryTypeRows ?? []).map((row) => ({ id: row.id, value: row.value })));
+      setInjuries(
+        (injuryRows ?? []).map((row) => ({
+          id: row.id,
+          injuredPartyType: row.injured_party_type as "student" | "staff",
+          passportId: row.passport_id,
+          staffUserId: row.staff_user_id,
+          partyName:
+            row.injured_party_type === "student"
+              ? nameByPassportId.get(row.passport_id ?? "") || "Unnamed child"
+              : row.free_text_name || nameByUserId.get(row.staff_user_id ?? "") || "Named staff member",
+          injuryTypes: row.injury_types ?? [],
+          injuryNotes: row.injury_notes ?? "",
+          firstAiderCalled: row.first_aider_called,
+          firstAiderName: row.first_aider_name ?? "",
+          doctorAmbulanceCalled: row.doctor_ambulance_called,
+          remainedOnSite: row.remained_on_site,
+          remainedDetail: row.remained_detail ?? "",
+        }))
+      );
 
       setCategory(incident.category as Category | null);
       setParty(incident.party as Party | null);
@@ -495,6 +549,73 @@ export default function IncidentRecordPage() {
         return;
       }
       updateRestrictivePracticeRecord(passportId, index, { isSaving: false, savedAt: Date.now(), id: inserted.id });
+    }
+  }
+
+  async function handleAddInjury() {
+    setAddInjuryError(null);
+    if (!newInjuryParty && !newInjuryStaffName.trim()) {
+      setAddInjuryError("Choose who this injury record is for.");
+      return;
+    }
+
+    const supabase = createClient();
+    const payload: Record<string, unknown> = newInjuryParty
+      ? { incident_id: params.incidentId as string, injured_party_type: "student", passport_id: newInjuryParty.passportId }
+      : { incident_id: params.incidentId as string, injured_party_type: "staff", free_text_name: newInjuryStaffName.trim() };
+
+    const { data: inserted, error: insertError } = await supabase.from("incident_injuries").insert(payload).select("id").single();
+
+    if (insertError) {
+      setAddInjuryError(insertError.message);
+      return;
+    }
+
+    setInjuries((current) => [
+      ...current,
+      {
+        id: inserted.id,
+        injuredPartyType: newInjuryParty ? "student" : "staff",
+        passportId: newInjuryParty?.passportId ?? null,
+        staffUserId: null,
+        partyName: newInjuryParty?.name ?? newInjuryStaffName.trim(),
+        injuryTypes: [],
+        injuryNotes: "",
+        firstAiderCalled: false,
+        firstAiderName: "",
+        doctorAmbulanceCalled: false,
+        remainedOnSite: null,
+        remainedDetail: "",
+      },
+    ]);
+    setIsAddingInjury(false);
+    setNewInjuryParty(null);
+    setNewInjuryStaffName("");
+  }
+
+  function updateInjuryLocal(injuryId: string, patch: Partial<InjuryRecordState>) {
+    setInjuries((current) => current.map((inj) => (inj.id === injuryId ? { ...inj, ...patch } : inj)));
+  }
+
+  async function saveInjuryField(injuryId: string, patch: Record<string, unknown>) {
+    const supabase = createClient();
+    await supabase.from("incident_injuries").update(patch).eq("id", injuryId);
+  }
+
+  function toggleInjuryType(injuryId: string, typeValue: string) {
+    const injury = injuries.find((inj) => inj.id === injuryId);
+    if (!injury) return;
+    const has = injury.injuryTypes.includes(typeValue);
+    const next = has ? injury.injuryTypes.filter((t) => t !== typeValue) : [...injury.injuryTypes, typeValue];
+    updateInjuryLocal(injuryId, { injuryTypes: next });
+    saveInjuryField(injuryId, { injury_types: next.length > 0 ? next : null });
+  }
+
+  async function handleRemoveInjury(injuryId: string) {
+    const supabase = createClient();
+    const { error: deleteError } = await supabase.from("incident_injuries").delete().eq("id", injuryId);
+    if (!deleteError) {
+      setInjuries((current) => current.filter((inj) => inj.id !== injuryId));
     }
   }
 
@@ -911,6 +1032,167 @@ export default function IncidentRecordPage() {
                     </section>
                   );
                 })}
+
+              <section>
+                <h2 className="mb-3 font-heading text-lg font-bold text-brand-prussian-blue">Injuries</h2>
+
+                <div className="flex flex-col gap-4">
+                  {injuries.map((injury) => (
+                    <div key={injury.id} className="flex flex-col gap-4">
+                      <div className="rounded-2xl border border-black/5 bg-white p-4">
+                        <div className="mb-3 flex items-center justify-between">
+                          <span className="font-heading text-base font-bold text-brand-prussian-blue">{injury.partyName}</span>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveInjury(injury.id)}
+                            className="text-xs font-semibold text-brand-golden-brown"
+                          >
+                            Remove record
+                          </button>
+                        </div>
+
+                        <div className="flex flex-col gap-4">
+                          <div>
+                            <span className="mb-2 block text-sm font-semibold text-brand-neutral-black">Injury type</span>
+                            <PillMultiSelect
+                              options={injuryTypeOptions.map((t) => ({ value: t.value }))}
+                              selected={injury.injuryTypes}
+                              onToggle={(v) => toggleInjuryType(injury.id, v)}
+                            />
+                          </div>
+
+                          <Textarea
+                            label="Notes"
+                            id={`injury-notes-${injury.id}`}
+                            value={injury.injuryNotes}
+                            onChange={(e) => updateInjuryLocal(injury.id, { injuryNotes: e.target.value })}
+                            onBlur={() => saveInjuryField(injury.id, { injury_notes: injury.injuryNotes.trim() || null })}
+                            rows={2}
+                          />
+
+                          <label className="flex items-center gap-2 text-sm font-semibold text-brand-neutral-black">
+                            <input
+                              type="checkbox"
+                              checked={injury.firstAiderCalled}
+                              onChange={(e) => {
+                                updateInjuryLocal(injury.id, { firstAiderCalled: e.target.checked });
+                                saveInjuryField(injury.id, { first_aider_called: e.target.checked });
+                              }}
+                            />
+                            First aider called
+                          </label>
+
+                          {injury.firstAiderCalled && (
+                            <TextField
+                              label="First aider name"
+                              id={`first-aider-name-${injury.id}`}
+                              value={injury.firstAiderName}
+                              onChange={(e) => updateInjuryLocal(injury.id, { firstAiderName: e.target.value })}
+                              onBlur={() => saveInjuryField(injury.id, { first_aider_name: injury.firstAiderName.trim() || null })}
+                            />
+                          )}
+
+                          <label className="flex items-center gap-2 text-sm font-semibold text-brand-neutral-black">
+                            <input
+                              type="checkbox"
+                              checked={injury.doctorAmbulanceCalled}
+                              onChange={(e) => {
+                                updateInjuryLocal(injury.id, { doctorAmbulanceCalled: e.target.checked });
+                                saveInjuryField(injury.id, { doctor_ambulance_called: e.target.checked });
+                              }}
+                            />
+                            Doctor / ambulance called
+                          </label>
+
+                          <div>
+                            <span className="mb-2 block text-sm font-semibold text-brand-neutral-black">Remained on site</span>
+                            <PillSingleSelect
+                              options={REMAINED_ON_SITE_OPTIONS}
+                              value={injury.remainedOnSite === null ? null : injury.remainedOnSite ? "yes" : "no"}
+                              onChange={(v) => {
+                                const val = v === "yes";
+                                updateInjuryLocal(injury.id, { remainedOnSite: val });
+                                saveInjuryField(injury.id, { remained_on_site: val });
+                              }}
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      <BodyMapCard
+                        injuryId={injury.id}
+                        partyName={injury.partyName}
+                        canEdit={canEdit}
+                        injuryTypeOptions={injuryTypeOptions}
+                      />
+                    </div>
+                  ))}
+
+                  {isAddingInjury ? (
+                    <div className="rounded-2xl border border-black/5 bg-white p-4">
+                      <span className="mb-2 block text-sm font-semibold text-brand-neutral-black">Who was injured?</span>
+                      <div className="flex flex-wrap gap-2">
+                        {children.map((child) => (
+                          <button
+                            key={child.passportId}
+                            type="button"
+                            onClick={() => {
+                              setNewInjuryParty({ type: "student", passportId: child.passportId, name: child.childName });
+                              setNewInjuryStaffName("");
+                            }}
+                            className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${
+                              newInjuryParty?.passportId === child.passportId
+                                ? "border-brand-prussian-blue bg-brand-pastel-blue/30 text-brand-prussian-blue"
+                                : "border-black/10 bg-white text-black/60"
+                            }`}
+                          >
+                            {child.childName}
+                          </button>
+                        ))}
+                      </div>
+                      <TextField
+                        label="Or a staff member (name)"
+                        id="new-injury-staff-name"
+                        value={newInjuryStaffName}
+                        onChange={(e) => {
+                          setNewInjuryStaffName(e.target.value);
+                          setNewInjuryParty(null);
+                        }}
+                        placeholder="e.g. Demo Teacher"
+                        className="mt-3"
+                      />
+                      {addInjuryError && (
+                        <p role="alert" className="mt-2 text-sm font-medium text-red-600">
+                          {addInjuryError}
+                        </p>
+                      )}
+                      <div className="mt-3 flex gap-2">
+                        <Button type="button" onClick={handleAddInjury}>
+                          Add
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          onClick={() => {
+                            setIsAddingInjury(false);
+                            setAddInjuryError(null);
+                          }}
+                        >
+                          Cancel
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setIsAddingInjury(true)}
+                      className="rounded-2xl border-2 border-dashed border-brand-prussian-blue/30 py-3 text-sm font-semibold text-brand-prussian-blue"
+                    >
+                      + Add injury record
+                    </button>
+                  )}
+                </div>
+              </section>
             </fieldset>
 
             {canEdit && (
@@ -930,8 +1212,7 @@ export default function IncidentRecordPage() {
             )}
 
             <p className="text-sm leading-relaxed text-brand-neutral-black/60">
-              Injuries, body map, and debrief are not yet available in this build. This record is saved and will
-              not be lost.
+              Debrief is not yet available in this build. This record is saved and will not be lost.
             </p>
           </div>
         ) : null}
