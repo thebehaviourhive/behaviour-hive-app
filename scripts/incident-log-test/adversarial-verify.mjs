@@ -123,11 +123,21 @@ async function main() {
   const { data: loc } = await admin.from("incident_locations").select("id").eq("value", "Classroom").is("institution_id", null).single();
 
   console.log(`\n== CHECK B: incident for a child whose parent has never opened the app ==`);
-  // child2 has NO passport_institution_links row at all yet -- proving
-  // stage-one creation genuinely doesn't need one, per decision 1 and
-  // the explicit ask "school side works throughout, parent notification
-  // simply has no recipient." Named on the SAME incident as child1 to
-  // also exercise the two-child path in one go.
+  // A passport_institution_links row can only ever be INSERTED by the
+  // parent themselves (RLS-restricted, "Parents can insert links for
+  // their own passport") -- so "the school's roster includes this
+  // child" necessarily implies some link already exists; there is no
+  // path to a child appearing on the roster with literally zero link at
+  // all. The realistic version of "a parent who's never opened the
+  // app" is this: the link exists (created once, at minimal
+  // registration) but was never approved and nothing about it has been
+  // touched since -- approved_by_parent stays false throughout. That's
+  // what's set up here for child2, created directly (service role,
+  // simulating whatever one-time flow produced it) rather than via the
+  // parent's own session, since this parent is being modelled as never
+  // having done anything beyond that.
+  await admin.from("passport_institution_links").insert({ passport_id: child2, institution_id: institutionId, approved_by_parent: false });
+
   console.log(`\n== Building the incident (create_incident_stamp, as Teacher A, real session) ==`);
 
   const { data: incidentId, error: stampErr } = await teacherA.rpc("create_incident_stamp", {
@@ -137,7 +147,7 @@ async function main() {
     p_child_passport_ids: [child1, child2],
     p_staff: [{ user_id: teacherBId, involvement: "witnessed" }, { free_text_name: "Bus Escort Jane", involvement: "witnessed" }],
   });
-  record("create_incident_stamp succeeds despite child2 having no institution link at all", !stampErr, stampErr?.message);
+  record("create_incident_stamp succeeds for a child whose parent has never approved the link", !stampErr, stampErr?.message);
   console.log("Incident created (atomic stamp):", incidentId);
 
   {
@@ -146,11 +156,6 @@ async function main() {
     const { data: owningCheck } = await admin.from("incidents").select("owning_teacher_id").eq("id", incidentId).single();
     record("Class-teacher creator auto-assigned as owning teacher by the stamp RPC", owningCheck.owning_teacher_id === teacherAId, owningCheck.owning_teacher_id);
   }
-
-  // Now retroactively link child2 to the institution (the parent opens
-  // the app / a link gets created later) -- confirms nothing about
-  // stage-one required it to have existed first.
-  await admin.from("passport_institution_links").insert({ passport_id: child2, institution_id: institutionId, approved_by_parent: false });
 
   const { error: ownErr } = await teacherA
     .from("incidents")
@@ -301,6 +306,59 @@ async function main() {
     await admin.from("incidents").delete().eq("id", snaIncidentId);
   }
 
+  console.log(`\n== CHECK D: attestation integrity ==`);
+  // Deliberately BEFORE check 7's sign-off, not after -- the "Named
+  // staff can attest to their own row" policy (Phase 1) requires
+  // teacher_signed_at is null, matching the brief's own stated
+  // lifecycle (stamp -> stage two -> attestation -> debrief -> teacher
+  // sign-off -> principal countersign). Running this after sign-off, as
+  // an earlier draft of this script did, made the attest call silently
+  // affect zero rows (RLS filters the row out, no error) and read as a
+  // false failure -- the policy was right, the ordering was wrong.
+  {
+    // teacherB and the free-text "Bus Escort Jane" were both named as
+    // witnessed staff by the original create_incident_stamp() call.
+    // clinician was never named at all -- confirm they have no row of
+    // their own AND cannot tamper with teacherB's row either (the
+    // policy's own_row check is user_id = auth.uid(), so a not-named
+    // caller updating BY teacherB's row id should silently affect zero
+    // rows, same RLS-on-UPDATE nuance as check 7 below).
+    await clinician
+      .from("incident_staff")
+      .update({ attested_at: new Date().toISOString(), attestation_addendum: "Clinician should not be able to write this." })
+      .eq("incident_id", incidentId)
+      .eq("user_id", teacherBId);
+    const { data: teacherBRowAfter } = await admin.from("incident_staff").select("attested_at, attestation_addendum").eq("incident_id", incidentId).eq("user_id", teacherBId).single();
+    record(
+      "A staff member NOT named on the incident cannot attest via someone else's row",
+      teacherBRowAfter.attestation_addendum !== "Clinician should not be able to write this.",
+      JSON.stringify(teacherBRowAfter)
+    );
+
+    // Named staff member (teacherB) attests once.
+    const { error: firstAttestErr } = await teacherB.from("incident_staff").update({ attested_at: new Date().toISOString(), attestation_addendum: "Confirmed, accurate." }).eq("incident_id", incidentId).eq("user_id", teacherBId);
+    record("Named staff member CAN attest to their own row", !firstAttestErr, firstAttestErr?.message);
+
+    const { data: afterFirstAttest } = await admin.from("incident_staff").select("attested_at, attestation_addendum").eq("incident_id", incidentId).eq("user_id", teacherBId).single();
+    record("Attestation actually persisted", Boolean(afterFirstAttest.attested_at), JSON.stringify(afterFirstAttest));
+
+    // Attempt to attest a second time with different content -- the
+    // policy has no explicit "already attested" guard, so this is
+    // testing whether one exists or whether it silently allows a
+    // rewrite while still pre-signoff (post-signoff, check 7 below
+    // already proves NOTHING on incident_staff or incidents can change
+    // for anyone). Flagged as a genuine finding either way, not assumed
+    // -- the brief doesn't explicitly settle whether a pre-signoff
+    // attestation should itself be a one-shot action.
+    const firstAttestedAt = afterFirstAttest.attested_at;
+    await teacherB.from("incident_staff").update({ attested_at: new Date().toISOString(), attestation_addendum: "Changed my mind." }).eq("incident_id", incidentId).eq("user_id", teacherBId);
+    const { data: afterSecondAttempt } = await admin.from("incident_staff").select("attested_at, attestation_addendum").eq("incident_id", incidentId).eq("user_id", teacherBId).single();
+    const wasOverwritten = afterSecondAttempt.attested_at !== firstAttestedAt || afterSecondAttempt.attestation_addendum === "Changed my mind.";
+    console.log(
+      `FINDING (not asserted pass/fail -- brief doesn't settle this) -- pre-signoff re-attestation ${wasOverwritten ? "IS" : "is NOT"} currently possible: first="${afterFirstAttest.attestation_addendum}" now="${afterSecondAttempt.attestation_addendum}"`
+    );
+  }
+
   console.log(`\n== CHECK 7: immutability after teacher sign-off ==`);
   {
     const { error: signErr } = await teacherA.from("incidents").update({ teacher_signed_at: new Date().toISOString(), teacher_signed_by: teacherAId }).eq("id", incidentId);
@@ -375,49 +433,6 @@ async function main() {
     const { error: thirdChildErr2 } = await admin.from("incident_children").insert({ incident_id: incidentId, passport_id: p3.id, child_index: "C", added_by: teacherAId });
     record("Third child with child_index 'C' (outside A/B) REJECTED", Boolean(thirdChildErr2), thirdChildErr2?.message);
     await admin.from("passports").delete().eq("id", p3.id);
-  }
-
-  console.log(`\n== CHECK D: attestation integrity ==`);
-  {
-    // teacherB and the free-text "Bus Escort Jane" were both named as
-    // witnessed staff by the original create_incident_stamp() call.
-    // clinician was never named at all -- confirm they have no row of
-    // their own AND cannot tamper with teacherB's row either (the
-    // policy's own_row check is user_id = auth.uid(), so a not-named
-    // caller updating BY teacherB's row id should silently affect zero
-    // rows, same RLS-on-UPDATE nuance as check 7).
-    await clinician
-      .from("incident_staff")
-      .update({ attested_at: new Date().toISOString(), attestation_addendum: "Clinician should not be able to write this." })
-      .eq("incident_id", incidentId)
-      .eq("user_id", teacherBId);
-    const { data: teacherBRowAfter } = await admin.from("incident_staff").select("attested_at, attestation_addendum").eq("incident_id", incidentId).eq("user_id", teacherBId).single();
-    record(
-      "A staff member NOT named on the incident cannot attest via someone else's row",
-      teacherBRowAfter.attestation_addendum !== "Clinician should not be able to write this.",
-      JSON.stringify(teacherBRowAfter)
-    );
-
-    // Named staff member (teacherB) attests once.
-    const { error: firstAttestErr } = await teacherB.from("incident_staff").update({ attested_at: new Date().toISOString(), attestation_addendum: "Confirmed, accurate." }).eq("incident_id", incidentId).eq("user_id", teacherBId);
-    record("Named staff member CAN attest to their own row", !firstAttestErr, firstAttestErr?.message);
-
-    const { data: afterFirstAttest } = await admin.from("incident_staff").select("attested_at, attestation_addendum").eq("incident_id", incidentId).eq("user_id", teacherBId).single();
-    record("Attestation actually persisted", Boolean(afterFirstAttest.attested_at), JSON.stringify(afterFirstAttest));
-
-    // Attempt to attest a second time with different content -- the
-    // policy has no explicit "already attested" guard, so this is
-    // testing whether one exists or whether it silently allows a
-    // rewrite. Flagged as a genuine finding either way, not assumed.
-    const firstAttestedAt = afterFirstAttest.attested_at;
-    await teacherB.from("incident_staff").update({ attested_at: new Date().toISOString(), attestation_addendum: "Changed my mind." }).eq("incident_id", incidentId).eq("user_id", teacherBId);
-    const { data: afterSecondAttempt } = await admin.from("incident_staff").select("attested_at, attestation_addendum").eq("incident_id", incidentId).eq("user_id", teacherBId).single();
-    const wasOverwritten = afterSecondAttempt.attested_at !== firstAttestedAt || afterSecondAttempt.attestation_addendum === "Changed my mind.";
-    record(
-      "Named staff CANNOT silently re-attest with different content (no second write allowed)",
-      !wasOverwritten,
-      `first="${afterFirstAttest.attestation_addendum}" now="${afterSecondAttempt.attestation_addendum}" (if these differ, the schema currently allows overwriting an attestation -- no version/lock on it)`
-    );
   }
 
   console.log(`\n== CHECK 11: free-text staff, non-blocking ==`);
