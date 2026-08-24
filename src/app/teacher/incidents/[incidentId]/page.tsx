@@ -70,11 +70,42 @@ const REMAINED_ON_SITE_OPTIONS = [
   { value: "no", label: "No" },
 ] as const;
 
+// Required, no default -- an active choice every time, never an
+// accepted default. The one field in this module not on the paper form
+// -- added because it's the distinction any reviewer, investigation, or
+// NCSE return cares about most: was this technique already set out in
+// the child's behaviour support plan, or an unplanned emergency
+// response.
+const PLANNING_STATUS_OPTIONS = [
+  { value: "in_bsp", label: "In BSP" },
+  { value: "not_planned", label: "Not planned" },
+] as const;
+
+const HOLD_TYPE_OPTIONS = [
+  { value: "childrens", label: "Children's" },
+  { value: "young_person", label: "Young person's" },
+] as const;
+
+const HOLD_POSITION_OPTIONS = [
+  { value: "seated", label: "Seated" },
+  { value: "standing", label: "Standing" },
+] as const;
+
+const HOLD_LEVEL_OPTIONS = [
+  { value: "low", label: "Low" },
+  { value: "med", label: "Medium" },
+  { value: "high", label: "High" },
+] as const;
+
 type Category = (typeof CATEGORY_OPTIONS)[number]["value"];
 type Party = (typeof PARTY_OPTIONS)[number]["value"];
 type StaffCount = (typeof STAFF_COUNT_OPTIONS)[number]["value"];
 type StaffDistressed = (typeof STAFF_DISTRESSED_OPTIONS)[number]["value"];
 type DistressLevel = (typeof DISTRESS_LEVEL_OPTIONS)[number]["value"];
+type PlanningStatus = (typeof PLANNING_STATUS_OPTIONS)[number]["value"];
+type HoldType = (typeof HOLD_TYPE_OPTIONS)[number]["value"];
+type HoldPosition = (typeof HOLD_POSITION_OPTIONS)[number]["value"];
+type HoldLevel = (typeof HOLD_LEVEL_OPTIONS)[number]["value"];
 
 interface ChildFormState {
   id: string;
@@ -91,6 +122,48 @@ interface StampSummary {
   occurredAt: string;
   locationValue: string;
   staffNames: string[];
+}
+
+interface ActionType {
+  id: string;
+  value: string;
+  isRestraint: boolean;
+}
+
+interface RestrictivePracticeRecord {
+  id: string | null; // null = not yet saved -- only these can be removed client-side.
+  planningStatus: PlanningStatus | null;
+  reasonCodes: string[];
+  disengagementCodes: string[];
+  holdType: HoldType | null;
+  holdPosition: HoldPosition | null;
+  holdLevel: HoldLevel | null;
+  resultCodes: string[];
+  totalProcedures: string;
+  staffInitials: string;
+  ncseReportComplete: boolean;
+  isSaving: boolean;
+  saveError: string | null;
+  savedAt: number | null;
+}
+
+function blankRestrictivePracticeRecord(): RestrictivePracticeRecord {
+  return {
+    id: null,
+    planningStatus: null,
+    reasonCodes: [],
+    disengagementCodes: [],
+    holdType: null,
+    holdPosition: null,
+    holdLevel: null,
+    resultCodes: [],
+    totalProcedures: "",
+    staffInitials: "",
+    ncseReportComplete: false,
+    isSaving: false,
+    saveError: null,
+    savedAt: null,
+  };
 }
 
 function formatDateTime(value: string): string {
@@ -116,6 +189,16 @@ export default function IncidentRecordPage() {
   const [summary, setSummary] = useState<StampSummary | null>(null);
   const [children, setChildren] = useState<ChildFormState[]>([]);
   const [recoveryOptions, setRecoveryOptions] = useState<string[]>([]);
+
+  const [actionTypes, setActionTypes] = useState<ActionType[]>([]);
+  const [selectedActionTypeIds, setSelectedActionTypeIds] = useState<string[]>([]);
+  const [actionsError, setActionsError] = useState<string | null>(null);
+  const [cpiReasonOptions, setCpiReasonOptions] = useState<string[]>([]);
+  const [cpiDisengagementOptions, setCpiDisengagementOptions] = useState<string[]>([]);
+  const [cpiResultOptions, setCpiResultOptions] = useState<string[]>([]);
+  // Keyed by passport_id -- a restrictive-practice record belongs to one
+  // named child, not the incident as a whole (0068 Part 7).
+  const [restrictivePracticesByChild, setRestrictivePracticesByChild] = useState<Record<string, RestrictivePracticeRecord[]>>({});
 
   const [category, setCategory] = useState<Category | null>(null);
   const [party, setParty] = useState<Party | null>(null);
@@ -154,25 +237,49 @@ export default function IncidentRecordPage() {
         return;
       }
 
-      const [{ data: childRows }, { data: staffRows }, { data: staffRoster }, { data: childRoster }, { data: recoveryTypes }] =
-        await Promise.all([
-          supabase
-            .from("incident_children")
-            .select("id, child_index, passport_id, distress_level, remained_on_site, remained_detail, recovery_methods")
-            .eq("incident_id", params.incidentId)
-            .order("child_index"),
-          supabase.from("incident_staff").select("user_id, free_text_name").eq("incident_id", params.incidentId),
-          supabase.rpc("get_institution_staff_roster", { p_institution_id: incident.institution_id }),
-          // Roster-scoped resolution, not an embedded passports(...) join
-          // -- see this file's header comment and CLAUDE.md.
-          supabase.rpc("get_institution_child_roster", { p_institution_id: incident.institution_id }),
-          supabase
-            .from("incident_recovery_types")
-            .select("value")
-            .or(`institution_id.is.null,institution_id.eq.${incident.institution_id}`)
-            .eq("is_active", true)
-            .order("sort_order"),
-        ]);
+      const institutionOrGlobal = `institution_id.is.null,institution_id.eq.${incident.institution_id}`;
+
+      const [
+        { data: childRows },
+        { data: staffRows },
+        { data: staffRoster },
+        { data: childRoster },
+        { data: recoveryTypes },
+        { data: actionTypeRows },
+        { data: selectedActionRows },
+        { data: reasonTypes },
+        { data: disengagementTypes },
+        { data: resultTypes },
+        { data: restrictivePracticeRows },
+      ] = await Promise.all([
+        supabase
+          .from("incident_children")
+          .select("id, child_index, passport_id, distress_level, remained_on_site, remained_detail, recovery_methods")
+          .eq("incident_id", params.incidentId)
+          .order("child_index"),
+        supabase.from("incident_staff").select("user_id, free_text_name").eq("incident_id", params.incidentId),
+        supabase.rpc("get_institution_staff_roster", { p_institution_id: incident.institution_id }),
+        // Roster-scoped resolution, not an embedded passports(...) join
+        // -- see this file's header comment and CLAUDE.md.
+        supabase.rpc("get_institution_child_roster", { p_institution_id: incident.institution_id }),
+        supabase.from("incident_recovery_types").select("value").or(institutionOrGlobal).eq("is_active", true).order("sort_order"),
+        supabase
+          .from("incident_action_types")
+          .select("id, value, is_restraint")
+          .or(institutionOrGlobal)
+          .eq("is_active", true)
+          .order("sort_order"),
+        supabase.from("incident_actions").select("action_type_id").eq("incident_id", params.incidentId),
+        supabase.from("cpi_reason_types").select("value").or(institutionOrGlobal).eq("is_active", true).order("sort_order"),
+        supabase.from("cpi_disengagement_types").select("value").or(institutionOrGlobal).eq("is_active", true).order("sort_order"),
+        supabase.from("cpi_result_types").select("value").or(institutionOrGlobal).eq("is_active", true).order("sort_order"),
+        supabase
+          .from("restrictive_practices")
+          .select(
+            "id, passport_id, planning_status, reason_codes, disengagement_codes, hold_type, hold_position, hold_level, result_codes, total_procedures, staff_initials, ncse_report_complete"
+          )
+          .eq("incident_id", params.incidentId),
+      ]);
 
       if (!isMounted) return;
 
@@ -208,6 +315,36 @@ export default function IncidentRecordPage() {
       );
 
       setRecoveryOptions((recoveryTypes ?? []).map((row) => row.value));
+
+      setActionTypes(
+        (actionTypeRows ?? []).map((row) => ({ id: row.id, value: row.value, isRestraint: row.is_restraint }))
+      );
+      setSelectedActionTypeIds((selectedActionRows ?? []).map((row) => row.action_type_id));
+      setCpiReasonOptions((reasonTypes ?? []).map((row) => row.value));
+      setCpiDisengagementOptions((disengagementTypes ?? []).map((row) => row.value));
+      setCpiResultOptions((resultTypes ?? []).map((row) => row.value));
+
+      const byChild: Record<string, RestrictivePracticeRecord[]> = {};
+      for (const row of restrictivePracticeRows ?? []) {
+        const record: RestrictivePracticeRecord = {
+          id: row.id,
+          planningStatus: row.planning_status as PlanningStatus | null,
+          reasonCodes: row.reason_codes ?? [],
+          disengagementCodes: row.disengagement_codes ?? [],
+          holdType: row.hold_type as HoldType | null,
+          holdPosition: row.hold_position as HoldPosition | null,
+          holdLevel: row.hold_level as HoldLevel | null,
+          resultCodes: row.result_codes ?? [],
+          totalProcedures: row.total_procedures?.toString() ?? "",
+          staffInitials: row.staff_initials ?? "",
+          ncseReportComplete: row.ncse_report_complete,
+          isSaving: false,
+          saveError: null,
+          savedAt: null,
+        };
+        byChild[row.passport_id] = [...(byChild[row.passport_id] ?? []), record];
+      }
+      setRestrictivePracticesByChild(byChild);
 
       setCategory(incident.category as Category | null);
       setParty(incident.party as Party | null);
@@ -249,6 +386,116 @@ export default function IncidentRecordPage() {
         return { ...c, recoveryMethods: has ? c.recoveryMethods.filter((m) => m !== methodValue) : [...c.recoveryMethods, methodValue] };
       })
     );
+  }
+
+  // Actions taken write immediately (a plain join table, nothing to
+  // batch) -- optimistic toggle, reverted on failure.
+  async function toggleAction(actionTypeId: string) {
+    const supabase = createClient();
+    const isSelected = selectedActionTypeIds.includes(actionTypeId);
+    setActionsError(null);
+    setSelectedActionTypeIds((current) =>
+      isSelected ? current.filter((id) => id !== actionTypeId) : [...current, actionTypeId]
+    );
+
+    const { error: toggleError } = isSelected
+      ? await supabase.from("incident_actions").delete().eq("incident_id", params.incidentId).eq("action_type_id", actionTypeId)
+      : await supabase.from("incident_actions").insert({ incident_id: params.incidentId, action_type_id: actionTypeId });
+
+    if (toggleError) {
+      setActionsError(toggleError.message);
+      setSelectedActionTypeIds((current) =>
+        isSelected ? [...current, actionTypeId] : current.filter((id) => id !== actionTypeId)
+      );
+    }
+  }
+
+  function addRestrictivePracticeRecord(passportId: string) {
+    setRestrictivePracticesByChild((current) => ({
+      ...current,
+      [passportId]: [...(current[passportId] ?? []), blankRestrictivePracticeRecord()],
+    }));
+  }
+
+  function removeDraftRestrictivePracticeRecord(passportId: string, index: number) {
+    // Only ever called on a record with id === null -- once a record has
+    // an id (saved), there's no removal path, matching 0068's own
+    // comment: "once a restrictive-practice row exists it is never
+    // removed, only ever corrected".
+    setRestrictivePracticesByChild((current) => ({
+      ...current,
+      [passportId]: current[passportId].filter((_, i) => i !== index),
+    }));
+  }
+
+  function updateRestrictivePracticeRecord(passportId: string, index: number, patch: Partial<RestrictivePracticeRecord>) {
+    setRestrictivePracticesByChild((current) => ({
+      ...current,
+      [passportId]: current[passportId].map((r, i) => (i === index ? { ...r, ...patch } : r)),
+    }));
+  }
+
+  function toggleRestrictivePracticeCode(
+    passportId: string,
+    index: number,
+    field: "reasonCodes" | "disengagementCodes" | "resultCodes",
+    codeValue: string
+  ) {
+    setRestrictivePracticesByChild((current) => ({
+      ...current,
+      [passportId]: current[passportId].map((r, i) => {
+        if (i !== index) return r;
+        const has = r[field].includes(codeValue);
+        return { ...r, [field]: has ? r[field].filter((c) => c !== codeValue) : [...r[field], codeValue] };
+      }),
+    }));
+  }
+
+  async function saveRestrictivePracticeRecord(passportId: string, index: number) {
+    const record = restrictivePracticesByChild[passportId][index];
+
+    if (!record.planningStatus) {
+      updateRestrictivePracticeRecord(passportId, index, { saveError: "Planning status is required." });
+      return;
+    }
+
+    updateRestrictivePracticeRecord(passportId, index, { isSaving: true, saveError: null });
+
+    const supabase = createClient();
+    const payload = {
+      incident_id: params.incidentId as string,
+      passport_id: passportId,
+      planning_status: record.planningStatus,
+      reason_codes: record.reasonCodes.length > 0 ? record.reasonCodes : null,
+      disengagement_codes: record.disengagementCodes.length > 0 ? record.disengagementCodes : null,
+      hold_type: record.holdType,
+      hold_position: record.holdPosition,
+      hold_level: record.holdLevel,
+      result_codes: record.resultCodes.length > 0 ? record.resultCodes : null,
+      total_procedures: record.totalProcedures.trim() ? parseInt(record.totalProcedures, 10) : null,
+      staff_initials: record.staffInitials.trim() || null,
+      ncse_report_complete: record.ncseReportComplete,
+    };
+
+    if (record.id) {
+      const { error: updateError } = await supabase.from("restrictive_practices").update(payload).eq("id", record.id);
+      if (updateError) {
+        updateRestrictivePracticeRecord(passportId, index, { isSaving: false, saveError: updateError.message });
+        return;
+      }
+      updateRestrictivePracticeRecord(passportId, index, { isSaving: false, savedAt: Date.now() });
+    } else {
+      const { data: inserted, error: insertError } = await supabase
+        .from("restrictive_practices")
+        .insert(payload)
+        .select("id")
+        .single();
+      if (insertError) {
+        updateRestrictivePracticeRecord(passportId, index, { isSaving: false, saveError: insertError.message });
+        return;
+      }
+      updateRestrictivePracticeRecord(passportId, index, { isSaving: false, savedAt: Date.now(), id: inserted.id });
+    }
   }
 
   async function handleSave() {
@@ -301,6 +548,9 @@ export default function IncidentRecordPage() {
   }
 
   const staffRole = user?.app_metadata?.role as string | undefined;
+  const hasCpiSelected = selectedActionTypeIds.some(
+    (id) => actionTypes.find((a) => a.id === id)?.isRestraint
+  );
 
   return (
     <div className="flex min-h-full flex-1 flex-col bg-brand-off-white/40 pb-10">
@@ -479,6 +729,188 @@ export default function IncidentRecordPage() {
                   </div>
                 </section>
               ))}
+
+              <section>
+                <h2 className="mb-3 font-heading text-lg font-bold text-brand-prussian-blue">Actions Taken</h2>
+                <div className="rounded-2xl border border-black/5 bg-white p-4">
+                  <div className="flex flex-wrap gap-2">
+                    {actionTypes.map((action) => {
+                      const isSelected = selectedActionTypeIds.includes(action.id);
+                      return (
+                        <button
+                          key={action.id}
+                          type="button"
+                          onClick={() => toggleAction(action.id)}
+                          className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors ${
+                            isSelected
+                              ? "border-brand-prussian-blue bg-brand-pastel-blue/30 text-brand-prussian-blue"
+                              : "border-black/10 bg-white text-black/60 hover:bg-black/[0.02]"
+                          }`}
+                        >
+                          {action.value}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {actionsError && (
+                    <p role="alert" className="mt-2 text-sm font-medium text-red-600">
+                      {actionsError}
+                    </p>
+                  )}
+                </div>
+              </section>
+
+              {hasCpiSelected &&
+                children.map((child) => {
+                  const records = restrictivePracticesByChild[child.passportId] ?? [];
+                  return (
+                    <section key={`rp-${child.id}`}>
+                      <h2 className="mb-3 font-heading text-lg font-bold text-brand-prussian-blue">
+                        {child.childName} -- Restrictive Practice
+                      </h2>
+
+                      <div className="flex flex-col gap-4">
+                        {records.map((record, index) => (
+                          <div key={record.id ?? `draft-${index}`} className="rounded-2xl border border-black/5 bg-white p-4">
+                            <div className="flex flex-col gap-5">
+                              <div>
+                                <span className="mb-2 block text-sm font-semibold text-brand-neutral-black">
+                                  Planning status <span className="text-brand-golden-brown">Required</span>
+                                </span>
+                                <PillSingleSelect
+                                  options={PLANNING_STATUS_OPTIONS}
+                                  value={record.planningStatus}
+                                  onChange={(v) => updateRestrictivePracticeRecord(child.passportId, index, { planningStatus: v })}
+                                />
+                              </div>
+
+                              <div>
+                                <span className="mb-2 block text-sm font-semibold text-brand-neutral-black">Reason</span>
+                                <PillMultiSelect
+                                  options={cpiReasonOptions.map((v) => ({ value: v }))}
+                                  selected={record.reasonCodes}
+                                  onToggle={(v) => toggleRestrictivePracticeCode(child.passportId, index, "reasonCodes", v)}
+                                />
+                              </div>
+
+                              <div>
+                                <span className="mb-2 block text-sm font-semibold text-brand-neutral-black">Disengagement</span>
+                                <PillMultiSelect
+                                  options={cpiDisengagementOptions.map((v) => ({ value: v }))}
+                                  selected={record.disengagementCodes}
+                                  onToggle={(v) => toggleRestrictivePracticeCode(child.passportId, index, "disengagementCodes", v)}
+                                />
+                              </div>
+
+                              <div>
+                                <span className="mb-2 block text-sm font-semibold text-brand-neutral-black">Hold type</span>
+                                <PillSingleSelect
+                                  options={HOLD_TYPE_OPTIONS}
+                                  value={record.holdType}
+                                  onChange={(v) => updateRestrictivePracticeRecord(child.passportId, index, { holdType: v })}
+                                />
+                              </div>
+
+                              <div>
+                                <span className="mb-2 block text-sm font-semibold text-brand-neutral-black">Hold position</span>
+                                <PillSingleSelect
+                                  options={HOLD_POSITION_OPTIONS}
+                                  value={record.holdPosition}
+                                  onChange={(v) => updateRestrictivePracticeRecord(child.passportId, index, { holdPosition: v })}
+                                />
+                              </div>
+
+                              <div>
+                                <span className="mb-2 block text-sm font-semibold text-brand-neutral-black">Hold level</span>
+                                <PillSingleSelect
+                                  options={HOLD_LEVEL_OPTIONS}
+                                  value={record.holdLevel}
+                                  onChange={(v) => updateRestrictivePracticeRecord(child.passportId, index, { holdLevel: v })}
+                                />
+                              </div>
+
+                              <div>
+                                <span className="mb-2 block text-sm font-semibold text-brand-neutral-black">Result</span>
+                                <PillMultiSelect
+                                  options={cpiResultOptions.map((v) => ({ value: v }))}
+                                  selected={record.resultCodes}
+                                  onToggle={(v) => toggleRestrictivePracticeCode(child.passportId, index, "resultCodes", v)}
+                                />
+                              </div>
+
+                              <TextField
+                                label="Total procedures"
+                                id={`total-procedures-${child.id}-${index}`}
+                                type="number"
+                                min={0}
+                                value={record.totalProcedures}
+                                onChange={(e) =>
+                                  updateRestrictivePracticeRecord(child.passportId, index, { totalProcedures: e.target.value })
+                                }
+                              />
+
+                              <TextField
+                                label="Staff initials"
+                                id={`staff-initials-${child.id}-${index}`}
+                                value={record.staffInitials}
+                                onChange={(e) =>
+                                  updateRestrictivePracticeRecord(child.passportId, index, { staffInitials: e.target.value })
+                                }
+                              />
+
+                              <label className="flex cursor-pointer items-center gap-2 text-sm font-semibold text-brand-neutral-black">
+                                <input
+                                  type="checkbox"
+                                  checked={record.ncseReportComplete}
+                                  onChange={(e) =>
+                                    updateRestrictivePracticeRecord(child.passportId, index, { ncseReportComplete: e.target.checked })
+                                  }
+                                />
+                                NCSE report complete
+                              </label>
+
+                              {record.saveError && (
+                                <p role="alert" className="text-sm font-medium text-red-600">
+                                  {record.saveError}
+                                </p>
+                              )}
+                              {record.savedAt && !record.saveError && (
+                                <p className="text-sm font-medium text-green-700">Saved.</p>
+                              )}
+
+                              <div className="flex gap-2">
+                                <Button
+                                  type="button"
+                                  onClick={() => saveRestrictivePracticeRecord(child.passportId, index)}
+                                  disabled={record.isSaving}
+                                >
+                                  {record.isSaving ? "Saving…" : record.id ? "Update" : "Save"}
+                                </Button>
+                                {record.id === null && (
+                                  <Button
+                                    type="button"
+                                    variant="secondary"
+                                    onClick={() => removeDraftRestrictivePracticeRecord(child.passportId, index)}
+                                  >
+                                    Remove
+                                  </Button>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+
+                        <button
+                          type="button"
+                          onClick={() => addRestrictivePracticeRecord(child.passportId)}
+                          className="rounded-2xl border-2 border-dashed border-brand-prussian-blue/30 py-3 text-sm font-semibold text-brand-prussian-blue"
+                        >
+                          + Add a restrictive practice record
+                        </button>
+                      </div>
+                    </section>
+                  );
+                })}
             </fieldset>
 
             {canEdit && (
@@ -498,8 +930,8 @@ export default function IncidentRecordPage() {
             )}
 
             <p className="text-sm leading-relaxed text-brand-neutral-black/60">
-              Actions taken, restrictive practice, injuries, and debrief are not yet available in this build. This
-              record is saved and will not be lost.
+              Injuries, body map, and debrief are not yet available in this build. This record is saved and will
+              not be lost.
             </p>
           </div>
         ) : null}
