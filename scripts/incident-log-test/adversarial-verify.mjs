@@ -274,6 +274,32 @@ async function main() {
     record("Parent 2 (child B) sees the incident via their own child's slice", (p2Rows?.length ?? 0) === 1, `rows=${p2Rows?.length}`);
   }
 
+  console.log(`\n== CHECK F: roster RPCs for the stamp UI (migration 0074) ==`);
+  {
+    const { data: childRoster, error: childRosterErr } = await teacherA.rpc("get_institution_child_roster", { p_institution_id: institutionId });
+    record("Institution staff can call get_institution_child_roster()", !childRosterErr, childRosterErr?.message);
+    const rosterIds = (childRoster ?? []).map((r) => r.passport_id);
+    record("Roster includes child1 (approved link)", rosterIds.includes(child1), JSON.stringify(rosterIds));
+    record("Roster includes child2 too -- NO approved_by_parent gate (decision 1/5)", rosterIds.includes(child2), JSON.stringify(rosterIds));
+
+    const { data: clinicianRoster } = await clinician.rpc("get_institution_child_roster", { p_institution_id: institutionId });
+    record("A caller who is NOT institution_staff (clinician) gets zero roster rows", (clinicianRoster?.length ?? 0) === 0, `rows=${clinicianRoster?.length}`);
+    const { data: parentRoster } = await parent1.rpc("get_institution_child_roster", { p_institution_id: institutionId });
+    record("A parent gets zero roster rows either", (parentRoster?.length ?? 0) === 0, `rows=${parentRoster?.length}`);
+
+    const { data: staffRoster, error: staffRosterErr } = await teacherA.rpc("get_institution_staff_roster", { p_institution_id: institutionId });
+    record("Institution staff can call get_institution_staff_roster()", !staffRosterErr, staffRosterErr?.message);
+    const staffIds = (staffRoster ?? []).map((r) => r.user_id);
+    record("Staff roster includes colleagues (teacherB, principal, sna), not just the caller", [teacherBId, principalId, snaId].every((id) => staffIds.includes(id)), JSON.stringify(staffRoster));
+
+    const { data: otherInstForRoster } = await admin.from("institutions").insert({ name: "Roster Cross-Check School", institution_code: CODE + "C", status: "verified" }).select().single();
+    const { data: crossInstChildRoster } = await teacherA.rpc("get_institution_child_roster", { p_institution_id: otherInstForRoster.id });
+    record("Own institution's staff member gets zero rows for a DIFFERENT institution's child roster", (crossInstChildRoster?.length ?? 0) === 0, `rows=${crossInstChildRoster?.length}`);
+    const { data: crossInstStaffRoster } = await teacherA.rpc("get_institution_staff_roster", { p_institution_id: otherInstForRoster.id });
+    record("Own institution's staff member gets zero rows for a DIFFERENT institution's staff roster", (crossInstStaffRoster?.length ?? 0) === 0, `rows=${crossInstStaffRoster?.length}`);
+    await admin.from("institutions").delete().eq("id", otherInstForRoster.id);
+  }
+
   console.log(`\n== CHECK C: SNA can stamp but cannot complete stage two or sign off ==`);
   {
     const { data: snaIncidentId, error: snaStampErr } = await sna.rpc("create_incident_stamp", {
