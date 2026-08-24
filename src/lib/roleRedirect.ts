@@ -8,6 +8,8 @@ export function getPostAuthRedirect(role: string | null | undefined): string {
       return "/sna/passports";
     case "clinician":
       return "/clinician/dashboard";
+    case "principal":
+      return "/principal/dashboard";
     default:
       return "/role-select";
   }

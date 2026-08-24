@@ -1,10 +1,13 @@
-// Throwaway test rig for the School Incident Log Phase 1 adversarial
-// verification -- real JWTs, not service-role, for every RLS check.
-// Creates a dedicated institution + accounts, drives the actual incident
-// lifecycle through real signed-in sessions, asserts each of the 11
-// checks from the verification plan, then deletes everything it created.
+// Adversarial RLS verification for the School Incident Log (Phases 1
+// and its follow-up fix). Real JWTs throughout, not service-role
+// bypasses -- "the UI doesn't show it" never counts, query-level is the
+// bar. Creates a dedicated institution + accounts, drives the actual
+// incident lifecycle through real signed-in sessions via
+// create_incident_stamp()/claim_incident() (the only creation paths --
+// direct table INSERT on incidents has no policy at all any more),
+// asserts every check, then deletes everything it created.
 //
-// Run with: node --env-file=.env.local scripts/messages-test/incident-log-adversarial-verify.mjs
+// Run with: node --env-file=.env.local scripts/incident-log-test/adversarial-verify.mjs
 
 import { createClient } from "@supabase/supabase-js";
 
@@ -48,7 +51,6 @@ async function createUser(email, fullName, role) {
 async function main() {
   console.log(`\n== Setup ==`);
 
-  // Institution, verified.
   const { data: inst, error: instErr } = await admin
     .from("institutions")
     .insert({ name: "Incident Verify Test School", institution_code: CODE, status: "verified" })
@@ -58,25 +60,24 @@ async function main() {
   const institutionId = inst.id;
   console.log(`Institution: ${institutionId} (code ${CODE})`);
 
-  // Users.
   const principalId = await createUser("incverify.principal@thebehaviourhive.com", "Principal Test", "principal");
   const teacherAId = await createUser("incverify.teacherA@thebehaviourhive.com", "Teacher A Owning", "class_teacher");
   const teacherBId = await createUser("incverify.teacherB@thebehaviourhive.com", "Teacher B Ordinary", "class_teacher");
+  const snaId = await createUser("incverify.sna@thebehaviourhive.com", "SNA Test", "sna");
   const clinicianId = await createUser("incverify.clinician@thebehaviourhive.com", "Clinician Test", "clinician");
   const parent1Id = await createUser("incverify.parent1@thebehaviourhive.com", "Parent One", "parent");
   const parent2Id = await createUser("incverify.parent2@thebehaviourhive.com", "Parent Two", "parent");
   const parent3Id = await createUser("incverify.parent3@thebehaviourhive.com", "Parent Three", "parent");
   console.log("Users created.");
 
-  // institution_staff.
   const { error: staffErr } = await admin.from("institution_staff").insert([
     { institution_id: institutionId, user_id: principalId, role: "principal" },
     { institution_id: institutionId, user_id: teacherAId, role: "class_teacher" },
     { institution_id: institutionId, user_id: teacherBId, role: "class_teacher" },
+    { institution_id: institutionId, user_id: snaId, role: "sna" },
   ]);
   if (staffErr) throw staffErr;
 
-  // Passports (children) -- minimal required fields only.
   const { data: p1, error: p1Err } = await admin
     .from("passports")
     .insert({ user_id: parent1Id, child_name: "Verify Child One", passport_status: "complete" })
@@ -91,22 +92,18 @@ async function main() {
   if (p2Err) throw p2Err;
   const child1 = p1.id, child2 = p2.id;
 
-  // passport_institution_links -- irrelevant to school-side access now
-  // (decision 1), but still created for realism / other code paths.
-  await admin.from("passport_institution_links").insert([
-    { passport_id: child1, institution_id: institutionId, approved_by_parent: true },
-    { passport_id: child2, institution_id: institutionId, approved_by_parent: true },
-  ]);
+  // Child 2 (check b) is deliberately given NO passport_institution_links
+  // row at all yet -- "an incident is created for a child whose parent
+  // has never opened the app" -- linked only after, to prove the
+  // school-side flow already worked without it. Child 1 IS linked from
+  // the start (approved), representing the ordinary case.
+  await admin.from("passport_institution_links").insert({ passport_id: child1, institution_id: institutionId, approved_by_parent: true });
 
-  // passport_access: Teacher B has ORDINARY access to child1 only.
-  // Teacher A (the eventual creator/owning teacher) deliberately gets
-  // NONE -- this is the whole point of check 2 below.
   await admin.from("passport_access").insert({
     passport_id: child1, teacher_id: teacherBId, institution_id: institutionId,
     is_active: true, actor_role: "class_teacher",
   });
 
-  // Clinician: verified, caseload access to child1 only.
   const { error: clinErr } = await admin.from("clinicians").insert({
     user_id: clinicianId, specialty: "behavioural_psychologist", verification_status: "verified",
   });
@@ -117,85 +114,72 @@ async function main() {
 
   const teacherA = await signedInClient("incverify.teacherA@thebehaviourhive.com");
   const teacherB = await signedInClient("incverify.teacherB@thebehaviourhive.com");
+  const sna = await signedInClient("incverify.sna@thebehaviourhive.com");
   const principal = await signedInClient("incverify.principal@thebehaviourhive.com");
   const clinician = await signedInClient("incverify.clinician@thebehaviourhive.com");
   const parent1 = await signedInClient("incverify.parent1@thebehaviourhive.com");
   const parent2 = await signedInClient("incverify.parent2@thebehaviourhive.com");
 
-  // A seeded global location.
   const { data: loc } = await admin.from("incident_locations").select("id").eq("value", "Classroom").is("institution_id", null).single();
 
-  console.log(`\n== Building the incident (as Teacher A, real session) ==`);
+  console.log(`\n== CHECK B: incident for a child whose parent has never opened the app ==`);
+  // child2 has NO passport_institution_links row at all yet -- proving
+  // stage-one creation genuinely doesn't need one, per decision 1 and
+  // the explicit ask "school side works throughout, parent notification
+  // simply has no recipient." Named on the SAME incident as child1 to
+  // also exercise the two-child path in one go.
+  console.log(`\n== Building the incident (create_incident_stamp, as Teacher A, real session) ==`);
 
-  // Deliberately NOT chaining .select() onto this insert -- confirmed
-  // live during this same verification run that doing so triggers
-  // INSERT ... RETURNING, which requires the SELECT policy (backed by
-  // the can_view_incident() SECURITY DEFINER function) to pass WITHIN
-  // THE SAME STATEMENT as the insert, and that self-referential
-  // evaluation does not resolve the same way a fresh, separate query
-  // does -- fails with "new row violates row-level security policy"
-  // even though the row and the caller both genuinely satisfy the
-  // policy a moment later. Exact same category of gotcha already
-  // documented for abc_logs's own insert (DO NOT chain .select()), just
-  // a different root cause (there: column-level grants; here: same-
-  // statement RETURNING vs. a SECURITY DEFINER helper function). Fix:
-  // generate the id client-side, matching the abc_logs precedent, so
-  // the caller already knows the new row's id without needing
-  // RETURNING. This is a real constraint client code (Phase 3) must
-  // follow too, not just this test script.
-  const incidentId = crypto.randomUUID();
-  const { error: incErr } = await teacherA
-    .from("incidents")
-    .insert({ id: incidentId, institution_id: institutionId, created_by: teacherAId, occurred_at: new Date().toISOString(), location_id: loc.id });
-  if (incErr) throw incErr;
-  console.log("Incident created (draft):", incidentId);
+  const { data: incidentId, error: stampErr } = await teacherA.rpc("create_incident_stamp", {
+    p_institution_id: institutionId,
+    p_occurred_at: new Date().toISOString(),
+    p_location_id: loc.id,
+    p_child_passport_ids: [child1, child2],
+    p_staff: [{ user_id: teacherBId, involvement: "witnessed" }, { free_text_name: "Bus Escort Jane", involvement: "witnessed" }],
+  });
+  record("create_incident_stamp succeeds despite child2 having no institution link at all", !stampErr, stampErr?.message);
+  console.log("Incident created (atomic stamp):", incidentId);
 
-  // Teacher A assigns themself as owning teacher and fills stage-two fields.
+  {
+    const { data: children } = await admin.from("incident_children").select("passport_id, child_index").eq("incident_id", incidentId);
+    record("Incident has exactly 2 children immediately after the stamp (never a childless window)", (children?.length ?? 0) === 2, JSON.stringify(children));
+    const { data: owningCheck } = await admin.from("incidents").select("owning_teacher_id").eq("id", incidentId).single();
+    record("Class-teacher creator auto-assigned as owning teacher by the stamp RPC", owningCheck.owning_teacher_id === teacherAId, owningCheck.owning_teacher_id);
+  }
+
+  // Now retroactively link child2 to the institution (the parent opens
+  // the app / a link gets created later) -- confirms nothing about
+  // stage-one required it to have existed first.
+  await admin.from("passport_institution_links").insert({ passport_id: child2, institution_id: institutionId, approved_by_parent: false });
+
   const { error: ownErr } = await teacherA
     .from("incidents")
-    .update({ owning_teacher_id: teacherAId, category: "one_party_incident", narrative: "Staff-facing narrative text.", parent_summary: "Parent-facing summary text." })
+    .update({ category: "one_party_incident", narrative: "Staff-facing narrative text.", parent_summary: "Parent-facing summary text." })
     .eq("id", incidentId);
   if (ownErr) throw ownErr;
 
-  // Two children, added by Teacher A -- drawn from the roster, not from
-  // Teacher A's own (nonexistent) passport_access.
-  const { error: icErr } = await teacherA.from("incident_children").insert([
-    { incident_id: incidentId, passport_id: child1, child_index: "A", added_by: teacherAId },
-    { incident_id: incidentId, passport_id: child2, child_index: "B", added_by: teacherAId },
-  ]);
-  if (icErr) throw icErr;
-
-  // Staff: Teacher B named as witnessed, plus a free-text bus escort.
-  const { error: isErr } = await teacherA.from("incident_staff").insert([
-    { incident_id: incidentId, user_id: teacherBId, involvement: "witnessed" },
-    { incident_id: incidentId, free_text_name: "Bus Escort Jane", involvement: "witnessed" },
-  ]);
-  if (isErr) throw isErr;
-
-  // Move status forward (no DB-enforced transition order -- just setting
-  // it for realism of the scenario).
   await teacherA.from("incidents").update({ status: "awaiting_attestation" }).eq("id", incidentId);
 
   console.log(`\n== CHECK 1: draft isolation ==`);
   {
-    const { data: draftIncident } = await admin.from("incidents").insert({
-      institution_id: institutionId, created_by: teacherAId, occurred_at: new Date().toISOString(), location_id: loc.id,
-    }).select().single();
-    await admin.from("incident_children").insert({ incident_id: draftIncident.id, passport_id: child1, child_index: "A", added_by: teacherAId });
+    const { data: draftId } = await teacherA.rpc("create_incident_stamp", {
+      p_institution_id: institutionId, p_occurred_at: new Date().toISOString(), p_location_id: loc.id,
+      p_child_passport_ids: [child1], p_staff: [],
+    });
 
-    const { data: byTeacherB } = await teacherB.from("incidents").select("id").eq("id", draftIncident.id);
+    const { data: byTeacherB } = await teacherB.from("incidents").select("id").eq("id", draftId);
     record("Draft invisible to ordinary teacher with passport_access", (byTeacherB?.length ?? 0) === 0, `rows=${byTeacherB?.length}`);
 
-    const { data: byClinician } = await clinician.from("incidents").select("id").eq("id", draftIncident.id);
+    const { data: byClinician } = await clinician.from("incidents").select("id").eq("id", draftId);
     record("Draft invisible to clinician (caseload access to named child)", (byClinician?.length ?? 0) === 0, `rows=${byClinician?.length}`);
 
-    const { data: byPrincipal } = await principal.from("incidents").select("id").eq("id", draftIncident.id);
+    const { data: byPrincipal } = await principal.from("incidents").select("id").eq("id", draftId);
     record("Draft VISIBLE to principal (author/owning/principal only)", (byPrincipal?.length ?? 0) === 1, `rows=${byPrincipal?.length}`);
 
-    const { data: byCreator } = await teacherA.from("incidents").select("id").eq("id", draftIncident.id);
+    const { data: byCreator } = await teacherA.from("incidents").select("id").eq("id", draftId);
     record("Draft VISIBLE to its own creator", (byCreator?.length ?? 0) === 1, `rows=${byCreator?.length}`);
 
-    await admin.from("incidents").delete().eq("id", draftIncident.id);
+    await admin.from("incidents").delete().eq("id", draftId);
   }
 
   console.log(`\n== CHECK 2: owning-teacher incident-scoped access, not passport-scoped ==`);
@@ -215,6 +199,33 @@ async function main() {
     const { data: principalStill } = await principal.from("incidents").select("id").eq("id", incidentId);
     record("Incident stays visible to principal after parent-link revoked", (principalStill?.length ?? 0) === 1, `rows=${principalStill?.length}`);
     await admin.from("passport_institution_links").update({ approved_by_parent: true }).eq("passport_id", child1).eq("institution_id", institutionId);
+  }
+
+  console.log(`\n== CHECK 3A (case a, the explicit re-ask): parent revokes the link -- EVERY incident for that child stays visible school-side ==`);
+  {
+    // Distinct from check 3 above: this asserts across the school-side
+    // read paths generically, not just one incident by id -- teacherB's
+    // ORDINARY passport_access-derived visibility (not owning-teacher
+    // status) and the principal's institution-wide list both re-checked
+    // after a full revoke (approved_by_parent -> false AND is_active ->
+    // false on passport_access itself, the strongest revocation this
+    // schema has).
+    await admin.from("passport_institution_links").update({ approved_by_parent: false }).eq("passport_id", child1).eq("institution_id", institutionId);
+    await admin.from("passport_access").update({ is_active: false }).eq("passport_id", child1).eq("teacher_id", teacherBId);
+
+    const { data: principalList } = await principal.rpc("get_institution_incidents", { p_institution_id: institutionId });
+    const stillThere = principalList?.some((r) => r.incident_id === incidentId);
+    record("Principal's institution-wide list still contains the incident after full revoke", Boolean(stillThere), `found=${stillThere}`);
+
+    const { data: ownerStill } = await teacherA.from("incidents").select("id").eq("id", incidentId);
+    record("Owning teacher (incident-scoped, decision 4) unaffected by the revoke regardless", (ownerStill?.length ?? 0) === 1, `rows=${ownerStill?.length}`);
+
+    // Restore for the rest of the suite.
+    await admin.from("passport_institution_links").update({ approved_by_parent: true }).eq("passport_id", child1).eq("institution_id", institutionId);
+    await admin.from("passport_access").update({ is_active: true }).eq("passport_id", child1).eq("teacher_id", teacherBId);
+
+    const { data: byTeacherBRestored } = await teacherB.from("incidents").select("id").eq("id", incidentId);
+    record("Ordinary teacher's own passport_access-derived visibility restored once re-activated", (byTeacherBRestored?.length ?? 0) === 1, `rows=${byTeacherBRestored?.length}`);
   }
 
   console.log(`\n== CHECK 4: principal institution scoping + unverified gap ==`);
@@ -258,32 +269,77 @@ async function main() {
     record("Parent 2 (child B) sees the incident via their own child's slice", (p2Rows?.length ?? 0) === 1, `rows=${p2Rows?.length}`);
   }
 
+  console.log(`\n== CHECK C: SNA can stamp but cannot complete stage two or sign off ==`);
+  {
+    const { data: snaIncidentId, error: snaStampErr } = await sna.rpc("create_incident_stamp", {
+      p_institution_id: institutionId, p_occurred_at: new Date().toISOString(), p_location_id: loc.id,
+      p_child_passport_ids: [child1], p_staff: [],
+    });
+    record("SNA CAN create a stamp", !snaStampErr, snaStampErr?.message);
+
+    const { data: snaOwning } = await admin.from("incidents").select("owning_teacher_id").eq("id", snaIncidentId).single();
+    record("SNA-created stamp has NO owning teacher auto-assigned (only class_teacher gets that)", snaOwning.owning_teacher_id === null, snaOwning.owning_teacher_id);
+
+    await sna.from("incidents").update({ narrative: "SNA tried to write stage two" }).eq("id", snaIncidentId);
+    const { data: afterSnaEdit } = await admin.from("incidents").select("narrative").eq("id", snaIncidentId).single();
+    record("SNA CANNOT complete stage two (edit did not persist)", afterSnaEdit.narrative === null, `narrative now: ${afterSnaEdit.narrative}`);
+
+    await sna.from("incidents").update({ teacher_signed_at: new Date().toISOString(), teacher_signed_by: snaId }).eq("id", snaIncidentId);
+    const { data: afterSnaSign } = await admin.from("incidents").select("teacher_signed_at").eq("id", snaIncidentId).single();
+    record("SNA CANNOT sign off (did not persist)", afterSnaSign.teacher_signed_at === null, afterSnaSign.teacher_signed_at);
+
+    const { error: snaClaimErr } = await sna.rpc("claim_incident", { p_incident_id: snaIncidentId });
+    record("SNA CANNOT claim_incident either (class_teacher only)", Boolean(snaClaimErr), snaClaimErr?.message);
+
+    const { error: teacherBClaimErr } = await teacherB.rpc("claim_incident", { p_incident_id: snaIncidentId });
+    record("A real class teacher CAN claim the SNA-created stamp", !teacherBClaimErr, teacherBClaimErr?.message);
+
+    await teacherB.from("incidents").update({ narrative: "Teacher B completed stage two after claiming" }).eq("id", snaIncidentId);
+    const { data: afterClaim } = await admin.from("incidents").select("narrative, owning_teacher_id").eq("id", snaIncidentId).single();
+    record("Once claimed, the claiming teacher CAN complete stage two", afterClaim.narrative === "Teacher B completed stage two after claiming" && afterClaim.owning_teacher_id === teacherBId, JSON.stringify(afterClaim));
+
+    await admin.from("incidents").delete().eq("id", snaIncidentId);
+  }
+
   console.log(`\n== CHECK 7: immutability after teacher sign-off ==`);
   {
     const { error: signErr } = await teacherA.from("incidents").update({ teacher_signed_at: new Date().toISOString(), teacher_signed_by: teacherAId }).eq("id", incidentId);
     record("Teacher sign-off write succeeds", !signErr, signErr?.message);
 
-    // NOT an error-throwing check -- confirmed live that it can't be.
-    // Once teacher_signed_at is set, this row no longer matches the
-    // UPDATE policy's USING clause at all, so PostgREST silently
-    // updates zero rows (data: [], error: null) rather than throwing --
-    // RLS filters rows for UPDATE, it doesn't reject the statement the
-    // way an INSERT's WITH CHECK does. The only way to tell a genuinely-
-    // blocked update from one that just did nothing is to re-read the
-    // actual persisted value afterward, which is what this asserts.
     await teacherA.from("incidents").update({ narrative: "Tampered narrative" }).eq("id", incidentId);
     const { data: afterTamperAttempt } = await admin.from("incidents").select("narrative").eq("id", incidentId).single();
-    record(
-      "Post-signoff edit by the SAME teacher who signed did NOT persist",
-      afterTamperAttempt.narrative === "Staff-facing narrative text.",
-      `narrative now: ${afterTamperAttempt.narrative}`
-    );
+    record("Post-signoff edit by the SAME teacher who signed did NOT persist", afterTamperAttempt.narrative === "Staff-facing narrative text.", `narrative now: ${afterTamperAttempt.narrative}`);
 
     const { error: cleanCountersign } = await principal.from("incidents").update({ principal_signed_at: new Date().toISOString(), principal_signed_by: principalId }).eq("id", incidentId);
     record("Principal countersign (only the two signoff columns) succeeds", !cleanCountersign, cleanCountersign?.message);
 
     const { data: afterCountersign } = await admin.from("incidents").select("narrative, status").eq("id", incidentId).single();
     record("narrative/status unchanged by the countersign write", afterCountersign.narrative === "Staff-facing narrative text." && afterCountersign.status === "awaiting_attestation", JSON.stringify(afterCountersign));
+  }
+
+  console.log(`\n== CHECK E: amendments after finalisation -- append-only, truly ==`);
+  {
+    const { data: amendment, error: amendErr } = await admin
+      .from("incident_amendments")
+      .insert({ incident_id: incidentId, author_id: teacherAId, reason: "Correction", content: "This is impossible" })
+      .select()
+      .single();
+    // (service role for the insert itself here -- the point under test
+    // is editability/deletability after the fact, not the insert
+    // authorization path, which check J4's own policy already covers
+    // via the owning-teacher/principal/clinician branches.)
+    record("Amendment can be appended", !amendErr, amendErr?.message);
+
+    await teacherA.from("incident_amendments").update({ content: "Tampered" }).eq("id", amendment.id);
+    const { data: afterEditAttempt } = await admin.from("incident_amendments").select("content").eq("id", amendment.id).single();
+    record("Existing amendment CANNOT be edited by anyone (no UPDATE policy exists at all)", afterEditAttempt.content === "This is impossible", `content now: ${afterEditAttempt.content}`);
+
+    await teacherA.from("incident_amendments").delete().eq("id", amendment.id);
+    const { data: stillThere } = await admin.from("incident_amendments").select("id").eq("id", amendment.id);
+    record("Existing amendment CANNOT be deleted by anyone (no DELETE policy exists at all)", (stillThere?.length ?? 0) === 1, `rows still present=${stillThere?.length}`);
+
+    const { data: visibleToPrincipal } = await principal.from("incident_amendments").select("id").eq("id", amendment.id);
+    record("Amendment visible to principal", (visibleToPrincipal?.length ?? 0) === 1, `rows=${visibleToPrincipal?.length}`);
   }
 
   console.log(`\n== CHECK 8: CPI is_restraint flag, robust lookup ==`);
@@ -295,7 +351,7 @@ async function main() {
   console.log(`\n== CHECK 9: school_notices generated automatically ==`);
   {
     const { error: injErr } = await admin.from("incident_injuries").insert({ incident_id: incidentId, injured_party_type: "student", passport_id: child1, injury_types: ["Bruising"] });
-    if (injErr) console.log("injury insert (post-signoff, expected to still work -- child tables aren't immutability-guarded):", injErr.message);
+    if (injErr) console.log("injury insert note:", injErr.message);
 
     const { data: flaggedChild } = await admin.from("incident_children").select("parent_call_required").eq("incident_id", incidentId).eq("passport_id", child1).single();
     record("incident_children.parent_call_required flipped true after injury insert", flaggedChild?.parent_call_required === true, JSON.stringify(flaggedChild));
@@ -321,6 +377,49 @@ async function main() {
     await admin.from("passports").delete().eq("id", p3.id);
   }
 
+  console.log(`\n== CHECK D: attestation integrity ==`);
+  {
+    // teacherB and the free-text "Bus Escort Jane" were both named as
+    // witnessed staff by the original create_incident_stamp() call.
+    // clinician was never named at all -- confirm they have no row of
+    // their own AND cannot tamper with teacherB's row either (the
+    // policy's own_row check is user_id = auth.uid(), so a not-named
+    // caller updating BY teacherB's row id should silently affect zero
+    // rows, same RLS-on-UPDATE nuance as check 7).
+    await clinician
+      .from("incident_staff")
+      .update({ attested_at: new Date().toISOString(), attestation_addendum: "Clinician should not be able to write this." })
+      .eq("incident_id", incidentId)
+      .eq("user_id", teacherBId);
+    const { data: teacherBRowAfter } = await admin.from("incident_staff").select("attested_at, attestation_addendum").eq("incident_id", incidentId).eq("user_id", teacherBId).single();
+    record(
+      "A staff member NOT named on the incident cannot attest via someone else's row",
+      teacherBRowAfter.attestation_addendum !== "Clinician should not be able to write this.",
+      JSON.stringify(teacherBRowAfter)
+    );
+
+    // Named staff member (teacherB) attests once.
+    const { error: firstAttestErr } = await teacherB.from("incident_staff").update({ attested_at: new Date().toISOString(), attestation_addendum: "Confirmed, accurate." }).eq("incident_id", incidentId).eq("user_id", teacherBId);
+    record("Named staff member CAN attest to their own row", !firstAttestErr, firstAttestErr?.message);
+
+    const { data: afterFirstAttest } = await admin.from("incident_staff").select("attested_at, attestation_addendum").eq("incident_id", incidentId).eq("user_id", teacherBId).single();
+    record("Attestation actually persisted", Boolean(afterFirstAttest.attested_at), JSON.stringify(afterFirstAttest));
+
+    // Attempt to attest a second time with different content -- the
+    // policy has no explicit "already attested" guard, so this is
+    // testing whether one exists or whether it silently allows a
+    // rewrite. Flagged as a genuine finding either way, not assumed.
+    const firstAttestedAt = afterFirstAttest.attested_at;
+    await teacherB.from("incident_staff").update({ attested_at: new Date().toISOString(), attestation_addendum: "Changed my mind." }).eq("incident_id", incidentId).eq("user_id", teacherBId);
+    const { data: afterSecondAttempt } = await admin.from("incident_staff").select("attested_at, attestation_addendum").eq("incident_id", incidentId).eq("user_id", teacherBId).single();
+    const wasOverwritten = afterSecondAttempt.attested_at !== firstAttestedAt || afterSecondAttempt.attestation_addendum === "Changed my mind.";
+    record(
+      "Named staff CANNOT silently re-attest with different content (no second write allowed)",
+      !wasOverwritten,
+      `first="${afterFirstAttest.attestation_addendum}" now="${afterSecondAttempt.attestation_addendum}" (if these differ, the schema currently allows overwriting an attestation -- no version/lock on it)`
+    );
+  }
+
   console.log(`\n== CHECK 11: free-text staff, non-blocking ==`);
   {
     const { data: freeTextRow } = await admin.from("incident_staff").select("attested_at").eq("incident_id", incidentId).is("user_id", null).single();
@@ -332,13 +431,13 @@ async function main() {
   const failed = results.filter((r) => !r.pass);
   console.log(`${results.length - failed.length}/${results.length} passed.`);
   if (failed.length) {
-    console.log("FAILURES:");
+    console.log("FAILURES / FINDINGS:");
     failed.forEach((f) => console.log(`  - ${f.name} :: ${f.detail}`));
   }
 
   console.log(`\n== Cleanup ==`);
   await admin.from("institutions").delete().eq("id", institutionId);
-  for (const id of [principalId, teacherAId, teacherBId, clinicianId, parent1Id, parent2Id, parent3Id]) {
+  for (const id of [principalId, teacherAId, teacherBId, snaId, clinicianId, parent1Id, parent2Id, parent3Id]) {
     await admin.auth.admin.deleteUser(id);
   }
   console.log("Cleaned up.");

@@ -14,7 +14,7 @@ import { createClient } from "@/lib/supabase/client";
 // added tap over the existing teacher flow: role-select's "School
 // staff" tile + Continue (same two actions a teacher always took) is
 // followed by a single tap here.
-type StaffRole = "class_teacher" | "sna";
+type StaffRole = "class_teacher" | "sna" | "principal";
 
 const STAFF_ROLES: {
   value: StaffRole;
@@ -33,6 +33,12 @@ const STAFF_ROLES: {
     icon: "🤝",
     title: "Special Needs Assistant",
     subtitle: "I support specific children alongside their class teacher",
+  },
+  {
+    value: "principal",
+    icon: "🗝️",
+    title: "Principal",
+    subtitle: "I oversee incident sign-off and records across the school",
   },
 ];
 

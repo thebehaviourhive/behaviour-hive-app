@@ -12,7 +12,7 @@ import { hasConsented } from "@/lib/hasConsented";
 
 const CONSENT_VERSION = 1;
 
-type ConsentRole = "parent" | "class_teacher" | "clinician" | "sna";
+type ConsentRole = "parent" | "class_teacher" | "clinician" | "sna" | "principal";
 
 interface ConsentCard {
   icon: string;
@@ -72,6 +72,14 @@ const CONSENT_CARDS: Record<ConsentRole, ConsentCard[]> = {
   ],
   class_teacher: CLASS_TEACHER_CONSENT_CARDS,
   sna: CLASS_TEACHER_CONSENT_CARDS,
+  // Reused verbatim, same "extend, don't fork" precedent as SNA -- same
+  // underlying obligation (confidentiality, records visible to
+  // families/clinical team, privacy policy). Flagged: the middle card's
+  // "everything I record" reads slightly loosely for a role that mostly
+  // reads/countersigns rather than authors content -- worth revisiting
+  // with bespoke copy if that imprecision matters once the sign-off
+  // flow itself ships (Phase 4).
+  principal: CLASS_TEACHER_CONSENT_CARDS,
   clinician: [
     {
       icon: "🔒",
@@ -103,6 +111,7 @@ const REQUIRED_CONSENT_LABEL: Record<ConsentRole, string> = {
   class_teacher: "I agree to The Behaviour Hive storing and processing my inputs.",
   sna: "I agree to The Behaviour Hive storing and processing my inputs.",
   clinician: "I agree to The Behaviour Hive storing and processing my inputs and data.",
+  principal: "I agree to The Behaviour Hive storing and processing my inputs.",
 };
 
 // Where accepting consent (or resuming with it already given) sends each
@@ -111,9 +120,9 @@ const REQUIRED_CONSENT_LABEL: Record<ConsentRole, string> = {
 // apart.
 function getPostConsentDestination(role: ConsentRole): string {
   if (role === "clinician") return "/clinician/specialty";
-  // SNA shares the teacher's institution-linking flow -- same
-  // "extend, don't fork" table (institution_staff), same screen.
-  if (role === "class_teacher" || role === "sna") return "/teacher/join-institution";
+  // SNA and principal share the teacher's institution-linking flow --
+  // same "extend, don't fork" table (institution_staff), same screen.
+  if (role === "class_teacher" || role === "sna" || role === "principal") return "/teacher/join-institution";
   return "/parent-dashboard";
 }
 
@@ -175,7 +184,8 @@ export default function ConsentPage() {
         userRole !== "parent" &&
         userRole !== "clinician" &&
         userRole !== "class_teacher" &&
-        userRole !== "sna"
+        userRole !== "sna" &&
+        userRole !== "principal"
       ) {
         router.replace("/");
         return;

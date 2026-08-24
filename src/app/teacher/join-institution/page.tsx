@@ -12,14 +12,30 @@ import { useRequireRole } from "@/hooks/useRequireRole";
 // so the "already joined" resume check and the post-join routing below
 // can never drift apart. class_teacher's destination is the
 // pre-existing one, byte-identical; sna's is the Phase 3 Passports home
-// (src/app/sna/passports/page.tsx).
+// (src/app/sna/passports/page.tsx); principal's is the Incident Log's
+// own minimal surface (src/app/principal/dashboard/page.tsx).
 function getStaffDashboardDestination(role: string | undefined): string {
-  return role === "sna" ? "/sna/passports" : "/teacher/dashboard";
+  if (role === "sna") return "/sna/passports";
+  if (role === "principal") return "/principal/dashboard";
+  return "/teacher/dashboard";
+}
+
+// The one-principal-per-institution constraint (migration 0068) is
+// enforced at the database, not the UI -- a second principal's self-link
+// fails with a raw Postgres unique-violation, which is not something to
+// put in front of someone mid-onboarding. Matched on the constraint
+// NAME (stable, chosen by the migration itself), not by fragile
+// string-matching against Postgres's own message wording.
+function friendlyJoinError(rawMessage: string): string {
+  if (rawMessage.includes("institution_staff_one_principal_per_institution")) {
+    return "This school already has a principal registered. If that should be you, contact Behaviour Hive support.";
+  }
+  return rawMessage;
 }
 
 export default function TeacherJoinInstitutionPage() {
   const router = useRouter();
-  const { user, isReady } = useRequireRole(["class_teacher", "sna"]);
+  const { user, isReady } = useRequireRole(["class_teacher", "sna", "principal"]);
   const staffRole = user?.app_metadata?.role as string | undefined;
 
   const [code, setCode] = useState("");
@@ -99,7 +115,7 @@ export default function TeacherJoinInstitutionPage() {
     setIsSaving(false);
 
     if (staffError) {
-      setError(staffError.message);
+      setError(friendlyJoinError(staffError.message));
       return;
     }
 
