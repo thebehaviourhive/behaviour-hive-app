@@ -306,73 +306,216 @@ async function main() {
     await admin.from("incidents").delete().eq("id", snaIncidentId);
   }
 
-  console.log(`\n== CHECK D: attestation integrity ==`);
-  // Deliberately BEFORE check 7's sign-off, not after -- the "Named
-  // staff can attest to their own row" policy (Phase 1) requires
-  // teacher_signed_at is null, matching the brief's own stated
-  // lifecycle (stamp -> stage two -> attestation -> debrief -> teacher
-  // sign-off -> principal countersign). Running this after sign-off, as
-  // an earlier draft of this script did, made the attest call silently
-  // affect zero rows (RLS filters the row out, no error) and read as a
-  // false failure -- the policy was right, the ordering was wrong.
+  console.log(`\n== CHECK D: attestation -- append-only, staleness, withdrawal (migration 0070) ==`);
+  // Deliberately BEFORE check 7's sign-off, not after -- attest_to_incident/
+  // withdraw_attestation both require teacher_signed_at is null, matching
+  // the brief's own stated lifecycle (stamp -> stage two -> attestation ->
+  // debrief -> teacher sign-off -> principal countersign). This whole
+  // block ends by leaving teacherB's attestation CURRENT again, on purpose
+  // -- check 7 right after this needs a clean sign-off to actually go
+  // through, now that the sign-off gate is genuinely DB-enforced.
+  //
+  // The narrative gets rewritten mid-block (to prove staleness), so the
+  // "revised" text below is what check 7's own assertions have to expect
+  // afterwards -- not the original "Staff-facing narrative text."
+  const REVISED_NARRATIVE = "Staff-facing narrative text, revised after initial attestation.";
+  let teacherBStaffId;
+  let snaStaffId;
   {
-    // teacherB and the free-text "Bus Escort Jane" were both named as
-    // witnessed staff by the original create_incident_stamp() call.
-    // clinician was never named at all -- confirm they have no row of
-    // their own AND cannot tamper with teacherB's row either (the
-    // policy's own_row check is user_id = auth.uid(), so a not-named
-    // caller updating BY teacherB's row id should silently affect zero
-    // rows, same RLS-on-UPDATE nuance as check 7 below).
-    await clinician
+    const { data: teacherBStaffRow } = await admin
       .from("incident_staff")
-      .update({ attested_at: new Date().toISOString(), attestation_addendum: "Clinician should not be able to write this." })
+      .select("id")
       .eq("incident_id", incidentId)
-      .eq("user_id", teacherBId);
-    const { data: teacherBRowAfter } = await admin.from("incident_staff").select("attested_at, attestation_addendum").eq("incident_id", incidentId).eq("user_id", teacherBId).single();
+      .eq("user_id", teacherBId)
+      .single();
+    teacherBStaffId = teacherBStaffRow.id;
+
+    // -- Not named on the incident cannot attest via someone else's row. --
+    // The RPC itself checks st.user_id = auth.uid(), not just RLS, so this
+    // should come back as a raised exception, not a silent no-op.
+    const { error: clinicianAttestErr } = await clinician.rpc("attest_to_incident", {
+      p_incident_staff_id: teacherBStaffId,
+      p_addendum: "Clinician should not be able to write this.",
+    });
+    record("A staff member NOT named on the incident cannot attest via attest_to_incident()", Boolean(clinicianAttestErr), clinicianAttestErr?.message);
+
+    // -- Named staff member CAN attest. --
+    const { error: attest1Err } = await teacherB.rpc("attest_to_incident", {
+      p_incident_staff_id: teacherBStaffId,
+      p_addendum: "Confirmed, accurate.",
+    });
+    record("Named staff member CAN attest via attest_to_incident()", !attest1Err, attest1Err?.message);
+
+    const { data: statusAfterFirst } = await teacherA.rpc("get_attestation_status", { p_incident_staff_id: teacherBStaffId });
+    record("Status is 'current' immediately after a fresh attestation", statusAfterFirst === "current", statusAfterFirst);
+
+    // -- get_attestation_status() has its own can_view_incident() gate. --
+    // It's SECURITY DEFINER, so without this check anyone with a valid
+    // (guessed or leaked) incident_staff_id could learn attestation
+    // status for an incident they have no standing to see at all. Parent
+    // 1 has no can_view_incident() branch at all (parents only ever get
+    // data through the separate redacted get_parent_incidents()) -- real
+    // status is 'current' at this exact moment, so 'unknown' here can
+    // only be the visibility gate doing its job, not a coincidence.
+    const { data: statusViaUnrelatedParent } = await parent1.rpc("get_attestation_status", { p_incident_staff_id: teacherBStaffId });
+    record("A caller with no standing to view the incident gets 'unknown', not the real status", statusViaUnrelatedParent === "unknown", statusViaUnrelatedParent);
+
+    // -- Append-only: re-attesting adds a new row, never overwrites. --
+    const { error: attest2Err } = await teacherB.rpc("attest_to_incident", {
+      p_incident_staff_id: teacherBStaffId,
+      p_addendum: "Re-attesting, still confirmed.",
+    });
+    record("Re-attesting (still pre-signoff, narrative unchanged) succeeds", !attest2Err, attest2Err?.message);
+
+    const { data: historyAfterTwo } = await admin
+      .from("incident_attestations")
+      .select("action, addendum, content_hash")
+      .eq("incident_staff_id", teacherBStaffId)
+      .order("created_at", { ascending: true });
     record(
-      "A staff member NOT named on the incident cannot attest via someone else's row",
-      teacherBRowAfter.attestation_addendum !== "Clinician should not be able to write this.",
-      JSON.stringify(teacherBRowAfter)
+      "History has BOTH attestations as separate rows -- the first is untouched, not overwritten",
+      historyAfterTwo?.length === 2 && historyAfterTwo[0].addendum === "Confirmed, accurate." && historyAfterTwo[1].addendum === "Re-attesting, still confirmed.",
+      JSON.stringify(historyAfterTwo)
     );
 
-    // Named staff member (teacherB) attests once.
-    const { error: firstAttestErr } = await teacherB.from("incident_staff").update({ attested_at: new Date().toISOString(), attestation_addendum: "Confirmed, accurate." }).eq("incident_id", incidentId).eq("user_id", teacherBId);
-    record("Named staff member CAN attest to their own row", !firstAttestErr, firstAttestErr?.message);
+    // -- Staleness: editing the narrative stales every existing attestation, computed live. --
+    await teacherA.from("incidents").update({ narrative: REVISED_NARRATIVE }).eq("id", incidentId);
+    const { data: statusAfterEdit } = await teacherA.rpc("get_attestation_status", { p_incident_staff_id: teacherBStaffId });
+    record("Status flips to 'stale' the moment the owning teacher edits the narrative", statusAfterEdit === "stale", statusAfterEdit);
 
-    const { data: afterFirstAttest } = await admin.from("incident_staff").select("attested_at, attestation_addendum").eq("incident_id", incidentId).eq("user_id", teacherBId).single();
-    record("Attestation actually persisted", Boolean(afterFirstAttest.attested_at), JSON.stringify(afterFirstAttest));
+    // -- Sign-off is blocked while any named staff member is stale. --
+    const { error: staleSignErr } = await teacherA
+      .from("incidents")
+      .update({ teacher_signed_at: new Date().toISOString(), teacher_signed_by: teacherAId })
+      .eq("id", incidentId);
+    record("Sign-off REJECTED by the DB while teacherB's attestation is stale", Boolean(staleSignErr), staleSignErr?.message);
+    const { data: stillUnsignedAfterStale } = await admin.from("incidents").select("teacher_signed_at").eq("id", incidentId).single();
+    record("teacher_signed_at genuinely still null after the rejected attempt", stillUnsignedAfterStale.teacher_signed_at === null, stillUnsignedAfterStale.teacher_signed_at);
 
-    // Attempt to attest a second time with different content -- the
-    // policy has no explicit "already attested" guard, so this is
-    // testing whether one exists or whether it silently allows a
-    // rewrite while still pre-signoff (post-signoff, check 7 below
-    // already proves NOTHING on incident_staff or incidents can change
-    // for anyone). Flagged as a genuine finding either way, not assumed
-    // -- the brief doesn't explicitly settle whether a pre-signoff
-    // attestation should itself be a one-shot action.
-    const firstAttestedAt = afterFirstAttest.attested_at;
-    await teacherB.from("incident_staff").update({ attested_at: new Date().toISOString(), attestation_addendum: "Changed my mind." }).eq("incident_id", incidentId).eq("user_id", teacherBId);
-    const { data: afterSecondAttempt } = await admin.from("incident_staff").select("attested_at, attestation_addendum").eq("incident_id", incidentId).eq("user_id", teacherBId).single();
-    const wasOverwritten = afterSecondAttempt.attested_at !== firstAttestedAt || afterSecondAttempt.attestation_addendum === "Changed my mind.";
-    console.log(
-      `FINDING (not asserted pass/fail -- brief doesn't settle this) -- pre-signoff re-attestation ${wasOverwritten ? "IS" : "is NOT"} currently possible: first="${afterFirstAttest.attestation_addendum}" now="${afterSecondAttempt.attestation_addendum}"`
+    // -- Withdrawal requires a non-empty reason. --
+    const { error: emptyReasonErr } = await teacherB.rpc("withdraw_attestation", { p_incident_staff_id: teacherBStaffId, p_reason: "   " });
+    record("withdraw_attestation() REJECTS a blank/whitespace-only reason", Boolean(emptyReasonErr), emptyReasonErr?.message);
+
+    // -- Withdrawal, with a real reason, succeeds and is append-only too. --
+    const WITHDRAWAL_REASON = "I was not present for the second half of what's now described and no longer stand over my account.";
+    const { error: withdrawErr } = await teacherB.rpc("withdraw_attestation", { p_incident_staff_id: teacherBStaffId, p_reason: WITHDRAWAL_REASON });
+    record("Named staff member CAN withdraw with a required reason", !withdrawErr, withdrawErr?.message);
+
+    const { data: statusAfterWithdraw } = await teacherA.rpc("get_attestation_status", { p_incident_staff_id: teacherBStaffId });
+    record("Status is 'withdrawn' after withdrawal", statusAfterWithdraw === "withdrawn", statusAfterWithdraw);
+
+    const { data: historyAfterWithdraw } = await admin
+      .from("incident_attestations")
+      .select("action, addendum, withdrawal_reason")
+      .eq("incident_staff_id", teacherBStaffId)
+      .order("created_at", { ascending: true });
+    record(
+      "Withdrawal APPENDS a third row -- both prior attestations still in the log",
+      historyAfterWithdraw?.length === 3 && historyAfterWithdraw[2].action === "withdrawn" && historyAfterWithdraw[2].withdrawal_reason === WITHDRAWAL_REASON,
+      JSON.stringify(historyAfterWithdraw)
     );
+
+    // -- Withdrawal surfaces to the principal via school_notices. --
+    const { data: withdrawalNotices } = await admin.from("school_notices").select("*").eq("incident_id", incidentId).eq("notice_type", "attestation_withdrawn");
+    record("Exactly one attestation_withdrawn notice raised", (withdrawalNotices?.length ?? 0) === 1, `rows=${withdrawalNotices?.length}`);
+    const { data: withdrawalNoticeByPrincipal } = await principal.from("school_notices").select("id").eq("incident_id", incidentId).eq("notice_type", "attestation_withdrawn");
+    record("Withdrawal notice visible to principal", (withdrawalNoticeByPrincipal?.length ?? 0) === 1, `rows=${withdrawalNoticeByPrincipal?.length}`);
+    const { data: withdrawalNoticeByOwner } = await teacherA.from("school_notices").select("id").eq("incident_id", incidentId).eq("notice_type", "attestation_withdrawn");
+    record("Withdrawal notice visible to owning teacher", (withdrawalNoticeByOwner?.length ?? 0) === 1, `rows=${withdrawalNoticeByOwner?.length}`);
+    const { data: withdrawalNoticeByParent } = await parent1.from("school_notices").select("id").eq("incident_id", incidentId).eq("notice_type", "attestation_withdrawn");
+    record("Withdrawal notice INVISIBLE to parent", (withdrawalNoticeByParent?.length ?? 0) === 0, `rows=${withdrawalNoticeByParent?.length}`);
+
+    // -- Sign-off is blocked while withdrawn, same as while stale. --
+    const { error: withdrawnSignErr } = await teacherA
+      .from("incidents")
+      .update({ teacher_signed_at: new Date().toISOString(), teacher_signed_by: teacherAId })
+      .eq("id", incidentId);
+    record("Sign-off REJECTED by the DB while teacherB's attestation is withdrawn", Boolean(withdrawnSignErr), withdrawnSignErr?.message);
+
+    // -- Renewing: a fresh attestation against the CURRENT narrative clears both stale and withdrawn. --
+    const { error: renewErr } = await teacherB.rpc("attest_to_incident", {
+      p_incident_staff_id: teacherBStaffId,
+      p_addendum: "Re-confirming after reviewing the revised narrative.",
+    });
+    record("Named staff member CAN renew with a fresh attestation after withdrawing", !renewErr, renewErr?.message);
+    const { data: statusAfterRenew } = await teacherA.rpc("get_attestation_status", { p_incident_staff_id: teacherBStaffId });
+    record("Status is 'current' again after renewal", statusAfterRenew === "current", statusAfterRenew);
+
+    const { data: fullHistory } = await admin
+      .from("incident_attestations")
+      .select("action")
+      .eq("incident_staff_id", teacherBStaffId)
+      .order("created_at", { ascending: true });
+    record(
+      "Full append-only history is attested, attested, withdrawn, attested -- 4 rows, nothing ever overwritten",
+      JSON.stringify(fullHistory?.map((r) => r.action)) === JSON.stringify(["attested", "attested", "withdrawn", "attested"]),
+      JSON.stringify(fullHistory)
+    );
+
+    // -- The corrected behaviour: a MISSING attestation does not block. --
+    // A second real staff member, named on the incident, who NEVER
+    // attests at all -- proving get_attestation_status() correctly
+    // reports 'not_attested' for them, and (checked in CHECK 7 below,
+    // where sign-off is actually attempted) that this status does NOT
+    // block sign-off the way 'stale'/'withdrawn' do.
+    const { data: snaStaffRow, error: snaNameErr } = await teacherA
+      .from("incident_staff")
+      .insert({ incident_id: incidentId, user_id: snaId, involvement: "witnessed" })
+      .select()
+      .single();
+    record("Owning teacher can name a second real staff member on the incident", !snaNameErr, snaNameErr?.message);
+    snaStaffId = snaStaffRow.id;
+
+    const { data: snaStatusNeverAttested } = await teacherA.rpc("get_attestation_status", { p_incident_staff_id: snaStaffId });
+    record("A newly-named staff member who has never attested reads as 'not_attested', not an error", snaStatusNeverAttested === "not_attested", snaStatusNeverAttested);
+
+    // -- Broadened hash: staleness also fires on non-narrative material --
+    // facts (decision 3) -- a child's distress_level here, not the
+    // narrative text at all.
+    await teacherA.from("incident_children").update({ distress_level: "yes_definitely" }).eq("incident_id", incidentId).eq("passport_id", child1);
+    const { data: statusAfterChildEdit } = await teacherA.rpc("get_attestation_status", { p_incident_staff_id: teacherBStaffId });
+    record("Status flips to 'stale' again from a child's distress_level changing -- the hash covers more than the narrative", statusAfterChildEdit === "stale", statusAfterChildEdit);
+
+    // Renew once more so teacherB is clean going into CHECK 7's sign-off.
+    const { error: finalRenewErr } = await teacherB.rpc("attest_to_incident", {
+      p_incident_staff_id: teacherBStaffId,
+      p_addendum: "Re-confirming again after the distress level was recorded.",
+    });
+    record("Final renewal (after the distress_level change) succeeds", !finalRenewErr, finalRenewErr?.message);
+    const { data: statusFinal } = await teacherA.rpc("get_attestation_status", { p_incident_staff_id: teacherBStaffId });
+    record("teacherB is 'current' again going into sign-off", statusFinal === "current", statusFinal);
+
+    const { data: snaStatusStillMissing } = await teacherA.rpc("get_attestation_status", { p_incident_staff_id: snaStaffId });
+    record("SNA's status is STILL 'not_attested' -- untouched by any of the above, exactly as it should be", snaStatusStillMissing === "not_attested", snaStatusStillMissing);
   }
 
   console.log(`\n== CHECK 7: immutability after teacher sign-off ==`);
   {
+    const { data: snaStatusRightBeforeSignoff } = await teacherA.rpc("get_attestation_status", { p_incident_staff_id: snaStaffId });
+    record("Right before sign-off, SNA is still 'not_attested' (a real, named, never-attested staff member)", snaStatusRightBeforeSignoff === "not_attested", snaStatusRightBeforeSignoff);
+
     const { error: signErr } = await teacherA.from("incidents").update({ teacher_signed_at: new Date().toISOString(), teacher_signed_by: teacherAId }).eq("id", incidentId);
-    record("Teacher sign-off write succeeds", !signErr, signErr?.message);
+    record(
+      "Sign-off succeeds DESPITE SNA never having attested -- a missing attestation does not block (the corrected behaviour); only 'stale'/'withdrawn' do, per CHECK D",
+      !signErr,
+      signErr?.message
+    );
 
     await teacherA.from("incidents").update({ narrative: "Tampered narrative" }).eq("id", incidentId);
     const { data: afterTamperAttempt } = await admin.from("incidents").select("narrative").eq("id", incidentId).single();
-    record("Post-signoff edit by the SAME teacher who signed did NOT persist", afterTamperAttempt.narrative === "Staff-facing narrative text.", `narrative now: ${afterTamperAttempt.narrative}`);
+    record("Post-signoff edit by the SAME teacher who signed did NOT persist", afterTamperAttempt.narrative === REVISED_NARRATIVE, `narrative now: ${afterTamperAttempt.narrative}`);
+
+    // -- Attestations are frozen post-signoff too, same as everything else. --
+    const { error: postSignoffAttestErr } = await teacherB.rpc("attest_to_incident", { p_incident_staff_id: teacherBStaffId, p_addendum: "Trying to attest after signoff." });
+    record("attest_to_incident() REJECTS a post-signoff attempt -- attestations freeze along with the rest of the record", Boolean(postSignoffAttestErr), postSignoffAttestErr?.message);
+    const { error: postSignoffWithdrawErr } = await teacherB.rpc("withdraw_attestation", { p_incident_staff_id: teacherBStaffId, p_reason: "Trying to withdraw after signoff." });
+    record("withdraw_attestation() REJECTS a post-signoff attempt too", Boolean(postSignoffWithdrawErr), postSignoffWithdrawErr?.message);
 
     const { error: cleanCountersign } = await principal.from("incidents").update({ principal_signed_at: new Date().toISOString(), principal_signed_by: principalId }).eq("id", incidentId);
     record("Principal countersign (only the two signoff columns) succeeds", !cleanCountersign, cleanCountersign?.message);
 
     const { data: afterCountersign } = await admin.from("incidents").select("narrative, status").eq("id", incidentId).single();
-    record("narrative/status unchanged by the countersign write", afterCountersign.narrative === "Staff-facing narrative text." && afterCountersign.status === "awaiting_attestation", JSON.stringify(afterCountersign));
+    record("narrative/status unchanged by the countersign write", afterCountersign.narrative === REVISED_NARRATIVE && afterCountersign.status === "awaiting_attestation", JSON.stringify(afterCountersign));
   }
 
   console.log(`\n== CHECK E: amendments after finalisation -- append-only, truly ==`);
@@ -414,14 +557,18 @@ async function main() {
     const { data: flaggedChild } = await admin.from("incident_children").select("parent_call_required").eq("incident_id", incidentId).eq("passport_id", child1).single();
     record("incident_children.parent_call_required flipped true after injury insert", flaggedChild?.parent_call_required === true, JSON.stringify(flaggedChild));
 
-    const { data: notices } = await admin.from("school_notices").select("*").eq("incident_id", incidentId);
-    record("Exactly one school_notices row raised", (notices?.length ?? 0) === 1, `rows=${notices?.length}`);
+    // Filtered to notice_type -- CHECK D already raised one
+    // attestation_withdrawn notice for this same incident, so a bare
+    // count here would over-count; each notice_type is independently
+    // exactly-one for its own trigger.
+    const { data: notices } = await admin.from("school_notices").select("*").eq("incident_id", incidentId).eq("notice_type", "incident_parent_call");
+    record("Exactly one incident_parent_call notice raised", (notices?.length ?? 0) === 1, `rows=${notices?.length}`);
 
-    const { data: byPrincipalNotice } = await principal.from("school_notices").select("id").eq("incident_id", incidentId);
+    const { data: byPrincipalNotice } = await principal.from("school_notices").select("id").eq("incident_id", incidentId).eq("notice_type", "incident_parent_call");
     record("Notice visible to principal", (byPrincipalNotice?.length ?? 0) === 1, `rows=${byPrincipalNotice?.length}`);
-    const { data: byOwnerNotice } = await teacherA.from("school_notices").select("id").eq("incident_id", incidentId);
+    const { data: byOwnerNotice } = await teacherA.from("school_notices").select("id").eq("incident_id", incidentId).eq("notice_type", "incident_parent_call");
     record("Notice visible to owning teacher", (byOwnerNotice?.length ?? 0) === 1, `rows=${byOwnerNotice?.length}`);
-    const { data: byParentNotice } = await parent1.from("school_notices").select("id").eq("incident_id", incidentId);
+    const { data: byParentNotice } = await parent1.from("school_notices").select("id").eq("incident_id", incidentId).eq("notice_type", "incident_parent_call");
     record("Notice INVISIBLE to parent", (byParentNotice?.length ?? 0) === 0, `rows=${byParentNotice?.length}`);
   }
 
