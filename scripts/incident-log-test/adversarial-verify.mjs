@@ -502,6 +502,63 @@ async function main() {
     const { data: statusAfterChildEdit } = await teacherA.rpc("get_attestation_status", { p_incident_staff_id: teacherBStaffId });
     record("Status flips to 'stale' again from a child's distress_level changing -- the hash covers more than the narrative", statusAfterChildEdit === "stale", statusAfterChildEdit);
 
+    // -- Restrictive practice fields are hashed too, and specifically --
+    // EDITING A SAVED record (not just adding a new one) must stale an
+    // existing attestation. This is the direct answer to "does changing
+    // hold_level or planning_status on a saved record invalidate
+    // attestations" -- isolated per field, not inferred from the
+    // migration text.
+    const { data: rpRow, error: rpInsertErr } = await teacherA
+      .from("restrictive_practices")
+      .insert({ incident_id: incidentId, passport_id: child1, planning_status: "not_planned", hold_level: "low" })
+      .select()
+      .single();
+    record("Owning teacher can record a restrictive practice pre-signoff", !rpInsertErr, rpInsertErr?.message);
+
+    const { data: statusAfterRpInsert } = await teacherA.rpc("get_attestation_status", { p_incident_staff_id: teacherBStaffId });
+    record("Status flips to 'stale' when a restrictive practice record is added", statusAfterRpInsert === "stale", statusAfterRpInsert);
+
+    const { error: rpBaselineRenewErr } = await teacherB.rpc("attest_to_incident", {
+      p_incident_staff_id: teacherBStaffId,
+      p_addendum: "Re-confirming with the restrictive practice record in place.",
+    });
+    record("Renewal with the restrictive practice record in place succeeds", !rpBaselineRenewErr, rpBaselineRenewErr?.message);
+    const { data: statusBeforeHoldLevelEdit } = await teacherA.rpc("get_attestation_status", { p_incident_staff_id: teacherBStaffId });
+    record("teacherB is 'current' with the restrictive practice record in place", statusBeforeHoldLevelEdit === "current", statusBeforeHoldLevelEdit);
+
+    // Edit hold_level ONLY, on the SAVED (already-has-an-id) record.
+    const { error: holdLevelEditErr } = await teacherA
+      .from("restrictive_practices")
+      .update({ hold_level: "high" })
+      .eq("id", rpRow.id);
+    record("Owning teacher can edit hold_level on a saved restrictive practice record pre-signoff", !holdLevelEditErr, holdLevelEditErr?.message);
+    const { data: statusAfterHoldLevelEdit } = await teacherA.rpc("get_attestation_status", { p_incident_staff_id: teacherBStaffId });
+    record(
+      "Status flips to 'stale' purely from editing hold_level on a SAVED record -- whether force escalated changes underneath an existing attestation",
+      statusAfterHoldLevelEdit === "stale",
+      statusAfterHoldLevelEdit
+    );
+
+    const { error: preStatusEditRenewErr } = await teacherB.rpc("attest_to_incident", {
+      p_incident_staff_id: teacherBStaffId,
+      p_addendum: "Re-confirming after hold_level was corrected.",
+    });
+    record("Renewal after the hold_level edit succeeds", !preStatusEditRenewErr, preStatusEditRenewErr?.message);
+
+    // Edit planning_status ONLY -- the field the whole decision is about:
+    // was this pre-authorised in the BSP, or an unplanned response.
+    const { error: planningStatusEditErr } = await teacherA
+      .from("restrictive_practices")
+      .update({ planning_status: "in_bsp" })
+      .eq("id", rpRow.id);
+    record("Owning teacher can edit planning_status on a saved restrictive practice record pre-signoff", !planningStatusEditErr, planningStatusEditErr?.message);
+    const { data: statusAfterPlanningStatusEdit } = await teacherA.rpc("get_attestation_status", { p_incident_staff_id: teacherBStaffId });
+    record(
+      "Status flips to 'stale' purely from editing planning_status on a SAVED record -- an attestation cannot survive whether force was pre-authorised changing underneath it",
+      statusAfterPlanningStatusEdit === "stale",
+      statusAfterPlanningStatusEdit
+    );
+
     // Renew, then prove the hash covers body-map markers too (migration
     // 0072) -- a marker's position/view/injury_type, not just the
     // injury row it hangs off.
