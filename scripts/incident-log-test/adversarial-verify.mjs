@@ -476,12 +476,59 @@ async function main() {
     const { data: statusAfterChildEdit } = await teacherA.rpc("get_attestation_status", { p_incident_staff_id: teacherBStaffId });
     record("Status flips to 'stale' again from a child's distress_level changing -- the hash covers more than the narrative", statusAfterChildEdit === "stale", statusAfterChildEdit);
 
-    // Renew once more so teacherB is clean going into CHECK 7's sign-off.
+    // Renew, then prove the hash covers body-map markers too (migration
+    // 0072) -- a marker's position/view/injury_type, not just the
+    // injury row it hangs off.
+    const { error: preMarkRenewErr } = await teacherB.rpc("attest_to_incident", {
+      p_incident_staff_id: teacherBStaffId,
+      p_addendum: "Re-confirming after the distress level was recorded.",
+    });
+    record("Renewal (after the distress_level change) succeeds", !preMarkRenewErr, preMarkRenewErr?.message);
+    const { data: statusBeforeMark } = await teacherA.rpc("get_attestation_status", { p_incident_staff_id: teacherBStaffId });
+    record("teacherB is 'current' again before the body-mark is added", statusBeforeMark === "current", statusBeforeMark);
+
+    const { data: injuryRow, error: injuryInsertErr } = await teacherA
+      .from("incident_injuries")
+      .insert({ incident_id: incidentId, injured_party_type: "student", passport_id: child1, injury_types: ["Bruising"] })
+      .select()
+      .single();
+    record("Owning teacher can record an injury pre-signoff", !injuryInsertErr, injuryInsertErr?.message);
+
+    const { error: markInsertErr } = await teacherA
+      .from("incident_body_marks")
+      .insert({ injury_id: injuryRow.id, view: "front", x: 0.4, y: 0.6, injury_type: "Bruising" });
+    record("Owning teacher can place a body-map marker pre-signoff", !markInsertErr, markInsertErr?.message);
+
+    const { data: statusAfterMark } = await teacherA.rpc("get_attestation_status", { p_incident_staff_id: teacherBStaffId });
+    record("Status flips to 'stale' when a body-map marker is added -- the hash covers markers too (migration 0072)", statusAfterMark === "stale", statusAfterMark);
+
+    // Renew with the marker in place, THEN move it -- proves position
+    // specifically is hashed, not just marker presence/absence (the
+    // exact scenario behind this decision: a marker moving from a
+    // forearm to a throat).
+    const { error: preMoveRenewErr } = await teacherB.rpc("attest_to_incident", {
+      p_incident_staff_id: teacherBStaffId,
+      p_addendum: "Re-confirming with the marker at its original position.",
+    });
+    record("Renewal with the marker in place succeeds", !preMoveRenewErr, preMoveRenewErr?.message);
+    const { data: statusBeforeMove } = await teacherA.rpc("get_attestation_status", { p_incident_staff_id: teacherBStaffId });
+    record("teacherB is 'current' with the marker at its original position", statusBeforeMove === "current", statusBeforeMove);
+
+    const { error: markMoveErr } = await teacherA
+      .from("incident_body_marks")
+      .update({ x: 0.1, y: 0.05, view: "front" })
+      .eq("injury_id", injuryRow.id);
+    record("Owning teacher can move a body-map marker pre-signoff", !markMoveErr, markMoveErr?.message);
+
+    const { data: statusAfterMove } = await teacherA.rpc("get_attestation_status", { p_incident_staff_id: teacherBStaffId });
+    record("Status flips to 'stale' again purely from MOVING the marker -- position is hashed, not just presence", statusAfterMove === "stale", statusAfterMove);
+
+    // Final renewal so teacherB is clean going into CHECK 7's sign-off.
     const { error: finalRenewErr } = await teacherB.rpc("attest_to_incident", {
       p_incident_staff_id: teacherBStaffId,
-      p_addendum: "Re-confirming again after the distress level was recorded.",
+      p_addendum: "Re-confirming after the marker was moved to its final position.",
     });
-    record("Final renewal (after the distress_level change) succeeds", !finalRenewErr, finalRenewErr?.message);
+    record("Final renewal (after the marker move) succeeds", !finalRenewErr, finalRenewErr?.message);
     const { data: statusFinal } = await teacherA.rpc("get_attestation_status", { p_incident_staff_id: teacherBStaffId });
     record("teacherB is 'current' again going into sign-off", statusFinal === "current", statusFinal);
 
@@ -510,6 +557,20 @@ async function main() {
     record("attest_to_incident() REJECTS a post-signoff attempt -- attestations freeze along with the rest of the record", Boolean(postSignoffAttestErr), postSignoffAttestErr?.message);
     const { error: postSignoffWithdrawErr } = await teacherB.rpc("withdraw_attestation", { p_incident_staff_id: teacherBStaffId, p_reason: "Trying to withdraw after signoff." });
     record("withdraw_attestation() REJECTS a post-signoff attempt too", Boolean(postSignoffWithdrawErr), postSignoffWithdrawErr?.message);
+
+    // -- Countersign authority now goes through can_countersign_incident() --
+    // (migration 0073), not an inlined principal-role check -- confirm
+    // the function itself agrees with what the policy allows/rejects,
+    // and that a non-principal (the owning teacher, who has every OTHER
+    // authority on this incident) still cannot countersign.
+    const { data: canPrincipalCountersign } = await admin.rpc("can_countersign_incident", { p_user_id: principalId, p_institution_id: institutionId });
+    record("can_countersign_incident() returns true for the real principal", canPrincipalCountersign === true, canPrincipalCountersign);
+    const { data: canTeacherCountersign } = await admin.rpc("can_countersign_incident", { p_user_id: teacherAId, p_institution_id: institutionId });
+    record("can_countersign_incident() returns false for the owning teacher (not a principal)", canTeacherCountersign === false, canTeacherCountersign);
+
+    const { error: teacherCountersignErr } = await teacherA.from("incidents").update({ principal_signed_at: new Date().toISOString(), principal_signed_by: teacherAId }).eq("id", incidentId);
+    const { data: stillUncountersigned } = await admin.from("incidents").select("principal_signed_at").eq("id", incidentId).single();
+    record("Owning teacher CANNOT countersign despite every other authority on the incident", stillUncountersigned.principal_signed_at === null, `err=${teacherCountersignErr?.message}, principal_signed_at=${stillUncountersigned.principal_signed_at}`);
 
     const { error: cleanCountersign } = await principal.from("incidents").update({ principal_signed_at: new Date().toISOString(), principal_signed_by: principalId }).eq("id", incidentId);
     record("Principal countersign (only the two signoff columns) succeeds", !cleanCountersign, cleanCountersign?.message);
