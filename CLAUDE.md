@@ -1,1 +1,11 @@
 @AGENTS.md
+
+# Supabase / Postgres gotchas
+
+Learned the hard way, on the School Incident Log build. Read before writing any code that touches RLS.
+
+- **RLS on UPDATE silently filters, it doesn't error.** A `.update()` whose target row fails the policy's USING clause returns `{ data: [], error: null }` — no thrown error, no signal at all. Never trust the absence of a client-visible error as proof a write succeeded, or that a negative test correctly blocked something. Re-read the actual persisted state afterward via a privileged (service-role) query.
+
+- **Chaining `.select()` onto `.insert()` requires the new row to pass the table's SELECT policy WITHIN THE SAME STATEMENT** (PostgREST sends `Prefer: return=representation`). If a row's visibility depends on related rows that don't exist yet in that same transaction — e.g. an incident whose visibility partly depends on its children, inserted a moment later — the chained `.select()` can fail even though the bare insert, and a separate follow-up `.select()` afterward, both succeed. Don't work around this with a client-generated id (`crypto.randomUUID()`) to dodge the RETURNING clause; if the row's own existence should never be structurally possible without its children, fix it properly with a single atomic SECURITY DEFINER RPC that inserts everything in one transaction.
+
+- **An embedded PostgREST join across a table with its own RLS returns EMPTY on the joined side, not an error.** `.select("incident_children(child_index, passports(child_name))")` silently drops the `passports` fields if the caller's session doesn't satisfy `passports`' own SELECT policy — even when the outer row (`incident_children`) is fully visible. The page renders wrong data (e.g. a name silently becomes "Unnamed child") with nothing failing anywhere to notice. When a relationship is deliberately broader than the joined table's own RLS — e.g. institution-roster-wide visibility that doesn't require the ordinary per-user grant (`passport_access`) — resolve it through a dedicated SECURITY DEFINER RPC instead of an embedded join. In this codebase: roster-scoped child names always resolve through `get_institution_child_roster()`, never a direct or embedded `passports(...)` read.
