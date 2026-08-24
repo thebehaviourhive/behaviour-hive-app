@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { useRequireRole } from "@/hooks/useRequireRole";
@@ -8,7 +9,7 @@ import { useTeacherMorningCheckins, type MorningPupilStatus } from "@/hooks/useT
 import { getChildDisplayName } from "@/lib/childDisplayName";
 import { AddChildSheet } from "@/components/teacher/AddChildSheet";
 import { SnaBottomNav } from "@/components/sna/SnaBottomNav";
-import { PeopleIcon } from "@/components/ui/icons";
+import { AlertTriangleIcon, PeopleIcon } from "@/components/ui/icons";
 import { QuestionnairePromptCard } from "@/components/questionnaire/QuestionnairePromptCard";
 
 // SNA's "Passports home" -- per the brief, this single page IS the SNA
@@ -93,16 +94,27 @@ export default function SnaPassportsPage() {
     <div className="flex min-h-full flex-1 flex-col bg-brand-off-white/40 pb-24">
       <header className="flex items-center justify-between gap-3 p-4">
         <h1 className="font-heading text-2xl text-brand-prussian-blue">Passports</h1>
-        {institutionId && (
-          <button
-            type="button"
-            onClick={() => setIsAddChildOpen(true)}
-            aria-label="Add a child"
-            className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-brand-prussian-blue text-lg text-white shadow-sm"
-          >
-            +
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          {institutionId && (
+            <Link
+              href="/teacher/incidents/new"
+              aria-label="Record incident"
+              className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-brand-golden-brown text-white shadow-sm"
+            >
+              <AlertTriangleIcon className="h-5 w-5" />
+            </Link>
+          )}
+          {institutionId && (
+            <button
+              type="button"
+              onClick={() => setIsAddChildOpen(true)}
+              aria-label="Add a child"
+              className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-brand-prussian-blue text-lg text-white shadow-sm"
+            >
+              +
+            </button>
+          )}
+        </div>
       </header>
 
       <QuestionnairePromptCard track="sna" className="px-4 pb-4" />

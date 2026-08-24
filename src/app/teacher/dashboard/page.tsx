@@ -268,6 +268,20 @@ function EmptyState({
       >
         Add Child
       </button>
+
+      {/* Incident Log stamping is institution-roster-scoped, not
+          passport_access-scoped (decision 5) -- reachable even with zero
+          ordinary students linked, so it can't live only inside
+          TeacherQuickActions below (which this empty state replaces
+          entirely). Caught live: without this, a teacher with no
+          passport_access grants yet had no way to reach the stamp at
+          all despite being fully entitled to create one. */}
+      <Link
+        href="/teacher/incidents/new"
+        className="mt-3 w-full rounded-2xl border-2 border-brand-prussian-blue py-3.5 text-center text-base font-semibold text-brand-prussian-blue"
+      >
+        Record Incident
+      </Link>
     </div>
   );
 }

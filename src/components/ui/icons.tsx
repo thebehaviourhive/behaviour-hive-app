@@ -133,3 +133,13 @@ export function TrendUpIcon(props: IconProps) {
     </Base>
   );
 }
+
+export function AlertTriangleIcon(props: IconProps) {
+  return (
+    <Base {...props}>
+      <path d="M12 4 21 19.5H3L12 4Z" strokeLinejoin="round" />
+      <path d="M12 10v4.5" />
+      <circle cx="12" cy="17.25" r="0.1" fill="currentColor" stroke="currentColor" strokeWidth={2.5} />
+    </Base>
+  );
+}

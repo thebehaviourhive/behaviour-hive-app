@@ -1,10 +1,14 @@
 import Link from "next/link";
-import { ChatBubbleIcon, ClipboardIcon, LightbulbIcon, PeopleIcon } from "@/components/ui/icons";
+import { AlertTriangleIcon, ChatBubbleIcon, ClipboardIcon, LightbulbIcon, PeopleIcon } from "@/components/ui/icons";
 import { CountBadge } from "@/components/ui/CountBadge";
 
 const ACTIONS = [
   { label: "Students", href: "/teacher/students", Icon: PeopleIcon },
   { label: "ABC Log", href: "/teacher/abc-log", Icon: ClipboardIcon },
+  // School Incident Log (Phase 3) -- separate from ABC logging above,
+  // deliberately not merged into it (different form, different legal
+  // status, per the brief).
+  { label: "Record Incident", href: "/teacher/incidents/new", Icon: AlertTriangleIcon },
   { label: "Resources", href: "/teacher/resources", Icon: LightbulbIcon },
   { label: "Messages", href: "/teacher/messages", Icon: ChatBubbleIcon },
 ];
