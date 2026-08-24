@@ -594,12 +594,32 @@ async function main() {
     const { data: canTeacherCountersign } = await admin.rpc("can_countersign_incident", { p_user_id: teacherAId, p_institution_id: institutionId });
     record("can_countersign_incident() returns false for the owning teacher (not a principal)", canTeacherCountersign === false, canTeacherCountersign);
 
-    const { error: teacherCountersignErr } = await teacherA.from("incidents").update({ principal_signed_at: new Date().toISOString(), principal_signed_by: teacherAId }).eq("id", incidentId);
-    const { data: stillUncountersigned } = await admin.from("incidents").select("principal_signed_at").eq("id", incidentId).single();
-    record("Owning teacher CANNOT countersign despite every other authority on the incident", stillUncountersigned.principal_signed_at === null, `err=${teacherCountersignErr?.message}, principal_signed_at=${stillUncountersigned.principal_signed_at}`);
+    const { error: teacherCountersignErr } = await teacherA
+      .from("incidents")
+      .update({ countersigned_at: new Date().toISOString(), countersigned_by: teacherAId, countersigned_role_at_time: "class_teacher" })
+      .eq("id", incidentId);
+    const { data: stillUncountersigned } = await admin.from("incidents").select("countersigned_at").eq("id", incidentId).single();
+    record("Owning teacher CANNOT countersign despite every other authority on the incident", stillUncountersigned.countersigned_at === null, `err=${teacherCountersignErr?.message}, countersigned_at=${stillUncountersigned.countersigned_at}`);
 
-    const { error: cleanCountersign } = await principal.from("incidents").update({ principal_signed_at: new Date().toISOString(), principal_signed_by: principalId }).eq("id", incidentId);
-    record("Principal countersign (only the two signoff columns) succeeds", !cleanCountersign, cleanCountersign?.message);
+    // countersigned_role_at_time must match the caller's REAL institution_staff.role
+    // (verified server-side by the policy's own WITH CHECK) -- a mismatched claim
+    // should be rejected even though the caller genuinely can countersign.
+    const { error: mismatchedRoleErr } = await principal
+      .from("incidents")
+      .update({ countersigned_at: new Date().toISOString(), countersigned_by: principalId, countersigned_role_at_time: "class_teacher" })
+      .eq("id", incidentId);
+    const { data: stillUncountersignedAfterMismatch } = await admin.from("incidents").select("countersigned_at").eq("id", incidentId).single();
+    record(
+      "Principal's countersign REJECTED if countersigned_role_at_time doesn't match their real role",
+      stillUncountersignedAfterMismatch.countersigned_at === null,
+      `err=${mismatchedRoleErr?.message}, countersigned_at=${stillUncountersignedAfterMismatch.countersigned_at}`
+    );
+
+    const { error: cleanCountersign } = await principal
+      .from("incidents")
+      .update({ countersigned_at: new Date().toISOString(), countersigned_by: principalId, countersigned_role_at_time: "principal" })
+      .eq("id", incidentId);
+    record("Principal countersign with the correct role recorded succeeds", !cleanCountersign, cleanCountersign?.message);
 
     const { data: afterCountersign } = await admin.from("incidents").select("narrative, status").eq("id", incidentId).single();
     record("narrative/status unchanged by the countersign write", afterCountersign.narrative === REVISED_NARRATIVE && afterCountersign.status === "awaiting_attestation", JSON.stringify(afterCountersign));

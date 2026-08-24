@@ -27,7 +27,7 @@ interface InstitutionIncident {
   child_indices: string[] | null;
   debrief_required: boolean;
   teacher_signed_at: string | null;
-  principal_signed_at: string | null;
+  countersigned_at: string | null;
   has_restrictive_practice: boolean;
   planning_status: string[] | null;
   ncse_report_complete: boolean[] | null;
@@ -107,8 +107,8 @@ export default function PrincipalDashboardPage() {
     return null;
   }
 
-  const awaitingSignoff = incidents.filter((i) => i.teacher_signed_at && !i.principal_signed_at);
-  const rest = incidents.filter((i) => !(i.teacher_signed_at && !i.principal_signed_at));
+  const awaitingSignoff = incidents.filter((i) => i.teacher_signed_at && !i.countersigned_at);
+  const rest = incidents.filter((i) => !(i.teacher_signed_at && !i.countersigned_at));
 
   return (
     <div className="flex min-h-full flex-1 flex-col bg-brand-off-white/40 pb-10">
