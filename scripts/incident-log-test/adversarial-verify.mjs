@@ -800,6 +800,193 @@ async function main() {
     await admin.from("incidents").delete().eq("id", notReqIncidentId);
   }
 
+  console.log(`\n== CHECK J: institution_permissions -- countersign as a grant (migration 0078), own institution, self-contained ==`);
+  {
+    const jCode = "PERMVERIFY" + Math.floor(Math.random() * 10000);
+    const { data: instJ, error: instJErr } = await admin
+      .from("institutions")
+      .insert({ name: "Permissions Verify Test School", institution_code: jCode, status: "verified" })
+      .select()
+      .single();
+    if (instJErr) throw instJErr;
+    const institutionJId = instJ.id;
+
+    const principalJId = await createUser("permverify.principal@thebehaviourhive.com", "Principal J", "principal");
+    const teacherDPId = await createUser("permverify.teacherdp@thebehaviourhive.com", "Teacher DP", "class_teacher");
+    const teacherOrdId = await createUser("permverify.teacherord@thebehaviourhive.com", "Teacher Ordinary", "class_teacher");
+    const parentJId = await createUser("permverify.parent@thebehaviourhive.com", "Parent J", "parent");
+
+    const { error: jStaffErr } = await admin.from("institution_staff").insert([
+      { institution_id: institutionJId, user_id: principalJId, role: "principal" },
+      { institution_id: institutionJId, user_id: teacherDPId, role: "class_teacher" },
+      { institution_id: institutionJId, user_id: teacherOrdId, role: "class_teacher" },
+    ]);
+    if (jStaffErr) throw jStaffErr;
+
+    const { data: childJ } = await admin
+      .from("passports")
+      .insert({ user_id: parentJId, child_name: "Perm Verify Child", passport_status: "complete" })
+      .select()
+      .single();
+    await admin.from("passport_institution_links").insert({ passport_id: childJ.id, institution_id: institutionJId, approved_by_parent: true });
+
+    const { data: locJ } = await admin.from("incident_locations").insert({ institution_id: institutionJId, value: "J Test Room" }).select().single();
+
+    const principalJ = await signedInClient("permverify.principal@thebehaviourhive.com");
+    const teacherDP = await signedInClient("permverify.teacherdp@thebehaviourhive.com");
+    const teacherOrd = await signedInClient("permverify.teacherord@thebehaviourhive.com");
+
+    // -- (a) principal grants countersign_incident to teacherDP. --
+    const { data: grantRow, error: grantErr } = await principalJ
+      .from("institution_permissions")
+      .insert({ institution_id: institutionJId, user_id: teacherDPId, permission: "countersign_incident", granted_by: principalJId })
+      .select()
+      .single();
+    record("Principal CAN grant countersign_incident to a real teacher", !grantErr, grantErr?.message);
+
+    const { data: canDPCountersign } = await admin.rpc("can_countersign_incident", { p_user_id: teacherDPId, p_institution_id: institutionJId });
+    record("can_countersign_incident() returns true for the granted DP", canDPCountersign === true, canDPCountersign);
+    const { data: canOrdCountersign } = await admin.rpc("can_countersign_incident", { p_user_id: teacherOrdId, p_institution_id: institutionJId });
+    record("can_countersign_incident() returns false for an ungranted, ordinary teacher", canOrdCountersign === false, canOrdCountersign);
+
+    // -- (b) grant attempted on a non-staff user (a parent) -- REJECTED --
+    // by the grantee-is-staff trigger, unconditionally, database-level.
+    const { error: nonStaffGrantErr } = await principalJ
+      .from("institution_permissions")
+      .insert({ institution_id: institutionJId, user_id: parentJId, permission: "countersign_incident", granted_by: principalJId });
+    record("Grant to a NON-STAFF user (a parent) REJECTED by the database, not just the UI", Boolean(nonStaffGrantErr), nonStaffGrantErr?.message);
+
+    // -- (c) principal attempting self-grant (and so, self-revoke) --
+    // REJECTED -- there is no row a principal's own automatic authority
+    // could ever appear as, because they can never create one for
+    // themselves in the first place.
+    const { error: selfGrantErr } = await principalJ
+      .from("institution_permissions")
+      .insert({ institution_id: institutionJId, user_id: principalJId, permission: "countersign_incident", granted_by: principalJId });
+    record("Principal attempting to GRANT THEMSELVES the permission REJECTED -- nothing exists for a self-revoke to act on", Boolean(selfGrantErr), selfGrantErr?.message);
+
+    // -- (d) incident A: owning teacher (ungranted) cannot self-countersign; --
+    // the granted DP, a completely different person, CAN countersign it.
+    const { data: incidentAId } = await teacherOrd.rpc("create_incident_stamp", {
+      p_institution_id: institutionJId, p_occurred_at: new Date().toISOString(), p_location_id: locJ.id,
+      p_child_passport_ids: [childJ.id], p_staff: [],
+    });
+    await teacherOrd.from("incidents").update({ teacher_signed_at: new Date().toISOString(), teacher_signed_by: teacherOrdId }).eq("id", incidentAId);
+
+    // RLS on UPDATE silently filters, it doesn't error -- a blocked write
+    // returns { error: null } with zero rows touched, not a thrown
+    // error. Re-query via admin, don't trust the client-visible error.
+    const { error: ordCountersignErr } = await teacherOrd
+      .from("incidents")
+      .update({ countersigned_at: new Date().toISOString(), countersigned_by: teacherOrdId, countersigned_role_at_time: "class_teacher" })
+      .eq("id", incidentAId);
+    const { data: incidentAAfterOrdAttempt } = await admin.from("incidents").select("countersigned_at").eq("id", incidentAId).single();
+    record(
+      "Ungranted owning teacher CANNOT countersign their own incident",
+      incidentAAfterOrdAttempt.countersigned_at === null,
+      `err=${ordCountersignErr?.message}, countersigned_at=${incidentAAfterOrdAttempt.countersigned_at}`
+    );
+
+    const { error: dpCountersignErr } = await teacherDP
+      .from("incidents")
+      .update({ countersigned_at: new Date().toISOString(), countersigned_by: teacherDPId, countersigned_role_at_time: "class_teacher" })
+      .eq("id", incidentAId);
+    const { data: incidentAAfter } = await admin.from("incidents").select("countersigned_at, countersigned_by, countersigned_role_at_time").eq("id", incidentAId).single();
+    record(
+      "Granted DP CAN countersign someone else's incident, recorded with their REAL role (class_teacher, not principal)",
+      !dpCountersignErr && incidentAAfter.countersigned_by === teacherDPId && incidentAAfter.countersigned_role_at_time === "class_teacher",
+      `err=${dpCountersignErr?.message}, ${JSON.stringify(incidentAAfter)}`
+    );
+
+    // -- (e) immutable grant record -- the principal cannot rewrite WHO --
+    // the existing grant belongs to, only revoke it.
+    const { error: rewriteErr } = await principalJ
+      .from("institution_permissions")
+      .update({ user_id: teacherOrdId })
+      .eq("id", grantRow.id);
+    record("Principal CANNOT rewrite an existing grant's user_id -- only revoked_at/revoked_by may ever change", Boolean(rewriteErr), rewriteErr?.message);
+
+    // -- (f) revoke the DP's grant, then confirm the EARLIER countersign --
+    // (incident A, signed while the grant was active) is UNTOUCHED --
+    // revocation is not retroactive.
+    const { error: revokeErr } = await principalJ
+      .from("institution_permissions")
+      .update({ revoked_at: new Date().toISOString(), revoked_by: principalJId })
+      .eq("id", grantRow.id);
+    record("Principal CAN revoke the DP's grant", !revokeErr, revokeErr?.message);
+
+    const { data: canDPCountersignAfterRevoke } = await admin.rpc("can_countersign_incident", { p_user_id: teacherDPId, p_institution_id: institutionJId });
+    record("can_countersign_incident() now returns false for the revoked DP", canDPCountersignAfterRevoke === false, canDPCountersignAfterRevoke);
+
+    const { data: incidentAStillAfterRevoke } = await admin.from("incidents").select("countersigned_at, countersigned_by, countersigned_role_at_time").eq("id", incidentAId).single();
+    record(
+      "Incident A's countersign is UNCHANGED after the DP's grant was revoked -- revocation is not retroactive",
+      incidentAStillAfterRevoke.countersigned_by === teacherDPId
+        && incidentAStillAfterRevoke.countersigned_at === incidentAAfter.countersigned_at
+        && incidentAStillAfterRevoke.countersigned_role_at_time === "class_teacher",
+      JSON.stringify(incidentAStillAfterRevoke)
+    );
+
+    // -- (g) incident B: the now-revoked DP attempts to countersign a --
+    // FRESH incident -- REJECTED.
+    const { data: incidentBId } = await teacherOrd.rpc("create_incident_stamp", {
+      p_institution_id: institutionJId, p_occurred_at: new Date().toISOString(), p_location_id: locJ.id,
+      p_child_passport_ids: [childJ.id], p_staff: [],
+    });
+    await teacherOrd.from("incidents").update({ teacher_signed_at: new Date().toISOString(), teacher_signed_by: teacherOrdId }).eq("id", incidentBId);
+
+    const { error: revokedDpCountersignErr } = await teacherDP
+      .from("incidents")
+      .update({ countersigned_at: new Date().toISOString(), countersigned_by: teacherDPId, countersigned_role_at_time: "class_teacher" })
+      .eq("id", incidentBId);
+    const { data: incidentBAfter } = await admin.from("incidents").select("countersigned_at").eq("id", incidentBId).single();
+    record(
+      "Revoked DP CANNOT countersign a fresh incident",
+      incidentBAfter.countersigned_at === null,
+      `err=${revokedDpCountersignErr?.message}, countersigned_at=${incidentBAfter.countersigned_at}`
+    );
+
+    // -- (h) last-holder guard, as a real backstop, not just an RLS --
+    // convenience -- an authenticated principal can never actually
+    // trigger this (revoking always leaves at least themselves, since
+    // the revoke policy itself requires an active principal to call it).
+    // The real exposure is a service-role/admin path that bypasses RLS
+    // entirely -- grant teacherOrd the permission, then remove
+    // principalJ's OWN principal role via service role (simulating the
+    // principal leaving without a role change going through this
+    // migration), leaving teacherOrd's grant as the ONLY countersign
+    // authority left at this institution -- then attempt to revoke it,
+    // via service role, bypassing RLS's own principal-only gate entirely.
+    // The trigger must still refuse, because it runs on every write
+    // regardless of how RLS was satisfied or bypassed.
+    const { data: secondGrant } = await principalJ
+      .from("institution_permissions")
+      .insert({ institution_id: institutionJId, user_id: teacherOrdId, permission: "countersign_incident", granted_by: principalJId })
+      .select()
+      .single();
+
+    await admin.from("institution_staff").update({ role: "class_teacher" }).eq("institution_id", institutionJId).eq("user_id", principalJId);
+    const { data: canAnyoneCountersignNow } = await admin.rpc("can_countersign_incident", { p_user_id: principalJId, p_institution_id: institutionJId });
+    record("Setup for (h): former principal (now demoted) no longer counts as countersign authority", canAnyoneCountersignNow === false, canAnyoneCountersignNow);
+
+    const { error: lastHolderRevokeErr } = await admin
+      .from("institution_permissions")
+      .update({ revoked_at: new Date().toISOString(), revoked_by: teacherOrdId })
+      .eq("id", secondGrant.id);
+    record(
+      "Last-holder guard REJECTS revoking the only remaining countersign authority at an institution, even via service role bypassing RLS entirely",
+      Boolean(lastHolderRevokeErr),
+      lastHolderRevokeErr?.message
+    );
+    const { data: secondGrantAfter } = await admin.from("institution_permissions").select("revoked_at").eq("id", secondGrant.id).single();
+    record("That grant's revoked_at is still null -- the rejected revoke did not partially apply", secondGrantAfter.revoked_at === null, secondGrantAfter.revoked_at);
+
+    await admin.from("institutions").delete().eq("id", institutionJId);
+    for (const id of [principalJId, teacherDPId, teacherOrdId, parentJId]) {
+      await admin.auth.admin.deleteUser(id);
+    }
+  }
+
   console.log(`\n== CHECK E: amendments after finalisation -- append-only, truly ==`);
   {
     const { data: amendment, error: amendErr } = await admin
