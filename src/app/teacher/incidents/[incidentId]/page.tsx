@@ -223,6 +223,23 @@ export default function IncidentRecordPage() {
   const [newInjuryStaffName, setNewInjuryStaffName] = useState("");
   const [addInjuryError, setAddInjuryError] = useState<string | null>(null);
 
+  const [owningTeacherId, setOwningTeacherId] = useState<string | null>(null);
+  const [owningTeacherName, setOwningTeacherName] = useState<string | null>(null);
+  const [canEditDebrief, setCanEditDebrief] = useState(false);
+  const [debriefRequired, setDebriefRequired] = useState(false);
+  const [debriefId, setDebriefId] = useState<string | null>(null);
+  const [debriefDate, setDebriefDate] = useState("");
+  const [debriefStaffPresent, setDebriefStaffPresent] = useState<string[]>([]);
+  const [debriefStaffInput, setDebriefStaffInput] = useState("");
+  const [debriefNotes, setDebriefNotes] = useState("");
+  const [debriefActionsForManagement, setDebriefActionsForManagement] = useState("");
+  const [debriefCompletedAt, setDebriefCompletedAt] = useState<string | null>(null);
+  const [debriefCompletedByName, setDebriefCompletedByName] = useState<string | null>(null);
+  const [isSavingDebrief, setIsSavingDebrief] = useState(false);
+  const [debriefSaveError, setDebriefSaveError] = useState<string | null>(null);
+  const [debriefSavedAt, setDebriefSavedAt] = useState<number | null>(null);
+  const [isCompletingDebrief, setIsCompletingDebrief] = useState(false);
+
   const [category, setCategory] = useState<Category | null>(null);
   const [party, setParty] = useState<Party | null>(null);
   const [itemInvolved, setItemInvolved] = useState("");
@@ -247,7 +264,7 @@ export default function IncidentRecordPage() {
       const { data: incident, error: incidentError } = await supabase
         .from("incidents")
         .select(
-          "institution_id, created_by, owning_teacher_id, teacher_signed_at, occurred_at, incident_locations(value), category, party, item_involved, narrative, parent_summary, staff_count_needed, staff_distressed, risk_reduction_future, other_information"
+          "institution_id, created_by, owning_teacher_id, teacher_signed_at, occurred_at, incident_locations(value), category, party, item_involved, narrative, parent_summary, staff_count_needed, staff_distressed, risk_reduction_future, other_information, debrief_required"
         )
         .eq("id", params.incidentId)
         .maybeSingle();
@@ -276,6 +293,7 @@ export default function IncidentRecordPage() {
         { data: restrictivePracticeRows },
         { data: injuryTypeRows },
         { data: injuryRows },
+        { data: debriefRow },
       ] = await Promise.all([
         supabase
           .from("incident_children")
@@ -312,6 +330,11 @@ export default function IncidentRecordPage() {
           )
           .eq("incident_id", params.incidentId)
           .order("created_at", { ascending: true }),
+        supabase
+          .from("incident_debriefs")
+          .select("id, debrief_date, staff_present, notes, actions_for_management, completed_by, completed_at")
+          .eq("incident_id", params.incidentId)
+          .maybeSingle(),
       ]);
 
       if (!isMounted) return;
@@ -414,6 +437,27 @@ export default function IncidentRecordPage() {
       setCanEdit(
         !incident.teacher_signed_at && (incident.created_by === user!.id || incident.owning_teacher_id === user!.id)
       );
+
+      // The debrief is owning-teacher-only, not creator-or-owning-teacher
+      // -- matches incident_debriefs' own RLS exactly
+      // ("i.owning_teacher_id = auth.uid()", no created_by branch at
+      // all), not the broader canEdit used everywhere else on this page.
+      setOwningTeacherId(incident.owning_teacher_id);
+      setOwningTeacherName(incident.owning_teacher_id ? nameByUserId.get(incident.owning_teacher_id) ?? "the owning teacher" : null);
+      setCanEditDebrief(!incident.teacher_signed_at && incident.owning_teacher_id === user!.id);
+
+      setDebriefRequired(incident.debrief_required);
+      if (debriefRow) {
+        setDebriefId(debriefRow.id);
+        setDebriefDate(debriefRow.debrief_date ?? "");
+        setDebriefStaffPresent(debriefRow.staff_present ?? []);
+        setDebriefNotes(debriefRow.notes ?? "");
+        setDebriefActionsForManagement(debriefRow.actions_for_management ?? "");
+        setDebriefCompletedAt(debriefRow.completed_at);
+        setDebriefCompletedByName(
+          debriefRow.completed_by ? nameByUserId.get(debriefRow.completed_by) ?? "Unknown staff member" : null
+        );
+      }
 
       setIsLoading(false);
     }
@@ -617,6 +661,116 @@ export default function IncidentRecordPage() {
     if (!deleteError) {
       setInjuries((current) => current.filter((inj) => inj.id !== injuryId));
     }
+  }
+
+  // Writes straight to incidents.debrief_required the moment the toggle
+  // changes -- matching toggleAction()'s immediate-write pattern. This
+  // used to only update local state and rely on the far-away top-level
+  // Save button to persist it, which meant a real click on this section's
+  // OWN save/complete buttons never actually wrote the toggle -- caught
+  // live by a direct DB re-query showing debrief_required still false
+  // after a UI round that looked fully successful. There is now exactly
+  // one write path for this column.
+  async function setDebriefRequiredAndSave(value: boolean) {
+    const previous = debriefRequired;
+    setDebriefRequired(value);
+    setDebriefSaveError(null);
+
+    const supabase = createClient();
+    const { error: updateError } = await supabase
+      .from("incidents")
+      .update({ debrief_required: value })
+      .eq("id", params.incidentId);
+
+    if (updateError) {
+      setDebriefRequired(previous);
+      setDebriefSaveError(updateError.message);
+    }
+  }
+
+  function addDebriefStaffPresent() {
+    const name = debriefStaffInput.trim();
+    if (!name || debriefStaffPresent.includes(name)) return;
+    setDebriefStaffPresent((current) => [...current, name]);
+    setDebriefStaffInput("");
+  }
+
+  function removeDebriefStaffPresent(name: string) {
+    setDebriefStaffPresent((current) => current.filter((n) => n !== name));
+  }
+
+  // Owning-teacher-only, matching incident_debriefs' RLS exactly. Fields
+  // save independently of the top-level Save button (same pattern as
+  // restrictive practice) -- a debrief can exist in a part-filled state
+  // right up until it's explicitly marked complete.
+  async function handleSaveDebrief() {
+    if (!debriefDate) {
+      setDebriefSaveError("Date of debrief is required.");
+      return;
+    }
+
+    setIsSavingDebrief(true);
+    setDebriefSaveError(null);
+
+    const supabase = createClient();
+    const payload = {
+      incident_id: params.incidentId as string,
+      debrief_date: debriefDate,
+      staff_present: debriefStaffPresent.length > 0 ? debriefStaffPresent : null,
+      notes: debriefNotes.trim() || null,
+      actions_for_management: debriefActionsForManagement.trim() || null,
+    };
+
+    if (debriefId) {
+      const { error: updateError } = await supabase.from("incident_debriefs").update(payload).eq("id", debriefId);
+      setIsSavingDebrief(false);
+      if (updateError) {
+        setDebriefSaveError(updateError.message);
+        return;
+      }
+      setDebriefSavedAt(Date.now());
+    } else {
+      const { data: inserted, error: insertError } = await supabase
+        .from("incident_debriefs")
+        .insert(payload)
+        .select("id")
+        .single();
+      setIsSavingDebrief(false);
+      if (insertError) {
+        setDebriefSaveError(insertError.message);
+        return;
+      }
+      setDebriefId(inserted.id);
+      setDebriefSavedAt(Date.now());
+    }
+  }
+
+  // A deliberate, separate action -- "saved" and "complete" are not the
+  // same thing. Only a completed debrief (completed_at set) satisfies
+  // the sign-off gate (migration 0077); this is the only place that
+  // column is ever written.
+  async function handleMarkDebriefComplete() {
+    if (!debriefId) {
+      setDebriefSaveError("Save the debrief before marking it complete.");
+      return;
+    }
+    setIsCompletingDebrief(true);
+    setDebriefSaveError(null);
+
+    const supabase = createClient();
+    const now = new Date().toISOString();
+    const { error: completeError } = await supabase
+      .from("incident_debriefs")
+      .update({ completed_at: now, completed_by: owningTeacherId })
+      .eq("id", debriefId);
+
+    setIsCompletingDebrief(false);
+    if (completeError) {
+      setDebriefSaveError(completeError.message);
+      return;
+    }
+    setDebriefCompletedAt(now);
+    setDebriefCompletedByName(owningTeacherName);
   }
 
   async function handleSave() {
@@ -1193,6 +1347,135 @@ export default function IncidentRecordPage() {
                   )}
                 </div>
               </section>
+
+              <section>
+                <h2 className="mb-3 font-heading text-lg font-bold text-brand-prussian-blue">Debrief</h2>
+
+                <div className="rounded-2xl border border-black/5 bg-white p-4">
+                  <div>
+                    <span className="mb-2 block text-sm font-semibold text-brand-neutral-black">Debrief required?</span>
+                    <PillSingleSelect
+                      options={REMAINED_ON_SITE_OPTIONS}
+                      value={debriefRequired ? "yes" : "no"}
+                      onChange={(v) => setDebriefRequiredAndSave(v === "yes")}
+                    />
+                  </div>
+
+                  {debriefRequired && (
+                    <div className="mt-4 border-t border-black/[0.06] pt-4">
+                      {!owningTeacherId ? (
+                        <p className="rounded-xl bg-brand-off-white/60 p-3 text-sm text-brand-neutral-black/60">
+                          A class teacher must claim this incident (see Actions Taken) before the debrief can be
+                          started.
+                        </p>
+                      ) : !canEditDebrief && !debriefCompletedAt ? (
+                        <p className="rounded-xl bg-brand-off-white/60 p-3 text-sm text-brand-neutral-black/60">
+                          Only {owningTeacherName}, the owning teacher, can complete this debrief.
+                        </p>
+                      ) : (
+                        <fieldset disabled={!canEditDebrief} className="flex flex-col gap-4 disabled:opacity-60">
+                          <TextField
+                            label="Date of debrief"
+                            id="debrief-date"
+                            type="date"
+                            value={debriefDate}
+                            onChange={(e) => setDebriefDate(e.target.value)}
+                          />
+
+                          <div>
+                            <span className="mb-2 block text-sm font-semibold text-brand-neutral-black">Staff present</span>
+                            {debriefStaffPresent.length > 0 && (
+                              <div className="mb-2 flex flex-wrap gap-2">
+                                {debriefStaffPresent.map((name) => (
+                                  <span
+                                    key={name}
+                                    className="flex items-center gap-1.5 rounded-full bg-brand-pastel-blue/20 px-3 py-1 text-xs font-semibold text-brand-prussian-blue"
+                                  >
+                                    {name}
+                                    <button type="button" onClick={() => removeDebriefStaffPresent(name)} aria-label={`Remove ${name}`}>
+                                      ×
+                                    </button>
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                            <div className="flex gap-2">
+                              <TextField
+                                label="Add a name"
+                                id="debrief-staff-input"
+                                value={debriefStaffInput}
+                                onChange={(e) => setDebriefStaffInput(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") {
+                                    e.preventDefault();
+                                    addDebriefStaffPresent();
+                                  }
+                                }}
+                                className="flex-1"
+                              />
+                              <button
+                                type="button"
+                                onClick={addDebriefStaffPresent}
+                                disabled={!debriefStaffInput.trim()}
+                                className="mt-[1.9rem] flex-shrink-0 rounded-xl border-2 border-brand-prussian-blue px-4 py-3 text-sm font-semibold text-brand-prussian-blue disabled:opacity-40"
+                              >
+                                Add
+                              </button>
+                            </div>
+                          </div>
+
+                          <Textarea
+                            label="Notes"
+                            id="debrief-notes"
+                            value={debriefNotes}
+                            onChange={(e) => setDebriefNotes(e.target.value)}
+                            rows={3}
+                          />
+
+                          <Textarea
+                            label="Actions for management / BA"
+                            id="debrief-actions"
+                            value={debriefActionsForManagement}
+                            onChange={(e) => setDebriefActionsForManagement(e.target.value)}
+                            rows={3}
+                          />
+
+                          {debriefSaveError && (
+                            <p role="alert" className="text-sm font-medium text-red-600">
+                              {debriefSaveError}
+                            </p>
+                          )}
+                          {debriefSavedAt && !debriefSaveError && !debriefCompletedAt && (
+                            <p className="text-sm font-medium text-green-700">Saved.</p>
+                          )}
+
+                          {debriefCompletedAt ? (
+                            <p className="rounded-xl bg-brand-pastel-blue/10 p-3 text-sm text-brand-prussian-blue">
+                              Completed by {debriefCompletedByName} on {formatDateTime(debriefCompletedAt)}.
+                            </p>
+                          ) : (
+                            canEditDebrief && (
+                              <div className="flex gap-2">
+                                <Button type="button" onClick={handleSaveDebrief} disabled={isSavingDebrief}>
+                                  {isSavingDebrief ? "Saving…" : "Save"}
+                                </Button>
+                                <Button
+                                  type="button"
+                                  variant="secondary"
+                                  onClick={handleMarkDebriefComplete}
+                                  disabled={isCompletingDebrief || !debriefId}
+                                >
+                                  {isCompletingDebrief ? "Completing…" : "Mark debrief complete"}
+                                </Button>
+                              </div>
+                            )
+                          )}
+                        </fieldset>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </section>
             </fieldset>
 
             {canEdit && (
@@ -1212,7 +1495,8 @@ export default function IncidentRecordPage() {
             )}
 
             <p className="text-sm leading-relaxed text-brand-neutral-black/60">
-              Debrief is not yet available in this build. This record is saved and will not be lost.
+              Teacher sign-off and principal countersign are not yet available in this build. This record is saved
+              and will not be lost.
             </p>
           </div>
         ) : null}

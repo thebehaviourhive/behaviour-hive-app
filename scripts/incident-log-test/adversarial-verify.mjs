@@ -713,6 +713,93 @@ async function main() {
     record("narrative/status unchanged by the countersign write", afterCountersign.narrative === REVISED_NARRATIVE && afterCountersign.status === "awaiting_attestation", JSON.stringify(afterCountersign));
   }
 
+  console.log(`\n== CHECK I: debrief sign-off gate (migration 0077) -- own incidents, self-contained ==`);
+  {
+    // -- (a) debrief_required = true, no debrief at all -- sign-off is --
+    // rejected outright. p_staff: [] so there's nothing for the
+    // attestation gate to have an opinion about -- this incident is
+    // testing the debrief gate alone.
+    const { data: reqIncidentId } = await teacherA.rpc("create_incident_stamp", {
+      p_institution_id: institutionId, p_occurred_at: new Date().toISOString(), p_location_id: loc.id,
+      p_child_passport_ids: [child1], p_staff: [],
+    });
+    await teacherA.from("incidents").update({ debrief_required: true }).eq("id", reqIncidentId);
+
+    const { error: signNoDebriefErr } = await teacherA
+      .from("incidents")
+      .update({ teacher_signed_at: new Date().toISOString(), teacher_signed_by: teacherAId })
+      .eq("id", reqIncidentId);
+    const { data: stillUnsignedNoDebrief } = await admin.from("incidents").select("teacher_signed_at").eq("id", reqIncidentId).single();
+    record(
+      "Sign-off REJECTED when debrief_required is true and no debrief exists at all",
+      stillUnsignedNoDebrief.teacher_signed_at === null,
+      `err=${signNoDebriefErr?.message}, teacher_signed_at=${stillUnsignedNoDebrief.teacher_signed_at}`
+    );
+
+    // -- (b) the owning TEACHER, not the principal, not another teacher --
+    // -- completes the debrief. Both non-owning attempts rejected by
+    // incident_debriefs' own RLS before the gate is even relevant.
+    const { error: principalDebriefErr } = await principal
+      .from("incident_debriefs")
+      .insert({ incident_id: reqIncidentId, debrief_date: "2026-01-01" });
+    record("Principal CANNOT record the debrief (owning teacher only)", Boolean(principalDebriefErr), principalDebriefErr?.message);
+
+    const { error: teacherBDebriefErr } = await teacherB
+      .from("incident_debriefs")
+      .insert({ incident_id: reqIncidentId, debrief_date: "2026-01-01" });
+    record("A different teacher (not the owner) CANNOT record the debrief either", Boolean(teacherBDebriefErr), teacherBDebriefErr?.message);
+
+    // -- (c) a debrief row exists but isn't completed -- still rejected. --
+    const { data: debriefRow, error: debriefInsertErr } = await teacherA
+      .from("incident_debriefs")
+      .insert({ incident_id: reqIncidentId, debrief_date: "2026-01-01", staff_present: ["Teacher A Owning"], notes: "Discussed with the team." })
+      .select()
+      .single();
+    record("Owning teacher CAN record the debrief", !debriefInsertErr, debriefInsertErr?.message);
+
+    const { error: signIncompleteErr } = await teacherA
+      .from("incidents")
+      .update({ teacher_signed_at: new Date().toISOString(), teacher_signed_by: teacherAId })
+      .eq("id", reqIncidentId);
+    const { data: stillUnsignedIncomplete } = await admin.from("incidents").select("teacher_signed_at").eq("id", reqIncidentId).single();
+    record(
+      "Sign-off still REJECTED -- a debrief row exists but isn't marked complete",
+      stillUnsignedIncomplete.teacher_signed_at === null,
+      `err=${signIncompleteErr?.message}, teacher_signed_at=${stillUnsignedIncomplete.teacher_signed_at}`
+    );
+
+    // -- (d) mark complete -- sign-off now succeeds. --
+    const { error: completeErr } = await teacherA
+      .from("incident_debriefs")
+      .update({ completed_at: new Date().toISOString(), completed_by: teacherAId })
+      .eq("id", debriefRow.id);
+    record("Owning teacher can mark the debrief complete", !completeErr, completeErr?.message);
+
+    const { error: signCompleteErr } = await teacherA
+      .from("incidents")
+      .update({ teacher_signed_at: new Date().toISOString(), teacher_signed_by: teacherAId })
+      .eq("id", reqIncidentId);
+    record("Sign-off SUCCEEDS once the debrief is marked complete", !signCompleteErr, signCompleteErr?.message);
+
+    await admin.from("incidents").delete().eq("id", reqIncidentId);
+
+    // -- (e) debrief_required = false -- proceeds without one, full stop. --
+    const { data: notReqIncidentId } = await teacherA.rpc("create_incident_stamp", {
+      p_institution_id: institutionId, p_occurred_at: new Date().toISOString(), p_location_id: loc.id,
+      p_child_passport_ids: [child1], p_staff: [],
+    });
+    const { data: notReqRow } = await admin.from("incidents").select("debrief_required").eq("id", notReqIncidentId).single();
+    record("debrief_required defaults to false", notReqRow.debrief_required === false, notReqRow.debrief_required);
+
+    const { error: signNotRequiredErr } = await teacherA
+      .from("incidents")
+      .update({ teacher_signed_at: new Date().toISOString(), teacher_signed_by: teacherAId })
+      .eq("id", notReqIncidentId);
+    record("Sign-off SUCCEEDS with no debrief at all when debrief_required is false", !signNotRequiredErr, signNotRequiredErr?.message);
+
+    await admin.from("incidents").delete().eq("id", notReqIncidentId);
+  }
+
   console.log(`\n== CHECK E: amendments after finalisation -- append-only, truly ==`);
   {
     const { data: amendment, error: amendErr } = await admin
