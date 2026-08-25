@@ -328,8 +328,7 @@ export default function IncidentRecordPage() {
           .select(
             "id, injured_party_type, passport_id, staff_user_id, free_text_name, injury_types, injury_notes, first_aider_called, first_aider_name, doctor_ambulance_called, remained_on_site, remained_detail"
           )
-          .eq("incident_id", params.incidentId)
-          .order("created_at", { ascending: true }),
+          .eq("incident_id", params.incidentId),
         supabase
           .from("incident_debriefs")
           .select("id, debrief_date, staff_present, notes, actions_for_management, completed_by, completed_at")
