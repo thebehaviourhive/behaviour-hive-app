@@ -1,22 +1,28 @@
 import { BodyFigureSvg } from "./BodyFigureSvg";
 import { BodyMapMarker } from "./BodyMapMarker";
-import { regionForMark, type BodyView } from "./bodyMapRegions";
+import { regionWithSideLabel, type BodyView, type Side } from "./bodyMapRegions";
 
-// Print rendering of a body map -- same data, same normalised
-// coordinates, same BodyFigureSvg/BodyMapMarker components as the
-// screen version, just the "print" palette (outline figures, solid
-// dark markers, black legend text -- inverted from screen on purpose,
-// see BodyFigureSvg/BodyMapMarker's own comments). This is what ends up
-// in the exported PDF. The name repeats on each individual figure here
-// (screen shows it once, above the pair) because a printed or scanned
-// page can end up separated from its own heading.
+// Print rendering of a body map -- same data, same supplied SVG assets
+// (print variant: outline figures, white fill, black stroke -- the
+// opposite of the screen version's light-tint fill, so a solid dark
+// figure doesn't flood to a black slab on a mediocre printer and
+// swallow white markers), same BodyFigureSvg/BodyMapMarker components as
+// the screen version. This is what ends up in the exported PDF. The
+// name repeats on each individual figure here (screen shows it once,
+// above the pair) because a printed or scanned page can end up
+// separated from its own heading. No interactivity, no highlight state
+// -- print is a static rendering of already-confirmed marks, not a tap
+// target.
 
 export interface PrintableMark {
   id: string;
   view: BodyView;
   x: number;
   y: number;
+  regionValue: string;
+  side: Side;
   injuryTypeName: string;
+  skinBroken: boolean | null;
 }
 
 interface BodyMapPrintCardProps {
@@ -27,6 +33,14 @@ interface BodyMapPrintCardProps {
 export function BodyMapPrintCard({ partyName, marks }: BodyMapPrintCardProps) {
   function markerNumber(markId: string): number {
     return marks.findIndex((m) => m.id === markId) + 1;
+  }
+
+  function legendLine(m: PrintableMark): string {
+    let line = `${m.injuryTypeName} — ${regionWithSideLabel(m.regionValue, m.side)}`;
+    if (m.injuryTypeName === "Bite" && m.skinBroken !== null) {
+      line += m.skinBroken ? ", skin broken" : ", skin not broken";
+    }
+    return line;
   }
 
   return (
@@ -70,9 +84,7 @@ export function BodyMapPrintCard({ partyName, marks }: BodyMapPrintCardProps) {
               <span className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-black text-[11px] font-bold text-white">
                 {markerNumber(m.id)}
               </span>
-              <span>
-                <b className="font-extrabold text-black">{m.injuryTypeName}</b> — {m.view}, {regionForMark(m.view, m.x, m.y)}
-              </span>
+              <span>{legendLine(m)}</span>
             </li>
           ))}
         </ul>

@@ -1,53 +1,37 @@
-import { VIEWBOX_HEIGHT, VIEWBOX_WIDTH } from "./bodyFigureData";
+// Region and side are no longer derived from tapped coordinates -- they
+// come straight off the tapped SVG path's own data-region/data-side
+// attributes (BodyFigureSvg's event delegation reads them directly).
+// This file's job shrinks to display labels only: how a stored region
+// slug (which must match incident_body_regions.value and regions.json
+// exactly -- that's the whole point of this rebuild) reads as English.
 
-// Left/right convention, stated once here rather than left implicit:
-// nothing is mirrored -- front is drawn as the child facing you (their
-// right hand lands on the image's left), back is drawn as the child
-// facing away (their right hand lands on the image's right). Both
-// figures carry their own "L"/"R" labels for this reason (bodyFigureData
-// swaps them per view) -- side() below is the same rule expressed as
-// code, so the legend text and the printed labels can never disagree.
 export type BodyView = "front" | "back";
-export type Side = "left" | "right";
+export type Side = "left" | "right" | "centre";
 
-export function sideForMark(view: BodyView, xNorm: number): Side {
-  const isImageLeftHalf = xNorm * VIEWBOX_WIDTH < VIEWBOX_WIDTH / 2;
-  if (view === "front") return isImageLeftHalf ? "right" : "left";
-  return isImageLeftHalf ? "left" : "right";
+// Matches this module's own established clinical wording from the
+// earlier coordinate-based build (lower_arm -> forearm, upper_leg ->
+// thigh) -- not a fresh guess, continuing what was already decided.
+// Display-only: the stored value is always the raw slug.
+const REGION_DISPLAY_LABEL: Record<string, string> = {
+  head: "head",
+  chest: "chest",
+  stomach: "stomach",
+  upper_arm: "upper arm",
+  lower_arm: "forearm",
+  hand: "hand",
+  upper_back: "upper back",
+  lower_back: "lower back",
+  upper_leg: "thigh",
+  lower_leg: "lower leg",
+};
+
+export function regionLabel(regionValue: string): string {
+  return REGION_DISPLAY_LABEL[regionValue] ?? regionValue;
 }
 
-// Region bands grounded in the actual joint landmarks the source SVGs
-// draw -- the elbow crease sits at y=176, the knee crease at y=336 (see
-// bodyFigureData.CREASE_LINES) -- not guessed independently of the art.
-// x bands separate the arms (which sit outside the torso/leg column)
-// from everything else; this is a legend-text approximation, not a
-// medical hit-test -- good enough to tell "forearm" from "upper arm",
-// which is the one thing the flat mitten shape it replaces could not do.
-export function regionForMark(view: BodyView, xNorm: number, yNorm: number): string {
-  const x = xNorm * VIEWBOX_WIDTH;
-  const y = yNorm * VIEWBOX_HEIGHT;
-  const side = sideForMark(view, xNorm);
-  const isArmColumn = x < 90 || x > 130;
-
-  if (y < 78) return "head";
-
-  if (isArmColumn && y >= 78 && y <= 260) {
-    return y < 176 ? `${side} upper arm` : `${side} forearm`;
-  }
-  if (isArmColumn && y > 260 && y <= 300) {
-    return `${side} hand`;
-  }
-
-  if (!isArmColumn && y >= 74 && y < 240) {
-    return y < 152 ? "chest" : "abdomen";
-  }
-
-  if (!isArmColumn && y >= 240 && y <= 438) {
-    return y < 336 ? `${side} thigh` : `${side} lower leg`;
-  }
-  if (!isArmColumn && y > 438) {
-    return `${side} foot`;
-  }
-
-  return "torso";
+// "left lower_arm" -> "left forearm"; centre regions (head, chest,
+// stomach, upper_back, lower_back) never take a side prefix.
+export function regionWithSideLabel(regionValue: string, side: Side): string {
+  const label = regionLabel(regionValue);
+  return side === "centre" ? label : `${side} ${label}`;
 }

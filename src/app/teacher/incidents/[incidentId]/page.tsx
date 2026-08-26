@@ -10,7 +10,7 @@ import { TextField } from "@/components/ui/TextField";
 import { Textarea } from "@/components/ui/Textarea";
 import { PillSingleSelect } from "@/components/ui/PillSingleSelect";
 import { PillMultiSelect } from "@/components/ui/PillMultiSelect";
-import { BodyMapCard, type InjuryTypeOption } from "@/components/incident-log/body-map/BodyMapCard";
+import { BodyMapCard, type InjuryTypeOption, type RegionOption } from "@/components/incident-log/body-map/BodyMapCard";
 
 // School Incident Log -- Phase 3 stage two, built in sections per
 // explicit instruction: category & narrative first (this round), then
@@ -179,12 +179,16 @@ interface InjuryRecordState {
   partyName: string;
   injuryTypes: string[];
   injuryNotes: string;
-  firstAiderCalled: boolean;
+  firstAiderCalled: boolean | null;
   firstAiderName: string;
-  doctorAmbulanceCalled: boolean;
+  doctorAmbulanceCalled: boolean | null;
+  treatments: string[];
+  treatmentOther: string;
   remainedOnSite: boolean | null;
   remainedDetail: string;
 }
+
+const TREATMENT_OPTIONS = ["Head injury assessment", "ice pack", "disinfected", "wound covered", "Other"];
 
 function formatDateTime(value: string): string {
   const d = new Date(value);
@@ -226,6 +230,7 @@ export default function IncidentRecordPage() {
   const [incidentStaffOptions, setIncidentStaffOptions] = useState<{ id: string; name: string }[]>([]);
 
   const [injuryTypeOptions, setInjuryTypeOptions] = useState<InjuryTypeOption[]>([]);
+  const [regionOptions, setRegionOptions] = useState<RegionOption[]>([]);
   const [injuries, setInjuries] = useState<InjuryRecordState[]>([]);
   const [isAddingInjury, setIsAddingInjury] = useState(false);
   // The injured party is picked from people already named on the
@@ -326,6 +331,7 @@ export default function IncidentRecordPage() {
         { data: resultTypes },
         { data: restrictivePracticeRows },
         { data: injuryTypeRows },
+        { data: regionRows },
         { data: injuryRows },
         { data: debriefRow },
       ] = await Promise.all([
@@ -357,10 +363,11 @@ export default function IncidentRecordPage() {
           )
           .eq("incident_id", params.incidentId),
         supabase.from("incident_injury_types").select("id, value").or(institutionOrGlobal).eq("is_active", true).order("sort_order"),
+        supabase.from("incident_body_regions").select("id, value").or(institutionOrGlobal).eq("is_active", true).order("sort_order"),
         supabase
           .from("incident_injuries")
           .select(
-            "id, injured_party_type, passport_id, staff_user_id, free_text_name, injury_types, injury_notes, first_aider_called, first_aider_name, doctor_ambulance_called, remained_on_site, remained_detail"
+            "id, injured_party_type, passport_id, staff_user_id, free_text_name, injury_types, injury_notes, first_aider_called, first_aider_name, doctor_ambulance_called, treatments, treatment_other, remained_on_site, remained_detail"
           )
           .eq("incident_id", params.incidentId),
         supabase
@@ -465,6 +472,7 @@ export default function IncidentRecordPage() {
       setRestrictivePracticesByChild(byChild);
 
       setInjuryTypeOptions((injuryTypeRows ?? []).map((row) => ({ id: row.id, value: row.value })));
+      setRegionOptions((regionRows ?? []).map((row) => ({ id: row.id, value: row.value })));
       setInjuries(
         (injuryRows ?? []).map((row) => ({
           id: row.id,
@@ -480,6 +488,8 @@ export default function IncidentRecordPage() {
           firstAiderCalled: row.first_aider_called,
           firstAiderName: row.first_aider_name ?? "",
           doctorAmbulanceCalled: row.doctor_ambulance_called,
+          treatments: row.treatments ?? [],
+          treatmentOther: row.treatment_other ?? "",
           remainedOnSite: row.remained_on_site,
           remainedDetail: row.remained_detail ?? "",
         }))
@@ -759,9 +769,11 @@ export default function IncidentRecordPage() {
         partyName,
         injuryTypes: [],
         injuryNotes: "",
-        firstAiderCalled: false,
+        firstAiderCalled: null,
         firstAiderName: "",
-        doctorAmbulanceCalled: false,
+        doctorAmbulanceCalled: null,
+        treatments: [],
+        treatmentOther: "",
         remainedOnSite: null,
         remainedDetail: "",
       },
@@ -1528,64 +1540,33 @@ export default function IncidentRecordPage() {
                 <div className="flex flex-col gap-4">
                   {injuries.map((injury) => (
                     <div key={injury.id} className="flex flex-col gap-4">
+                      <div className="flex items-center justify-between px-1">
+                        <span className="font-heading text-base font-bold text-brand-prussian-blue">{injury.partyName}</span>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveInjury(injury.id)}
+                          className="text-xs font-semibold text-brand-golden-brown"
+                        >
+                          Remove record
+                        </button>
+                      </div>
+
+                      {/* Body map at the top of the record, per the brief --
+                          above the welfare fields, not below them. */}
+                      <BodyMapCard
+                        injuryId={injury.id}
+                        partyName={injury.partyName}
+                        canEdit={canEdit}
+                        injuryTypeOptions={injuryTypeOptions}
+                        regionOptions={regionOptions}
+                      />
+
                       <div className="rounded-2xl border border-black/5 bg-white p-4">
-                        <div className="mb-3 flex items-center justify-between">
-                          <span className="font-heading text-base font-bold text-brand-prussian-blue">{injury.partyName}</span>
-                          <button
-                            type="button"
-                            onClick={() => handleRemoveInjury(injury.id)}
-                            className="text-xs font-semibold text-brand-golden-brown"
-                          >
-                            Remove record
-                          </button>
-                        </div>
-
                         <div className="flex flex-col gap-4">
-                          <Textarea
-                            label="Notes"
-                            id={`injury-notes-${injury.id}`}
-                            value={injury.injuryNotes}
-                            onChange={(e) => updateInjuryLocal(injury.id, { injuryNotes: e.target.value })}
-                            onBlur={() => saveInjuryField(injury.id, { injury_notes: injury.injuryNotes.trim() || null })}
-                            rows={2}
-                          />
-
-                          <label className="flex items-center gap-2 text-sm font-semibold text-brand-neutral-black">
-                            <input
-                              type="checkbox"
-                              checked={injury.firstAiderCalled}
-                              onChange={(e) => {
-                                updateInjuryLocal(injury.id, { firstAiderCalled: e.target.checked });
-                                saveInjuryField(injury.id, { first_aider_called: e.target.checked });
-                              }}
-                            />
-                            First aider called
-                          </label>
-
-                          {injury.firstAiderCalled && (
-                            <TextField
-                              label="First aider name"
-                              id={`first-aider-name-${injury.id}`}
-                              value={injury.firstAiderName}
-                              onChange={(e) => updateInjuryLocal(injury.id, { firstAiderName: e.target.value })}
-                              onBlur={() => saveInjuryField(injury.id, { first_aider_name: injury.firstAiderName.trim() || null })}
-                            />
-                          )}
-
-                          <label className="flex items-center gap-2 text-sm font-semibold text-brand-neutral-black">
-                            <input
-                              type="checkbox"
-                              checked={injury.doctorAmbulanceCalled}
-                              onChange={(e) => {
-                                updateInjuryLocal(injury.id, { doctorAmbulanceCalled: e.target.checked });
-                                saveInjuryField(injury.id, { doctor_ambulance_called: e.target.checked });
-                              }}
-                            />
-                            Doctor / ambulance called
-                          </label>
-
                           <div>
-                            <span className="mb-2 block text-sm font-semibold text-brand-neutral-black">Remained on site</span>
+                            <span className="mb-2 block text-sm font-semibold text-brand-neutral-black">
+                              Did injured party remain on site for remainder of school day?
+                            </span>
                             <PillSingleSelect
                               options={REMAINED_ON_SITE_OPTIONS}
                               value={injury.remainedOnSite === null ? null : injury.remainedOnSite ? "yes" : "no"}
@@ -1596,15 +1577,108 @@ export default function IncidentRecordPage() {
                               }}
                             />
                           </div>
+
+                          {injury.remainedOnSite === false && (
+                            <TextField
+                              label="If no, provide details"
+                              id={`remained-detail-injury-${injury.id}`}
+                              value={injury.remainedDetail}
+                              onChange={(e) => updateInjuryLocal(injury.id, { remainedDetail: e.target.value })}
+                              onBlur={() => saveInjuryField(injury.id, { remained_detail: injury.remainedDetail.trim() || null })}
+                              placeholder="e.g. Parent collected child"
+                            />
+                          )}
+
+                          <div>
+                            <span className="mb-2 block text-sm font-semibold text-brand-neutral-black">
+                              First aider called?
+                            </span>
+                            <PillSingleSelect
+                              options={REMAINED_ON_SITE_OPTIONS}
+                              value={injury.firstAiderCalled === null ? null : injury.firstAiderCalled ? "yes" : "no"}
+                              onChange={(v) => {
+                                const val = v === "yes";
+                                updateInjuryLocal(injury.id, { firstAiderCalled: val });
+                                saveInjuryField(injury.id, { first_aider_called: val });
+                              }}
+                            />
+                          </div>
+
+                          {injury.firstAiderCalled === true && (
+                            <TextField
+                              label="If yes, who?"
+                              id={`first-aider-name-${injury.id}`}
+                              value={injury.firstAiderName}
+                              onChange={(e) => updateInjuryLocal(injury.id, { firstAiderName: e.target.value })}
+                              onBlur={() => saveInjuryField(injury.id, { first_aider_name: injury.firstAiderName.trim() || null })}
+                            />
+                          )}
+
+                          <div>
+                            <span className="mb-2 block text-sm font-semibold text-brand-neutral-black">
+                              Doctor / Ambulance called?
+                            </span>
+                            <PillSingleSelect
+                              options={REMAINED_ON_SITE_OPTIONS}
+                              value={injury.doctorAmbulanceCalled === null ? null : injury.doctorAmbulanceCalled ? "yes" : "no"}
+                              onChange={(v) => {
+                                const val = v === "yes";
+                                updateInjuryLocal(injury.id, { doctorAmbulanceCalled: val });
+                                saveInjuryField(injury.id, { doctor_ambulance_called: val });
+                              }}
+                            />
+                          </div>
+
+                          <div>
+                            <span className="mb-2 block text-sm font-semibold text-brand-neutral-black">Treatment</span>
+                            <div className="flex flex-wrap gap-2">
+                              {TREATMENT_OPTIONS.map((option) => {
+                                const isSelected = injury.treatments.includes(option);
+                                return (
+                                  <button
+                                    key={option}
+                                    type="button"
+                                    onClick={() => {
+                                      const next = isSelected
+                                        ? injury.treatments.filter((t) => t !== option)
+                                        : [...injury.treatments, option];
+                                      updateInjuryLocal(injury.id, { treatments: next });
+                                      saveInjuryField(injury.id, { treatments: next.length > 0 ? next : null });
+                                    }}
+                                    className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors ${
+                                      isSelected
+                                        ? "border-brand-prussian-blue bg-brand-pastel-blue/30 text-brand-prussian-blue"
+                                        : "border-black/10 bg-white text-black/60 hover:bg-black/[0.02]"
+                                    }`}
+                                  >
+                                    {option}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                            {injury.treatments.includes("Other") && (
+                              <TextField
+                                label="Other -- please specify"
+                                id={`treatment-other-${injury.id}`}
+                                value={injury.treatmentOther}
+                                onChange={(e) => updateInjuryLocal(injury.id, { treatmentOther: e.target.value })}
+                                onBlur={() => saveInjuryField(injury.id, { treatment_other: injury.treatmentOther.trim() || null })}
+                                placeholder="Optional"
+                                className="mt-3"
+                              />
+                            )}
+                          </div>
+
+                          <Textarea
+                            label="Optional -- more information on the injury:"
+                            id={`injury-notes-${injury.id}`}
+                            value={injury.injuryNotes}
+                            onChange={(e) => updateInjuryLocal(injury.id, { injuryNotes: e.target.value })}
+                            onBlur={() => saveInjuryField(injury.id, { injury_notes: injury.injuryNotes.trim() || null })}
+                            rows={2}
+                          />
                         </div>
                       </div>
-
-                      <BodyMapCard
-                        injuryId={injury.id}
-                        partyName={injury.partyName}
-                        canEdit={canEdit}
-                        injuryTypeOptions={injuryTypeOptions}
-                      />
                     </div>
                   ))}
 

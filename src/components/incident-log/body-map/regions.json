@@ -1,0 +1,158 @@
+[
+  {
+    "id": "head",
+    "region": "head",
+    "side": "centre",
+    "view": "front"
+  },
+  {
+    "id": "chest",
+    "region": "chest",
+    "side": "centre",
+    "view": "front"
+  },
+  {
+    "id": "stomach",
+    "region": "stomach",
+    "side": "centre",
+    "view": "front"
+  },
+  {
+    "id": "left_upper_arm",
+    "region": "upper_arm",
+    "side": "left",
+    "view": "front"
+  },
+  {
+    "id": "right_upper_arm",
+    "region": "upper_arm",
+    "side": "right",
+    "view": "front"
+  },
+  {
+    "id": "left_lower_arm",
+    "region": "lower_arm",
+    "side": "left",
+    "view": "front"
+  },
+  {
+    "id": "right_lower_arm",
+    "region": "lower_arm",
+    "side": "right",
+    "view": "front"
+  },
+  {
+    "id": "left_hand",
+    "region": "hand",
+    "side": "left",
+    "view": "front"
+  },
+  {
+    "id": "right_hand",
+    "region": "hand",
+    "side": "right",
+    "view": "front"
+  },
+  {
+    "id": "left_upper_leg",
+    "region": "upper_leg",
+    "side": "left",
+    "view": "front"
+  },
+  {
+    "id": "right_upper_leg",
+    "region": "upper_leg",
+    "side": "right",
+    "view": "front"
+  },
+  {
+    "id": "left_lower_leg",
+    "region": "lower_leg",
+    "side": "left",
+    "view": "front"
+  },
+  {
+    "id": "right_lower_leg",
+    "region": "lower_leg",
+    "side": "right",
+    "view": "front"
+  },
+  {
+    "id": "head",
+    "region": "head",
+    "side": "centre",
+    "view": "back"
+  },
+  {
+    "id": "upper_back",
+    "region": "upper_back",
+    "side": "centre",
+    "view": "back"
+  },
+  {
+    "id": "lower_back",
+    "region": "lower_back",
+    "side": "centre",
+    "view": "back"
+  },
+  {
+    "id": "right_upper_arm",
+    "region": "upper_arm",
+    "side": "right",
+    "view": "back"
+  },
+  {
+    "id": "left_upper_arm",
+    "region": "upper_arm",
+    "side": "left",
+    "view": "back"
+  },
+  {
+    "id": "right_lower_arm",
+    "region": "lower_arm",
+    "side": "right",
+    "view": "back"
+  },
+  {
+    "id": "left_lower_arm",
+    "region": "lower_arm",
+    "side": "left",
+    "view": "back"
+  },
+  {
+    "id": "right_hand",
+    "region": "hand",
+    "side": "right",
+    "view": "back"
+  },
+  {
+    "id": "left_hand",
+    "region": "hand",
+    "side": "left",
+    "view": "back"
+  },
+  {
+    "id": "right_upper_leg",
+    "region": "upper_leg",
+    "side": "right",
+    "view": "back"
+  },
+  {
+    "id": "left_upper_leg",
+    "region": "upper_leg",
+    "side": "left",
+    "view": "back"
+  },
+  {
+    "id": "right_lower_leg",
+    "region": "lower_leg",
+    "side": "right",
+    "view": "back"
+  },
+  {
+    "id": "left_lower_leg",
+    "region": "lower_leg",
+    "side": "left",
+    "view": "back"
+  }
+]

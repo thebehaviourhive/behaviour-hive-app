@@ -31,7 +31,10 @@ export function BodyMapMarker({ xNorm, yNorm, number, isSelected, variant = "scr
   }
 
   return (
-    <g onClick={variant === "screen" ? handleClick : undefined} style={{ cursor: onSelect ? "pointer" : undefined }}>
+    <g
+      onClick={variant === "screen" ? handleClick : undefined}
+      style={{ cursor: onSelect ? "pointer" : undefined, pointerEvents: variant === "screen" ? "auto" : "none" }}
+    >
       {/* Invisible, larger-than-visible hit target -- a comfortable
           thumb touch area without inflating the printed/visible dot. */}
       {variant === "screen" && <circle cx={cx} cy={cy} r={22} fill="transparent" />}
