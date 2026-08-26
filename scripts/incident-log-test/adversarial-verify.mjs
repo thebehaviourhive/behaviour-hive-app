@@ -174,7 +174,18 @@ async function main() {
     .eq("id", incidentId);
   if (ownErr) throw ownErr;
 
-  await teacherA.from("incidents").update({ status: "awaiting_attestation" }).eq("id", incidentId);
+  // status is derived (0089), not settable -- moving past 'draft' the
+  // real way, the same action a teacher takes: request attestations.
+  // The old version of this line (`update({ status: "awaiting_attestation" })`)
+  // was the exact pattern flagged as the session's own standing violation:
+  // a fixture reaching a state no production code path ever reaches on
+  // its own. It happened to work only because status used to be a plain,
+  // independently-settable column -- once it became derived, every check
+  // below that depends on "past draft" visibility (ordinary teacher via
+  // passport_access, parent, clinician) started failing for real,
+  // because the old line no longer does anything (the derive trigger
+  // immediately overwrites it back to 'draft', correctly).
+  await teacherA.from("incidents").update({ attestations_requested: true }).eq("id", incidentId);
 
   console.log(`\n== CHECK 1: draft isolation ==`);
   {
@@ -730,7 +741,16 @@ async function main() {
     record("Principal countersign with the correct role recorded succeeds", !cleanCountersign, cleanCountersign?.message);
 
     const { data: afterCountersign } = await admin.from("incidents").select("narrative, status").eq("id", incidentId).single();
-    record("narrative/status unchanged by the countersign write", afterCountersign.narrative === REVISED_NARRATIVE && afterCountersign.status === "awaiting_attestation", JSON.stringify(afterCountersign));
+    // narrative is untouched by the countersign write (the real thing
+    // this checks); status is SUPPOSED to change now (0089) -- it
+    // derives to 'finalised' the moment countersigned_at is set, not
+    // frozen at whatever it was before, the way it used to be when
+    // nothing ever touched it at all.
+    record(
+      "narrative unchanged by the countersign write, status correctly derives to 'finalised'",
+      afterCountersign.narrative === REVISED_NARRATIVE && afterCountersign.status === "finalised",
+      JSON.stringify(afterCountersign)
+    );
   }
 
   console.log(`\n== CHECK I: debrief sign-off gate (migration 0077) -- own incidents, self-contained ==`);
@@ -1678,39 +1698,333 @@ async function main() {
       `summary.can_sign_off=${oSummary2?.can_sign_off}, err=${oSignAfterFixErr?.message}`
     );
 
-    // -- O6: immutability freeze-by-exclusion, re-confirmed post-0086 -- --
-    // the three previously-missed columns, plus a regression check on an
-    // already-frozen one, plus the allow-list actually working.
-    const { error: oAnyoneInjuredErr } = await teacherA.from("incidents").update({ anyone_injured: true }).eq("id", oCpiId);
-    const { error: oLocationOtherErr } = await teacherA.from("incidents").update({ location_other: "Should not persist" }).eq("id", oCpiId);
-    const { error: oPartyOtherErr } = await teacherA.from("incidents").update({ party_other: "Should not persist" }).eq("id", oCpiId);
-    const { error: oNarrativeErr } = await teacherA.from("incidents").update({ narrative: "Should not persist either" }).eq("id", oCpiId);
-    const { data: oFrozenAfter } = await admin.from("incidents").select("anyone_injured, location_other, party_other, narrative").eq("id", oCpiId).single();
+    // -- O6: immutability freeze-by-exclusion -- the REAL test, not the --
+    // false-positive one this suite ran the first time. Using teacherA
+    // here (as the original version of this check did) proves nothing:
+    // post-signoff, the owning teacher has NO valid RLS policy at all
+    // (their edit policy requires teacher_signed_at is null), so any
+    // write is rejected by RLS finding zero applicable policies -- the
+    // exact same silently-passing-for-the-wrong-reason bug that let
+    // 0085's freeze-by-exclusion rewrite go unnoticed as never having
+    // actually landed (found and fixed in 0089's own commentary). The
+    // only way to test the TRIGGER's own logic is a caller who has a
+    // genuinely valid RLS path for the write and tries to smuggle a
+    // frozen field in alongside it -- here, the principal, mid-countersign,
+    // which is the one write RLS actually allows at this stage.
+    const { error: oSneakErr } = await principal
+      .from("incidents")
+      .update({
+        countersigned_at: new Date().toISOString(),
+        countersigned_by: principalId,
+        countersigned_role_at_time: "principal",
+        narrative: "Sneaked in alongside a legitimate countersign write.",
+      })
+      .eq("id", oCpiId);
+    const { data: oAfterSneak } = await admin.from("incidents").select("countersigned_at, narrative, anyone_injured, location_other, party_other").eq("id", oCpiId).single();
     record(
-      "O6a: post-signoff, anyone_injured/location_other/party_other (the three 0080/0081 columns 0085 caught up) all still frozen",
-      oFrozenAfter.anyone_injured === null && oFrozenAfter.location_other === null && oFrozenAfter.party_other === null,
-      JSON.stringify({ errs: [oAnyoneInjuredErr, oLocationOtherErr, oPartyOtherErr].map((e) => e?.message), oFrozenAfter })
+      "O6: a caller with a GENUINELY VALID RLS path (the principal, mid-countersign) still cannot smuggle a frozen field into the same write -- the trigger itself rejects it",
+      Boolean(oSneakErr) && oAfterSneak.countersigned_at === null && oAfterSneak.narrative !== "Sneaked in alongside a legitimate countersign write.",
+      JSON.stringify({ sneakErr: oSneakErr?.message, oAfterSneak })
     );
-    record("O6b: narrative (already frozen pre-0085) still frozen -- no regression from the freeze-by-exclusion rewrite", oFrozenAfter.narrative === null, `err=${oNarrativeErr?.message}, narrative=${oFrozenAfter.narrative}`);
+    record(
+      "O6b: the whole statement failed together -- the countersign did NOT partially apply while rejecting only the narrative",
+      oAfterSneak.countersigned_at === null,
+      JSON.stringify(oAfterSneak)
+    );
 
-    // -- O7: countersign still works post-signoff -- the exact concern --
-    // raised about the teacher_signed_by trigger interfering. It cannot,
-    // structurally (countersign never touches teacher_signed_at, so
-    // old.teacher_signed_at is null is always false for that write) --
-    // proved here directly rather than left as reasoning.
+    // -- O7: a CLEAN countersign (no sneak) succeeds normally post-signoff --
+    // -- the exact concern raised about the teacher_signed_by trigger
+    // interfering. It cannot, structurally (countersign never touches
+    // teacher_signed_at, so old.teacher_signed_at is null is always false
+    // for that write) -- proved here directly rather than left as
+    // reasoning.
     const { error: oCountersignErr } = await principal
       .from("incidents")
       .update({ countersigned_at: new Date().toISOString(), countersigned_by: principalId, countersigned_role_at_time: "principal" })
       .eq("id", oCpiId);
-    const { data: oAfterCountersign } = await admin.from("incidents").select("countersigned_at, countersigned_by, countersigned_role_at_time, updated_at").eq("id", oCpiId).single();
+    const { data: oAfterCountersign } = await admin.from("incidents").select("countersigned_at, countersigned_by, countersigned_role_at_time, updated_at, status").eq("id", oCpiId).single();
     record(
-      "O7: countersign succeeds post-signoff, completely unaffected by the teacher_signed_by guard trigger",
-      !oCountersignErr && oAfterCountersign.countersigned_at != null && oAfterCountersign.countersigned_by === principalId,
+      "O7: countersign succeeds post-signoff, completely unaffected by the teacher_signed_by guard trigger, status derives to 'finalised'",
+      !oCountersignErr && oAfterCountersign.countersigned_at != null && oAfterCountersign.countersigned_by === principalId && oAfterCountersign.status === "finalised",
       `err=${oCountersignErr?.message}, ${JSON.stringify(oAfterCountersign)}`
     );
 
     await admin.from("incidents").delete().eq("id", oCleanId);
     await admin.from("incidents").delete().eq("id", oCpiId);
+  }
+
+  console.log(`\n== CHECK P: Phase 4 piece 2 -- per-category staleness, get_my_incident_attestations() (migration 0088) ==`);
+  {
+    const sameSet = (a, b) => JSON.stringify([...(a ?? [])].sort()) === JSON.stringify([...(b ?? [])].sort());
+
+    const { data: pIncidentId } = await teacherA.rpc("create_incident_stamp", {
+      p_institution_id: institutionId, p_occurred_at: new Date().toISOString(), p_location_id: loc.id,
+      p_child_passport_ids: [child1], p_staff: [{ user_id: teacherBId, involvement: "witnessed" }],
+    });
+    await teacherA.from("incidents").update({ narrative: "Baseline narrative.", anyone_injured: true }).eq("id", pIncidentId);
+    await teacherA.from("incident_children").update({ distress_level: "slightly_distressed" }).eq("incident_id", pIncidentId).eq("passport_id", child1);
+    await teacherA.from("incident_actions").insert({ incident_id: pIncidentId, action_type_id: restraintAction.id });
+    const { data: pRp } = await teacherA
+      .from("restrictive_practices")
+      .insert({ incident_id: pIncidentId, passport_id: child1, planning_status: "not_planned", hold_level: "low" })
+      .select()
+      .single();
+    const { data: pInjury } = await teacherA
+      .from("incident_injuries")
+      .insert({ incident_id: pIncidentId, injured_party_type: "student", passport_id: child1, injury_notes: "Baseline note." })
+      .select()
+      .single();
+    const { data: pMark } = await teacherA
+      .from("incident_body_marks")
+      .insert({ injury_id: pInjury.id, view: "front", x: 0.5, y: 0.1, injury_type_id: bruisingType.id, region_id: headRegion.id, side: "centre" })
+      .select()
+      .single();
+    const { data: pStaffRow } = await admin.from("incident_staff").select("id").eq("incident_id", pIncidentId).eq("user_id", teacherBId).single();
+
+    // Request attestations the real way -- the explicit teacher toggle
+    // (0089), not a hand-set status. Without this, teacherB has no RLS
+    // path to the incident at all (can_view_incident's named-staff
+    // branch requires status <> 'draft' OR having already attested --
+    // neither true yet), so get_my_incident_attestations() below would
+    // silently return nothing, for the exact reason CHECK P caught live
+    // the first time this suite was run against 0089.
+    await teacherA.from("incidents").update({ attestations_requested: true }).eq("id", pIncidentId);
+    const { data: pStatusAfterRequest } = await admin.from("incidents").select("status").eq("id", pIncidentId).single();
+    record("P0: requesting attestations derives status to 'awaiting_signoff'", pStatusAfterRequest.status === "awaiting_signoff", pStatusAfterRequest.status);
+
+    // -- P1: baseline attest, category_hashes populated with all six keys. --
+    await teacherB.rpc("attest_to_incident", { p_incident_staff_id: pStaffRow.id, p_addendum: "Baseline." });
+    const { data: pLatestRow } = await admin
+      .from("incident_attestations")
+      .select("category_hashes")
+      .eq("incident_staff_id", pStaffRow.id)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .single();
+    const pKeys = pLatestRow.category_hashes ? Object.keys(pLatestRow.category_hashes).sort() : [];
+    record(
+      "P1: attest_to_incident() populates category_hashes with all six categories",
+      sameSet(pKeys, ["actions", "body_marks", "children", "injuries", "narrative", "restrictive_practices"]),
+      JSON.stringify(pKeys)
+    );
+
+    // -- P2: freshly attested, nothing changed -- empty, not null. --
+    const { data: pStale0 } = await teacherA.rpc("get_stale_categories", { p_incident_staff_id: pStaffRow.id });
+    record("P2: get_stale_categories() is an empty array immediately after attesting (current, not stale)", Array.isArray(pStale0) && pStale0.length === 0, JSON.stringify(pStale0));
+
+    // -- P3: narrative alone. --
+    await teacherA.from("incidents").update({ narrative: "Rewritten narrative." }).eq("id", pIncidentId);
+    const { data: pStale1 } = await teacherA.rpc("get_stale_categories", { p_incident_staff_id: pStaffRow.id });
+    record("P3: editing ONLY the narrative reports exactly ['narrative']", sameSet(pStale1, ["narrative"]), JSON.stringify(pStale1));
+    await teacherB.rpc("attest_to_incident", { p_incident_staff_id: pStaffRow.id, p_addendum: "Re-confirming after narrative correction." });
+
+    // -- P4: actions alone. --
+    const { data: pOtherActionType } = await admin.from("incident_action_types").select("id").eq("value", "Redirected").is("institution_id", null).single();
+    await teacherA.from("incident_actions").insert({ incident_id: pIncidentId, action_type_id: pOtherActionType.id });
+    const { data: pStale2 } = await teacherA.rpc("get_stale_categories", { p_incident_staff_id: pStaffRow.id });
+    record("P4: adding an action alone reports exactly ['actions']", sameSet(pStale2, ["actions"]), JSON.stringify(pStale2));
+    await teacherB.rpc("attest_to_incident", { p_incident_staff_id: pStaffRow.id, p_addendum: "Re-confirming after an action was added." });
+
+    // -- P5: children (distress_level) alone. --
+    await teacherA.from("incident_children").update({ distress_level: "yes_definitely" }).eq("incident_id", pIncidentId).eq("passport_id", child1);
+    const { data: pStale3 } = await teacherA.rpc("get_stale_categories", { p_incident_staff_id: pStaffRow.id });
+    record("P5: changing a child's distress_level alone reports exactly ['children']", sameSet(pStale3, ["children"]), JSON.stringify(pStale3));
+    await teacherB.rpc("attest_to_incident", { p_incident_staff_id: pStaffRow.id, p_addendum: "Re-confirming after distress level was corrected." });
+
+    // -- P6: restrictive_practices alone. --
+    await teacherA.from("restrictive_practices").update({ hold_level: "high" }).eq("id", pRp.id);
+    const { data: pStale4 } = await teacherA.rpc("get_stale_categories", { p_incident_staff_id: pStaffRow.id });
+    record("P6: editing hold_level on the saved restrictive practice record alone reports exactly ['restrictive_practices']", sameSet(pStale4, ["restrictive_practices"]), JSON.stringify(pStale4));
+    await teacherB.rpc("attest_to_incident", { p_incident_staff_id: pStaffRow.id, p_addendum: "Re-confirming after hold_level was corrected." });
+
+    // -- P7: injuries alone. --
+    await teacherA.from("incident_injuries").update({ injury_notes: "Revised note." }).eq("id", pInjury.id);
+    const { data: pStale5 } = await teacherA.rpc("get_stale_categories", { p_incident_staff_id: pStaffRow.id });
+    record("P7: editing injury_notes alone reports exactly ['injuries']", sameSet(pStale5, ["injuries"]), JSON.stringify(pStale5));
+    await teacherB.rpc("attest_to_incident", { p_incident_staff_id: pStaffRow.id, p_addendum: "Re-confirming after the injury note was revised." });
+
+    // -- P8: body_marks alone. --
+    await teacherA.from("incident_body_marks").update({ x: 0.15, y: 0.2 }).eq("id", pMark.id);
+    const { data: pStale6 } = await teacherA.rpc("get_stale_categories", { p_incident_staff_id: pStaffRow.id });
+    record("P8: moving a body-map marker alone reports exactly ['body_marks']", sameSet(pStale6, ["body_marks"]), JSON.stringify(pStale6));
+    await teacherB.rpc("attest_to_incident", { p_incident_staff_id: pStaffRow.id, p_addendum: "Re-confirming after the marker was moved." });
+
+    // -- P9: two categories at once. --
+    await teacherA.from("incidents").update({ narrative: "Rewritten a second time." }).eq("id", pIncidentId);
+    await teacherA.from("incident_injuries").update({ injury_notes: "Revised a second time." }).eq("id", pInjury.id);
+    const { data: pStale7 } = await teacherA.rpc("get_stale_categories", { p_incident_staff_id: pStaffRow.id });
+    record("P9: two simultaneous changes report BOTH categories, nothing more", sameSet(pStale7, ["narrative", "injuries"]), JSON.stringify(pStale7));
+    await teacherB.rpc("attest_to_incident", { p_incident_staff_id: pStaffRow.id, p_addendum: "Re-confirming after both corrections." });
+
+    // -- P10: not_attested -- a second, never-attested real staff member. --
+    const { data: pSecondStaff } = await teacherA
+      .from("incident_staff")
+      .insert({ incident_id: pIncidentId, user_id: snaId, involvement: "witnessed" })
+      .select()
+      .single();
+    const { data: pStaleNotAttested } = await teacherA.rpc("get_stale_categories", { p_incident_staff_id: pSecondStaff.id });
+    record("P10: get_stale_categories() is null for a staff member who has never attested", pStaleNotAttested === null, JSON.stringify(pStaleNotAttested));
+
+    // -- P11: withdrawn. --
+    await teacherB.rpc("withdraw_attestation", { p_incident_staff_id: pStaffRow.id, p_reason: "Testing withdrawal for CHECK P." });
+    const { data: pStaleWithdrawn } = await teacherA.rpc("get_stale_categories", { p_incident_staff_id: pStaffRow.id });
+    record("P11: get_stale_categories() is null once withdrawn (nothing to compare against)", pStaleWithdrawn === null, JSON.stringify(pStaleWithdrawn));
+
+    // -- P12: pre-migration-style row -- content_hash set, category_hashes --
+    // null, simulating an attestation made before 0088. Status should still
+    // read 'stale' off the untouched combined hash; the category breakdown
+    // must degrade to null rather than guess.
+    const { data: pRenewedAttestationId } = await teacherB.rpc("attest_to_incident", {
+      p_incident_staff_id: pStaffRow.id,
+      p_addendum: "Renewing after withdrawal, for the next test.",
+    });
+    // .update().order().limit() does NOT constrain which rows an UPDATE
+    // touches (PostgREST/Postgres UPDATE has no LIMIT) -- targeting this
+    // one row by the id the RPC itself just returned, not by a query
+    // shape that looks scoped but isn't.
+    await admin.from("incident_attestations").update({ category_hashes: null }).eq("id", pRenewedAttestationId);
+    await teacherA.from("incidents").update({ narrative: "Rewritten a third time, after simulating a pre-migration attestation." }).eq("id", pIncidentId);
+    const { data: pStatusPreMigration } = await teacherA.rpc("get_attestation_status", { p_incident_staff_id: pStaffRow.id });
+    const { data: pStalePreMigration } = await teacherA.rpc("get_stale_categories", { p_incident_staff_id: pStaffRow.id });
+    record(
+      "P12: a pre-0088-style attestation (no category_hashes) still correctly reads 'stale' off the untouched combined hash",
+      pStatusPreMigration === "stale",
+      pStatusPreMigration
+    );
+    record(
+      "P12b: ...but get_stale_categories() degrades honestly to null rather than guessing which parts moved",
+      pStalePreMigration === null,
+      JSON.stringify(pStalePreMigration)
+    );
+    await teacherB.rpc("attest_to_incident", { p_incident_staff_id: pStaffRow.id, p_addendum: "Re-confirming, category_hashes captured fresh from here." });
+
+    // -- P13: visibility -- a caller with no standing on this incident gets null. --
+    const { data: pStaleNoStanding } = await parent1.rpc("get_stale_categories", { p_incident_staff_id: pStaffRow.id });
+    record("P13: get_stale_categories() is null for a caller with no standing to view the incident", pStaleNoStanding === null, JSON.stringify(pStaleNoStanding));
+
+    // -- P14/P15: get_my_incident_attestations(). --
+    const { data: pMyList } = await teacherB.rpc("get_my_incident_attestations");
+    const pMyRow = pMyList?.find((r) => r.incident_id === pIncidentId);
+    record(
+      "P14: get_my_incident_attestations() includes this incident for the named staff member, status 'current', not closed",
+      pMyRow?.status === "current" && pMyRow?.status_label === "Current" && pMyRow?.is_closed === false,
+      JSON.stringify(pMyRow)
+    );
+
+    const { data: pEmptyList } = await clinician.rpc("get_my_incident_attestations");
+    record("P15: an account named on nothing gets an empty list, not an error", Array.isArray(pEmptyList) && pEmptyList.length === 0, JSON.stringify(pEmptyList));
+
+    // -- P16: sign off, then confirm the row is still returned, now closed, --
+    // frozen at whatever it was -- the point raised in chat: a staff
+    // member's name is on a legal record and they should be able to look
+    // it up even after it's closed, not lose access the moment it locks.
+    // (pOtherActionType, "Redirected", is not a restraint action and was
+    // never touched again after P4 -- nothing here needs to remove it;
+    // an earlier draft of this test did, which staled teacherB's own
+    // attestation again right before sign-off and blocked it for an
+    // unrelated reason.)
+    const { error: pSignErr } = await teacherA.rpc("sign_off_incident", { p_incident_id: pIncidentId });
+    record("P16 setup: this incident actually reached sign-off (consistency gates satisfied)", !pSignErr, pSignErr?.message);
+
+    const { data: pMyListAfterSignoff } = await teacherB.rpc("get_my_incident_attestations");
+    const pMyRowAfterSignoff = pMyListAfterSignoff?.find((r) => r.incident_id === pIncidentId);
+    record(
+      "P16: post-signoff, the incident is STILL returned (not restricted to pre-signoff), correctly marked closed",
+      pMyRowAfterSignoff?.is_closed === true && pMyRowAfterSignoff?.status === "current",
+      JSON.stringify(pMyRowAfterSignoff)
+    );
+
+    // SNA's row (P10, never attested, still pre-signoff at that check) is
+    // now also frozen post-signoff -- confirm it shows not_attested, closed,
+    // not excluded.
+    const { data: pSnaListAfterSignoff } = await sna.rpc("get_my_incident_attestations");
+    const pSnaRowAfterSignoff = pSnaListAfterSignoff?.find((r) => r.incident_id === pIncidentId);
+    record(
+      "P16b: a staff member who never attested at all is still listed post-signoff, closed, status not_attested -- not silently dropped",
+      pSnaRowAfterSignoff?.is_closed === true && pSnaRowAfterSignoff?.status === "not_attested",
+      JSON.stringify(pSnaRowAfterSignoff)
+    );
+
+    await admin.from("incidents").delete().eq("id", pIncidentId);
+  }
+
+  console.log(`\n== CHECK Q: status derivation, the attestations_requested toggle, visibility persistence, re-request staleness (migration 0089) ==`);
+  {
+    const { data: qIncidentId } = await teacherA.rpc("create_incident_stamp", {
+      p_institution_id: institutionId, p_occurred_at: new Date().toISOString(), p_location_id: loc.id,
+      p_child_passport_ids: [child1], p_staff: [{ user_id: teacherBId, involvement: "witnessed" }],
+    });
+    const { data: qStaffRow } = await admin.from("incident_staff").select("id").eq("incident_id", qIncidentId).eq("user_id", teacherBId).single();
+
+    // -- Q1: fresh incident derives 'draft'; named staff cannot see it yet. --
+    const { data: qRow1 } = await admin.from("incidents").select("status, attestations_requested, attestations_requested_at").eq("id", qIncidentId).single();
+    record(
+      "Q1: a freshly-stamped incident derives status='draft', attestations_requested defaults false",
+      qRow1.status === "draft" && qRow1.attestations_requested === false && qRow1.attestations_requested_at === null,
+      JSON.stringify(qRow1)
+    );
+    const { data: qPreVis } = await teacherB.from("incidents").select("id").eq("id", qIncidentId);
+    record("Q2: named staff CANNOT see a draft incident before attestations are requested", (qPreVis?.length ?? 0) === 0, `rows=${qPreVis?.length}`);
+
+    // -- Q3/Q4: the real toggle -- status derives, timestamp stamped, --
+    // named staff gains visibility.
+    await teacherA.from("incidents").update({ attestations_requested: true }).eq("id", qIncidentId);
+    const { data: qRow2 } = await admin.from("incidents").select("status, attestations_requested_at").eq("id", qIncidentId).single();
+    record(
+      "Q3: toggling attestations_requested derives status='awaiting_signoff' and stamps attestations_requested_at",
+      qRow2.status === "awaiting_signoff" && qRow2.attestations_requested_at !== null,
+      JSON.stringify(qRow2)
+    );
+    const { data: qPostVis } = await teacherB.from("incidents").select("id").eq("id", qIncidentId);
+    record("Q4: named staff CAN see it once attestations are requested", (qPostVis?.length ?? 0) === 1, `rows=${qPostVis?.length}`);
+
+    // -- Q5: attest, then un-toggle -- status reverts, but visibility --
+    // PERSISTS for the person who already attested (agreed in chat:
+    // that's not a permission the owning teacher gets to revoke).
+    await teacherB.rpc("attest_to_incident", { p_incident_staff_id: qStaffRow.id, p_addendum: "Confirmed present." });
+    await teacherA.from("incidents").update({ attestations_requested: false }).eq("id", qIncidentId);
+    const { data: qRow3 } = await admin.from("incidents").select("status").eq("id", qIncidentId).single();
+    record("Q5: un-toggling reverts status to 'draft'", qRow3.status === "draft", qRow3.status);
+
+    const { data: qPersistVis } = await teacherB.from("incidents").select("id").eq("id", qIncidentId);
+    record("Q6: visibility PERSISTS for teacherB after un-toggle, because they already attested", (qPersistVis?.length ?? 0) === 1, `rows=${qPersistVis?.length}`);
+    const { data: qMyListAfterUntoggle } = await teacherB.rpc("get_my_incident_attestations");
+    record(
+      "Q6b: get_my_incident_attestations() -- the real piece-2 surface -- still lists it too",
+      qMyListAfterUntoggle?.some((r) => r.incident_id === qIncidentId),
+      qMyListAfterUntoggle?.find((r) => r.incident_id === qIncidentId)
+    );
+
+    // -- Q7: a DIFFERENT staff member, named but never attested, loses --
+    // visibility while status is back to draft -- the persistence is
+    // specifically for people who've engaged, not a blanket reopening.
+    await teacherA.from("incident_staff").insert({ incident_id: qIncidentId, user_id: snaId, involvement: "witnessed" });
+    const { data: qSnaVis } = await sna.from("incidents").select("id").eq("id", qIncidentId);
+    record("Q7: a staff member who never attested CANNOT see it while status is back to draft", (qSnaVis?.length ?? 0) === 0, `rows=${qSnaVis?.length}`);
+
+    // -- Q8/Q9: re-request. Content unchanged -- teacherB's attestation --
+    // must NOT silently stay current (agreed in chat: treat re-requesting
+    // as the account having moved).
+    await teacherA.from("incidents").update({ attestations_requested: true }).eq("id", qIncidentId);
+    const { data: qStatusAfterReRequest } = await teacherB.rpc("get_attestation_status", { p_incident_staff_id: qStaffRow.id });
+    record(
+      "Q8: re-requesting with no content change makes a previously-current attestation STALE, not silently current",
+      qStatusAfterReRequest === "stale",
+      qStatusAfterReRequest
+    );
+    const { data: qStaleCats } = await teacherB.rpc("get_stale_categories", { p_incident_staff_id: qStaffRow.id });
+    record(
+      "Q9: get_stale_categories() reports 'attestation_reset' specifically -- not an empty list that would misleadingly suggest nothing changed",
+      Array.isArray(qStaleCats) && qStaleCats.includes("attestation_reset"),
+      JSON.stringify(qStaleCats)
+    );
+    // -- Q10: renew, sign off -- status derives to 'awaiting_principal'. --
+    await teacherB.rpc("attest_to_incident", { p_incident_staff_id: qStaffRow.id, p_addendum: "Re-confirming after reset." });
+    const { error: qSignErr } = await teacherA.rpc("sign_off_incident", { p_incident_id: qIncidentId });
+    const { data: qRow4 } = await admin.from("incidents").select("status").eq("id", qIncidentId).single();
+    record("Q10: signing off derives status='awaiting_principal'", !qSignErr && qRow4.status === "awaiting_principal", `err=${qSignErr?.message}, status=${qRow4.status}`);
+
+    await admin.from("incidents").delete().eq("id", qIncidentId);
   }
 
   console.log(`\n== Summary ==`);
