@@ -228,9 +228,33 @@ export default function IncidentRecordPage() {
   const [injuryTypeOptions, setInjuryTypeOptions] = useState<InjuryTypeOption[]>([]);
   const [injuries, setInjuries] = useState<InjuryRecordState[]>([]);
   const [isAddingInjury, setIsAddingInjury] = useState(false);
-  const [newInjuryParty, setNewInjuryParty] = useState<{ type: "student"; passportId: string; name: string } | null>(null);
-  const [newInjuryStaffName, setNewInjuryStaffName] = useState("");
+  // The injured party is picked from people already named on the
+  // incident -- children or staff, account or not -- never typed fresh.
+  // Free text is a genuine fallback, only for someone who was never
+  // named at the stamp at all.
+  const [newInjuryParty, setNewInjuryParty] = useState<
+    | { kind: "student"; passportId: string; name: string }
+    | { kind: "named_staff"; userId: string | null; freeTextName: string | null; name: string }
+    | null
+  >(null);
+  const [newInjuryStaffFreeText, setNewInjuryStaffFreeText] = useState("");
   const [addInjuryError, setAddInjuryError] = useState<string | null>(null);
+
+  // "Was a student or staff member injured?" -- the form's own gate,
+  // one answer for the whole incident. Immediate-write, not batched --
+  // debrief_required taught this module that a gate like this silently
+  // failing to persist (never touching the top-level Save) is a real,
+  // hard-to-notice bug, not a hypothetical one.
+  const [anyoneInjured, setAnyoneInjured] = useState<boolean | null>(null);
+  const [anyoneInjuredSaveError, setAnyoneInjuredSaveError] = useState<string | null>(null);
+  // Every person named on the incident at the stamp -- children handled
+  // separately via `children`; this is staff, account or not, for the
+  // injured-party picker (a looser rule than the CPI staff picker,
+  // which requires a real account -- here, anyone actually named
+  // qualifies, per the brief).
+  const [incidentStaffForPicker, setIncidentStaffForPicker] = useState<
+    { key: string; name: string; userId: string | null; freeTextName: string | null }[]
+  >([]);
 
   const [owningTeacherId, setOwningTeacherId] = useState<string | null>(null);
   const [owningTeacherName, setOwningTeacherName] = useState<string | null>(null);
@@ -274,7 +298,7 @@ export default function IncidentRecordPage() {
       const { data: incident, error: incidentError } = await supabase
         .from("incidents")
         .select(
-          "institution_id, created_by, owning_teacher_id, teacher_signed_at, occurred_at, incident_locations(value), category, party, party_other, item_involved, narrative, parent_summary, staff_count_needed, staff_distressed, risk_reduction_future, other_information, debrief_required"
+          "institution_id, created_by, owning_teacher_id, teacher_signed_at, occurred_at, incident_locations(value), category, party, party_other, item_involved, narrative, parent_summary, staff_count_needed, staff_distressed, risk_reduction_future, other_information, debrief_required, anyone_injured"
         )
         .eq("id", params.incidentId)
         .maybeSingle();
@@ -362,6 +386,14 @@ export default function IncidentRecordPage() {
         (staffRows ?? [])
           .filter((row) => row.user_id)
           .map((row) => ({ id: row.id, name: nameByUserId.get(row.user_id ?? "") || "Named staff member" }))
+      );
+      setIncidentStaffForPicker(
+        (staffRows ?? []).map((row) => ({
+          key: row.id,
+          name: row.free_text_name || nameByUserId.get(row.user_id ?? "") || "Named staff member",
+          userId: row.user_id,
+          freeTextName: row.free_text_name,
+        }))
       );
 
       setSummary({
@@ -478,6 +510,7 @@ export default function IncidentRecordPage() {
       setCanEditDebrief(!incident.teacher_signed_at && incident.owning_teacher_id === user!.id);
 
       setDebriefRequired(incident.debrief_required);
+      setAnyoneInjured(incident.anyone_injured);
       if (debriefRow) {
         setDebriefId(debriefRow.id);
         setDebriefDate(debriefRow.debrief_date ?? "");
@@ -678,15 +711,36 @@ export default function IncidentRecordPage() {
 
   async function handleAddInjury() {
     setAddInjuryError(null);
-    if (!newInjuryParty && !newInjuryStaffName.trim()) {
+    if (!newInjuryParty && !newInjuryStaffFreeText.trim()) {
       setAddInjuryError("Choose who this injury record is for.");
       return;
     }
 
     const supabase = createClient();
-    const payload: Record<string, unknown> = newInjuryParty
-      ? { incident_id: params.incidentId as string, injured_party_type: "student", passport_id: newInjuryParty.passportId }
-      : { incident_id: params.incidentId as string, injured_party_type: "staff", free_text_name: newInjuryStaffName.trim() };
+    let payload: Record<string, unknown>;
+    let injuredPartyType: "student" | "staff";
+    let passportId: string | null = null;
+    let staffUserId: string | null = null;
+    let partyName: string;
+
+    if (newInjuryParty?.kind === "student") {
+      injuredPartyType = "student";
+      passportId = newInjuryParty.passportId;
+      partyName = newInjuryParty.name;
+      payload = { incident_id: params.incidentId as string, injured_party_type: "student", passport_id: passportId };
+    } else if (newInjuryParty?.kind === "named_staff") {
+      injuredPartyType = "staff";
+      staffUserId = newInjuryParty.userId;
+      partyName = newInjuryParty.name;
+      payload = newInjuryParty.userId
+        ? { incident_id: params.incidentId as string, injured_party_type: "staff", staff_user_id: newInjuryParty.userId }
+        : { incident_id: params.incidentId as string, injured_party_type: "staff", free_text_name: newInjuryParty.freeTextName };
+    } else {
+      // Genuine fallback -- someone never named on the incident at the stamp.
+      injuredPartyType = "staff";
+      partyName = newInjuryStaffFreeText.trim();
+      payload = { incident_id: params.incidentId as string, injured_party_type: "staff", free_text_name: partyName };
+    }
 
     const { data: inserted, error: insertError } = await supabase.from("incident_injuries").insert(payload).select("id").single();
 
@@ -699,10 +753,10 @@ export default function IncidentRecordPage() {
       ...current,
       {
         id: inserted.id,
-        injuredPartyType: newInjuryParty ? "student" : "staff",
-        passportId: newInjuryParty?.passportId ?? null,
-        staffUserId: null,
-        partyName: newInjuryParty?.name ?? newInjuryStaffName.trim(),
+        injuredPartyType,
+        passportId,
+        staffUserId,
+        partyName,
         injuryTypes: [],
         injuryNotes: "",
         firstAiderCalled: false,
@@ -714,7 +768,7 @@ export default function IncidentRecordPage() {
     ]);
     setIsAddingInjury(false);
     setNewInjuryParty(null);
-    setNewInjuryStaffName("");
+    setNewInjuryStaffFreeText("");
   }
 
   function updateInjuryLocal(injuryId: string, patch: Partial<InjuryRecordState>) {
@@ -726,14 +780,10 @@ export default function IncidentRecordPage() {
     await supabase.from("incident_injuries").update(patch).eq("id", injuryId);
   }
 
-  function toggleInjuryType(injuryId: string, typeValue: string) {
-    const injury = injuries.find((inj) => inj.id === injuryId);
-    if (!injury) return;
-    const has = injury.injuryTypes.includes(typeValue);
-    const next = has ? injury.injuryTypes.filter((t) => t !== typeValue) : [...injury.injuryTypes, typeValue];
-    updateInjuryLocal(injuryId, { injuryTypes: next });
-    saveInjuryField(injuryId, { injury_types: next.length > 0 ? next : null });
-  }
+  // injury_types (the per-person multi-select) is deliberately no
+  // longer written to -- type belongs to the mark, not the person
+  // (0080's own migration comment). The column stays, untouched, so no
+  // existing value is lost.
 
   async function handleRemoveInjury(injuryId: string) {
     const supabase = createClient();
@@ -765,6 +815,23 @@ export default function IncidentRecordPage() {
     if (updateError) {
       setDebriefRequired(previous);
       setDebriefSaveError(updateError.message);
+    }
+  }
+
+  async function setAnyoneInjuredAndSave(value: boolean) {
+    const previous = anyoneInjured;
+    setAnyoneInjured(value);
+    setAnyoneInjuredSaveError(null);
+
+    const supabase = createClient();
+    const { error: updateError } = await supabase
+      .from("incidents")
+      .update({ anyone_injured: value })
+      .eq("id", params.incidentId);
+
+    if (updateError) {
+      setAnyoneInjured(previous);
+      setAnyoneInjuredSaveError(updateError.message);
     }
   }
 
@@ -1423,7 +1490,36 @@ export default function IncidentRecordPage() {
                 })}
 
               <section>
-                <h2 className="mb-3 font-heading text-lg font-bold text-brand-prussian-blue">Injuries</h2>
+                <h2 className="mb-1 font-heading text-lg font-bold text-brand-prussian-blue">Injuries</h2>
+                <p className="mb-3 text-sm text-brand-neutral-black/60">
+                  Each injured person gets their own record -- one person, one record. Add a separate one for every
+                  person affected.
+                </p>
+
+                <div className="mb-3">
+                  <span className="mb-2 block text-sm font-semibold text-brand-neutral-black">
+                    Was a student or staff member injured?
+                  </span>
+                  <PillSingleSelect
+                    options={REMAINED_ON_SITE_OPTIONS}
+                    value={anyoneInjured === null ? null : anyoneInjured ? "yes" : "no"}
+                    onChange={(v) => setAnyoneInjuredAndSave(v === "yes")}
+                  />
+                  {anyoneInjuredSaveError && (
+                    <p role="alert" className="mt-2 text-sm font-medium text-red-600">
+                      {anyoneInjuredSaveError}
+                    </p>
+                  )}
+                </div>
+
+                {anyoneInjured !== true && injuries.length > 0 && (
+                  <p className="mb-3 rounded-xl border border-brand-golden-brown bg-brand-golden-brown/10 p-3 text-sm text-brand-neutral-black">
+                    <strong>Inconsistent:</strong> injury record(s) exist below, but &quot;Was a student or staff
+                    member injured?&quot; is currently {anyoneInjured === false ? "answered No" : "not answered"}.
+                    This will block sign-off. Answer Yes above if it&apos;s accurate, or these records need to be
+                    corrected.
+                  </p>
+                )}
 
                 <div className="flex flex-col gap-4">
                   {injuries.map((injury) => (
@@ -1441,15 +1537,6 @@ export default function IncidentRecordPage() {
                         </div>
 
                         <div className="flex flex-col gap-4">
-                          <div>
-                            <span className="mb-2 block text-sm font-semibold text-brand-neutral-black">Injury type</span>
-                            <PillMultiSelect
-                              options={injuryTypeOptions.map((t) => ({ value: t.value }))}
-                              selected={injury.injuryTypes}
-                              onToggle={(v) => toggleInjuryType(injury.id, v)}
-                            />
-                          </div>
-
                           <Textarea
                             label="Notes"
                             id={`injury-notes-${injury.id}`}
@@ -1517,20 +1604,25 @@ export default function IncidentRecordPage() {
                     </div>
                   ))}
 
-                  {isAddingInjury ? (
+                  {anyoneInjured === true &&
+                    (isAddingInjury ? (
                     <div className="rounded-2xl border border-black/5 bg-white p-4">
                       <span className="mb-2 block text-sm font-semibold text-brand-neutral-black">Who was injured?</span>
+                      <p className="mb-2 text-xs text-brand-neutral-black/50">
+                        Chosen from people already named on this incident -- the same person is always the same
+                        record.
+                      </p>
                       <div className="flex flex-wrap gap-2">
                         {children.map((child) => (
                           <button
                             key={child.passportId}
                             type="button"
                             onClick={() => {
-                              setNewInjuryParty({ type: "student", passportId: child.passportId, name: child.childName });
-                              setNewInjuryStaffName("");
+                              setNewInjuryParty({ kind: "student", passportId: child.passportId, name: child.childName });
+                              setNewInjuryStaffFreeText("");
                             }}
                             className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${
-                              newInjuryParty?.passportId === child.passportId
+                              newInjuryParty?.kind === "student" && newInjuryParty.passportId === child.passportId
                                 ? "border-brand-prussian-blue bg-brand-pastel-blue/30 text-brand-prussian-blue"
                                 : "border-black/10 bg-white text-black/60"
                             }`}
@@ -1538,13 +1630,35 @@ export default function IncidentRecordPage() {
                             {child.childName}
                           </button>
                         ))}
+                        {incidentStaffForPicker.map((staffMember) => (
+                          <button
+                            key={staffMember.key}
+                            type="button"
+                            onClick={() => {
+                              setNewInjuryParty({
+                                kind: "named_staff",
+                                userId: staffMember.userId,
+                                freeTextName: staffMember.freeTextName,
+                                name: staffMember.name,
+                              });
+                              setNewInjuryStaffFreeText("");
+                            }}
+                            className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${
+                              newInjuryParty?.kind === "named_staff" && newInjuryParty.userId === staffMember.userId && newInjuryParty.freeTextName === staffMember.freeTextName
+                                ? "border-brand-prussian-blue bg-brand-pastel-blue/30 text-brand-prussian-blue"
+                                : "border-black/10 bg-white text-black/60"
+                            }`}
+                          >
+                            {staffMember.name}
+                          </button>
+                        ))}
                       </div>
                       <TextField
-                        label="Or a staff member (name)"
+                        label="Someone not named on this incident (name)"
                         id="new-injury-staff-name"
-                        value={newInjuryStaffName}
+                        value={newInjuryStaffFreeText}
                         onChange={(e) => {
-                          setNewInjuryStaffName(e.target.value);
+                          setNewInjuryStaffFreeText(e.target.value);
                           setNewInjuryParty(null);
                         }}
                         placeholder="e.g. Demo Teacher"
@@ -1571,7 +1685,7 @@ export default function IncidentRecordPage() {
                         </Button>
                       </div>
                     </div>
-                  ) : (
+                    ) : (
                     <button
                       type="button"
                       onClick={() => setIsAddingInjury(true)}
@@ -1579,7 +1693,7 @@ export default function IncidentRecordPage() {
                     >
                       + Add injury record
                     </button>
-                  )}
+                    ))}
                 </div>
               </section>
 
