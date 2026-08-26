@@ -123,6 +123,15 @@ async function main() {
   const { data: loc } = await admin.from("incident_locations").select("id").eq("value", "Classroom").is("institution_id", null).single();
   const { data: bruisingType } = await admin.from("incident_injury_types").select("id").eq("value", "Bruising").is("institution_id", null).single();
   const { data: rednessType } = await admin.from("incident_injury_types").select("id").eq("value", "Redness").is("institution_id", null).single();
+  // Fetched here (not just down at CHECK K/L/M/N, which also use these)
+  // because CHECK D's own pre-existing body-mark inserts need region_id/
+  // side too -- both columns became NOT NULL in migration 0080, after
+  // CHECK D was originally written; this suite hadn't been run end to
+  // end since, so that gap was invisible until now.
+  const { data: biteType } = await admin.from("incident_injury_types").select("id").eq("value", "Bite").is("institution_id", null).single();
+  const { data: restraintAction } = await admin.from("incident_action_types").select("id").eq("value", "Physical restraint (CPI)").is("institution_id", null).single();
+  const { data: nonRestraintAction } = await admin.from("incident_action_types").select("id").eq("value", "Gently blocked further attempts").is("institution_id", null).single();
+  const { data: headRegion } = await admin.from("incident_body_regions").select("id").eq("value", "head").is("institution_id", null).single();
 
   console.log(`\n== CHECK B: incident for a child whose parent has never opened the app ==`);
   // A passport_institution_links row can only ever be INSERTED by the
@@ -517,6 +526,13 @@ async function main() {
       .single();
     record("Owning teacher can record a restrictive practice pre-signoff", !rpInsertErr, rpInsertErr?.message);
 
+    // The real UI only ever gets here by ticking CPI/restraint first (that's
+    // what opens this section) -- match that here too, now that migration
+    // 0083's sign-off gate checks the two are consistent (CHECK N below
+    // exercises that gate directly; this is just keeping this incident's
+    // own eventual sign-off in CHECK 7 clean).
+    await teacherA.from("incident_actions").insert({ incident_id: incidentId, action_type_id: restraintAction.id });
+
     const { data: statusAfterRpInsert } = await teacherA.rpc("get_attestation_status", { p_incident_staff_id: teacherBStaffId });
     record("Status flips to 'stale' when a restrictive practice record is added", statusAfterRpInsert === "stale", statusAfterRpInsert);
 
@@ -581,19 +597,23 @@ async function main() {
 
     // -- Migration 0076: a marker with no type, or an invalid type, is --
     // structurally impossible now, not just discouraged by the UI.
+    // region_id/side supplied on every insert below (migration 0080 made
+    // both NOT NULL) so each test isolates the ONE constraint it's
+    // actually named for, rather than tripping the region_id constraint
+    // first and reporting a pass for the wrong reason.
     const { error: nullTypeErr } = await teacherA
       .from("incident_body_marks")
-      .insert({ injury_id: injuryRow.id, view: "front", x: 0.4, y: 0.6, injury_type_id: null });
+      .insert({ injury_id: injuryRow.id, view: "front", x: 0.4, y: 0.6, injury_type_id: null, region_id: headRegion.id, side: "centre" });
     record("A body mark with NO injury_type_id is REJECTED (not null constraint)", Boolean(nullTypeErr), nullTypeErr?.message);
 
     const { error: bogusTypeErr } = await teacherA
       .from("incident_body_marks")
-      .insert({ injury_id: injuryRow.id, view: "front", x: 0.4, y: 0.6, injury_type_id: "00000000-0000-0000-0000-000000000000" });
+      .insert({ injury_id: injuryRow.id, view: "front", x: 0.4, y: 0.6, injury_type_id: "00000000-0000-0000-0000-000000000000", region_id: headRegion.id, side: "centre" });
     record("A body mark with an injury_type_id NOT in the vocabulary is REJECTED (foreign key)", Boolean(bogusTypeErr), bogusTypeErr?.message);
 
     const { data: markRow, error: markInsertErr } = await teacherA
       .from("incident_body_marks")
-      .insert({ injury_id: injuryRow.id, view: "front", x: 0.4, y: 0.6, injury_type_id: bruisingType.id })
+      .insert({ injury_id: injuryRow.id, view: "front", x: 0.4, y: 0.6, injury_type_id: bruisingType.id, region_id: headRegion.id, side: "centre" })
       .select()
       .single();
     record("Owning teacher can place a body-map marker pre-signoff", !markInsertErr, markInsertErr?.message);
@@ -1087,6 +1107,426 @@ async function main() {
     const { data: freeTextRow } = await admin.from("incident_staff").select("attested_at").eq("incident_id", incidentId).is("user_id", null).single();
     record("Free-text staff row has no attested_at (never attested, by construction)", freeTextRow.attested_at === null, JSON.stringify(freeTextRow));
     record("Incident reached teacher sign-off despite the free-text row being unattested (non-blocking, confirmed above in check 7)", true, "sign-off in check 7 already succeeded with this row present");
+  }
+
+  // biteType/restraintAction/nonRestraintAction/headRegion were all
+  // fetched up in Setup, alongside loc/bruisingType/rednessType --
+  // CHECK D above needs them too now that region_id/side are NOT NULL.
+
+  console.log(`\n== CHECK K: Part 2 schema (migration 0080) -- party array, body regions, linked people ==`);
+  {
+    // -- (a) party: non-empty array required, allowed-values set enforced. --
+    const { data: p3 } = await admin.from("passports").insert({ user_id: parent3Id, child_name: "Verify Child K", passport_status: "complete" }).select().single();
+    const { data: kIncidentId } = await teacherA.rpc("create_incident_stamp", {
+      p_institution_id: institutionId, p_occurred_at: new Date().toISOString(), p_location_id: loc.id,
+      p_child_passport_ids: [child1], p_staff: [],
+    });
+
+    const { error: partyEmptyErr } = await teacherA.from("incidents").update({ party: [] }).eq("id", kIncidentId);
+    record("party = [] (empty array) REJECTED -- required field, not silently satisfied by an empty selection", Boolean(partyEmptyErr), partyEmptyErr?.message);
+
+    const { error: partyBogusErr } = await teacherA.from("incidents").update({ party: ["bystander"] }).eq("id", kIncidentId);
+    record("party containing a value outside the allowed set REJECTED", Boolean(partyBogusErr), partyBogusErr?.message);
+
+    const { error: partyGoodErr } = await teacherA.from("incidents").update({ party: ["self", "other"], party_other: "Playground supervisor" }).eq("id", kIncidentId);
+    const { data: partyAfter } = await admin.from("incidents").select("party, party_other").eq("id", kIncidentId).single();
+    record(
+      "party as a genuine multi-select, with 'other' + party_other, persists correctly",
+      !partyGoodErr && JSON.stringify(partyAfter.party) === JSON.stringify(["self", "other"]) && partyAfter.party_other === "Playground supervisor",
+      `err=${partyGoodErr?.message}, ${JSON.stringify(partyAfter)}`
+    );
+
+    // -- (b) incident_body_marks: region_id/side are NOT NULL, region_id is a real FK. --
+    const { data: kInjury } = await teacherA
+      .from("incident_injuries")
+      .insert({ incident_id: kIncidentId, injured_party_type: "student", passport_id: child1 })
+      .select()
+      .single();
+
+    const { error: noRegionErr } = await teacherA
+      .from("incident_body_marks")
+      .insert({ injury_id: kInjury.id, view: "front", x: 0.5, y: 0.1, injury_type_id: bruisingType.id, side: "centre" });
+    record("A body mark with NO region_id is REJECTED (not null constraint)", Boolean(noRegionErr), noRegionErr?.message);
+
+    const { error: bogusRegionErr } = await teacherA
+      .from("incident_body_marks")
+      .insert({ injury_id: kInjury.id, view: "front", x: 0.5, y: 0.1, injury_type_id: bruisingType.id, region_id: "00000000-0000-0000-0000-000000000000", side: "centre" });
+    record("A body mark with a region_id NOT in the vocabulary is REJECTED (foreign key)", Boolean(bogusRegionErr), bogusRegionErr?.message);
+
+    const { error: bogusSideErr } = await teacherA
+      .from("incident_body_marks")
+      .insert({ injury_id: kInjury.id, view: "front", x: 0.5, y: 0.1, injury_type_id: bruisingType.id, region_id: headRegion.id, side: "diagonal" });
+    record("A body mark with a side outside left/right/centre is REJECTED (check constraint)", Boolean(bogusSideErr), bogusSideErr?.message);
+
+    const { error: goodMarkErr } = await teacherA
+      .from("incident_body_marks")
+      .insert({ injury_id: kInjury.id, view: "front", x: 0.5, y: 0.1, injury_type_id: bruisingType.id, region_id: headRegion.id, side: "centre" });
+    record("A body mark with region_id + side both valid succeeds", !goodMarkErr, goodMarkErr?.message);
+
+    const { data: regionSeed } = await admin.from("incident_body_regions").select("value").is("institution_id", null);
+    const expectedRegions = ["head", "chest", "stomach", "upper_arm", "lower_arm", "hand", "upper_back", "lower_back", "upper_leg", "lower_leg"].sort();
+    record(
+      "Global incident_body_regions seed is EXACTLY the ten regions.json slugs -- no more, no fewer",
+      JSON.stringify((regionSeed ?? []).map((r) => r.value).sort()) === JSON.stringify(expectedRegions),
+      JSON.stringify(regionSeed?.map((r) => r.value))
+    );
+
+    // -- (c) injured party must be named on THIS incident. --
+    const { error: unnamedChildErr } = await teacherA
+      .from("incident_injuries")
+      .insert({ incident_id: kIncidentId, injured_party_type: "student", passport_id: p3.id });
+    record("Injured party's passport_id NOT among this incident's children is REJECTED", Boolean(unnamedChildErr), unnamedChildErr?.message);
+
+    const { error: unnamedStaffErr } = await teacherA
+      .from("incident_injuries")
+      .insert({ incident_id: kIncidentId, injured_party_type: "staff", staff_user_id: snaId });
+    record("Injured party's staff_user_id NOT among this incident's staff is REJECTED (SNA never named on this incident)", Boolean(unnamedStaffErr), unnamedStaffErr?.message);
+
+    // -- (d) CPI staff links: real accounts only, same incident only. --
+    const { data: kFreeTextStaff } = await teacherA
+      .from("incident_staff")
+      .insert({ incident_id: kIncidentId, free_text_name: "Cover Supervisor No Account", involvement: "witnessed" })
+      .select()
+      .single();
+    const { data: kRealStaff } = await teacherA
+      .from("incident_staff")
+      .insert({ incident_id: kIncidentId, user_id: teacherBId, involvement: "witnessed" })
+      .select()
+      .single();
+    const { data: kRp } = await teacherA
+      .from("restrictive_practices")
+      .insert({ incident_id: kIncidentId, passport_id: child1, planning_status: "not_planned" })
+      .select()
+      .single();
+
+    const { error: freeTextLinkErr } = await teacherA
+      .from("restrictive_practice_staff")
+      .insert({ restrictive_practice_id: kRp.id, incident_staff_id: kFreeTextStaff.id });
+    record("Linking a free-text-only (no-account) staff entry to a restrictive practice record is REJECTED", Boolean(freeTextLinkErr), freeTextLinkErr?.message);
+
+    // A genuinely separate, still-open incident -- not the main
+    // incidentId, which is already signed+countersigned by this point
+    // and would reject the staff insert outright, never actually
+    // exercising the cross-incident mismatch this is meant to test.
+    const { data: kOtherIncidentId } = await teacherA.rpc("create_incident_stamp", {
+      p_institution_id: institutionId, p_occurred_at: new Date().toISOString(), p_location_id: loc.id,
+      p_child_passport_ids: [child1], p_staff: [],
+    });
+    const { data: otherIncidentStaff } = await teacherA
+      .from("incident_staff")
+      .insert({ incident_id: kOtherIncidentId, user_id: snaId, involvement: "witnessed" })
+      .select()
+      .single();
+    const { error: crossIncidentLinkErr } = await teacherA
+      .from("restrictive_practice_staff")
+      .insert({ restrictive_practice_id: kRp.id, incident_staff_id: otherIncidentStaff.id });
+    record("Linking a staff row named on a DIFFERENT incident is REJECTED (incident mismatch, real session not a bypass)", Boolean(crossIncidentLinkErr), crossIncidentLinkErr?.message);
+    await admin.from("incidents").delete().eq("id", kOtherIncidentId);
+
+    const { error: realLinkErr } = await teacherA
+      .from("restrictive_practice_staff")
+      .insert({ restrictive_practice_id: kRp.id, incident_staff_id: kRealStaff.id });
+    record("Linking a real-account staff member named on the SAME incident succeeds", !realLinkErr, realLinkErr?.message);
+
+    const { data: linkVisibleToPrincipal } = await principal.from("restrictive_practice_staff").select("id").eq("restrictive_practice_id", kRp.id);
+    record("The link is visible to the principal (follows the parent incident's own visibility)", (linkVisibleToPrincipal?.length ?? 0) >= 1, `rows=${linkVisibleToPrincipal?.length}`);
+    const { data: linkVisibleToParent } = await parent1.from("restrictive_practice_staff").select("id").eq("restrictive_practice_id", kRp.id);
+    record("The link is INVISIBLE to an unrelated parent", (linkVisibleToParent?.length ?? 0) === 0, `rows=${linkVisibleToParent?.length}`);
+
+    // -- (e) after sign-off, linking/unlinking is rejected by RLS's own gate. --
+    // A restrictive_practices record now exists (kRp) with no restraint
+    // action ticked -- would trip 0083's own CPI-consistency gate first
+    // and never reach a genuine post-signoff state, so tick one here
+    // purely to let sign-off through; 0083 itself is covered on its own
+    // terms in CHECK N below.
+    await teacherA.from("incident_actions").insert({ incident_id: kIncidentId, action_type_id: restraintAction.id });
+    await teacherA.from("incidents").update({ teacher_signed_at: new Date().toISOString(), teacher_signed_by: teacherAId }).eq("id", kIncidentId);
+    const { data: kSignedCheck } = await admin.from("incidents").select("teacher_signed_at").eq("id", kIncidentId).single();
+    if (kSignedCheck.teacher_signed_at) {
+      const { error: postSignLinkErr } = await teacherA
+        .from("restrictive_practice_staff")
+        .insert({ restrictive_practice_id: kRp.id, incident_staff_id: kFreeTextStaff.id });
+      record("Post-signoff link attempt REJECTED (RLS's own teacher_signed_at is null gate)", Boolean(postSignLinkErr), postSignLinkErr?.message);
+    } else {
+      record("Post-signoff link attempt REJECTED (RLS's own teacher_signed_at is null gate)", false, "fixture did not reach sign-off -- see anyone_injured/CPI consistency, expected for this minimal fixture");
+    }
+
+    await admin.from("incidents").delete().eq("id", kIncidentId);
+    await admin.from("passports").delete().eq("id", p3.id);
+  }
+
+  console.log(`\n== CHECK L: three-way Yes/No fields -- 'answered No' is not 'not recorded' (migration 0081) ==`);
+  {
+    const { data: lIncidentId } = await teacherA.rpc("create_incident_stamp", {
+      p_institution_id: institutionId, p_occurred_at: new Date().toISOString(), p_location_id: loc.id,
+      p_child_passport_ids: [child1], p_staff: [],
+    });
+
+    const { data: lIncidentRow } = await admin.from("incidents").select("anyone_injured").eq("id", lIncidentId).single();
+    record("incidents.anyone_injured defaults to null (not false) on a freshly-stamped incident", lIncidentRow.anyone_injured === null, lIncidentRow.anyone_injured);
+
+    const { data: lRp } = await teacherA
+      .from("restrictive_practices")
+      .insert({ incident_id: lIncidentId, passport_id: child1, planning_status: "not_planned" })
+      .select()
+      .single();
+    record("restrictive_practices.ncse_report_complete defaults to null (not false)", lRp.ncse_report_complete === null, lRp.ncse_report_complete);
+
+    const { data: lInjury } = await teacherA
+      .from("incident_injuries")
+      .insert({ incident_id: lIncidentId, injured_party_type: "student", passport_id: child1 })
+      .select()
+      .single();
+    record(
+      "incident_injuries.first_aider_called / doctor_ambulance_called both default to null (not false)",
+      lInjury.first_aider_called === null && lInjury.doctor_ambulance_called === null,
+      JSON.stringify({ first_aider_called: lInjury.first_aider_called, doctor_ambulance_called: lInjury.doctor_ambulance_called })
+    );
+
+    await teacherA.from("incident_injuries").update({ first_aider_called: false, doctor_ambulance_called: true }).eq("id", lInjury.id);
+    const { data: lInjuryAfter } = await admin.from("incident_injuries").select("first_aider_called, doctor_ambulance_called").eq("id", lInjury.id).single();
+    record(
+      "An explicit 'No' (false) persists distinctly from null -- not coerced back to unanswered",
+      lInjuryAfter.first_aider_called === false && lInjuryAfter.doctor_ambulance_called === true,
+      JSON.stringify(lInjuryAfter)
+    );
+
+    const { data: lMark } = await teacherA
+      .from("incident_body_marks")
+      .insert({ injury_id: lInjury.id, view: "front", x: 0.3, y: 0.4, injury_type_id: biteType.id, region_id: headRegion.id, side: "left" })
+      .select()
+      .single();
+    record("A fresh Bite mark's skin_broken defaults to null (not asked yet)", lMark.skin_broken === null, lMark.skin_broken);
+
+    await teacherA.from("incident_body_marks").update({ skin_broken: false }).eq("id", lMark.id);
+    const { data: lMarkAfter } = await admin.from("incident_body_marks").select("skin_broken").eq("id", lMark.id).single();
+    record("skin_broken = false persists distinctly from null (skin explicitly NOT broken, not unanswered)", lMarkAfter.skin_broken === false, lMarkAfter.skin_broken);
+
+    await admin.from("incidents").delete().eq("id", lIncidentId);
+  }
+
+  console.log(`\n== CHECK M: incident_actions UPDATE policy (migration 0082) ==`);
+  {
+    const { data: mIncidentId } = await teacherA.rpc("create_incident_stamp", {
+      p_institution_id: institutionId, p_occurred_at: new Date().toISOString(), p_location_id: loc.id,
+      p_child_passport_ids: [child1], p_staff: [],
+    });
+    const { data: otherActionType } = await admin.from("incident_action_types").select("id").eq("value", "Other").is("institution_id", null).single();
+    const { data: mAction } = await teacherA
+      .from("incident_actions")
+      .insert({ incident_id: mIncidentId, action_type_id: otherActionType.id })
+      .select()
+      .single();
+
+    const { error: ownerUpdateErr } = await teacherA
+      .from("incident_actions")
+      .update({ other_detail: "Called a parent to collect early." })
+      .eq("id", mAction.id);
+    const { data: mActionAfterOwner } = await admin.from("incident_actions").select("other_detail").eq("id", mAction.id).single();
+    record(
+      "Owning teacher CAN update other_detail on an existing action (the bug 0082 fixed -- previously silently wrote nothing)",
+      !ownerUpdateErr && mActionAfterOwner.other_detail === "Called a parent to collect early.",
+      `err=${ownerUpdateErr?.message}, other_detail=${mActionAfterOwner.other_detail}`
+    );
+
+    const { error: strangerUpdateErr } = await teacherB
+      .from("incident_actions")
+      .update({ other_detail: "Teacher B should not be able to write this." })
+      .eq("id", mAction.id);
+    const { data: mActionAfterStranger } = await admin.from("incident_actions").select("other_detail").eq("id", mAction.id).single();
+    record(
+      "A teacher with no standing on this incident CANNOT update its action (silently, RLS-filtered -- re-queried, not trusted from the client-visible error)",
+      mActionAfterStranger.other_detail === "Called a parent to collect early.",
+      `err=${strangerUpdateErr?.message}, other_detail now=${mActionAfterStranger.other_detail}`
+    );
+
+    await admin.from("incidents").delete().eq("id", mIncidentId);
+  }
+
+  console.log(`\n== CHECK N: sign-off consistency gate -- all four cases, both directions where symmetric (migration 0083) ==`);
+  {
+    // -- N1: anyone_injured = true, zero injury records -- rejected, --
+    // then fixed by adding one.
+    const { data: nAId } = await teacherA.rpc("create_incident_stamp", {
+      p_institution_id: institutionId, p_occurred_at: new Date().toISOString(), p_location_id: loc.id,
+      p_child_passport_ids: [child1], p_staff: [],
+    });
+    await teacherA.from("incidents").update({ anyone_injured: true }).eq("id", nAId);
+    const { error: nAErr1 } = await teacherA.from("incidents").update({ teacher_signed_at: new Date().toISOString(), teacher_signed_by: teacherAId }).eq("id", nAId);
+    const { data: nAAfter1 } = await admin.from("incidents").select("teacher_signed_at").eq("id", nAId).single();
+    record(
+      "N1a: Sign-off REJECTED -- anyone_injured=true but zero incident_injuries rows exist",
+      nAAfter1.teacher_signed_at === null,
+      `err=${nAErr1?.message}, teacher_signed_at=${nAAfter1.teacher_signed_at}`
+    );
+
+    await teacherA.from("incident_injuries").insert({ incident_id: nAId, injured_party_type: "student", passport_id: child1 });
+    const { error: nAErr2 } = await teacherA.from("incidents").update({ teacher_signed_at: new Date().toISOString(), teacher_signed_by: teacherAId }).eq("id", nAId);
+    const { data: nAAfter2 } = await admin.from("incidents").select("teacher_signed_at").eq("id", nAId).single();
+    record(
+      "N1b: Sign-off SUCCEEDS once an injury record is added, resolving the inconsistency",
+      !nAErr2 && nAAfter2.teacher_signed_at !== null,
+      `err=${nAErr2?.message}, teacher_signed_at=${nAAfter2.teacher_signed_at}`
+    );
+    await admin.from("incidents").delete().eq("id", nAId);
+
+    // -- N2: anyone_injured = false, but an injury record exists -- --
+    // rejected, then fixed by removing it.
+    const { data: nBId } = await teacherA.rpc("create_incident_stamp", {
+      p_institution_id: institutionId, p_occurred_at: new Date().toISOString(), p_location_id: loc.id,
+      p_child_passport_ids: [child1], p_staff: [],
+    });
+    await teacherA.from("incidents").update({ anyone_injured: false }).eq("id", nBId);
+    const { data: nBInjury } = await teacherA
+      .from("incident_injuries")
+      .insert({ incident_id: nBId, injured_party_type: "student", passport_id: child1 })
+      .select()
+      .single();
+    const { error: nBErr1 } = await teacherA.from("incidents").update({ teacher_signed_at: new Date().toISOString(), teacher_signed_by: teacherAId }).eq("id", nBId);
+    const { data: nBAfter1 } = await admin.from("incidents").select("teacher_signed_at").eq("id", nBId).single();
+    record(
+      "N2a: Sign-off REJECTED -- anyone_injured=false but an incident_injuries row still exists",
+      nBAfter1.teacher_signed_at === null,
+      `err=${nBErr1?.message}, teacher_signed_at=${nBAfter1.teacher_signed_at}`
+    );
+
+    await teacherA.from("incident_injuries").delete().eq("id", nBInjury.id);
+    const { error: nBErr2 } = await teacherA.from("incidents").update({ teacher_signed_at: new Date().toISOString(), teacher_signed_by: teacherAId }).eq("id", nBId);
+    const { data: nBAfter2 } = await admin.from("incidents").select("teacher_signed_at").eq("id", nBId).single();
+    record(
+      "N2b: Sign-off SUCCEEDS once the orphaned injury record is removed",
+      !nBErr2 && nBAfter2.teacher_signed_at !== null,
+      `err=${nBErr2?.message}, teacher_signed_at=${nBAfter2.teacher_signed_at}`
+    );
+    await admin.from("incidents").delete().eq("id", nBId);
+
+    // -- N3: anyone_injured = null (never answered) -- passes through --
+    // untouched, even with an injury row present (agreed in chat: a
+    // missing answer is not forced, matching the attestation precedent).
+    const { data: nCId } = await teacherA.rpc("create_incident_stamp", {
+      p_institution_id: institutionId, p_occurred_at: new Date().toISOString(), p_location_id: loc.id,
+      p_child_passport_ids: [child1], p_staff: [],
+    });
+    await teacherA.from("incident_injuries").insert({ incident_id: nCId, injured_party_type: "student", passport_id: child1 });
+    const { data: nCRow } = await admin.from("incidents").select("anyone_injured").eq("id", nCId).single();
+    record("N3 setup: anyone_injured is genuinely null on this incident (never answered)", nCRow.anyone_injured === null, nCRow.anyone_injured);
+    const { error: nCErr } = await teacherA.from("incidents").update({ teacher_signed_at: new Date().toISOString(), teacher_signed_by: teacherAId }).eq("id", nCId);
+    const { data: nCAfter } = await admin.from("incidents").select("teacher_signed_at").eq("id", nCId).single();
+    record(
+      "N3: Sign-off SUCCEEDS with anyone_injured left null -- an unanswered gate is not forced, unlike an inconsistent one",
+      !nCErr && nCAfter.teacher_signed_at !== null,
+      `err=${nCErr?.message}, teacher_signed_at=${nCAfter.teacher_signed_at}`
+    );
+    await admin.from("incidents").delete().eq("id", nCId);
+
+    // -- N4: skin_broken set on a mark whose type is no longer Bite -- --
+    // the exact "type was changed away from Bite after skin_broken was
+    // set" scenario, forced via service role since the app's own client
+    // clears skin_broken on the same write that changes type -- the
+    // trigger is the structural backstop for a state the UI itself tries
+    // to prevent, not a UI-only guarantee.
+    const { data: nDId } = await teacherA.rpc("create_incident_stamp", {
+      p_institution_id: institutionId, p_occurred_at: new Date().toISOString(), p_location_id: loc.id,
+      p_child_passport_ids: [child1], p_staff: [],
+    });
+    const { data: nDInjury } = await teacherA
+      .from("incident_injuries")
+      .insert({ incident_id: nDId, injured_party_type: "student", passport_id: child1 })
+      .select()
+      .single();
+    const { data: nDMark } = await teacherA
+      .from("incident_body_marks")
+      .insert({ injury_id: nDInjury.id, view: "front", x: 0.5, y: 0.2, injury_type_id: biteType.id, region_id: headRegion.id, side: "left", skin_broken: true })
+      .select()
+      .single();
+    await admin.from("incident_body_marks").update({ injury_type_id: bruisingType.id }).eq("id", nDMark.id);
+    const { data: nDMarkAfter } = await admin.from("incident_body_marks").select("injury_type_id, skin_broken").eq("id", nDMark.id).single();
+    record(
+      "N4 setup: mark's type is now Bruising while skin_broken is still true (bypassing the client's own clear-on-change)",
+      nDMarkAfter.injury_type_id === bruisingType.id && nDMarkAfter.skin_broken === true,
+      JSON.stringify(nDMarkAfter)
+    );
+    const { error: nDErr1 } = await teacherA.from("incidents").update({ teacher_signed_at: new Date().toISOString(), teacher_signed_by: teacherAId }).eq("id", nDId);
+    const { data: nDAfter1 } = await admin.from("incidents").select("teacher_signed_at").eq("id", nDId).single();
+    record(
+      "N4a: Sign-off REJECTED -- skin_broken is recorded but the mark's type is no longer Bite",
+      nDAfter1.teacher_signed_at === null,
+      `err=${nDErr1?.message}, teacher_signed_at=${nDAfter1.teacher_signed_at}`
+    );
+
+    await teacherA.from("incident_body_marks").update({ skin_broken: null }).eq("id", nDMark.id);
+    const { error: nDErr2 } = await teacherA.from("incidents").update({ teacher_signed_at: new Date().toISOString(), teacher_signed_by: teacherAId }).eq("id", nDId);
+    const { data: nDAfter2 } = await admin.from("incidents").select("teacher_signed_at").eq("id", nDId).single();
+    record(
+      "N4b: Sign-off SUCCEEDS once skin_broken is cleared to null, matching the now-non-Bite type",
+      !nDErr2 && nDAfter2.teacher_signed_at !== null,
+      `err=${nDErr2?.message}, teacher_signed_at=${nDAfter2.teacher_signed_at}`
+    );
+    await admin.from("incidents").delete().eq("id", nDId);
+
+    // -- N5: CPI ticked (a restraint action present), no restrictive_ --
+    // practices record at all -- the fourth case, found live in
+    // already-shipped Part 4 code. Rejected, then fixed by adding one.
+    const { data: nEId } = await teacherA.rpc("create_incident_stamp", {
+      p_institution_id: institutionId, p_occurred_at: new Date().toISOString(), p_location_id: loc.id,
+      p_child_passport_ids: [child1], p_staff: [],
+    });
+    await teacherA.from("incident_actions").insert({ incident_id: nEId, action_type_id: restraintAction.id });
+    const { error: nEErr1 } = await teacherA.from("incidents").update({ teacher_signed_at: new Date().toISOString(), teacher_signed_by: teacherAId }).eq("id", nEId);
+    const { data: nEAfter1 } = await admin.from("incidents").select("teacher_signed_at").eq("id", nEId).single();
+    record(
+      "N5a: Sign-off REJECTED -- CPI/restraint action ticked but no restrictive_practices record exists",
+      nEAfter1.teacher_signed_at === null,
+      `err=${nEErr1?.message}, teacher_signed_at=${nEAfter1.teacher_signed_at}`
+    );
+
+    await teacherA.from("restrictive_practices").insert({ incident_id: nEId, passport_id: child1, planning_status: "not_planned" });
+    const { error: nEErr2 } = await teacherA.from("incidents").update({ teacher_signed_at: new Date().toISOString(), teacher_signed_by: teacherAId }).eq("id", nEId);
+    const { data: nEAfter2 } = await admin.from("incidents").select("teacher_signed_at").eq("id", nEId).single();
+    record(
+      "N5b: Sign-off SUCCEEDS once a restrictive_practices record is added to match the ticked action",
+      !nEErr2 && nEAfter2.teacher_signed_at !== null,
+      `err=${nEErr2?.message}, teacher_signed_at=${nEAfter2.teacher_signed_at}`
+    );
+    await admin.from("incidents").delete().eq("id", nEId);
+
+    // -- N6: the original case -- a restrictive_practices record exists, --
+    // but CPI/restraint is NOT ticked (unticked after the record was
+    // saved). Rejected, then fixed by ticking it.
+    const { data: nFId } = await teacherA.rpc("create_incident_stamp", {
+      p_institution_id: institutionId, p_occurred_at: new Date().toISOString(), p_location_id: loc.id,
+      p_child_passport_ids: [child1], p_staff: [],
+    });
+    await teacherA.from("restrictive_practices").insert({ incident_id: nFId, passport_id: child1, planning_status: "not_planned" });
+    const { error: nFErr1 } = await teacherA.from("incidents").update({ teacher_signed_at: new Date().toISOString(), teacher_signed_by: teacherAId }).eq("id", nFId);
+    const { data: nFAfter1 } = await admin.from("incidents").select("teacher_signed_at").eq("id", nFId).single();
+    record(
+      "N6a: Sign-off REJECTED -- a restrictive_practices record exists but CPI/restraint is not ticked",
+      nFAfter1.teacher_signed_at === null,
+      `err=${nFErr1?.message}, teacher_signed_at=${nFAfter1.teacher_signed_at}`
+    );
+
+    // A non-restraint action alone must NOT satisfy the gate -- proves
+    // the check is keyed on is_restraint specifically, not "any action
+    // exists".
+    await teacherA.from("incident_actions").insert({ incident_id: nFId, action_type_id: nonRestraintAction.id });
+    const { error: nFErr1b } = await teacherA.from("incidents").update({ teacher_signed_at: new Date().toISOString(), teacher_signed_by: teacherAId }).eq("id", nFId);
+    const { data: nFAfter1b } = await admin.from("incidents").select("teacher_signed_at").eq("id", nFId).single();
+    record(
+      "N6a-bis: A NON-restraint action present is still REJECTED -- the gate is keyed on is_restraint, not merely 'some action exists'",
+      nFAfter1b.teacher_signed_at === null,
+      `err=${nFErr1b?.message}, teacher_signed_at=${nFAfter1b.teacher_signed_at}`
+    );
+
+    await teacherA.from("incident_actions").insert({ incident_id: nFId, action_type_id: restraintAction.id });
+    const { error: nFErr2 } = await teacherA.from("incidents").update({ teacher_signed_at: new Date().toISOString(), teacher_signed_by: teacherAId }).eq("id", nFId);
+    const { data: nFAfter2 } = await admin.from("incidents").select("teacher_signed_at").eq("id", nFId).single();
+    record(
+      "N6b: Sign-off SUCCEEDS once the restraint action is ticked to match the existing record",
+      !nFErr2 && nFAfter2.teacher_signed_at !== null,
+      `err=${nFErr2?.message}, teacher_signed_at=${nFAfter2.teacher_signed_at}`
+    );
+    await admin.from("incidents").delete().eq("id", nFId);
   }
 
   console.log(`\n== Summary ==`);
