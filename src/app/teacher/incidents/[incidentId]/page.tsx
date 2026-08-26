@@ -40,9 +40,10 @@ const CATEGORY_OPTIONS = [
 ] as const;
 
 const PARTY_OPTIONS = [
-  { value: "self", label: "Self" },
-  { value: "peer", label: "Peer" },
-  { value: "staff", label: "Staff" },
+  { value: "self", label: "self" },
+  { value: "peer", label: "peer" },
+  { value: "staff", label: "staff" },
+  { value: "other", label: "Other" },
 ] as const;
 
 const STAFF_COUNT_OPTIONS = [
@@ -55,15 +56,15 @@ const STAFF_COUNT_OPTIONS = [
 
 const STAFF_DISTRESSED_OPTIONS = [
   { value: "yes", label: "Yes" },
-  { value: "slightly", label: "Slightly" },
+  { value: "slightly", label: "Slightly distressing" },
   { value: "no", label: "No" },
 ] as const;
 
 const DISTRESS_LEVEL_OPTIONS = [
   { value: "yes_definitely", label: "Yes, definitely" },
-  { value: "slightly", label: "Slightly" },
+  { value: "slightly", label: "Slightly distressed" },
   { value: "not_distressed", label: "Not distressed" },
-  { value: "hard_to_tell", label: "Hard to tell" },
+  { value: "hard_to_tell", label: "hard to tell" },
 ] as const;
 
 const REMAINED_ON_SITE_OPTIONS = [
@@ -117,6 +118,7 @@ interface ChildFormState {
   remainedOnSite: boolean | null;
   remainedDetail: string;
   recoveryMethods: string[];
+  recoveryMethodsOther: string;
 }
 
 interface StampSummary {
@@ -209,6 +211,7 @@ export default function IncidentRecordPage() {
   const [actionTypes, setActionTypes] = useState<ActionType[]>([]);
   const [selectedActionTypeIds, setSelectedActionTypeIds] = useState<string[]>([]);
   const [actionsError, setActionsError] = useState<string | null>(null);
+  const [otherActionDetail, setOtherActionDetail] = useState("");
   const [cpiReasonOptions, setCpiReasonOptions] = useState<string[]>([]);
   const [cpiDisengagementOptions, setCpiDisengagementOptions] = useState<string[]>([]);
   const [cpiResultOptions, setCpiResultOptions] = useState<string[]>([]);
@@ -241,7 +244,8 @@ export default function IncidentRecordPage() {
   const [isCompletingDebrief, setIsCompletingDebrief] = useState(false);
 
   const [category, setCategory] = useState<Category | null>(null);
-  const [party, setParty] = useState<Party | null>(null);
+  const [party, setParty] = useState<Party[]>([]);
+  const [partyOther, setPartyOther] = useState("");
   const [itemInvolved, setItemInvolved] = useState("");
   const [narrative, setNarrative] = useState("");
   const [parentSummary, setParentSummary] = useState("");
@@ -264,7 +268,7 @@ export default function IncidentRecordPage() {
       const { data: incident, error: incidentError } = await supabase
         .from("incidents")
         .select(
-          "institution_id, created_by, owning_teacher_id, teacher_signed_at, occurred_at, incident_locations(value), category, party, item_involved, narrative, parent_summary, staff_count_needed, staff_distressed, risk_reduction_future, other_information, debrief_required"
+          "institution_id, created_by, owning_teacher_id, teacher_signed_at, occurred_at, incident_locations(value), category, party, party_other, item_involved, narrative, parent_summary, staff_count_needed, staff_distressed, risk_reduction_future, other_information, debrief_required"
         )
         .eq("id", params.incidentId)
         .maybeSingle();
@@ -297,7 +301,7 @@ export default function IncidentRecordPage() {
       ] = await Promise.all([
         supabase
           .from("incident_children")
-          .select("id, child_index, passport_id, distress_level, remained_on_site, remained_detail, recovery_methods")
+          .select("id, child_index, passport_id, distress_level, remained_on_site, remained_detail, recovery_methods, recovery_methods_other")
           .eq("incident_id", params.incidentId)
           .order("child_index"),
         supabase.from("incident_staff").select("user_id, free_text_name").eq("incident_id", params.incidentId),
@@ -312,7 +316,7 @@ export default function IncidentRecordPage() {
           .or(institutionOrGlobal)
           .eq("is_active", true)
           .order("sort_order"),
-        supabase.from("incident_actions").select("action_type_id").eq("incident_id", params.incidentId),
+        supabase.from("incident_actions").select("action_type_id, other_detail").eq("incident_id", params.incidentId),
         supabase.from("cpi_reason_types").select("value").or(institutionOrGlobal).eq("is_active", true).order("sort_order"),
         supabase.from("cpi_disengagement_types").select("value").or(institutionOrGlobal).eq("is_active", true).order("sort_order"),
         supabase.from("cpi_result_types").select("value").or(institutionOrGlobal).eq("is_active", true).order("sort_order"),
@@ -366,6 +370,7 @@ export default function IncidentRecordPage() {
           remainedOnSite: row.remained_on_site,
           remainedDetail: row.remained_detail ?? "",
           recoveryMethods: row.recovery_methods ?? [],
+          recoveryMethodsOther: row.recovery_methods_other ?? "",
         }))
       );
 
@@ -375,6 +380,7 @@ export default function IncidentRecordPage() {
         (actionTypeRows ?? []).map((row) => ({ id: row.id, value: row.value, isRestraint: row.is_restraint }))
       );
       setSelectedActionTypeIds((selectedActionRows ?? []).map((row) => row.action_type_id));
+      setOtherActionDetail((selectedActionRows ?? []).find((row) => row.other_detail)?.other_detail ?? "");
       setCpiReasonOptions((reasonTypes ?? []).map((row) => row.value));
       setCpiDisengagementOptions((disengagementTypes ?? []).map((row) => row.value));
       setCpiResultOptions((resultTypes ?? []).map((row) => row.value));
@@ -423,7 +429,8 @@ export default function IncidentRecordPage() {
       );
 
       setCategory(incident.category as Category | null);
-      setParty(incident.party as Party | null);
+      setParty((incident.party as Party[] | null) ?? []);
+      setPartyOther(incident.party_other ?? "");
       setItemInvolved(incident.item_involved ?? "");
       setNarrative(incident.narrative ?? "");
       setParentSummary(incident.parent_summary ?? "");
@@ -475,6 +482,13 @@ export default function IncidentRecordPage() {
     setChildren((current) => current.map((c) => (c.id === childId ? { ...c, ...patch } : c)));
   }
 
+  // An incident can involve more than one party -- self, peer, and staff
+  // are not mutually exclusive (e.g. a peer conflict a staff member also
+  // had to intervene in).
+  function toggleParty(value: Party) {
+    setParty((current) => (current.includes(value) ? current.filter((v) => v !== value) : [...current, value]));
+  }
+
   function toggleRecoveryMethod(childId: string, methodValue: string) {
     setChildren((current) =>
       current.map((c) => {
@@ -505,6 +519,15 @@ export default function IncidentRecordPage() {
         isSelected ? [...current, actionTypeId] : current.filter((id) => id !== actionTypeId)
       );
     }
+  }
+
+  async function saveOtherActionDetail(otherActionTypeId: string) {
+    const supabase = createClient();
+    await supabase
+      .from("incident_actions")
+      .update({ other_detail: otherActionDetail.trim() || null })
+      .eq("incident_id", params.incidentId)
+      .eq("action_type_id", otherActionTypeId);
   }
 
   function addRestrictivePracticeRecord(passportId: string) {
@@ -782,7 +805,8 @@ export default function IncidentRecordPage() {
       .from("incidents")
       .update({
         category,
-        party,
+        party: party.length > 0 ? party : null,
+        party_other: partyOther.trim() || null,
         item_involved: itemInvolved.trim() || null,
         narrative: narrative.trim() || null,
         parent_summary: parentSummary.trim() || null,
@@ -807,6 +831,7 @@ export default function IncidentRecordPage() {
           remained_on_site: child.remainedOnSite,
           remained_detail: child.remainedDetail.trim() || null,
           recovery_methods: child.recoveryMethods.length > 0 ? child.recoveryMethods : null,
+          recovery_methods_other: child.recoveryMethodsOther.trim() || null,
         })
         .eq("id", child.id);
 
@@ -896,7 +921,24 @@ export default function IncidentRecordPage() {
 
                   <div>
                     <span className="mb-2 block text-sm font-semibold text-brand-neutral-black">Party</span>
-                    <PillSingleSelect options={PARTY_OPTIONS} value={party} onChange={setParty} />
+                    <PillMultiSelect
+                      options={PARTY_OPTIONS.map((o) => ({ value: o.label }))}
+                      selected={party.map((p) => PARTY_OPTIONS.find((o) => o.value === p)?.label ?? p)}
+                      onToggle={(label) => {
+                        const opt = PARTY_OPTIONS.find((o) => o.label === label);
+                        if (opt) toggleParty(opt.value);
+                      }}
+                    />
+                    {party.includes("other") && (
+                      <TextField
+                        label="Party -- other, please specify"
+                        id="party-other"
+                        value={partyOther}
+                        onChange={(e) => setPartyOther(e.target.value)}
+                        placeholder="Optional"
+                        className="mt-3"
+                      />
+                    )}
                   </div>
 
                   <TextField
@@ -904,15 +946,16 @@ export default function IncidentRecordPage() {
                     id="item-involved"
                     value={itemInvolved}
                     onChange={(e) => setItemInvolved(e.target.value)}
-                    placeholder="Optional"
+                    placeholder="e.g. fall from swing, cut from scissors"
                   />
 
                   <Textarea
-                    label="Narrative (staff-facing account)"
+                    label="What happened?"
                     id="narrative"
                     value={narrative}
                     onChange={(e) => setNarrative(e.target.value)}
                     rows={5}
+                    placeholder="Brief factual outline of significant details leading up to the incident (i.e. precursors, setting events)"
                   />
 
                   <Textarea
@@ -922,90 +965,14 @@ export default function IncidentRecordPage() {
                     onChange={(e) => setParentSummary(e.target.value)}
                     rows={3}
                   />
-
-                  <div>
-                    <span className="mb-2 block text-sm font-semibold text-brand-neutral-black">
-                      Staff needed to manage this
-                    </span>
-                    <PillSingleSelect options={STAFF_COUNT_OPTIONS} value={staffCountNeeded} onChange={setStaffCountNeeded} />
-                  </div>
-
-                  <div>
-                    <span className="mb-2 block text-sm font-semibold text-brand-neutral-black">Staff distressed</span>
-                    <PillSingleSelect
-                      options={STAFF_DISTRESSED_OPTIONS}
-                      value={staffDistressed}
-                      onChange={setStaffDistressed}
-                    />
-                  </div>
-
-                  <Textarea
-                    label="Risk reduction for the future"
-                    id="risk-reduction-future"
-                    value={riskReductionFuture}
-                    onChange={(e) => setRiskReductionFuture(e.target.value)}
-                    rows={3}
-                  />
-
-                  <Textarea
-                    label="Other information"
-                    id="other-information"
-                    value={otherInformation}
-                    onChange={(e) => setOtherInformation(e.target.value)}
-                    rows={3}
-                  />
                 </div>
               </section>
 
-              {children.map((child) => (
-                <section key={child.id}>
-                  <h2 className="mb-3 font-heading text-lg font-bold text-brand-prussian-blue">
-                    {child.childName} -- Impact
-                  </h2>
-
-                  <div className="flex flex-col gap-5 rounded-2xl border border-black/5 bg-white p-4">
-                    <div>
-                      <span className="mb-2 block text-sm font-semibold text-brand-neutral-black">Distress level</span>
-                      <PillSingleSelect
-                        options={DISTRESS_LEVEL_OPTIONS}
-                        value={child.distressLevel}
-                        onChange={(v) => updateChild(child.id, { distressLevel: v })}
-                      />
-                    </div>
-
-                    <div>
-                      <span className="mb-2 block text-sm font-semibold text-brand-neutral-black">Remained on site</span>
-                      <PillSingleSelect
-                        options={REMAINED_ON_SITE_OPTIONS}
-                        value={child.remainedOnSite === null ? null : child.remainedOnSite ? "yes" : "no"}
-                        onChange={(v) => updateChild(child.id, { remainedOnSite: v === "yes" })}
-                      />
-                    </div>
-
-                    <TextField
-                      label="Remained-on-site detail"
-                      id={`remained-detail-${child.id}`}
-                      value={child.remainedDetail}
-                      onChange={(e) => updateChild(child.id, { remainedDetail: e.target.value })}
-                      placeholder="Optional"
-                    />
-
-                    <div>
-                      <span className="mb-2 block text-sm font-semibold text-brand-neutral-black">
-                        Recovery methods
-                      </span>
-                      <PillMultiSelect
-                        options={recoveryOptions.map((v) => ({ value: v }))}
-                        selected={child.recoveryMethods}
-                        onToggle={(v) => toggleRecoveryMethod(child.id, v)}
-                      />
-                    </div>
-                  </div>
-                </section>
-              ))}
-
               <section>
-                <h2 className="mb-3 font-heading text-lg font-bold text-brand-prussian-blue">Actions Taken</h2>
+                <h2 className="mb-1 font-heading text-lg font-bold text-brand-prussian-blue">What did you do?</h2>
+                <p className="mb-3 text-sm text-brand-neutral-black/60">
+                  Actions taken, minimising risk i.e. de-escalation, positive interventions, environmental adaptions.
+                </p>
                 <div className="rounded-2xl border border-black/5 bg-white p-4">
                   <div className="flex flex-wrap gap-2">
                     {actionTypes.map((action) => {
@@ -1031,8 +998,121 @@ export default function IncidentRecordPage() {
                       {actionsError}
                     </p>
                   )}
+                  {(() => {
+                    const otherAction = actionTypes.find((a) => a.value === "Other");
+                    if (!otherAction || !selectedActionTypeIds.includes(otherAction.id)) return null;
+                    return (
+                      <TextField
+                        label="Other -- please specify"
+                        id="action-other-detail"
+                        value={otherActionDetail}
+                        onChange={(e) => setOtherActionDetail(e.target.value)}
+                        onBlur={() => saveOtherActionDetail(otherAction.id)}
+                        placeholder="Optional"
+                        className="mt-3"
+                      />
+                    );
+                  })()}
                 </div>
               </section>
+
+              <div className="flex flex-col gap-5 rounded-2xl border border-black/5 bg-white p-4">
+                <div>
+                  <span className="mb-2 block text-sm font-semibold text-brand-neutral-black">
+                    How many staff were needed to manage the incident safely?
+                  </span>
+                  <PillSingleSelect options={STAFF_COUNT_OPTIONS} value={staffCountNeeded} onChange={setStaffCountNeeded} />
+                </div>
+
+                <div>
+                  <span className="mb-2 block text-sm font-semibold text-brand-neutral-black">
+                    Did staff member/s find this incident distressing?
+                  </span>
+                  <PillSingleSelect
+                    options={STAFF_DISTRESSED_OPTIONS}
+                    value={staffDistressed}
+                    onChange={setStaffDistressed}
+                  />
+                </div>
+
+                <Textarea
+                  label="How can we reduce the risks in future?"
+                  id="risk-reduction-future"
+                  value={riskReductionFuture}
+                  onChange={(e) => setRiskReductionFuture(e.target.value)}
+                  rows={3}
+                  placeholder="e.g. proactive strategies, deescalation, positioning to reduce risk"
+                />
+
+                <Textarea
+                  label="Any other information:"
+                  id="other-information"
+                  value={otherInformation}
+                  onChange={(e) => setOtherInformation(e.target.value)}
+                  rows={3}
+                />
+              </div>
+
+              {children.map((child) => (
+                <section key={child.id}>
+                  <h2 className="mb-3 font-heading text-lg font-bold text-brand-prussian-blue">
+                    {child.childName} -- Impact
+                  </h2>
+
+                  <div className="flex flex-col gap-5 rounded-2xl border border-black/5 bg-white p-4">
+                    <div>
+                      <span className="mb-2 block text-sm font-semibold text-brand-neutral-black">
+                        Was {child.childName} distressed?
+                      </span>
+                      <PillSingleSelect
+                        options={DISTRESS_LEVEL_OPTIONS}
+                        value={child.distressLevel}
+                        onChange={(v) => updateChild(child.id, { distressLevel: v })}
+                      />
+                    </div>
+
+                    <div>
+                      <span className="mb-2 block text-sm font-semibold text-brand-neutral-black">
+                        Did {child.childName} remain on site for remainder of school day?
+                      </span>
+                      <PillSingleSelect
+                        options={REMAINED_ON_SITE_OPTIONS}
+                        value={child.remainedOnSite === null ? null : child.remainedOnSite ? "yes" : "no"}
+                        onChange={(v) => updateChild(child.id, { remainedOnSite: v === "yes" })}
+                      />
+                    </div>
+
+                    <TextField
+                      label="If no, provide detail"
+                      id={`remained-detail-${child.id}`}
+                      value={child.remainedDetail}
+                      onChange={(e) => updateChild(child.id, { remainedDetail: e.target.value })}
+                      placeholder="e.g. Parent collected child"
+                    />
+
+                    <div>
+                      <span className="mb-2 block text-sm font-semibold text-brand-neutral-black">
+                        How was {child.childName} assisted to recover/repair relationships with staff/pupil?
+                      </span>
+                      <PillMultiSelect
+                        options={recoveryOptions.map((v) => ({ value: v }))}
+                        selected={child.recoveryMethods}
+                        onToggle={(v) => toggleRecoveryMethod(child.id, v)}
+                      />
+                      {child.recoveryMethods.includes("Other") && (
+                        <TextField
+                          label="Other -- please specify"
+                          id={`recovery-other-${child.id}`}
+                          value={child.recoveryMethodsOther}
+                          onChange={(e) => updateChild(child.id, { recoveryMethodsOther: e.target.value })}
+                          placeholder="Optional"
+                          className="mt-3"
+                        />
+                      )}
+                    </div>
+                  </div>
+                </section>
+              ))}
 
               {hasCpiSelected &&
                 children.map((child) => {
@@ -1382,7 +1462,7 @@ export default function IncidentRecordPage() {
                           />
 
                           <div>
-                            <span className="mb-2 block text-sm font-semibold text-brand-neutral-black">Staff present</span>
+                            <span className="mb-2 block text-sm font-semibold text-brand-neutral-black">Staff present for debrief:</span>
                             {debriefStaffPresent.length > 0 && (
                               <div className="mb-2 flex flex-wrap gap-2">
                                 {debriefStaffPresent.map((name) => (
@@ -1424,7 +1504,7 @@ export default function IncidentRecordPage() {
                           </div>
 
                           <Textarea
-                            label="Notes"
+                            label="Notes from debrief:"
                             id="debrief-notes"
                             value={debriefNotes}
                             onChange={(e) => setDebriefNotes(e.target.value)}
@@ -1432,7 +1512,7 @@ export default function IncidentRecordPage() {
                           />
 
                           <Textarea
-                            label="Actions for management / BA"
+                            label="Actions for management/BA:"
                             id="debrief-actions"
                             value={debriefActionsForManagement}
                             onChange={(e) => setDebriefActionsForManagement(e.target.value)}
