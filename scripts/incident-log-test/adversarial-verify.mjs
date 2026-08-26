@@ -939,12 +939,29 @@ async function main() {
     );
 
     // -- (e) immutable grant record -- the principal cannot rewrite WHO --
-    // the existing grant belongs to, only revoke it.
+    // the existing grant belongs to, only revoke it. Smuggled into a
+    // payload that ALSO sets revoked_by = auth.uid() -- an otherwise-
+    // legitimate revoke, satisfying "Principal can revoke
+    // institution_permissions"'s own WITH CHECK on its own terms.
+    // Sending user_id ALONE (the original form of this check) doesn't
+    // isolate anything: that policy's WITH CHECK (revoked_by =
+    // auth.uid()) already rejects a payload that never sets revoked_by,
+    // regardless of whether guard_institution_permissions_immutable_
+    // grant() -- the trigger actually built to stop a user_id rewrite --
+    // ever runs at all. This version proves the trigger specifically:
+    // if it vanished, this write would succeed (RLS is satisfied) and
+    // only the trigger stands in the way.
     const { error: rewriteErr } = await principalJ
       .from("institution_permissions")
-      .update({ user_id: teacherOrdId })
+      .update({ user_id: teacherOrdId, revoked_at: new Date().toISOString(), revoked_by: principalJId })
       .eq("id", grantRow.id);
-    record("Principal CANNOT rewrite an existing grant's user_id -- only revoked_at/revoked_by may ever change", Boolean(rewriteErr), rewriteErr?.message);
+    record("Principal CANNOT rewrite an existing grant's user_id, even smuggled into an otherwise-legitimate revoke -- only revoked_at/revoked_by may ever change", Boolean(rewriteErr), rewriteErr?.message);
+    const { data: grantRowAfterRewriteAttempt } = await admin.from("institution_permissions").select("user_id, revoked_at").eq("id", grantRow.id).single();
+    record(
+      "...and the whole statement failed together -- the grant is neither rewritten nor accidentally revoked as a side effect",
+      grantRowAfterRewriteAttempt.user_id === teacherDPId && grantRowAfterRewriteAttempt.revoked_at === null,
+      JSON.stringify(grantRowAfterRewriteAttempt)
+    );
 
     // -- (f) revoke the DP's grant, then confirm the EARLIER countersign --
     // (incident A, signed while the grant was active) is UNTOUCHED --
