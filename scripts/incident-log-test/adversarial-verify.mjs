@@ -1529,6 +1529,190 @@ async function main() {
     await admin.from("incidents").delete().eq("id", nFId);
   }
 
+  console.log(`\n== CHECK O: Phase 4 piece 1 -- sign_off_incident() RPC, get_incident_signoff_summary(), teacher_signed_by guard (migrations 0085/0086) ==`);
+  {
+    // -- O1: teacher_signed_by spoofing REJECTED (the bug 0086 fixed). --
+    const { data: oSpoofId } = await teacherA.rpc("create_incident_stamp", {
+      p_institution_id: institutionId, p_occurred_at: new Date().toISOString(), p_location_id: loc.id,
+      p_child_passport_ids: [child1], p_staff: [],
+    });
+    const { error: spoofErr } = await teacherA
+      .from("incidents")
+      .update({ teacher_signed_at: new Date().toISOString(), teacher_signed_by: teacherBId })
+      .eq("id", oSpoofId);
+    const { data: afterSpoof } = await admin.from("incidents").select("teacher_signed_at, teacher_signed_by").eq("id", oSpoofId).single();
+    record(
+      "O1: teacher_signed_by spoofed to someone other than the caller is REJECTED, and does not persist",
+      afterSpoof.teacher_signed_at === null && afterSpoof.teacher_signed_by === null,
+      `err=${spoofErr?.message}, ${JSON.stringify(afterSpoof)}`
+    );
+
+    // -- O1b: correct self-attribution via raw update still works (the --
+    // guard is scoped to a MISMATCH, not to touching the column at all).
+    const { error: selfAttribErr } = await teacherA
+      .from("incidents")
+      .update({ teacher_signed_at: new Date().toISOString(), teacher_signed_by: teacherAId })
+      .eq("id", oSpoofId);
+    const { data: afterSelfAttrib } = await admin.from("incidents").select("teacher_signed_at, teacher_signed_by").eq("id", oSpoofId).single();
+    record(
+      "O1b: correct self-attribution (teacher_signed_by = caller) still succeeds via raw update",
+      !selfAttribErr && afterSelfAttrib.teacher_signed_by === teacherAId,
+      `err=${selfAttribErr?.message}, ${JSON.stringify(afterSelfAttrib)}`
+    );
+    await admin.from("incidents").delete().eq("id", oSpoofId);
+
+    // -- O2: sign_off_incident() RPC -- clean, distinct error paths. --
+    const { error: notFoundErr } = await teacherA.rpc("sign_off_incident", { p_incident_id: "00000000-0000-0000-0000-000000000000" });
+    record("O2a: sign_off_incident() on a nonexistent id gives a clean 'not found' error", Boolean(notFoundErr) && /not found|permission/i.test(notFoundErr?.message ?? ""), notFoundErr?.message);
+
+    const { data: oCleanId } = await teacherA.rpc("create_incident_stamp", {
+      p_institution_id: institutionId, p_occurred_at: new Date().toISOString(), p_location_id: loc.id,
+      p_child_passport_ids: [child1], p_staff: [],
+    });
+    const { error: notOwnerErr } = await teacherB.rpc("sign_off_incident", { p_incident_id: oCleanId });
+    record(
+      "O2b: sign_off_incident() called by someone who can VIEW but isn't creator/owning teacher gives a distinct 'not permitted' error",
+      Boolean(notOwnerErr) && /permission|creator|owning/i.test(notOwnerErr?.message ?? ""),
+      notOwnerErr?.message
+    );
+
+    const { data: oSignResult, error: oSignErr } = await teacherA.rpc("sign_off_incident", { p_incident_id: oCleanId });
+    record(
+      "O2c: sign_off_incident() succeeds for the real creator/owning teacher, teacher_signed_by correctly self-attributed",
+      !oSignErr && oSignResult?.teacher_signed_by === teacherAId && oSignResult?.teacher_signed_at != null,
+      `err=${oSignErr?.message}, ${JSON.stringify(oSignResult)}`
+    );
+
+    const { error: alreadySignedErr } = await teacherA.rpc("sign_off_incident", { p_incident_id: oCleanId });
+    record(
+      "O2d: sign_off_incident() called again on an already-signed incident gives a distinct 'already signed off' error",
+      Boolean(alreadySignedErr) && /already/i.test(alreadySignedErr?.message ?? ""),
+      alreadySignedErr?.message
+    );
+
+    // -- O3: the three shared-function-backed gates still block via the RPC --
+    // (not just via raw .update(), which CHECK N already covers) -- one
+    // pass each confirms the trigger rewrites are correctly wired.
+    const { data: oDebriefId } = await teacherA.rpc("create_incident_stamp", {
+      p_institution_id: institutionId, p_occurred_at: new Date().toISOString(), p_location_id: loc.id,
+      p_child_passport_ids: [child1], p_staff: [],
+    });
+    await teacherA.from("incidents").update({ debrief_required: true }).eq("id", oDebriefId);
+    const { error: oDebriefErr } = await teacherA.rpc("sign_off_incident", { p_incident_id: oDebriefId });
+    record("O3a: debrief gate still blocks sign_off_incident() (via the refactored trigger)", Boolean(oDebriefErr) && /debrief/i.test(oDebriefErr?.message ?? ""), oDebriefErr?.message);
+    await admin.from("incidents").delete().eq("id", oDebriefId);
+
+    const { data: oAttestId } = await teacherA.rpc("create_incident_stamp", {
+      p_institution_id: institutionId, p_occurred_at: new Date().toISOString(), p_location_id: loc.id,
+      p_child_passport_ids: [child1], p_staff: [{ user_id: teacherBId, involvement: "witnessed" }],
+    });
+    const { data: oAttestStaffRow } = await admin.from("incident_staff").select("id").eq("incident_id", oAttestId).eq("user_id", teacherBId).single();
+    await teacherB.rpc("attest_to_incident", { p_incident_staff_id: oAttestStaffRow.id, p_addendum: "Confirmed." });
+    await teacherA.from("incidents").update({ narrative: "Edited after attestation." }).eq("id", oAttestId);
+    const { error: oAttestErr } = await teacherA.rpc("sign_off_incident", { p_incident_id: oAttestId });
+    record("O3b: attestation staleness gate still blocks sign_off_incident() (via the refactored trigger)", Boolean(oAttestErr) && /stale|attestation/i.test(oAttestErr?.message ?? ""), oAttestErr?.message);
+    await admin.from("incidents").delete().eq("id", oAttestId);
+
+    const { data: oCpiId } = await teacherA.rpc("create_incident_stamp", {
+      p_institution_id: institutionId, p_occurred_at: new Date().toISOString(), p_location_id: loc.id,
+      p_child_passport_ids: [child1], p_staff: [],
+    });
+    await teacherA.from("incident_actions").insert({ incident_id: oCpiId, action_type_id: restraintAction.id });
+    const { error: oCpiErr } = await teacherA.rpc("sign_off_incident", { p_incident_id: oCpiId });
+    record("O3c: CPI-consistency gate still blocks sign_off_incident() (via the refactored trigger)", Boolean(oCpiErr) && /restrictive practice/i.test(oCpiErr?.message ?? ""), oCpiErr?.message);
+
+    // -- O4: get_incident_signoff_summary() -- content correctness. --
+    const { data: oSummary1, error: oSummary1Err } = await teacherA.rpc("get_incident_signoff_summary", { p_incident_id: oCpiId });
+    record("O4a: get_incident_signoff_summary() callable, no longer 'permission denied for table users'", !oSummary1Err, oSummary1Err?.message);
+    record(
+      "O4b: summary correctly reports can_sign_off = false with the matching blocking issue when CPI is ticked but no RP record exists",
+      oSummary1?.can_sign_off === false && oSummary1?.blocking_issues?.some((i) => i.code === "cpi_ticked_no_record"),
+      JSON.stringify(oSummary1)
+    );
+    record(
+      "O4c: unanswered anyone_injured reported as {value: null, note: 'not recorded'}, NOT in blocking_issues",
+      oSummary1?.anyone_injured?.value === null && oSummary1?.anyone_injured?.note === "not recorded" && !oSummary1?.blocking_issues?.some((i) => i.code?.startsWith("anyone_injured")),
+      JSON.stringify(oSummary1?.anyone_injured)
+    );
+
+    await teacherA.from("restrictive_practices").insert({ incident_id: oCpiId, passport_id: child1, planning_status: "not_planned" });
+    const { data: oFreeTextStaff } = await teacherA
+      .from("incident_staff")
+      .insert({ incident_id: oCpiId, free_text_name: "Cover Supervisor No Account", involvement: "witnessed" })
+      .select()
+      .single();
+    const { data: oRealStaff } = await teacherA
+      .from("incident_staff")
+      .insert({ incident_id: oCpiId, user_id: teacherBId, involvement: "witnessed" })
+      .select()
+      .single();
+    const { data: oSummary2 } = await teacherA.rpc("get_incident_signoff_summary", { p_incident_id: oCpiId });
+    const oFreeTextEntry = oSummary2?.staff_attestations?.find((s) => s.incident_staff_id === oFreeTextStaff.id);
+    const oRealEntry = oSummary2?.staff_attestations?.find((s) => s.incident_staff_id === oRealStaff.id);
+    record(
+      "O4d: free-text (no-account) staff labelled 'Not attested -- no account', never blocking",
+      oFreeTextEntry?.status_label === "Not attested -- no account" && oFreeTextEntry?.has_account === false && oFreeTextEntry?.blocks_signoff === false,
+      JSON.stringify(oFreeTextEntry)
+    );
+    record(
+      "O4e: real-account staff who hasn't attested yet labelled 'Not attested', never blocking",
+      oRealEntry?.status_label === "Not attested" && oRealEntry?.has_account === true && oRealEntry?.blocks_signoff === false,
+      JSON.stringify(oRealEntry)
+    );
+    record("O4f: can_sign_off now true once the CPI/RP mismatch is resolved (RP record added)", oSummary2?.can_sign_off === true, JSON.stringify(oSummary2?.blocking_issues));
+
+    // -- O4g: restricted to creator/owning teacher -- a principal who can --
+    // VIEW the incident (but isn't its creator/owning teacher) is refused.
+    const { error: oSummaryPrincipalErr } = await principal.rpc("get_incident_signoff_summary", { p_incident_id: oCpiId });
+    record("O4g: get_incident_signoff_summary() refused to a principal (view access, not creator/owning teacher)", Boolean(oSummaryPrincipalErr), oSummaryPrincipalErr?.message);
+
+    // -- O5: the drift-proof check -- summary.can_sign_off must agree with --
+    // what sign_off_incident() actually does, on the SAME incident, in the
+    // SAME state. Now genuinely guaranteed by sharing incident_signoff_
+    // issues(), not just hoped for -- this exercises that the WIRING (not
+    // just the shared function itself) is correct on both paths.
+    const { data: oSignAfterFix, error: oSignAfterFixErr } = await teacherA.rpc("sign_off_incident", { p_incident_id: oCpiId });
+    record(
+      "O5: summary said can_sign_off=true, and sign_off_incident() agrees -- succeeds",
+      oSummary2?.can_sign_off === true && !oSignAfterFixErr && oSignAfterFix?.teacher_signed_at != null,
+      `summary.can_sign_off=${oSummary2?.can_sign_off}, err=${oSignAfterFixErr?.message}`
+    );
+
+    // -- O6: immutability freeze-by-exclusion, re-confirmed post-0086 -- --
+    // the three previously-missed columns, plus a regression check on an
+    // already-frozen one, plus the allow-list actually working.
+    const { error: oAnyoneInjuredErr } = await teacherA.from("incidents").update({ anyone_injured: true }).eq("id", oCpiId);
+    const { error: oLocationOtherErr } = await teacherA.from("incidents").update({ location_other: "Should not persist" }).eq("id", oCpiId);
+    const { error: oPartyOtherErr } = await teacherA.from("incidents").update({ party_other: "Should not persist" }).eq("id", oCpiId);
+    const { error: oNarrativeErr } = await teacherA.from("incidents").update({ narrative: "Should not persist either" }).eq("id", oCpiId);
+    const { data: oFrozenAfter } = await admin.from("incidents").select("anyone_injured, location_other, party_other, narrative").eq("id", oCpiId).single();
+    record(
+      "O6a: post-signoff, anyone_injured/location_other/party_other (the three 0080/0081 columns 0085 caught up) all still frozen",
+      oFrozenAfter.anyone_injured === null && oFrozenAfter.location_other === null && oFrozenAfter.party_other === null,
+      JSON.stringify({ errs: [oAnyoneInjuredErr, oLocationOtherErr, oPartyOtherErr].map((e) => e?.message), oFrozenAfter })
+    );
+    record("O6b: narrative (already frozen pre-0085) still frozen -- no regression from the freeze-by-exclusion rewrite", oFrozenAfter.narrative === null, `err=${oNarrativeErr?.message}, narrative=${oFrozenAfter.narrative}`);
+
+    // -- O7: countersign still works post-signoff -- the exact concern --
+    // raised about the teacher_signed_by trigger interfering. It cannot,
+    // structurally (countersign never touches teacher_signed_at, so
+    // old.teacher_signed_at is null is always false for that write) --
+    // proved here directly rather than left as reasoning.
+    const { error: oCountersignErr } = await principal
+      .from("incidents")
+      .update({ countersigned_at: new Date().toISOString(), countersigned_by: principalId, countersigned_role_at_time: "principal" })
+      .eq("id", oCpiId);
+    const { data: oAfterCountersign } = await admin.from("incidents").select("countersigned_at, countersigned_by, countersigned_role_at_time, updated_at").eq("id", oCpiId).single();
+    record(
+      "O7: countersign succeeds post-signoff, completely unaffected by the teacher_signed_by guard trigger",
+      !oCountersignErr && oAfterCountersign.countersigned_at != null && oAfterCountersign.countersigned_by === principalId,
+      `err=${oCountersignErr?.message}, ${JSON.stringify(oAfterCountersign)}`
+    );
+
+    await admin.from("incidents").delete().eq("id", oCleanId);
+    await admin.from("incidents").delete().eq("id", oCpiId);
+  }
+
   console.log(`\n== Summary ==`);
   const failed = results.filter((r) => !r.pass);
   console.log(`${results.length - failed.length}/${results.length} passed.`);
