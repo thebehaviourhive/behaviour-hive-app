@@ -143,8 +143,9 @@ interface RestrictivePracticeRecord {
   holdLevel: HoldLevel | null;
   resultCodes: string[];
   totalProcedures: string;
-  staffInitials: string;
-  ncseReportComplete: boolean;
+  staffInitials: string; // legacy, read-only -- see the CPI section's own comment.
+  linkedStaffIds: string[]; // incident_staff.id values -- real accounts only.
+  ncseReportComplete: boolean | null; // null = not answered, distinct from an answered No (0081).
   isSaving: boolean;
   saveError: string | null;
   savedAt: number | null;
@@ -162,7 +163,8 @@ function blankRestrictivePracticeRecord(): RestrictivePracticeRecord {
     resultCodes: [],
     totalProcedures: "",
     staffInitials: "",
-    ncseReportComplete: false,
+    linkedStaffIds: [],
+    ncseReportComplete: null,
     isSaving: false,
     saveError: null,
     savedAt: null,
@@ -218,6 +220,10 @@ export default function IncidentRecordPage() {
   // Keyed by passport_id -- a restrictive-practice record belongs to one
   // named child, not the incident as a whole (0068 Part 7).
   const [restrictivePracticesByChild, setRestrictivePracticesByChild] = useState<Record<string, RestrictivePracticeRecord[]>>({});
+  // Real-account staff named on this incident at the stamp -- the only
+  // people who can be linked to a restrictive practice record (0080's
+  // trigger rejects free-text-only entries; no fallback here, per the brief).
+  const [incidentStaffOptions, setIncidentStaffOptions] = useState<{ id: string; name: string }[]>([]);
 
   const [injuryTypeOptions, setInjuryTypeOptions] = useState<InjuryTypeOption[]>([]);
   const [injuries, setInjuries] = useState<InjuryRecordState[]>([]);
@@ -304,7 +310,7 @@ export default function IncidentRecordPage() {
           .select("id, child_index, passport_id, distress_level, remained_on_site, remained_detail, recovery_methods, recovery_methods_other")
           .eq("incident_id", params.incidentId)
           .order("child_index"),
-        supabase.from("incident_staff").select("user_id, free_text_name").eq("incident_id", params.incidentId),
+        supabase.from("incident_staff").select("id, user_id, free_text_name").eq("incident_id", params.incidentId),
         supabase.rpc("get_institution_staff_roster", { p_institution_id: incident.institution_id }),
         // Roster-scoped resolution, not an embedded passports(...) join
         // -- see this file's header comment and CLAUDE.md.
@@ -352,6 +358,12 @@ export default function IncidentRecordPage() {
         (childRoster ?? []).map((row: { passport_id: string; child_name: string | null }) => [row.passport_id, row.child_name])
       );
 
+      setIncidentStaffOptions(
+        (staffRows ?? [])
+          .filter((row) => row.user_id)
+          .map((row) => ({ id: row.id, name: nameByUserId.get(row.user_id ?? "") || "Named staff member" }))
+      );
+
       setSummary({
         occurredAt: incident.occurred_at,
         locationValue: locationValue ?? "Unknown location",
@@ -385,6 +397,18 @@ export default function IncidentRecordPage() {
       setCpiDisengagementOptions((disengagementTypes ?? []).map((row) => row.value));
       setCpiResultOptions((resultTypes ?? []).map((row) => row.value));
 
+      // A record's own id isn't known until the batch above resolves, so
+      // the staff links are a separate follow-up query, not part of the
+      // Promise.all.
+      const rpIds = (restrictivePracticeRows ?? []).map((row) => row.id);
+      const { data: rpStaffLinkRows } = rpIds.length
+        ? await supabase.from("restrictive_practice_staff").select("restrictive_practice_id, incident_staff_id").in("restrictive_practice_id", rpIds)
+        : { data: [] };
+      const linkedStaffByRpId = new Map<string, string[]>();
+      for (const link of rpStaffLinkRows ?? []) {
+        linkedStaffByRpId.set(link.restrictive_practice_id, [...(linkedStaffByRpId.get(link.restrictive_practice_id) ?? []), link.incident_staff_id]);
+      }
+
       const byChild: Record<string, RestrictivePracticeRecord[]> = {};
       for (const row of restrictivePracticeRows ?? []) {
         const record: RestrictivePracticeRecord = {
@@ -398,6 +422,7 @@ export default function IncidentRecordPage() {
           resultCodes: row.result_codes ?? [],
           totalProcedures: row.total_procedures?.toString() ?? "",
           staffInitials: row.staff_initials ?? "",
+          linkedStaffIds: linkedStaffByRpId.get(row.id) ?? [],
           ncseReportComplete: row.ncse_report_complete,
           isSaving: false,
           saveError: null,
@@ -571,6 +596,17 @@ export default function IncidentRecordPage() {
     }));
   }
 
+  function toggleRestrictivePracticeStaff(passportId: string, index: number, incidentStaffId: string) {
+    setRestrictivePracticesByChild((current) => ({
+      ...current,
+      [passportId]: current[passportId].map((r, i) => {
+        if (i !== index) return r;
+        const has = r.linkedStaffIds.includes(incidentStaffId);
+        return { ...r, linkedStaffIds: has ? r.linkedStaffIds.filter((id) => id !== incidentStaffId) : [...r.linkedStaffIds, incidentStaffId] };
+      }),
+    }));
+  }
+
   async function saveRestrictivePracticeRecord(passportId: string, index: number) {
     const record = restrictivePracticesByChild[passportId][index];
 
@@ -597,13 +633,14 @@ export default function IncidentRecordPage() {
       ncse_report_complete: record.ncseReportComplete,
     };
 
-    if (record.id) {
-      const { error: updateError } = await supabase.from("restrictive_practices").update(payload).eq("id", record.id);
+    let rpId = record.id;
+
+    if (rpId) {
+      const { error: updateError } = await supabase.from("restrictive_practices").update(payload).eq("id", rpId);
       if (updateError) {
         updateRestrictivePracticeRecord(passportId, index, { isSaving: false, saveError: updateError.message });
         return;
       }
-      updateRestrictivePracticeRecord(passportId, index, { isSaving: false, savedAt: Date.now() });
     } else {
       const { data: inserted, error: insertError } = await supabase
         .from("restrictive_practices")
@@ -614,8 +651,29 @@ export default function IncidentRecordPage() {
         updateRestrictivePracticeRecord(passportId, index, { isSaving: false, saveError: insertError.message });
         return;
       }
-      updateRestrictivePracticeRecord(passportId, index, { isSaving: false, savedAt: Date.now(), id: inserted.id });
+      rpId = inserted.id;
     }
+
+    // Staff links: delete-all-then-reinsert-selected. Simpler than
+    // diffing against what was originally loaded, and correct either
+    // way -- this is a plain "who's linked right now" selection, not an
+    // append-only history like attestations.
+    const { error: unlinkError } = await supabase.from("restrictive_practice_staff").delete().eq("restrictive_practice_id", rpId);
+    if (unlinkError) {
+      updateRestrictivePracticeRecord(passportId, index, { isSaving: false, saveError: unlinkError.message, id: rpId });
+      return;
+    }
+    if (record.linkedStaffIds.length > 0) {
+      const { error: linkError } = await supabase
+        .from("restrictive_practice_staff")
+        .insert(record.linkedStaffIds.map((incidentStaffId) => ({ restrictive_practice_id: rpId, incident_staff_id: incidentStaffId })));
+      if (linkError) {
+        updateRestrictivePracticeRecord(passportId, index, { isSaving: false, saveError: linkError.message, id: rpId });
+        return;
+      }
+    }
+
+    updateRestrictivePracticeRecord(passportId, index, { isSaving: false, savedAt: Date.now(), id: rpId });
   }
 
   async function handleAddInjury() {
@@ -975,7 +1033,9 @@ export default function IncidentRecordPage() {
                 </p>
                 <div className="rounded-2xl border border-black/5 bg-white p-4">
                   <div className="flex flex-wrap gap-2">
-                    {actionTypes.map((action) => {
+                    {actionTypes
+                      .filter((action) => !action.isRestraint)
+                      .map((action) => {
                       const isSelected = selectedActionTypeIds.includes(action.id);
                       return (
                         <button
@@ -1015,6 +1075,41 @@ export default function IncidentRecordPage() {
                   })()}
                 </div>
               </section>
+
+              {(() => {
+                const restraintAction = actionTypes.find((a) => a.isRestraint);
+                if (!restraintAction) return null;
+                const isCpiOn = selectedActionTypeIds.includes(restraintAction.id);
+                return (
+                  <section>
+                    <div
+                      className={`rounded-2xl border-2 p-4 ${
+                        isCpiOn
+                          ? "border-brand-golden-brown bg-brand-golden-brown/10"
+                          : "border-brand-golden-brown/40 bg-white"
+                      }`}
+                    >
+                      <label className="flex cursor-pointer items-start gap-3">
+                        <input
+                          type="checkbox"
+                          checked={isCpiOn}
+                          onChange={() => toggleAction(restraintAction.id)}
+                          className="mt-1 h-5 w-5 flex-shrink-0 accent-brand-golden-brown"
+                        />
+                        <span>
+                          <span className="block font-heading text-lg font-bold text-brand-prussian-blue">
+                            CPI / restraint used
+                          </span>
+                          <span className="mt-0.5 block text-sm text-brand-neutral-black/70">
+                            Tick only if physical restraint (CPI) was used during this incident -- this opens the
+                            restrictive practice record below, added deliberately, never permanently present.
+                          </span>
+                        </span>
+                      </label>
+                    </div>
+                  </section>
+                );
+              })()}
 
               <div className="flex flex-col gap-5 rounded-2xl border border-black/5 bg-white p-4">
                 <div>
@@ -1176,11 +1271,37 @@ export default function IncidentRecordPage() {
 
                               <div>
                                 <span className="mb-2 block text-sm font-semibold text-brand-neutral-black">Hold level</span>
-                                <PillSingleSelect
-                                  options={HOLD_LEVEL_OPTIONS}
-                                  value={record.holdLevel}
-                                  onChange={(v) => updateRestrictivePracticeRecord(child.passportId, index, { holdLevel: v })}
-                                />
+                                {/* Deliberate, narrow exception to the module's colour rules --
+                                    escalating physical force is exactly where a reader's eye
+                                    should be drawn. Standard semantic red/amber/green, never
+                                    the Calm red pair, used only on these three pills. Colour
+                                    is never the only signal -- the pill's own label (Low/
+                                    Medium/High) is always readable underneath it. */}
+                                <div className="flex flex-wrap gap-2">
+                                  {HOLD_LEVEL_OPTIONS.map((option) => {
+                                    const isSelected = record.holdLevel === option.value;
+                                    const selectedClass =
+                                      option.value === "low"
+                                        ? "border-green-600 bg-green-100 text-green-800"
+                                        : option.value === "med"
+                                          ? "border-amber-600 bg-amber-100 text-amber-800"
+                                          : "border-red-600 bg-red-100 text-red-800";
+                                    return (
+                                      <button
+                                        key={option.value}
+                                        type="button"
+                                        onClick={() =>
+                                          updateRestrictivePracticeRecord(child.passportId, index, { holdLevel: option.value })
+                                        }
+                                        className={`rounded-full border-2 px-3 py-1.5 text-xs font-semibold transition-colors ${
+                                          isSelected ? selectedClass : "border-black/10 bg-white text-black/60 hover:bg-black/[0.02]"
+                                        }`}
+                                      >
+                                        {option.label}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
                               </div>
 
                               <div>
@@ -1193,7 +1314,7 @@ export default function IncidentRecordPage() {
                               </div>
 
                               <TextField
-                                label="Total procedures"
+                                label="Total no. of procedures used:"
                                 id={`total-procedures-${child.id}-${index}`}
                                 type="number"
                                 min={0}
@@ -1203,25 +1324,46 @@ export default function IncidentRecordPage() {
                                 }
                               />
 
-                              <TextField
-                                label="Staff initials"
-                                id={`staff-initials-${child.id}-${index}`}
-                                value={record.staffInitials}
-                                onChange={(e) =>
-                                  updateRestrictivePracticeRecord(child.passportId, index, { staffInitials: e.target.value })
-                                }
-                              />
+                              <div>
+                                <span className="mb-2 block text-sm font-semibold text-brand-neutral-black">
+                                  Staff involved
+                                </span>
+                                {incidentStaffOptions.length === 0 ? (
+                                  <p className="text-sm text-brand-neutral-black/60">
+                                    No staff with an account are named on this incident yet -- add them at the staff
+                                    step first.
+                                  </p>
+                                ) : (
+                                  <PillMultiSelect
+                                    options={incidentStaffOptions.map((s) => ({ value: s.name, fullName: s.name }))}
+                                    selected={record.linkedStaffIds
+                                      .map((id) => incidentStaffOptions.find((s) => s.id === id)?.name)
+                                      .filter((name): name is string => Boolean(name))}
+                                    onToggle={(name) => {
+                                      const staffMember = incidentStaffOptions.find((s) => s.name === name);
+                                      if (staffMember) toggleRestrictivePracticeStaff(child.passportId, index, staffMember.id);
+                                    }}
+                                  />
+                                )}
+                                {record.staffInitials && (
+                                  <p className="mt-2 text-xs text-brand-neutral-black/50">
+                                    Previously recorded initials (read-only, no longer written to): {record.staffInitials}
+                                  </p>
+                                )}
+                              </div>
 
-                              <label className="flex cursor-pointer items-center gap-2 text-sm font-semibold text-brand-neutral-black">
-                                <input
-                                  type="checkbox"
-                                  checked={record.ncseReportComplete}
-                                  onChange={(e) =>
-                                    updateRestrictivePracticeRecord(child.passportId, index, { ncseReportComplete: e.target.checked })
+                              <div>
+                                <span className="mb-2 block text-sm font-semibold text-brand-neutral-black">
+                                  NCSE report complete?
+                                </span>
+                                <PillSingleSelect
+                                  options={REMAINED_ON_SITE_OPTIONS}
+                                  value={record.ncseReportComplete === null ? null : record.ncseReportComplete ? "yes" : "no"}
+                                  onChange={(v) =>
+                                    updateRestrictivePracticeRecord(child.passportId, index, { ncseReportComplete: v === "yes" })
                                   }
                                 />
-                                NCSE report complete
-                              </label>
+                              </div>
 
                               {record.saveError && (
                                 <p role="alert" className="text-sm font-medium text-red-600">
