@@ -11,6 +11,7 @@ import { Textarea } from "@/components/ui/Textarea";
 import { PillSingleSelect } from "@/components/ui/PillSingleSelect";
 import { PillMultiSelect } from "@/components/ui/PillMultiSelect";
 import { BodyMapCard, type InjuryTypeOption, type RegionOption } from "@/components/incident-log/body-map/BodyMapCard";
+import { SignOffCard } from "@/components/incident-log/SignOffCard";
 
 // School Incident Log -- Phase 3 stage two, built in sections per
 // explicit instruction: category & narrative first (this round), then
@@ -1923,10 +1924,15 @@ export default function IncidentRecordPage() {
               </>
             )}
 
-            <p className="text-sm leading-relaxed text-brand-neutral-black/60">
-              Teacher sign-off and principal countersign are not yet available in this build. This record is saved
-              and will not be lost.
-            </p>
+            {/* Sign-off is the owning teacher's action specifically (0069:
+                creator alone is not enough), not the broader canEdit used
+                everywhere else on this page -- matches exactly what
+                sign_off_incident() will actually allow. Nothing renders
+                once locked; the isLocked banner above already covers
+                that state, and principal countersign is a later piece. */}
+            {!isLocked && owningTeacherId === user?.id && (
+              <SignOffCard incidentId={params.incidentId as string} onSignedOff={() => window.location.reload()} />
+            )}
           </div>
         ) : null}
       </main>
