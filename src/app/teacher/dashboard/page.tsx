@@ -95,6 +95,17 @@ export default function TeacherDashboardPage() {
         {getGreeting()}, {firstName}
       </h1>
 
+      {/* Unconditional, unlike QuestionnairePromptCard below -- a
+          teacher can be named staff on an incident they don't own
+          (and don't need a single linked child of their own for) via
+          institution-roster visibility, same as the SNA/principal
+          dashboards' own copies of this card. Nesting it inside the
+          hasStudents branch was a real gap: a teacher with zero linked
+          passports but an outstanding attestation saw nothing at all,
+          on the exact roster-wide-visibility branch 0089 was written
+          to un-hide. Caught live in browser verification, not by eye. */}
+      <AttestationPromptCard className="mt-4 px-4" />
+
       {!hasStudents ? (
         <EmptyState
           institutionCode={institutionCode}
@@ -123,7 +134,6 @@ export default function TeacherDashboardPage() {
               below it. No bottom margin needed: the grid section
               already supplies its own mt-4. */}
           <QuestionnairePromptCard track="teacher" className="mt-4 px-4" />
-          <AttestationPromptCard className="mt-4 px-4" />
 
           <section className="mt-4 grid grid-cols-2 gap-3 px-4">
             {isLoadingCheckins

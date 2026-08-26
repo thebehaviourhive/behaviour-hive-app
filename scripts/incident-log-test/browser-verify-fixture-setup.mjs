@@ -1,12 +1,16 @@
 // Disposable browser-verification fixture for Phase 4 Piece 2
 // (attestation UI). NOT ZZFIXTURE_THUMBTEST -- torn down in this same
-// session via browser-verify-fixture-teardown.mjs, confirmed gone by
-// direct query, per this session's own established discipline.
+// session via a direct admin.from(...).delete() + deleteUser() pass,
+// confirmed gone by direct query, per this session's own established
+// discipline.
 //
-// Creates one institution, one owning teacher, one SNA (named staff,
-// real account), one child, and one incident with narrative/category
-// filled in (so it's past the "empty draft" stage). Prints the login
-// credentials and incident URL for manual browser walk-through.
+// Creates one institution, one owning teacher, and TWO named staff who
+// are NOT the owner: an ordinary teacher and a principal -- so both the
+// teacher dashboard's and the principal dashboard's own copies of
+// AttestationPromptCard get a real, non-owner "named staff" case to
+// render, not just the SNA path already covered once before. Prints
+// the login credentials and incident URL for manual browser
+// walk-through.
 //
 // Run with: node --env-file=.env.local scripts/incident-log-test/browser-verify-fixture-setup.mjs
 
@@ -53,12 +57,14 @@ async function main() {
   const institutionId = inst.id;
 
   const teacherAId = await createUser("attestbrowser.teacherA@thebehaviourhive.com", "Attest Teacher A", "class_teacher");
-  const snaId = await createUser("attestbrowser.sna@thebehaviourhive.com", "Attest SNA", "sna");
+  const teacherBId = await createUser("attestbrowser.teacherB@thebehaviourhive.com", "Attest Teacher B", "class_teacher");
+  const principalId = await createUser("attestbrowser.principal@thebehaviourhive.com", "Attest Principal", "principal");
   const parentId = await createUser("attestbrowser.parent@thebehaviourhive.com", "Attest Parent", "parent");
 
   const { error: staffErr } = await admin.from("institution_staff").insert([
     { institution_id: institutionId, user_id: teacherAId, role: "class_teacher" },
-    { institution_id: institutionId, user_id: snaId, role: "sna" },
+    { institution_id: institutionId, user_id: teacherBId, role: "class_teacher" },
+    { institution_id: institutionId, user_id: principalId, role: "principal" },
   ]);
   if (staffErr) throw staffErr;
 
@@ -75,12 +81,19 @@ async function main() {
 
   const teacherA = await signedInClient("attestbrowser.teacherA@thebehaviourhive.com");
 
+  // teacherB and principal are BOTH named staff, NEITHER is the owner
+  // (teacherA is) -- the case that exercises the teacher and principal
+  // dashboards' own AttestationPromptCard, distinct from piece 2's
+  // original SNA-only verification pass.
   const { data: incidentId, error: stampErr } = await teacherA.rpc("create_incident_stamp", {
     p_institution_id: institutionId,
     p_occurred_at: new Date().toISOString(),
     p_location_id: loc.id,
     p_child_passport_ids: [passport.id],
-    p_staff: [{ user_id: snaId, involvement: "witnessed" }],
+    p_staff: [
+      { user_id: teacherBId, involvement: "witnessed" },
+      { user_id: principalId, involvement: "witnessed" },
+    ],
   });
   if (stampErr) throw stampErr;
 
@@ -94,12 +107,16 @@ async function main() {
     .eq("id", incidentId);
   if (narrErr) throw narrErr;
 
+  const { error: reqErr } = await teacherA.from("incidents").update({ attestations_requested: true }).eq("id", incidentId);
+  if (reqErr) throw reqErr;
+
   console.log(JSON.stringify(
     {
       institutionId,
       incidentId,
       teacherAEmail: "attestbrowser.teacherA@thebehaviourhive.com",
-      snaEmail: "attestbrowser.sna@thebehaviourhive.com",
+      teacherBEmail: "attestbrowser.teacherB@thebehaviourhive.com",
+      principalEmail: "attestbrowser.principal@thebehaviourhive.com",
       password: PASSWORD,
       incidentUrl: `/teacher/incidents/${incidentId}`,
     },
