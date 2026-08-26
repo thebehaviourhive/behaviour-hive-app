@@ -1407,6 +1407,10 @@ export default function IncidentRecordPage() {
                                 <span className="mb-2 block text-sm font-semibold text-brand-neutral-black">
                                   Staff involved
                                 </span>
+                                <p className="mb-2 text-xs text-brand-neutral-black/50">
+                                  Only staff with an account can be linked here -- a restraint record has to trace
+                                  back to a named, accountable individual.
+                                </p>
                                 {incidentStaffOptions.length === 0 ? (
                                   <p className="text-sm text-brand-neutral-black/60">
                                     No staff with an account are named on this incident yet -- add them at the staff
@@ -1610,7 +1614,8 @@ export default function IncidentRecordPage() {
                       <span className="mb-2 block text-sm font-semibold text-brand-neutral-black">Who was injured?</span>
                       <p className="mb-2 text-xs text-brand-neutral-black/50">
                         Chosen from people already named on this incident -- the same person is always the same
-                        record.
+                        record. Unlike the restrictive practice section above, staff without an account are included
+                        here too: anyone can be injured, whether or not they can be held accountable for a technique.
                       </p>
                       <div className="flex flex-wrap gap-2">
                         {children.map((child) => (
@@ -1650,6 +1655,7 @@ export default function IncidentRecordPage() {
                             }`}
                           >
                             {staffMember.name}
+                            {!staffMember.userId && <span className="text-black/40"> (no account)</span>}
                           </button>
                         ))}
                       </div>
