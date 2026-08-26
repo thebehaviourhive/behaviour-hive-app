@@ -720,27 +720,34 @@ async function main() {
     const { data: stillUncountersigned } = await admin.from("incidents").select("countersigned_at").eq("id", incidentId).single();
     record("Owning teacher CANNOT countersign despite every other authority on the incident", stillUncountersigned.countersigned_at === null, `err=${teacherCountersignErr?.message}, countersigned_at=${stillUncountersigned.countersigned_at}`);
 
-    // countersigned_role_at_time must match the caller's REAL institution_staff.role
-    // (verified server-side by the policy's own WITH CHECK) -- a mismatched claim
-    // should be rejected even though the caller genuinely can countersign.
-    const { error: mismatchedRoleErr } = await principal
-      .from("incidents")
-      .update({ countersigned_at: new Date().toISOString(), countersigned_by: principalId, countersigned_role_at_time: "class_teacher" })
-      .eq("id", incidentId);
-    const { data: stillUncountersignedAfterMismatch } = await admin.from("incidents").select("countersigned_at").eq("id", incidentId).single();
-    record(
-      "Principal's countersign REJECTED if countersigned_role_at_time doesn't match their real role",
-      stillUncountersignedAfterMismatch.countersigned_at === null,
-      `err=${mismatchedRoleErr?.message}, countersigned_at=${stillUncountersignedAfterMismatch.countersigned_at}`
-    );
-
+    // -- 0090: countersigned_role_at_time/countersigned_via are now --
+    // DERIVED by derive_countersign_fields() (a trigger), not validated
+    // against a client-submitted value in the policy's own WITH CHECK --
+    // the old "mismatch rejected" behaviour tested here no longer
+    // applies, because there's no longer a client-submitted value to
+    // mismatch against. What matters now is that the trigger is
+    // authoritative even when a client submits something wrong: a
+    // deliberately incorrect role, a deliberately wrong countersigned_by
+    // (someone else's id), and a deliberately wrong countersigned_via
+    // should all be silently overwritten with the real caller's own
+    // identity and role, not trusted and not merely rejected.
     const { error: cleanCountersign } = await principal
       .from("incidents")
-      .update({ countersigned_at: new Date().toISOString(), countersigned_by: principalId, countersigned_role_at_time: "principal" })
+      .update({ countersigned_at: new Date().toISOString(), countersigned_by: teacherAId, countersigned_role_at_time: "class_teacher", countersigned_via: "grant" })
       .eq("id", incidentId);
-    record("Principal countersign with the correct role recorded succeeds", !cleanCountersign, cleanCountersign?.message);
-
-    const { data: afterCountersign } = await admin.from("incidents").select("narrative, status").eq("id", incidentId).single();
+    const { data: afterCountersign } = await admin
+      .from("incidents")
+      .select("narrative, status, countersigned_by, countersigned_role_at_time, countersigned_via")
+      .eq("id", incidentId)
+      .single();
+    record(
+      "Principal's countersign succeeds despite deliberately wrong countersigned_by/role/via submitted -- the trigger overwrites them with the real caller's identity and role, not the client's claim",
+      !cleanCountersign
+        && afterCountersign.countersigned_by === principalId
+        && afterCountersign.countersigned_role_at_time === "principal"
+        && afterCountersign.countersigned_via === "principal_role",
+      `err=${cleanCountersign?.message}, ${JSON.stringify(afterCountersign)}`
+    );
     // narrative is untouched by the countersign write (the real thing
     // this checks); status is SUPPOSED to change now (0089) -- it
     // derives to 'finalised' the moment countersigned_at is set, not
@@ -2042,6 +2049,176 @@ async function main() {
     record("Q10: signing off derives status='awaiting_principal'", !qSignErr && qRow4.status === "awaiting_principal", `err=${qSignErr?.message}, status=${qRow4.status}`);
 
     await admin.from("incidents").delete().eq("id", qIncidentId);
+  }
+
+  console.log(`\n== CHECK R: Phase 4 piece 3 -- countersign_incident() RPC, get_countersign_summary(), countersigned_via, amendment-notify trigger (migration 0090) ==`);
+  {
+    // -- R1: minimal clean incident, teacher-signed via the RPC -- no --
+    // staff named, so nothing to attest, no debrief/CPI gate tripped
+    // (same minimal recipe CHECK O's oCleanId uses).
+    const { data: rIncidentId } = await teacherA.rpc("create_incident_stamp", {
+      p_institution_id: institutionId, p_occurred_at: new Date().toISOString(), p_location_id: loc.id,
+      p_child_passport_ids: [child1], p_staff: [],
+    });
+    await teacherA.rpc("sign_off_incident", { p_incident_id: rIncidentId });
+
+    // -- R2: teacherB has real, otherwise-unrelated visibility into this --
+    // incident via passport_access (established in top-level setup) --
+    // confirm that first, so R2b's refusal is provably about
+    // can_countersign_incident() specifically, not about lacking any
+    // standing at all.
+    const { data: rVisibleToTeacherB } = await teacherB.from("incidents").select("id").eq("id", rIncidentId);
+    record("R2a: teacherB CAN see the incident (visibility isn't the thing under test)", (rVisibleToTeacherB?.length ?? 0) === 1, `rows=${rVisibleToTeacherB?.length}`);
+    const { error: rSummaryDeniedErr } = await teacherB.rpc("get_countersign_summary", { p_incident_id: rIncidentId });
+    record("R2b: get_countersign_summary() refused for a visible-but-non-countersigning caller, for the right reason", Boolean(rSummaryDeniedErr) && /countersign/i.test(rSummaryDeniedErr?.message ?? ""), rSummaryDeniedErr?.message);
+
+    // -- R3: get_countersign_summary() -- correct content for the real principal. --
+    const { data: rSummary, error: rSummaryErr } = await principal.rpc("get_countersign_summary", { p_incident_id: rIncidentId });
+    record(
+      "R3: get_countersign_summary() succeeds for the principal, reports teacher name/time and not-yet-countersigned",
+      !rSummaryErr && rSummary?.already_countersigned === false && rSummary?.teacher_signed_by_name != null && rSummary?.teacher_signed_at != null,
+      `err=${rSummaryErr?.message}, ${JSON.stringify(rSummary)}`
+    );
+
+    // -- R4: countersign_incident() -- not-yet-signed-off gate. --
+    const { data: rUnsignedId } = await teacherA.rpc("create_incident_stamp", {
+      p_institution_id: institutionId, p_occurred_at: new Date().toISOString(), p_location_id: loc.id,
+      p_child_passport_ids: [child1], p_staff: [],
+    });
+    const { error: rTooEarlyErr } = await principal.rpc("countersign_incident", { p_incident_id: rUnsignedId });
+    record("R4: countersign_incident() refused before teacher sign-off", Boolean(rTooEarlyErr) && /not yet.*signed off/i.test(rTooEarlyErr?.message ?? ""), rTooEarlyErr?.message);
+    await admin.from("incidents").delete().eq("id", rUnsignedId);
+
+    // -- R5: countersign_incident() -- permission gate, real reason (same --
+    // visible-but-unauthorized caller as R2).
+    const { error: rNoPermErr } = await teacherB.rpc("countersign_incident", { p_incident_id: rIncidentId });
+    record("R5: countersign_incident() refused for a visible-but-non-countersigning caller", Boolean(rNoPermErr) && /permission/i.test(rNoPermErr?.message ?? ""), rNoPermErr?.message);
+
+    // -- R6: countersign_incident() -- clean success via the RPC, derived --
+    // fields correct, status finalised.
+    const { error: rSignErr } = await principal.rpc("countersign_incident", { p_incident_id: rIncidentId });
+    const { data: rAfter } = await admin.from("incidents").select("countersigned_at, countersigned_by, countersigned_role_at_time, countersigned_via, status").eq("id", rIncidentId).single();
+    record(
+      "R6: countersign_incident() succeeds for the principal, all four fields correctly derived, status='finalised'",
+      !rSignErr && rAfter.countersigned_by === principalId && rAfter.countersigned_role_at_time === "principal" && rAfter.countersigned_via === "principal_role" && rAfter.status === "finalised",
+      `err=${rSignErr?.message}, ${JSON.stringify(rAfter)}`
+    );
+
+    // -- R7: already-countersigned gate. --
+    const { error: rTwiceErr } = await principal.rpc("countersign_incident", { p_incident_id: rIncidentId });
+    record("R7: countersign_incident() refused a second time on an already-countersigned incident", Boolean(rTwiceErr) && /already/i.test(rTwiceErr?.message ?? ""), rTwiceErr?.message);
+
+    // -- R8: get_countersign_summary() reflects the completed countersign, --
+    // so a reload (or a race with another countersigner) is legible.
+    const { data: rSummaryAfter } = await principal.rpc("get_countersign_summary", { p_incident_id: rIncidentId });
+    record(
+      "R8: get_countersign_summary() reports already_countersigned=true with the countersigner's name and role",
+      rSummaryAfter?.already_countersigned === true && rSummaryAfter?.countersigned_role_at_time === "principal" && rSummaryAfter?.countersigned_via === "principal_role" && rSummaryAfter?.countersigned_by_name != null,
+      JSON.stringify(rSummaryAfter)
+    );
+
+    // -- R9: countersigned_via='grant', countersigned_role_at_time is the --
+    // grant-holder's REAL role ('class_teacher'), never 'principal' -- on
+    // a second, separate incident.
+    const { data: rGrantId } = await teacherA.rpc("create_incident_stamp", {
+      p_institution_id: institutionId, p_occurred_at: new Date().toISOString(), p_location_id: loc.id,
+      p_child_passport_ids: [child1], p_staff: [],
+    });
+    await teacherA.rpc("sign_off_incident", { p_incident_id: rGrantId });
+    const { error: rGrantInsertErr } = await principal.from("institution_permissions").insert({ institution_id: institutionId, user_id: teacherBId, permission: "countersign_incident", granted_by: principalId });
+    record("R9a: principal CAN grant countersign_incident to teacherB (ordinary class_teacher)", !rGrantInsertErr, rGrantInsertErr?.message);
+    const { error: rGrantSignErr } = await teacherB.rpc("countersign_incident", { p_incident_id: rGrantId });
+    const { data: rGrantAfter } = await admin.from("incidents").select("countersigned_by, countersigned_role_at_time, countersigned_via, countersigned_at").eq("id", rGrantId).single();
+    record(
+      "R9b: grant-holder countersigns successfully, countersigned_via='grant', countersigned_role_at_time is their REAL role ('class_teacher'), never 'principal'",
+      !rGrantSignErr && rGrantAfter.countersigned_by === teacherBId && rGrantAfter.countersigned_via === "grant" && rGrantAfter.countersigned_role_at_time === "class_teacher",
+      `err=${rGrantSignErr?.message}, ${JSON.stringify(rGrantAfter)}`
+    );
+    await admin.from("institution_permissions").delete().eq("institution_id", institutionId).eq("user_id", teacherBId).eq("permission", "countersign_incident");
+
+    // -- R10: revoking the grant afterward does not affect the already- --
+    // countersigned record (CHECK J already proves this at the raw-update
+    // layer; this confirms the same property holds through the RPC too).
+    const { data: rGrantAfterRevoke } = await admin.from("incidents").select("countersigned_by, countersigned_role_at_time, countersigned_via, countersigned_at").eq("id", rGrantId).single();
+    record(
+      "R10: countersign is unchanged after the grant is revoked -- revocation is not retroactive",
+      rGrantAfterRevoke.countersigned_by === teacherBId
+        && rGrantAfterRevoke.countersigned_via === "grant"
+        && rGrantAfterRevoke.countersigned_at === rGrantAfter.countersigned_at,
+      JSON.stringify(rGrantAfterRevoke)
+    );
+
+    // -- R11: a raw update deliberately submitting someone else's id and --
+    // the wrong role/via is overwritten by the trigger, not rejected and
+    // not trusted -- on a third, separate incident.
+    const { data: rSpoofId } = await teacherA.rpc("create_incident_stamp", {
+      p_institution_id: institutionId, p_occurred_at: new Date().toISOString(), p_location_id: loc.id,
+      p_child_passport_ids: [child1], p_staff: [],
+    });
+    await teacherA.rpc("sign_off_incident", { p_incident_id: rSpoofId });
+    const { error: rSpoofErr } = await principal
+      .from("incidents")
+      .update({ countersigned_at: new Date().toISOString(), countersigned_by: teacherAId, countersigned_role_at_time: "class_teacher", countersigned_via: "grant" })
+      .eq("id", rSpoofId);
+    const { data: rSpoofAfter } = await admin.from("incidents").select("countersigned_by, countersigned_role_at_time, countersigned_via").eq("id", rSpoofId).single();
+    record(
+      "R11: a raw update deliberately submitting someone else's id and the wrong role/via is overwritten by the trigger, not rejected and not trusted",
+      !rSpoofErr && rSpoofAfter.countersigned_by === principalId && rSpoofAfter.countersigned_role_at_time === "principal" && rSpoofAfter.countersigned_via === "principal_role",
+      `err=${rSpoofErr?.message}, ${JSON.stringify(rSpoofAfter)}`
+    );
+
+    // -- R12: wrong-reason-pass discipline -- combine a legitimate --
+    // countersign write with a smuggled narrative change in the SAME
+    // statement, as the real principal (who genuinely has countersign
+    // authority) -- only guard_incident_immutability() should be able to
+    // reject this, on a fourth, separate incident so the countersign
+    // itself is still live when the guard fires.
+    const { data: rSmuggleId } = await teacherA.rpc("create_incident_stamp", {
+      p_institution_id: institutionId, p_occurred_at: new Date().toISOString(), p_location_id: loc.id,
+      p_child_passport_ids: [child1], p_staff: [],
+    });
+    await teacherA.from("incidents").update({ narrative: "Original narrative." }).eq("id", rSmuggleId);
+    await teacherA.rpc("sign_off_incident", { p_incident_id: rSmuggleId });
+    const { error: rSmuggleErr } = await principal
+      .from("incidents")
+      .update({ countersigned_at: new Date().toISOString(), narrative: "Smuggled alongside a legitimate countersign." })
+      .eq("id", rSmuggleId);
+    const { data: rSmuggleAfter } = await admin.from("incidents").select("countersigned_at, narrative").eq("id", rSmuggleId).single();
+    record(
+      "R12: guard_incident_immutability() rejects a narrative change smuggled into an otherwise-legitimate countersign write, from a caller who genuinely has countersign authority",
+      Boolean(rSmuggleErr) && /immutable/i.test(rSmuggleErr?.message ?? "") && rSmuggleAfter.countersigned_at === null && rSmuggleAfter.narrative === "Original narrative.",
+      `err=${rSmuggleErr?.message}, ${JSON.stringify(rSmuggleAfter)}`
+    );
+
+    // -- R13/R14/R15: amendment-notify trigger -- principal's amendment --
+    // notifies the owning teacher; the owning teacher's OWN amendment
+    // does not notify themselves; teacherB (visible via passport_access,
+    // but no countersign authority left after R9's grant was revoked, and
+    // not creator/owning teacher/clinician) cannot add one at all.
+    const { data: rNoticesBefore } = await admin.from("school_notices").select("id").eq("incident_id", rSmuggleId).eq("notice_type", "incident_amendment_added");
+    const { error: rPrincipalAmendErr } = await principal.from("incident_amendments").insert({ incident_id: rSmuggleId, author_id: principalId, reason: "Disagreement", content: "I was not present for this but the record raises a concern." });
+    const { data: rNoticesAfterPrincipal } = await admin.from("school_notices").select("id").eq("incident_id", rSmuggleId).eq("notice_type", "incident_amendment_added");
+    record(
+      "R13: principal's amendment raises exactly one incident_amendment_added notice",
+      !rPrincipalAmendErr && (rNoticesBefore?.length ?? 0) === 0 && (rNoticesAfterPrincipal?.length ?? 0) === 1,
+      `err=${rPrincipalAmendErr?.message}, before=${rNoticesBefore?.length}, after=${rNoticesAfterPrincipal?.length}`
+    );
+
+    const { error: rTeacherAmendErr } = await teacherA.from("incident_amendments").insert({ incident_id: rSmuggleId, author_id: teacherAId, reason: "Clarification", content: "Adding detail the principal asked about." });
+    const { data: rNoticesAfterTeacher } = await admin.from("school_notices").select("id").eq("incident_id", rSmuggleId).eq("notice_type", "incident_amendment_added");
+    record(
+      "R14: the owning teacher's OWN amendment does not raise a self-notice -- still exactly one notice total",
+      !rTeacherAmendErr && (rNoticesAfterTeacher?.length ?? 0) === 1,
+      `err=${rTeacherAmendErr?.message}, notices=${rNoticesAfterTeacher?.length}`
+    );
+
+    const { error: rTeacherBAmendErr } = await teacherB.from("incident_amendments").insert({ incident_id: rSmuggleId, author_id: teacherBId, reason: "Uninvited", content: "I can see this incident but have no standing to amend it." });
+    record("R15: a caller who can SEE the incident but is not creator/owning teacher/countersigner/clinician CANNOT add an amendment", Boolean(rTeacherBAmendErr), rTeacherBAmendErr?.message);
+
+    await admin.from("incidents").delete().eq("id", rIncidentId);
+    await admin.from("incidents").delete().eq("id", rGrantId);
+    await admin.from("incidents").delete().eq("id", rSpoofId);
+    await admin.from("incidents").delete().eq("id", rSmuggleId);
   }
 
   console.log(`\n== Summary ==`);
