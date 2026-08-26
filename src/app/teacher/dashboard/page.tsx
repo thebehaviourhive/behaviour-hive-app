@@ -15,6 +15,7 @@ import { MorningCheckinDetailSheet } from "@/components/teacher/MorningCheckinDe
 import { TeacherQuickActions } from "@/components/teacher/TeacherQuickActions";
 import { TeacherActivityCard } from "@/components/teacher/TeacherActivityCard";
 import { QuestionnairePromptCard } from "@/components/questionnaire/QuestionnairePromptCard";
+import { AttestationPromptCard } from "@/components/incident-log/AttestationPromptCard";
 
 const GRID_CAP = 6;
 
@@ -122,6 +123,7 @@ export default function TeacherDashboardPage() {
               below it. No bottom margin needed: the grid section
               already supplies its own mt-4. */}
           <QuestionnairePromptCard track="teacher" className="mt-4 px-4" />
+          <AttestationPromptCard className="mt-4 px-4" />
 
           <section className="mt-4 grid grid-cols-2 gap-3 px-4">
             {isLoadingCheckins

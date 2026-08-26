@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { createClient } from "@/lib/supabase/client";
 import { AlertTriangleIcon } from "@/components/ui/icons";
+import { AttestationPromptCard } from "@/components/incident-log/AttestationPromptCard";
 
 // Minimal principal surface, per the brief: "a sign-off queue and
 // access to incidents" -- nothing more. The full principal daily
@@ -33,10 +34,17 @@ interface InstitutionIncident {
   ncse_report_complete: boolean[] | null;
 }
 
+// Four states (0089), not the original five -- awaiting_attestation and
+// awaiting_debrief collapsed into one derived awaiting_signoff, since
+// the two aren't actually sequential (a teacher can finish either in
+// either order, and both can be outstanding at once) -- see that
+// migration's own reasoning. A single label here can't say WHAT'S
+// outstanding without inventing a false priority between them; that
+// detail lives in incident_signoff_issues()/get_incident_signoff_summary()
+// instead, for whoever's actually signing it off.
 const STATUS_LABEL: Record<string, string> = {
   draft: "Draft",
-  awaiting_attestation: "Awaiting attestation",
-  awaiting_debrief: "Awaiting debrief",
+  awaiting_signoff: "Awaiting sign-off",
   awaiting_principal: "Awaiting principal sign-off",
   finalised: "Finalised",
 };
@@ -131,6 +139,7 @@ export default function PrincipalDashboardPage() {
       </header>
 
       <main className="flex-1 px-4">
+        <AttestationPromptCard className="mb-4" />
         {isLoading ? (
           <div className="flex flex-col gap-2">
             <div className="h-16 animate-pulse rounded-2xl bg-white" />

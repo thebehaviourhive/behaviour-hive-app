@@ -12,6 +12,8 @@ import { PillSingleSelect } from "@/components/ui/PillSingleSelect";
 import { PillMultiSelect } from "@/components/ui/PillMultiSelect";
 import { BodyMapCard, type InjuryTypeOption, type RegionOption } from "@/components/incident-log/body-map/BodyMapCard";
 import { SignOffCard } from "@/components/incident-log/SignOffCard";
+import { AttestationCard } from "@/components/incident-log/AttestationCard";
+import { RequestAttestationsCard } from "@/components/incident-log/RequestAttestationsCard";
 
 // School Incident Log -- Phase 3 stage two, built in sections per
 // explicit instruction: category & narrative first (this round), then
@@ -264,6 +266,7 @@ export default function IncidentRecordPage() {
 
   const [owningTeacherId, setOwningTeacherId] = useState<string | null>(null);
   const [owningTeacherName, setOwningTeacherName] = useState<string | null>(null);
+  const [attestationsRequested, setAttestationsRequested] = useState(false);
   const [canEditDebrief, setCanEditDebrief] = useState(false);
   const [debriefRequired, setDebriefRequired] = useState(false);
   const [debriefId, setDebriefId] = useState<string | null>(null);
@@ -304,7 +307,7 @@ export default function IncidentRecordPage() {
       const { data: incident, error: incidentError } = await supabase
         .from("incidents")
         .select(
-          "institution_id, created_by, owning_teacher_id, teacher_signed_at, occurred_at, incident_locations(value), category, party, party_other, item_involved, narrative, parent_summary, staff_count_needed, staff_distressed, risk_reduction_future, other_information, debrief_required, anyone_injured"
+          "institution_id, created_by, owning_teacher_id, teacher_signed_at, occurred_at, incident_locations(value), category, party, party_other, item_involved, narrative, parent_summary, staff_count_needed, staff_distressed, risk_reduction_future, other_information, debrief_required, anyone_injured, attestations_requested"
         )
         .eq("id", params.incidentId)
         .maybeSingle();
@@ -522,6 +525,7 @@ export default function IncidentRecordPage() {
 
       setDebriefRequired(incident.debrief_required);
       setAnyoneInjured(incident.anyone_injured);
+      setAttestationsRequested(incident.attestations_requested);
       if (debriefRow) {
         setDebriefId(debriefRow.id);
         setDebriefDate(debriefRow.debrief_date ?? "");
@@ -1931,8 +1935,28 @@ export default function IncidentRecordPage() {
                 once locked; the isLocked banner above already covers
                 that state, and principal countersign is a later piece. */}
             {!isLocked && owningTeacherId === user?.id && (
+              <RequestAttestationsCard
+                incidentId={params.incidentId as string}
+                requested={attestationsRequested}
+                onChange={setAttestationsRequested}
+              />
+            )}
+
+            {!isLocked && owningTeacherId === user?.id && (
               <SignOffCard incidentId={params.incidentId as string} onSignedOff={() => window.location.reload()} />
             )}
+
+            {/* Attestation is a DIFFERENT population from sign-off -- any
+                named staff member with a real account, not just the
+                owning teacher (who may also be named staff themselves,
+                in which case they'd see both cards). Renders in both the
+                open and closed state (unlike SignOffCard, which
+                disappears once locked) -- a staff member's name is on a
+                legal record and they should be able to look up what they
+                attested to even after it closes. Self-hides entirely
+                (returns null) if the current user isn't named on this
+                incident at all. */}
+            <AttestationCard incidentId={params.incidentId as string} isClosed={isLocked} />
           </div>
         ) : null}
       </main>
