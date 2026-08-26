@@ -905,9 +905,8 @@ export default function IncidentRecordPage() {
   }
 
   const staffRole = user?.app_metadata?.role as string | undefined;
-  const hasCpiSelected = selectedActionTypeIds.some(
-    (id) => actionTypes.find((a) => a.id === id)?.isRestraint
-  );
+  const restraintAction = actionTypes.find((a) => a.isRestraint);
+  const hasCpiSelected = Boolean(restraintAction && selectedActionTypeIds.includes(restraintAction.id));
 
   return (
     <div className="flex min-h-full flex-1 flex-col bg-brand-off-white/40 pb-10">
@@ -1076,40 +1075,35 @@ export default function IncidentRecordPage() {
                 </div>
               </section>
 
-              {(() => {
-                const restraintAction = actionTypes.find((a) => a.isRestraint);
-                if (!restraintAction) return null;
-                const isCpiOn = selectedActionTypeIds.includes(restraintAction.id);
-                return (
-                  <section>
-                    <div
-                      className={`rounded-2xl border-2 p-4 ${
-                        isCpiOn
-                          ? "border-brand-golden-brown bg-brand-golden-brown/10"
-                          : "border-brand-golden-brown/40 bg-white"
-                      }`}
-                    >
-                      <label className="flex cursor-pointer items-start gap-3">
-                        <input
-                          type="checkbox"
-                          checked={isCpiOn}
-                          onChange={() => toggleAction(restraintAction.id)}
-                          className="mt-1 h-5 w-5 flex-shrink-0 accent-brand-golden-brown"
-                        />
-                        <span>
-                          <span className="block font-heading text-lg font-bold text-brand-prussian-blue">
-                            CPI / restraint used
-                          </span>
-                          <span className="mt-0.5 block text-sm text-brand-neutral-black/70">
-                            Tick only if physical restraint (CPI) was used during this incident -- this opens the
-                            restrictive practice record below, added deliberately, never permanently present.
-                          </span>
+              {restraintAction && (
+                <section>
+                  <div
+                    className={`rounded-2xl border-2 p-4 ${
+                      hasCpiSelected
+                        ? "border-brand-golden-brown bg-brand-golden-brown/10"
+                        : "border-brand-golden-brown/40 bg-white"
+                    }`}
+                  >
+                    <label className="flex cursor-pointer items-start gap-3">
+                      <input
+                        type="checkbox"
+                        checked={hasCpiSelected}
+                        onChange={() => toggleAction(restraintAction.id)}
+                        className="mt-1 h-5 w-5 flex-shrink-0 accent-brand-golden-brown"
+                      />
+                      <span>
+                        <span className="block font-heading text-lg font-bold text-brand-prussian-blue">
+                          CPI / restraint used
                         </span>
-                      </label>
-                    </div>
-                  </section>
-                );
-              })()}
+                        <span className="mt-0.5 block text-sm text-brand-neutral-black/70">
+                          Tick only if physical restraint (CPI) was used during this incident -- this opens the
+                          restrictive practice record below, added deliberately, never permanently present.
+                        </span>
+                      </span>
+                    </label>
+                  </div>
+                </section>
+              )}
 
               <div className="flex flex-col gap-5 rounded-2xl border border-black/5 bg-white p-4">
                 <div>
@@ -1209,14 +1203,32 @@ export default function IncidentRecordPage() {
                 </section>
               ))}
 
-              {hasCpiSelected &&
-                children.map((child) => {
+              {children.map((child) => {
                   const records = restrictivePracticesByChild[child.passportId] ?? [];
+                  // A record survives even if the toggle above gets
+                  // unticked (existing rows are never removed, only
+                  // corrected) -- so the section stays visible whenever
+                  // a record exists, regardless of the toggle, or a
+                  // teacher who unticked by mistake would have no way
+                  // to see what they've orphaned before hitting a
+                  // sign-off error naming a record that isn't on screen.
+                  // The trigger (0083) is the correctness boundary;
+                  // this is about being able to see and fix what it
+                  // will stop you on.
+                  if (!hasCpiSelected && records.length === 0) return null;
                   return (
                     <section key={`rp-${child.id}`}>
                       <h2 className="mb-3 font-heading text-lg font-bold text-brand-prussian-blue">
                         {child.childName} -- Restrictive Practice
                       </h2>
+
+                      {!hasCpiSelected && records.length > 0 && (
+                        <p className="mb-3 rounded-xl border border-brand-golden-brown bg-brand-golden-brown/10 p-3 text-sm text-brand-neutral-black">
+                          <strong>Inconsistent:</strong> a restrictive practice record exists below, but &quot;CPI /
+                          restraint used&quot; is currently unticked. This will block sign-off. Re-tick it above if
+                          restraint was used, or this record needs to be corrected.
+                        </p>
+                      )}
 
                       <div className="flex flex-col gap-4">
                         {records.map((record, index) => (
@@ -1396,13 +1408,15 @@ export default function IncidentRecordPage() {
                           </div>
                         ))}
 
-                        <button
-                          type="button"
-                          onClick={() => addRestrictivePracticeRecord(child.passportId)}
-                          className="rounded-2xl border-2 border-dashed border-brand-prussian-blue/30 py-3 text-sm font-semibold text-brand-prussian-blue"
-                        >
-                          + Add a restrictive practice record
-                        </button>
+                        {hasCpiSelected && (
+                          <button
+                            type="button"
+                            onClick={() => addRestrictivePracticeRecord(child.passportId)}
+                            className="rounded-2xl border-2 border-dashed border-brand-prussian-blue/30 py-3 text-sm font-semibold text-brand-prussian-blue"
+                          >
+                            + Add a restrictive practice record
+                          </button>
+                        )}
                       </div>
                     </section>
                   );
