@@ -2219,6 +2219,42 @@ async function main() {
     await admin.from("incidents").delete().eq("id", rGrantId);
     await admin.from("incidents").delete().eq("id", rSpoofId);
     await admin.from("incidents").delete().eq("id", rSmuggleId);
+
+    // -- R16: get_countersign_summary() surfaces addendum/withdrawal --
+    // reason in full, attributed, plus involvement -- not just a status
+    // label (migration 0092). teacherB attests with an addendum,
+    // withdraws with a reason, then re-attests with a different
+    // addendum -- both the attested and withdrawn timestamps should be
+    // present at once (both genuinely happened), attested_at AFTER
+    // withdrawn_at, so the client can render it as a sequence rather
+    // than two contradictory current states.
+    const { data: rSeqId } = await teacherA.rpc("create_incident_stamp", {
+      p_institution_id: institutionId, p_occurred_at: new Date().toISOString(), p_location_id: loc.id,
+      p_child_passport_ids: [child1], p_staff: [{ user_id: teacherBId, involvement: "witnessed" }],
+    });
+    const { data: rSeqStaffRow } = await admin.from("incident_staff").select("id").eq("incident_id", rSeqId).eq("user_id", teacherBId).single();
+    await teacherB.rpc("attest_to_incident", { p_incident_staff_id: rSeqStaffRow.id, p_addendum: "First attestation." });
+    await teacherB.rpc("withdraw_attestation", { p_incident_staff_id: rSeqStaffRow.id, p_reason: "Need to check something first." });
+    await teacherB.rpc("attest_to_incident", { p_incident_staff_id: rSeqStaffRow.id, p_addendum: "Checked -- confirming now." });
+    await teacherA.rpc("sign_off_incident", { p_incident_id: rSeqId });
+
+    const { data: rSeqSummary, error: rSeqSummaryErr } = await principal.rpc("get_countersign_summary", { p_incident_id: rSeqId });
+    const rSeqEntry = rSeqSummary?.staff_attestations?.find((s) => s.incident_staff_id === rSeqStaffRow.id);
+    record(
+      "R16a: get_countersign_summary() reports involvement, the CURRENT addendum ('Checked -- confirming now.'), and status='current'",
+      !rSeqSummaryErr && rSeqEntry?.involvement === "witnessed" && rSeqEntry?.addendum === "Checked -- confirming now." && rSeqEntry?.status === "current",
+      `err=${rSeqSummaryErr?.message}, ${JSON.stringify(rSeqEntry)}`
+    );
+    record(
+      "R16b: the EARLIER withdrawal is still reported (reason + timestamp) alongside the later re-attestation -- both genuinely happened, attested_at AFTER withdrawn_at (a sequence, not two contradictory current states)",
+      rSeqEntry?.withdrawal_reason === "Need to check something first."
+        && rSeqEntry?.withdrawn_at != null
+        && rSeqEntry?.attested_at != null
+        && new Date(rSeqEntry.attested_at).getTime() > new Date(rSeqEntry.withdrawn_at).getTime(),
+      JSON.stringify(rSeqEntry)
+    );
+
+    await admin.from("incidents").delete().eq("id", rSeqId);
   }
 
   console.log(`\n== Summary ==`);
