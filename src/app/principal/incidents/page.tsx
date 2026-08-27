@@ -81,6 +81,7 @@ export default function PrincipalIncidentsListPage() {
         .select("institution_id")
         .eq("user_id", user!.id)
         .eq("role", "principal")
+        .is("deactivated_at", null)
         .maybeSingle();
       if (!isMounted) return;
       setInstitutionId(data?.institution_id ?? null);

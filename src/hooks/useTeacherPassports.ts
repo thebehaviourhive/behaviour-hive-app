@@ -51,6 +51,7 @@ export function useTeacherPassports(userId: string | null): UseTeacherPassportsR
         .from("institution_staff")
         .select("institution_id")
         .eq("user_id", userId)
+        .is("deactivated_at", null)
         .maybeSingle();
 
       if (!isMounted) return;

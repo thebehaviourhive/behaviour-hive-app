@@ -53,6 +53,7 @@ export default function TeacherJoinInstitutionPage() {
         .from("institution_staff")
         .select("institution_id")
         .eq("user_id", user!.id)
+        .is("deactivated_at", null)
         .maybeSingle();
 
       if (!isMounted) return;

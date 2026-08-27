@@ -75,6 +75,7 @@ export default function PrincipalDashboardPage() {
         .select("institution_id, institutions(name)")
         .eq("user_id", user!.id)
         .eq("role", "principal")
+        .is("deactivated_at", null)
         .maybeSingle();
 
       if (!isMounted) return;
