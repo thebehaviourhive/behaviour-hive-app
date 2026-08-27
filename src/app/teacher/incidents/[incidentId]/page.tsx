@@ -14,6 +14,7 @@ import { BodyMapCard, type InjuryTypeOption, type RegionOption } from "@/compone
 import { SignOffCard } from "@/components/incident-log/SignOffCard";
 import { AttestationCard } from "@/components/incident-log/AttestationCard";
 import { RequestAttestationsCard } from "@/components/incident-log/RequestAttestationsCard";
+import { CountersignCard } from "@/components/incident-log/CountersignCard";
 
 // School Incident Log -- Phase 3 stage two, built in sections per
 // explicit instruction: category & narrative first (this round), then
@@ -1933,7 +1934,8 @@ export default function IncidentRecordPage() {
                 everywhere else on this page -- matches exactly what
                 sign_off_incident() will actually allow. Nothing renders
                 once locked; the isLocked banner above already covers
-                that state, and principal countersign is a later piece. */}
+                that state, and countersign (below, gated on isLocked
+                instead) is a separate card for a separate population. */}
             {!isLocked && owningTeacherId === user?.id && (
               <RequestAttestationsCard
                 incidentId={params.incidentId as string}
@@ -1957,6 +1959,23 @@ export default function IncidentRecordPage() {
                 (returns null) if the current user isn't named on this
                 incident at all. */}
             <AttestationCard incidentId={params.incidentId as string} isClosed={isLocked} />
+
+            {/* Countersign -- Phase 4 piece 3. Only meaningful once
+                teacher-signed (isLocked); self-hides entirely for
+                anyone get_countersign_summary() refuses, so no
+                separate "am I a countersigner" check is needed here.
+                Full record is already rendered read-only above for
+                anyone who can see this page at all -- this card adds
+                what the teacher's own form doesn't show: who
+                attested, who didn't, addenda in full, withdrawals with
+                their reason. */}
+            {isLocked && user && (
+              <CountersignCard
+                incidentId={params.incidentId as string}
+                userId={user.id}
+                onCountersigned={() => window.location.reload()}
+              />
+            )}
           </div>
         ) : null}
       </main>
