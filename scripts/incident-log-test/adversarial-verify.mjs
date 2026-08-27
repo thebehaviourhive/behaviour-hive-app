@@ -3129,10 +3129,46 @@ async function main() {
     );
 
     console.log(`-- item 10: rejoin creates a new membership row, doesn't resurrect the old one --`);
+    // V10-pre/post replicate the EXACT query join-institution/page.tsx's
+    // checkExisting() runs -- not a proxy for it, the same shape,
+    // file:line-matched -- because that query, not the table's own INSERT
+    // policy, is what actually decides whether a real person ever sees
+    // the join form. V10a alone (the raw INSERT below) proved the
+    // DATABASE would accept a legitimate rejoin; it never touched the
+    // CLIENT decision that gates whether anyone reaches the point of
+    // attempting it. That gap shipped for real -- checkExisting() had no
+    // deactivated_at filter, so a deactivated person's still-RLS-visible
+    // old row sent them straight back to their old dashboard, never to
+    // the form -- and this suite, which never renders or drives a UI,
+    // had no way to see it until it was hit by hand. See CLAUDE.md.
+    const { data: preRejoinCheck } = await teacherVTarget
+      .from("institution_staff")
+      .select("institution_id")
+      .eq("user_id", teacherVTargetId)
+      .is("deactivated_at", null)
+      .maybeSingle();
+    record(
+      "V10-pre: checkExisting()'s own query (src/app/teacher/join-institution/page.tsx:52-57) returns NO row for a deactivated person -- this is what actually lets them see the join form, not just whether an INSERT would succeed",
+      preRejoinCheck === null,
+      JSON.stringify(preRejoinCheck)
+    );
+
     const { error: rejoinErr } = await teacherVTarget.from("institution_staff").insert({
       institution_id: institutionVId, user_id: teacherVTargetId, role: "class_teacher",
     });
-    record("V10a: deactivated person rejoining via the real self-link INSERT succeeds -- the new active-only unique index doesn't collide with their old row", !rejoinErr, rejoinErr?.message);
+    record("V10a: the self-link INSERT itself succeeds at the database level -- the new active-only unique index doesn't collide with their old row (mechanism only, not the journey -- see V10-pre/post for that)", !rejoinErr, rejoinErr?.message);
+
+    const { data: postRejoinCheck } = await teacherVTarget
+      .from("institution_staff")
+      .select("institution_id")
+      .eq("user_id", teacherVTargetId)
+      .is("deactivated_at", null)
+      .maybeSingle();
+    record(
+      "V10-post: the SAME query now returns the new row -- confirms checkExisting() would correctly redirect them onward next time, not show the join form again forever",
+      postRejoinCheck?.institution_id === institutionVId,
+      JSON.stringify(postRejoinCheck)
+    );
 
     const { data: allTargetRows } = await admin.from("institution_staff").select("id, deactivated_at, deactivated_by, deactivation_reason").eq("institution_id", institutionVId).eq("user_id", teacherVTargetId).order("created_at");
     record("V10b: exactly 2 rows now exist for teacherVTarget at this institution -- the old one, plus the new one", allTargetRows?.length === 2, JSON.stringify(allTargetRows));
