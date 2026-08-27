@@ -2490,6 +2490,157 @@ async function main() {
     }
   }
 
+  console.log(`\n== CHECK T: Phase 5 -- get_parent_incidents()/get_clinician_incidents(), every role against every field, two-child incident (migration 0095) ==`);
+  {
+    const { data: instT } = await admin
+      .from("institutions")
+      .insert({ name: "Check T Institution", institution_code: "CHECKT" + Math.floor(Math.random() * 10000), status: "verified" })
+      .select()
+      .single();
+    const institutionTId = instT.id;
+
+    const teacherTId = await createUser("checkt.teacher@thebehaviourhive.com", "Check T Teacher", "class_teacher");
+    const snaTId = await createUser("checkt.sna@thebehaviourhive.com", "Check T SNA", "sna");
+    const parent1TId = await createUser("checkt.parent1@thebehaviourhive.com", "Check T Parent One", "parent");
+    const parent2TId = await createUser("checkt.parent2@thebehaviourhive.com", "Check T Parent Two", "parent");
+    const parent3TId = await createUser("checkt.parent3@thebehaviourhive.com", "Check T Parent Unrelated", "parent");
+    const clinicianTId = await createUser("checkt.clinician@thebehaviourhive.com", "Check T Clinician", "clinician");
+
+    await admin.from("institution_staff").insert([
+      { institution_id: institutionTId, user_id: teacherTId, role: "class_teacher" },
+      { institution_id: institutionTId, user_id: snaTId, role: "sna" },
+    ]);
+
+    const { data: child1T } = await admin.from("passports").insert({ user_id: parent1TId, child_name: "Check T Child One", passport_status: "complete" }).select().single();
+    const { data: child2T } = await admin.from("passports").insert({ user_id: parent2TId, child_name: "Check T Child Two", passport_status: "complete" }).select().single();
+    await admin.from("passport_institution_links").insert([
+      { passport_id: child1T.id, institution_id: institutionTId, approved_by_parent: true },
+      { passport_id: child2T.id, institution_id: institutionTId, approved_by_parent: true },
+    ]);
+    await admin.from("clinicians").insert({ user_id: clinicianTId, specialty: "behavioural_psychologist", verification_status: "verified" });
+    await admin.from("clinician_access").insert({ passport_id: child1T.id, clinician_id: clinicianTId, is_active: true }); // linked to child1T ONLY
+
+    const teacherT = await signedInClient("checkt.teacher@thebehaviourhive.com");
+    const snaT = await signedInClient("checkt.sna@thebehaviourhive.com");
+    const parent1T = await signedInClient("checkt.parent1@thebehaviourhive.com");
+    const parent2T = await signedInClient("checkt.parent2@thebehaviourhive.com");
+    const parent3T = await signedInClient("checkt.parent3@thebehaviourhive.com");
+    const clinicianT = await signedInClient("checkt.clinician@thebehaviourhive.com");
+
+    const { data: tIncidentId } = await teacherT.rpc("create_incident_stamp", {
+      p_institution_id: institutionTId, p_occurred_at: new Date().toISOString(), p_location_id: loc.id,
+      p_child_passport_ids: [child1T.id, child2T.id], p_staff: [],
+    });
+    await teacherT.from("incidents").update({
+      category: "one_party_incident",
+      narrative: "STAFF-ONLY NARRATIVE: staff intervened after the trigger event.",
+      parent_summary: "PARENT SUMMARY: your child was supported today.",
+    }).eq("id", tIncidentId);
+    await teacherT.from("incident_children").update({ distress_level: "yes_definitely", remained_on_site: true }).eq("incident_id", tIncidentId).eq("passport_id", child1T.id);
+    await teacherT.from("incident_children").update({ distress_level: "slightly", remained_on_site: false, remained_detail: "CHILD TWO ONLY: collected early by guardian." }).eq("incident_id", tIncidentId).eq("passport_id", child2T.id);
+
+    // -- T1: clinician sees FULL content (narrative included) even --
+    // pre-signoff -- confirms the gate is status<>'draft' like
+    // can_view_incident()'s own clinician branch, not teacher_signed_at.
+    await teacherT.from("incidents").update({ attestations_requested: true }).eq("id", tIncidentId);
+    const { data: tClinPre, error: tClinPreErr } = await clinicianT.rpc("get_clinician_incidents", { p_passport_id: child1T.id });
+    record(
+      "T1: clinician sees full content pre-signoff (narrative present), correct child_index/distress_level for THEIR linked child",
+      !tClinPreErr && tClinPre?.length === 1 && tClinPre[0].narrative?.includes("STAFF-ONLY NARRATIVE") && tClinPre[0].child_index === "A" && tClinPre[0].distress_level === "yes_definitely",
+      `err=${tClinPreErr?.message}, ${JSON.stringify(tClinPre)}`
+    );
+
+    // -- T2: clinician NOT linked to child2 gets nothing for child2, --
+    // even though they're a real, verified clinician (visible standing
+    // elsewhere) -- proves clinician_access, not just role, gates this.
+    const { data: tClinChild2 } = await clinicianT.rpc("get_clinician_incidents", { p_passport_id: child2T.id });
+    record("T2: clinician with NO clinician_access to child2 gets nothing for child2", (tClinChild2?.length ?? 0) === 0, `rows=${tClinChild2?.length}`);
+
+    // -- T3: teacher (real standing, owns the incident) is not a parent --
+    // or a clinician -- both parent- and clinician-facing RPCs correctly
+    // refuse them, for the right reason (owns_passport/clinician_access
+    // failing, not lack of visibility generally -- teacherT can see the
+    // full incident directly).
+    const { data: tTeacherAsParent } = await teacherT.rpc("get_parent_incidents", { p_passport_id: child1T.id });
+    record("T3a: owning teacher calling get_parent_incidents() gets nothing (not a parent)", (tTeacherAsParent?.length ?? 0) === 0, `rows=${tTeacherAsParent?.length}`);
+    const { data: tTeacherAsClinician } = await teacherT.rpc("get_clinician_incidents", { p_passport_id: child1T.id });
+    record("T3b: owning teacher calling get_clinician_incidents() gets nothing (not a clinician)", (tTeacherAsClinician?.length ?? 0) === 0, `rows=${tTeacherAsClinician?.length}`);
+
+    // -- T4: SNA, named/visible staff with real standing on this --
+    // incident, still gets nothing from either parent- or
+    // clinician-facing RPC -- visibility on the staff side doesn't leak
+    // into either.
+    const { data: tSnaAsParent } = await snaT.rpc("get_parent_incidents", { p_passport_id: child1T.id });
+    record("T4a: SNA (real staff standing) calling get_parent_incidents() gets nothing", (tSnaAsParent?.length ?? 0) === 0, `rows=${tSnaAsParent?.length}`);
+    const { data: tSnaAsClinician } = await snaT.rpc("get_clinician_incidents", { p_passport_id: child1T.id });
+    record("T4b: SNA calling get_clinician_incidents() gets nothing", (tSnaAsClinician?.length ?? 0) === 0, `rows=${tSnaAsClinician?.length}`);
+
+    // -- T5: an entirely unrelated parent (parent3T, no connection to --
+    // this incident or either child at all) gets nothing.
+    const { data: tParent3 } = await parent3T.rpc("get_parent_incidents", { p_passport_id: child1T.id });
+    record("T5: entirely unrelated parent gets nothing for someone else's child", (tParent3?.length ?? 0) === 0, `rows=${tParent3?.length}`);
+
+    // -- T6: both parents get ZERO rows pre-signoff, despite status --
+    // having left 'draft' (attestations_requested above) -- the actual
+    // gate under audit, live not just read from source.
+    const { data: tParent1Pre } = await parent1T.rpc("get_parent_incidents", { p_passport_id: child1T.id });
+    record("T6a: parent1T gets nothing pre-signoff", (tParent1Pre?.length ?? 0) === 0, `rows=${tParent1Pre?.length}`);
+    const { data: tParent2Pre } = await parent2T.rpc("get_parent_incidents", { p_passport_id: child2T.id });
+    record("T6b: parent2T gets nothing pre-signoff", (tParent2Pre?.length ?? 0) === 0, `rows=${tParent2Pre?.length}`);
+
+    await teacherT.rpc("sign_off_incident", { p_incident_id: tIncidentId });
+
+    // -- T7: post-signoff, each parent sees exactly their own child's --
+    // fields, correctly distinct (yes_definitely/true for child1,
+    // slightly/false/the child2-only remained_detail for child2), and
+    // the column set structurally excludes every staff-only field --
+    // "every field", not just narrative.
+    const { data: tParent1Post } = await parent1T.rpc("get_parent_incidents", { p_passport_id: child1T.id });
+    const p1Row = tParent1Post?.[0];
+    const REDACTED_FIELDS = ["narrative", "staff_count_needed", "staff_distressed", "risk_reduction_future", "other_information", "category", "party", "party_other", "item_involved", "debrief_required"];
+    const p1LeakedFields = p1Row ? REDACTED_FIELDS.filter((f) => Object.prototype.hasOwnProperty.call(p1Row, f)) : ["<no row>"];
+    record(
+      "T7a: parent1T post-signoff sees correct own-child fields (distress_level='yes_definitely', remained_on_site=true), column set excludes EVERY staff-only field checked",
+      p1Row?.distress_level === "yes_definitely" && p1Row?.remained_on_site === true && p1LeakedFields.length === 0,
+      `leaked=${JSON.stringify(p1LeakedFields)}, ${JSON.stringify(p1Row)}`
+    );
+    record(
+      "T7b: parent1T's row contains NOTHING identifying child2 -- no 'CHILD TWO ONLY' text anywhere in the serialized row",
+      !JSON.stringify(p1Row).includes("CHILD TWO"),
+      JSON.stringify(p1Row)
+    );
+
+    const { data: tParent2Post } = await parent2T.rpc("get_parent_incidents", { p_passport_id: child2T.id });
+    const p2Row = tParent2Post?.[0];
+    record(
+      "T7c: parent2T post-signoff sees correct own-child fields (distress_level='slightly', remained_on_site=false, their own remained_detail)",
+      p2Row?.distress_level === "slightly" && p2Row?.remained_on_site === false && p2Row?.remained_detail?.includes("CHILD TWO ONLY"),
+      JSON.stringify(p2Row)
+    );
+    record(
+      "T7d: parent2T's row contains NOTHING identifying child1 -- no leakage of the other child's distress_level/remained_on_site values by cross-wiring",
+      p2Row?.child_index !== "A",
+      JSON.stringify(p2Row)
+    );
+    const { data: tParent1CrossAttempt } = await parent1T.rpc("get_parent_incidents", { p_passport_id: child2T.id });
+    record("T7e: parent1T explicitly calling for child2's passport_id gets nothing (RLS-equivalent owns_passport check, not client trust)", (tParent1CrossAttempt?.length ?? 0) === 0, `rows=${tParent1CrossAttempt?.length}`);
+
+    // -- T8: clinician post-signoff -- still full, still correctly --
+    // scoped, narrative still present (the gate never narrowed).
+    const { data: tClinPost } = await clinicianT.rpc("get_clinician_incidents", { p_passport_id: child1T.id });
+    record(
+      "T8: clinician post-signoff still sees full content, narrative present, actions array present (structurally, even if empty)",
+      tClinPost?.[0]?.narrative?.includes("STAFF-ONLY NARRATIVE") && Array.isArray(tClinPost?.[0]?.actions),
+      JSON.stringify(tClinPost)
+    );
+
+    await admin.from("incidents").delete().eq("id", tIncidentId);
+    await admin.from("institutions").delete().eq("id", institutionTId);
+    for (const id of [teacherTId, snaTId, parent1TId, parent2TId, parent3TId, clinicianTId]) {
+      await admin.auth.admin.deleteUser(id);
+    }
+  }
+
   console.log(`\n== Summary ==`);
   const failed = results.filter((r) => !r.pass);
   console.log(`${results.length - failed.length}/${results.length} passed.`);
