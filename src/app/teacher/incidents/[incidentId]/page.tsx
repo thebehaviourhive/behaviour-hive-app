@@ -123,6 +123,11 @@ interface ChildFormState {
   remainedDetail: string;
   recoveryMethods: string[];
   recoveryMethodsOther: string;
+  parentCallRequired: boolean;
+  parentCalledAt: string | null;
+  parentCalledBy: string | null;
+  parentNotifiedAt: string | null;
+  parentNotificationBlockedReason: string | null;
 }
 
 interface StampSummary {
@@ -256,6 +261,15 @@ export default function IncidentRecordPage() {
   // hard-to-notice bug, not a hypothetical one.
   const [anyoneInjured, setAnyoneInjured] = useState<boolean | null>(null);
   const [anyoneInjuredSaveError, setAnyoneInjuredSaveError] = useState<string | null>(null);
+  const [parentCallSaveError, setParentCallSaveError] = useState<string | null>(null);
+  const [markingCalledChildId, setMarkingCalledChildId] = useState<string | null>(null);
+  // Institution staff roster name lookup -- built once during load
+  // (get_institution_staff_roster(), the same roster-scoped source
+  // used for staff-name resolution elsewhere on this page), kept in
+  // state so it's usable in render for parent_called_by/similar --
+  // covers the owning teacher/principal even when they aren't
+  // themselves named incident_staff.
+  const [staffNameById, setStaffNameById] = useState<Map<string, string | null>>(new Map());
   // Every person named on the incident at the stamp -- children handled
   // separately via `children`; this is staff, account or not, for the
   // injured-party picker (a looser rule than the CPI staff picker,
@@ -342,7 +356,9 @@ export default function IncidentRecordPage() {
       ] = await Promise.all([
         supabase
           .from("incident_children")
-          .select("id, child_index, passport_id, distress_level, remained_on_site, remained_detail, recovery_methods, recovery_methods_other")
+          .select(
+            "id, child_index, passport_id, distress_level, remained_on_site, remained_detail, recovery_methods, recovery_methods_other, parent_call_required, parent_called_at, parent_called_by, parent_notified_at, parent_notification_blocked_reason"
+          )
           .eq("incident_id", params.incidentId)
           .order("child_index"),
         supabase.from("incident_staff").select("id, user_id, free_text_name").eq("incident_id", params.incidentId),
@@ -390,6 +406,7 @@ export default function IncidentRecordPage() {
       const nameByUserId = new Map<string, string | null>(
         (staffRoster ?? []).map((row: { user_id: string; full_name: string | null }) => [row.user_id, row.full_name])
       );
+      setStaffNameById(nameByUserId);
       const nameByPassportId = new Map<string, string | null>(
         (childRoster ?? []).map((row: { passport_id: string; child_name: string | null }) => [row.passport_id, row.child_name])
       );
@@ -427,6 +444,11 @@ export default function IncidentRecordPage() {
           remainedDetail: row.remained_detail ?? "",
           recoveryMethods: row.recovery_methods ?? [],
           recoveryMethodsOther: row.recovery_methods_other ?? "",
+          parentCallRequired: row.parent_call_required,
+          parentCalledAt: row.parent_called_at,
+          parentCalledBy: row.parent_called_by,
+          parentNotifiedAt: row.parent_notified_at,
+          parentNotificationBlockedReason: row.parent_notification_blocked_reason,
         }))
       );
 
@@ -851,6 +873,56 @@ export default function IncidentRecordPage() {
       setAnyoneInjured(previous);
       setAnyoneInjuredSaveError(updateError.message);
     }
+  }
+
+  // Parent-call flag -- per child (incident_children), immediate write
+  // like debrief_required/anyone_injured above, not batched into the
+  // main Save. One-way in the UI: the toggle is only ever offered while
+  // false -- injuries/restrictive practice can also flip it true
+  // automatically, and 0068's own trigger comment is explicit that it
+  // never goes back to false once set ("a physical injury or
+  // restrictive practice was used" doesn't un-happen). A raw update
+  // COULD technically still write false (no DB-level guard against it),
+  // but the UI simply never offers that action.
+  async function setParentCallRequiredAndSave(childId: string) {
+    setParentCallSaveError(null);
+    updateChild(childId, { parentCallRequired: true });
+
+    const supabase = createClient();
+    const { error: updateError } = await supabase
+      .from("incident_children")
+      .update({ parent_call_required: true })
+      .eq("id", childId);
+
+    if (updateError) {
+      updateChild(childId, { parentCallRequired: false });
+      setParentCallSaveError(updateError.message);
+    }
+  }
+
+  async function markParentCalled(childId: string) {
+    setParentCallSaveError(null);
+    setMarkingCalledChildId(childId);
+
+    const supabase = createClient();
+    const { error: callError } = await supabase.rpc("mark_parent_called", { p_incident_children_id: childId });
+
+    if (callError) {
+      setParentCallSaveError(callError.message);
+      setMarkingCalledChildId(null);
+      return;
+    }
+
+    const { data: refreshedRow } = await supabase
+      .from("incident_children")
+      .select("parent_called_at, parent_called_by")
+      .eq("id", childId)
+      .single();
+
+    if (refreshedRow) {
+      updateChild(childId, { parentCalledAt: refreshedRow.parent_called_at, parentCalledBy: refreshedRow.parent_called_by });
+    }
+    setMarkingCalledChildId(null);
   }
 
   function addDebriefStaffPresent() {
@@ -1282,6 +1354,65 @@ export default function IncidentRecordPage() {
                           placeholder="Optional"
                           className="mt-3"
                         />
+                      )}
+                    </div>
+
+                    {/* Parent contact -- per child (incident_children),
+                        Phase 4 piece 4. Golden Brown throughout, never
+                        Calm's red -- this flag is urgency-adjacent but
+                        not Calm's own escalation surface. */}
+                    <div className="border-t border-black/[0.06] pt-4">
+                      <span className="mb-2 block text-sm font-semibold text-brand-neutral-black">Parent call required?</span>
+                      {child.parentCallRequired ? (
+                        <span className="inline-block rounded-full border border-brand-golden-brown bg-brand-golden-brown/10 px-3 py-1.5 text-xs font-semibold text-brand-golden-brown">
+                          Yes
+                        </span>
+                      ) : (
+                        <div className="flex flex-wrap gap-2">
+                          <span className="rounded-full border border-brand-prussian-blue bg-brand-pastel-blue/30 px-3 py-1.5 text-xs font-semibold text-brand-prussian-blue">
+                            No
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setParentCallRequiredAndSave(child.id)}
+                            className="rounded-full border border-black/10 bg-white px-3 py-1.5 text-xs font-semibold text-black/60 transition-colors hover:bg-black/[0.02]"
+                          >
+                            Yes
+                          </button>
+                        </div>
+                      )}
+
+                      {child.parentCallRequired && (
+                        <div className="mt-3">
+                          {child.parentCalledAt ? (
+                            <p className="text-sm text-brand-neutral-black/70">
+                              Parent called {formatDateTime(child.parentCalledAt)}
+                              {child.parentCalledBy && ` by ${staffNameById.get(child.parentCalledBy) || "a staff member"}`}.
+                            </p>
+                          ) : (
+                            <Button
+                              type="button"
+                              onClick={() => markParentCalled(child.id)}
+                              disabled={markingCalledChildId === child.id}
+                              className="!w-auto !bg-brand-golden-brown !px-4 !py-2 !text-sm"
+                            >
+                              {markingCalledChildId === child.id ? "Recording…" : "Mark parent called"}
+                            </Button>
+                          )}
+                        </div>
+                      )}
+
+                      {child.parentNotificationBlockedReason === "dormant_account" && (
+                        <p className="mt-3 rounded-xl border border-brand-golden-brown/30 bg-brand-golden-brown/10 p-3 text-sm text-brand-neutral-black">
+                          This parent hasn&apos;t signed in and can&apos;t be notified in the app — contact them
+                          directly.
+                        </p>
+                      )}
+
+                      {parentCallSaveError && (
+                        <p role="alert" className="mt-2 text-sm font-medium text-red-600">
+                          {parentCallSaveError}
+                        </p>
                       )}
                     </div>
                   </div>

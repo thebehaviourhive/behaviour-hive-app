@@ -9,6 +9,7 @@ import { useRequireRole } from "@/hooks/useRequireRole";
 import { useMessagesAwaitingActionCount } from "@/hooks/useMessagesAwaitingActionCount";
 import { getPassportResumeHref } from "@/lib/getPassportResumeHref";
 import { RecentUpdatesCard } from "@/components/parent/RecentUpdatesCard";
+import { IncidentNoticeCard } from "@/components/parent/IncidentNoticeCard";
 import { ClinicalSupportSection } from "@/components/parent/ClinicalSupportSection";
 import { QuickActionButtons } from "@/components/parent/QuickActionButtons";
 import { YourTeamCard } from "@/components/parent/YourTeamCard";
@@ -261,6 +262,8 @@ export default function ParentDashboardPage() {
           hasTeacherUpdateToday={hasTeacherUpdateToday}
           teacherUpdate={teacherUpdate}
         />
+
+        <IncidentNoticeCard passportId={passportId} />
 
         {passportStatus === "complete" ? (
           !isPassportCardDismissed && (
