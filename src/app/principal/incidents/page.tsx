@@ -76,12 +76,15 @@ export default function PrincipalIncidentsListPage() {
     let isMounted = true;
     async function loadInstitution() {
       const supabase = createClient();
+      // approved_at is not null alongside deactivated_at is null -- see
+      // useTeacherPassports.ts's matching comment.
       const { data } = await supabase
         .from("institution_staff")
         .select("institution_id")
         .eq("user_id", user!.id)
         .eq("role", "principal")
         .is("deactivated_at", null)
+        .not("approved_at", "is", null)
         .maybeSingle();
       if (!isMounted) return;
       setInstitutionId(data?.institution_id ?? null);

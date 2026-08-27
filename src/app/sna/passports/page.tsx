@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { useTeacherPassports } from "@/hooks/useTeacherPassports";
 import { useTeacherMorningCheckins, type MorningPupilStatus } from "@/hooks/useTeacherMorningCheckins";
@@ -87,7 +87,19 @@ export default function SnaPassportsPage() {
     return pupils.filter((p) => p.firstName.toLowerCase().includes(q));
   }, [pupils, query]);
 
-  if (!isReady) {
+  // Same pattern as teacher/dashboard -- was missing here entirely, found
+  // while extending useTeacherPassports' resolution query to exclude
+  // pending/rejected (Stage 1b Step 3). Without this, this page silently
+  // rendered with its institution-gated sections just missing instead of
+  // sending someone with no active row to join-institution's own status
+  // page -- the same "broken dashboard instead of a clear state" gap
+  // Daniel's brief named explicitly.
+  useEffect(() => {
+    if (!isReady || isLoadingPassports) return;
+    if (institutionId === null) router.replace("/teacher/join-institution");
+  }, [isReady, isLoadingPassports, institutionId, router]);
+
+  if (!isReady || isLoadingPassports || institutionId === null) {
     return null;
   }
 

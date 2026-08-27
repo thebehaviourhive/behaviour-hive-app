@@ -45,11 +45,15 @@ export function useInstitutionRoster(userId: string | null): UseInstitutionRoste
       const supabase = createClient();
       setError(null);
 
+      // approved_at is not null alongside deactivated_at is null -- see
+      // useTeacherPassports.ts's matching comment; a pending or rejected
+      // caller must resolve as "no institution" here too.
       const { data: staffRow, error: staffError } = await supabase
         .from("institution_staff")
         .select("institution_id")
         .eq("user_id", userId)
         .is("deactivated_at", null)
+        .not("approved_at", "is", null)
         .maybeSingle();
 
       if (!isMounted) return;

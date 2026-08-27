@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { createClient } from "@/lib/supabase/client";
@@ -58,6 +59,7 @@ function formatDateTime(value: string): string {
 }
 
 export default function PrincipalDashboardPage() {
+  const router = useRouter();
   const { user, isReady } = useRequireRole("principal");
   const [institutionName, setInstitutionName] = useState<string | null>(null);
   const [incidents, setIncidents] = useState<InstitutionIncident[]>([]);
@@ -70,19 +72,27 @@ export default function PrincipalDashboardPage() {
 
     async function load() {
       const supabase = createClient();
+      // approved_at is not null alongside deactivated_at is null -- a
+      // pending or rejected principal is structurally unreachable today
+      // (CLAUDE.md, Deferred work) but this lookup, and the redirect
+      // below, should already be correct for the day handover makes it
+      // reachable rather than need a second pass then.
       const { data: staffRow, error: staffError } = await supabase
         .from("institution_staff")
         .select("institution_id, institutions(name)")
         .eq("user_id", user!.id)
         .eq("role", "principal")
         .is("deactivated_at", null)
+        .not("approved_at", "is", null)
         .maybeSingle();
 
       if (!isMounted) return;
 
       if (staffError || !staffRow) {
-        setError("Could not find your institution.");
-        setIsLoading(false);
+        // Matches teacher/dashboard's own pattern: no active row here
+        // means join-institution's own four-way status resolution is
+        // where this belongs, not a dead-end error on this page.
+        router.replace("/teacher/join-institution");
         return;
       }
 
@@ -110,7 +120,7 @@ export default function PrincipalDashboardPage() {
     return () => {
       isMounted = false;
     };
-  }, [user]);
+  }, [user, router]);
 
   if (!isReady) {
     return null;

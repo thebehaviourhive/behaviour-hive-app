@@ -47,11 +47,18 @@ export function useTeacherPassports(userId: string | null): UseTeacherPassportsR
       const supabase = createClient();
       setError(null);
 
+      // approved_at is not null alongside deactivated_at is null -- a
+      // pending or rejected row must resolve the same as "no row at all"
+      // here, so this hook's existing "no institution -> join form"
+      // fallback (every dashboard using this hook already redirects on a
+      // null institutionId) correctly bounces them to join-institution's
+      // own four-way status page, not a broken empty dashboard.
       const { data: staffRow, error: staffError } = await supabase
         .from("institution_staff")
         .select("institution_id")
         .eq("user_id", userId)
         .is("deactivated_at", null)
+        .not("approved_at", "is", null)
         .maybeSingle();
 
       if (!isMounted) return;

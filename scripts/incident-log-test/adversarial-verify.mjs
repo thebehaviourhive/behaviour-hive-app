@@ -29,6 +29,19 @@ function record(name, pass, detail) {
   console.log(`${pass ? "PASS" : "FAIL"} -- ${name}${detail ? " :: " + detail : ""}`);
 }
 
+// Mirrors checkExisting()'s own resolution logic
+// (src/app/teacher/join-institution/page.tsx) exactly -- given the rows
+// its query returns, what status would the component show. Shared by
+// CHECK V (V10-pre/post, a genuine rejoin) and CHECK W (W13-W15, the
+// none/rejected/active states) rather than duplicated per check.
+function resolveStatus(rows) {
+  const active = rows.find((r) => r.approved_at !== null);
+  if (active) return "active";
+  const current = rows[0];
+  if (!current) return "none";
+  return current.rejected_at !== null ? "rejected" : "pending";
+}
+
 async function signedInClient(email) {
   const c = createClient(URL, ANON_KEY, { auth: { autoRefreshToken: false, persistSession: false } });
   const { error } = await c.auth.signInWithPassword({ email, password: PASSWORD });
@@ -3222,16 +3235,26 @@ async function main() {
     // old row sent them straight back to their old dashboard, never to
     // the form -- and this suite, which never renders or drives a UI,
     // had no way to see it until it was hit by hand. See CLAUDE.md.
-    const { data: preRejoinCheck } = await teacherVTarget
+    // Replicates checkExisting()'s CURRENT query shape (rewritten for
+    // Stage 1b Step 3, src/app/teacher/join-institution/page.tsx's
+    // checkExisting(), the useCallback starting around line 74) --
+    // updated here in the same pass as that rewrite, not left pointing at
+    // the two-way query it replaced. The prior version of this comment
+    // said the three-way rewrite was "owed to Step 3, not built" -- it's
+    // built now, so the query below, and what it's asserted against,
+    // changed with it rather than silently going stale. resolveStatus()
+    // itself is a top-level helper (defined once, alongside signedInClient/
+    // createUser) since CHECK W reuses it too.
+    const { data: preRejoinRows } = await teacherVTarget
       .from("institution_staff")
-      .select("institution_id")
+      .select("institution_id, approved_at, rejected_at, rejection_reason, created_at, institutions(name)")
       .eq("user_id", teacherVTargetId)
       .is("deactivated_at", null)
-      .maybeSingle();
+      .order("created_at", { ascending: false });
     record(
-      "V10-pre: checkExisting()'s own query (src/app/teacher/join-institution/page.tsx:52-57) returns NO row for a deactivated person -- this is what actually lets them see the join form, not just whether an INSERT would succeed",
-      preRejoinCheck === null,
-      JSON.stringify(preRejoinCheck)
+      "V10-pre: checkExisting()'s own query returns NO rows for a deactivated person with no other history -- resolves to 'none', the same as never having joined, which is what actually lets them see the join form",
+      resolveStatus(preRejoinRows ?? []) === "none",
+      JSON.stringify(preRejoinRows)
     );
 
     const { error: rejoinErr } = await teacherVTarget.from("institution_staff").insert({
@@ -3239,31 +3262,16 @@ async function main() {
     });
     record("V10a: the self-link INSERT itself succeeds at the database level -- the new active-only unique index doesn't collide with their old row (mechanism only, not the journey -- see V10-pre/post for that)", !rejoinErr, rejoinErr?.message);
 
-    // 0100 landed after V10-post was first written, and changes what
-    // this query's result actually means -- flagging honestly rather
-    // than quietly keeping the old claim. checkExisting() as it exists
-    // on disk TODAY still only checks deactivated_at is null (the Stage
-    // 1 fix) -- it does not yet know about approved_at, because that
-    // rewrite is Step 3 of the join-approval work, not built. So this
-    // query genuinely does return the new row (that part still holds),
-    // but the honest claim is narrower than "correctly redirect them
-    // onward": a PENDING person would currently be waved straight to
-    // their dashboard by the as-yet-unpatched client, which is exactly
-    // the bug class this whole exercise exists to catch, at a new door,
-    // reproduced here rather than left to be found by hand again. Not a
-    // new discovery -- the join-approval build prompt's own Step 0/3
-    // already owed this rewrite -- but this is the reproducible proof of
-    // it, kept rather than silently dropped.
-    const { data: postRejoinCheck } = await teacherVTarget
+    const { data: postRejoinRows } = await teacherVTarget
       .from("institution_staff")
-      .select("institution_id")
+      .select("institution_id, approved_at, rejected_at, rejection_reason, created_at, institutions(name)")
       .eq("user_id", teacherVTargetId)
       .is("deactivated_at", null)
-      .maybeSingle();
+      .order("created_at", { ascending: false });
     record(
-      "V10-post: the query returns the new row, as it did before 0100 -- but this no longer means 'correctly redirect onward': checkExisting() doesn't check approved_at yet, so a genuinely PENDING rejoiner would currently be waved straight to their dashboard by the unpatched client -- the three-way rewrite owed to Stage 1b Step 3, reproduced here rather than re-discovered later",
-      postRejoinCheck?.institution_id === institutionVId,
-      JSON.stringify(postRejoinCheck)
+      "V10-post: checkExisting()'s query, run through the SAME resolution logic the component uses, now correctly classifies the rejoined row as PENDING -- not silently waved onward to the dashboard, the exact bug class this exercise exists to catch, now closed at this door specifically",
+      resolveStatus(postRejoinRows ?? []) === "pending",
+      JSON.stringify(postRejoinRows)
     );
 
     const { data: allTargetRows } = await admin.from("institution_staff").select("id, deactivated_at, deactivated_by, deactivation_reason, approved_at, rejected_at").eq("institution_id", institutionVId).eq("user_id", teacherVTargetId).order("created_at");
@@ -3546,8 +3554,36 @@ async function main() {
     const { data: rejectedForCrossPrincipal, error: rejectedForCrossPrincipalErr } = await principalWOther.rpc("get_rejected_staff_joins", { p_institution_id: institutionWId });
     record("W12c: an active principal at a DIFFERENT institution sees an empty list for institutionW, not an error -- same-institution boundary, not just principal-only", !rejectedForCrossPrincipalErr && (rejectedForCrossPrincipal ?? []).length === 0, JSON.stringify(rejectedForCrossPrincipal));
 
+    console.log(`-- item: checkExisting()'s query-shape, four-way (src/app/teacher/join-institution/page.tsx's checkExisting) -- 'pending' is proved separately by V10-post above (a genuine rejoin), these three cover the rest --`);
+    const noRowId = await createUser("joinapproval.norow@thebehaviourhive.com", "No Row W", "class_teacher");
+    const noRowClient = await signedInClient("joinapproval.norow@thebehaviourhive.com");
+    const { data: noRowRows } = await noRowClient
+      .from("institution_staff")
+      .select("institution_id, approved_at, rejected_at, rejection_reason, created_at, institutions(name)")
+      .eq("user_id", noRowId)
+      .is("deactivated_at", null)
+      .order("created_at", { ascending: false });
+    record("W13: checkExisting() -- someone with no institution_staff row at all resolves to 'none' (empty result), showing the plain join form", resolveStatus(noRowRows ?? []) === "none", JSON.stringify(noRowRows));
+
+    const targetGetRejectedScope = await signedInClient("joinapproval.targetscope@thebehaviourhive.com");
+    const { data: rejectedRows } = await targetGetRejectedScope
+      .from("institution_staff")
+      .select("institution_id, approved_at, rejected_at, rejection_reason, created_at, institutions(name)")
+      .eq("user_id", targetGetRejectedScopeId)
+      .is("deactivated_at", null)
+      .order("created_at", { ascending: false });
+    record("W14: checkExisting() -- a rejected person resolves to 'rejected', with their own rejection_reason attached, not silently redirected anywhere", resolveStatus(rejectedRows ?? []) === "rejected" && rejectedRows?.[0]?.rejection_reason === "Reference for scope checks.", JSON.stringify(rejectedRows));
+
+    const { data: activeRows } = await principalW1
+      .from("institution_staff")
+      .select("institution_id, approved_at, rejected_at, rejection_reason, created_at, institutions(name)")
+      .eq("user_id", principalW1Id)
+      .is("deactivated_at", null)
+      .order("created_at", { ascending: false });
+    record("W15: checkExisting() -- an active person resolves to 'active', which is what actually redirects them onward to their dashboard rather than showing the join form again", resolveStatus(activeRows ?? []) === "active", JSON.stringify(activeRows));
+
     await admin.from("institutions").delete().in("id", [institutionWId, institutionWOtherId, institutionWUnverifiedId, institutionWFreshId]);
-    for (const id of [principalW1Id, principalWOtherId, principalWUnverifiedId, teacherWId, targetDoubleId, targetRejectThenApproveId, targetApproveThenRejectId, targetReasonRequiredId, targetSpoofId, targetNonPrincipalId, targetCrossInstitutionId, targetGetRejectedScopeId, targetUnverifiedId, freshTeacherId]) {
+    for (const id of [principalW1Id, principalWOtherId, principalWUnverifiedId, teacherWId, targetDoubleId, targetRejectThenApproveId, targetApproveThenRejectId, targetReasonRequiredId, targetSpoofId, targetNonPrincipalId, targetCrossInstitutionId, targetGetRejectedScopeId, targetUnverifiedId, freshTeacherId, noRowId]) {
       await admin.auth.admin.deleteUser(id);
     }
   }
