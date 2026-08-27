@@ -2,10 +2,14 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "behaviour-hive-app",
+      "name": "local-dev",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev"],
       "port": 3000
+    },
+    {
+      "name": "deployed",
+      "url": "https://behaviour-hive-app.vercel.app"
     }
   ]
 }
