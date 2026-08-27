@@ -70,13 +70,32 @@ async function main() {
   const parent3Id = await createUser("incverify.parent3@thebehaviourhive.com", "Parent Three", "parent");
   console.log("Users created.");
 
-  const { error: staffErr } = await admin.from("institution_staff").insert([
+  const { data: staffRows, error: staffErr } = await admin.from("institution_staff").insert([
     { institution_id: institutionId, user_id: principalId, role: "principal" },
     { institution_id: institutionId, user_id: teacherAId, role: "class_teacher" },
     { institution_id: institutionId, user_id: teacherBId, role: "class_teacher" },
     { institution_id: institutionId, user_id: snaId, role: "sna" },
-  ]);
+  ]).select();
   if (staffErr) throw staffErr;
+
+  // 0100: the principal-role row auto-approves via derive_staff_join_
+  // approval() (no active principal existed yet in this fresh
+  // institution) -- confirmed, not assumed, by teacherA's own approval
+  // succeeding below via the PRINCIPAL's real session. class_teacher/sna
+  // rows are never auto-approved, so they're correctly pending the
+  // instant after this insert -- driven through the real
+  // approve_staff_join() RPC, never by setting approved_at directly in
+  // this service-role insert. That would be the exact shortcut flagged
+  // as the standing violation elsewhere in this file (the old
+  // status: "awaiting_attestation" line) -- a fixture reaching a state
+  // no production path produces on its own.
+  {
+    const principalForApproval = await signedInClient("incverify.principal@thebehaviourhive.com");
+    for (const row of staffRows.filter((r) => r.role !== "principal")) {
+      const { error: approveErr } = await principalForApproval.rpc("approve_staff_join", { p_institution_staff_id: row.id });
+      if (approveErr) throw approveErr;
+    }
+  }
 
   const { data: p1, error: p1Err } = await admin
     .from("passports")
@@ -874,12 +893,23 @@ async function main() {
     const teacherOrdId = await createUser("permverify.teacherord@thebehaviourhive.com", "Teacher Ordinary", "class_teacher");
     const parentJId = await createUser("permverify.parent@thebehaviourhive.com", "Parent J", "parent");
 
-    const { error: jStaffErr } = await admin.from("institution_staff").insert([
+    const { data: jStaffRows, error: jStaffErr } = await admin.from("institution_staff").insert([
       { institution_id: institutionJId, user_id: principalJId, role: "principal" },
       { institution_id: institutionJId, user_id: teacherDPId, role: "class_teacher" },
       { institution_id: institutionJId, user_id: teacherOrdId, role: "class_teacher" },
-    ]);
+    ]).select();
     if (jStaffErr) throw jStaffErr;
+
+    // 0100: class_teacher rows are never auto-approved -- driven through
+    // approve_staff_join() as the principal's real session, never set
+    // directly. See the main fixture's own note above for why.
+    {
+      const principalJForApproval = await signedInClient("permverify.principal@thebehaviourhive.com");
+      for (const row of jStaffRows.filter((r) => r.role !== "principal")) {
+        const { error: approveErr } = await principalJForApproval.rpc("approve_staff_join", { p_institution_staff_id: row.id });
+        if (approveErr) throw approveErr;
+      }
+    }
 
     const { data: childJ } = await admin
       .from("passports")
@@ -2288,11 +2318,27 @@ async function main() {
     const snaSId = await createUser("checks.sna@thebehaviourhive.com", "Check S SNA", "sna");
     const parent1SId = await createUser("checks.parent1@thebehaviourhive.com", "Check S Parent One", "parent");
     const parent2SId = await createUser("checks.parent2@thebehaviourhive.com", "Check S Parent Two", "parent");
+    // 0100: this fixture never needed a principal before -- teacherS/snaS
+    // are the only staff this check actually exercises. It needs one now,
+    // purely as plumbing, because approving anyone requires a real
+    // principal session to call approve_staff_join() through. Worth
+    // naming: this is new fixture surface the migration introduced, not
+    // something CHECK S itself tests.
+    const principalSId = await createUser("checks.principal@thebehaviourhive.com", "Check S Principal", "principal");
 
-    await admin.from("institution_staff").insert([
+    const { data: sStaffRows } = await admin.from("institution_staff").insert([
+      { institution_id: institutionSId, user_id: principalSId, role: "principal" },
       { institution_id: institutionSId, user_id: teacherSId, role: "class_teacher" },
       { institution_id: institutionSId, user_id: snaSId, role: "sna" },
-    ]);
+    ]).select();
+
+    {
+      const principalSForApproval = await signedInClient("checks.principal@thebehaviourhive.com");
+      for (const row of sStaffRows.filter((r) => r.role !== "principal")) {
+        const { error: approveErr } = await principalSForApproval.rpc("approve_staff_join", { p_institution_staff_id: row.id });
+        if (approveErr) throw approveErr;
+      }
+    }
 
     const { data: child1S } = await admin.from("passports").insert({ user_id: parent1SId, child_name: "Check S Child One", passport_status: "complete" }).select().single();
     const { data: child2S } = await admin.from("passports").insert({ user_id: parent2SId, child_name: "Check S Child Two", passport_status: "complete" }).select().single();
@@ -2485,7 +2531,7 @@ async function main() {
     await admin.auth.admin.deleteUser(clinicianSId);
 
     await admin.from("institutions").delete().eq("id", institutionSId);
-    for (const id of [teacherSId, snaSId, parent1SId, parent2SId]) {
+    for (const id of [principalSId, teacherSId, snaSId, parent1SId, parent2SId]) {
       await admin.auth.admin.deleteUser(id);
     }
   }
@@ -2505,11 +2551,23 @@ async function main() {
     const parent2TId = await createUser("checkt.parent2@thebehaviourhive.com", "Check T Parent Two", "parent");
     const parent3TId = await createUser("checkt.parent3@thebehaviourhive.com", "Check T Parent Unrelated", "parent");
     const clinicianTId = await createUser("checkt.clinician@thebehaviourhive.com", "Check T Clinician", "clinician");
+    // 0100: same as CHECK S -- this fixture never needed a principal
+    // before, needs one now purely to drive approve_staff_join().
+    const principalTId = await createUser("checkt.principal@thebehaviourhive.com", "Check T Principal", "principal");
 
-    await admin.from("institution_staff").insert([
+    const { data: tStaffRows } = await admin.from("institution_staff").insert([
+      { institution_id: institutionTId, user_id: principalTId, role: "principal" },
       { institution_id: institutionTId, user_id: teacherTId, role: "class_teacher" },
       { institution_id: institutionTId, user_id: snaTId, role: "sna" },
-    ]);
+    ]).select();
+
+    {
+      const principalTForApproval = await signedInClient("checkt.principal@thebehaviourhive.com");
+      for (const row of tStaffRows.filter((r) => r.role !== "principal")) {
+        const { error: approveErr } = await principalTForApproval.rpc("approve_staff_join", { p_institution_staff_id: row.id });
+        if (approveErr) throw approveErr;
+      }
+    }
 
     const { data: child1T } = await admin.from("passports").insert({ user_id: parent1TId, child_name: "Check T Child One", passport_status: "complete" }).select().single();
     const { data: child2T } = await admin.from("passports").insert({ user_id: parent2TId, child_name: "Check T Child Two", passport_status: "complete" }).select().single();
@@ -2636,7 +2694,7 @@ async function main() {
 
     await admin.from("incidents").delete().eq("id", tIncidentId);
     await admin.from("institutions").delete().eq("id", institutionTId);
-    for (const id of [teacherTId, snaTId, parent1TId, parent2TId, parent3TId, clinicianTId]) {
+    for (const id of [principalTId, teacherTId, snaTId, parent1TId, parent2TId, parent3TId, clinicianTId]) {
       await admin.auth.admin.deleteUser(id);
     }
   }
@@ -2812,6 +2870,18 @@ async function main() {
     const parentV3Id = await createUser("lifecycle.parent3@thebehaviourhive.com", "Parent V Three", "parent");
     const parentV4Id = await createUser("lifecycle.parent4@thebehaviourhive.com", "Parent V Four", "parent");
 
+    // crossTeacherId is 'principal', not 'class_teacher' -- found live,
+    // not assumed: deactivate_institution_staff()'s pending-target guard
+    // (0100) fires BEFORE the caller-authorization check (the same
+    // relative order Stage 1 always had -- "already deactivated" was
+    // checked before caller-authorization there too, this isn't a new
+    // ordering choice, just the first time a check's target happened to
+    // also be pending). A pending class_teacher here would make V8 fail
+    // for "still pending", never reaching the cross-institution check it
+    // exists to prove. crossTeacher-as-principal auto-approves via the
+    // trigger (institutionVOther has no other staff), giving V8 a
+    // genuinely ACTIVE cross-institution target -- reaching, and
+    // correctly failing, the actual guard under test.
     const { data: staffVRows, error: staffVErr } = await admin
       .from("institution_staff")
       .insert([
@@ -2820,7 +2890,7 @@ async function main() {
         { institution_id: institutionVId, user_id: teacherVOtherId, role: "class_teacher" },
         { institution_id: institutionVId, user_id: grantHolderId, role: "class_teacher" },
         { institution_id: institutionVId, user_id: snaVId, role: "sna" },
-        { institution_id: institutionVOtherId, user_id: crossTeacherId, role: "class_teacher" },
+        { institution_id: institutionVOtherId, user_id: crossTeacherId, role: "principal" },
       ])
       .select();
     if (staffVErr) throw staffVErr;
@@ -2828,6 +2898,17 @@ async function main() {
     const principalV1StaffId = staffVRows.find((r) => r.user_id === principalV1Id).id;
     const grantHolderStaffId = staffVRows.find((r) => r.user_id === grantHolderId).id;
     const crossTeacherStaffId = staffVRows.find((r) => r.user_id === crossTeacherId).id;
+
+    // Approve every institutionVId class_teacher/sna row through the
+    // real RPC. crossTeacherId needs no separate approval call -- it
+    // auto-approved above, per the comment on its insert.
+    {
+      const principalV1ForApproval = await signedInClient("lifecycle.principal1@thebehaviourhive.com");
+      for (const row of staffVRows.filter((r) => r.institution_id === institutionVId && r.role !== "principal")) {
+        const { error: approveErr } = await principalV1ForApproval.rpc("approve_staff_join", { p_institution_staff_id: row.id });
+        if (approveErr) throw approveErr;
+      }
+    }
 
     const { data: cv1 } = await admin.from("passports").insert({ user_id: parentV1Id, child_name: "Lifecycle Child One", passport_status: "complete" }).select().single();
     const { data: cv2 } = await admin.from("passports").insert({ user_id: parentV2Id, child_name: "Lifecycle Child Two", passport_status: "complete" }).select().single();
@@ -3158,6 +3239,21 @@ async function main() {
     });
     record("V10a: the self-link INSERT itself succeeds at the database level -- the new active-only unique index doesn't collide with their old row (mechanism only, not the journey -- see V10-pre/post for that)", !rejoinErr, rejoinErr?.message);
 
+    // 0100 landed after V10-post was first written, and changes what
+    // this query's result actually means -- flagging honestly rather
+    // than quietly keeping the old claim. checkExisting() as it exists
+    // on disk TODAY still only checks deactivated_at is null (the Stage
+    // 1 fix) -- it does not yet know about approved_at, because that
+    // rewrite is Step 3 of the join-approval work, not built. So this
+    // query genuinely does return the new row (that part still holds),
+    // but the honest claim is narrower than "correctly redirect them
+    // onward": a PENDING person would currently be waved straight to
+    // their dashboard by the as-yet-unpatched client, which is exactly
+    // the bug class this whole exercise exists to catch, at a new door,
+    // reproduced here rather than left to be found by hand again. Not a
+    // new discovery -- the join-approval build prompt's own Step 0/3
+    // already owed this rewrite -- but this is the reproducible proof of
+    // it, kept rather than silently dropped.
     const { data: postRejoinCheck } = await teacherVTarget
       .from("institution_staff")
       .select("institution_id")
@@ -3165,17 +3261,37 @@ async function main() {
       .is("deactivated_at", null)
       .maybeSingle();
     record(
-      "V10-post: the SAME query now returns the new row -- confirms checkExisting() would correctly redirect them onward next time, not show the join form again forever",
+      "V10-post: the query returns the new row, as it did before 0100 -- but this no longer means 'correctly redirect onward': checkExisting() doesn't check approved_at yet, so a genuinely PENDING rejoiner would currently be waved straight to their dashboard by the unpatched client -- the three-way rewrite owed to Stage 1b Step 3, reproduced here rather than re-discovered later",
       postRejoinCheck?.institution_id === institutionVId,
       JSON.stringify(postRejoinCheck)
     );
 
-    const { data: allTargetRows } = await admin.from("institution_staff").select("id, deactivated_at, deactivated_by, deactivation_reason").eq("institution_id", institutionVId).eq("user_id", teacherVTargetId).order("created_at");
+    const { data: allTargetRows } = await admin.from("institution_staff").select("id, deactivated_at, deactivated_by, deactivation_reason, approved_at, rejected_at").eq("institution_id", institutionVId).eq("user_id", teacherVTargetId).order("created_at");
     record("V10b: exactly 2 rows now exist for teacherVTarget at this institution -- the old one, plus the new one", allTargetRows?.length === 2, JSON.stringify(allTargetRows));
     const oldRow = allTargetRows?.find((r) => r.id === teacherVTargetStaffId);
     record("V10c: the OLD row's deactivation fields are unchanged, not nulled out -- deactivation is append-only, reactivation is a new row", oldRow?.deactivated_at !== null && oldRow?.deactivation_reason === "Lifecycle check: main cascade target.", JSON.stringify(oldRow));
     const newRow = allTargetRows?.find((r) => r.id !== teacherVTargetStaffId);
-    record("V10d: the NEW row is genuinely active (deactivated_at is null)", newRow?.deactivated_at === null, JSON.stringify(newRow));
+    // V10d ORIGINALLY claimed "genuinely active" from deactivated_at is
+    // null alone -- true under Stage 1's two-state model, false now that
+    // 0100 adds pending/rejected. Same failure shape as V10 itself before
+    // its own rewrite: a check whose name claims more than its assertion
+    // proves, because the state model moved under it. Renamed to what it
+    // actually shows (not deactivated), with V10e added alongside it to
+    // state the row's REAL status honestly: pending, not active.
+    record("V10d: the NEW row is not deactivated (deactivated_at is null) -- narrower than 'active' now, see V10e", newRow?.deactivated_at === null, JSON.stringify(newRow));
+    record("V10e: the NEW row is genuinely PENDING, not active -- class_teacher is never auto-approved, matching the same rule that gates every other class_teacher/sna join", newRow?.approved_at === null && newRow?.rejected_at === null, JSON.stringify(newRow));
+
+    // 0100's own new guard on deactivate_institution_staff(), untested
+    // until now -- newRow is a genuinely pending row, ready-made. A real
+    // reason is passed specifically so the reason-required check (fires
+    // first, unconditionally) can't be the cause of the refusal --
+    // isolating the pending-target guard itself, not a different one.
+    const { error: pendingDeactivateErr } = await principalV1.rpc("deactivate_institution_staff", { p_institution_staff_id: newRow.id, p_reason: "Attempting to deactivate a pending request." });
+    record(
+      "V10f: deactivate_institution_staff() refused on a genuinely PENDING row -- 'still pending -- use reject_staff_join()'",
+      Boolean(pendingDeactivateErr) && /still pending/i.test(pendingDeactivateErr.message),
+      pendingDeactivateErr?.message
+    );
 
     console.log(`-- bonus: the two remaining input guards on deactivate_institution_staff() itself --`);
     const { error: emptyReasonErr } = await principalV1.rpc("deactivate_institution_staff", { p_institution_staff_id: newRow.id, p_reason: "" });
