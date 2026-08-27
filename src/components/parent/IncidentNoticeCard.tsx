@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 
@@ -120,7 +121,12 @@ export function IncidentNoticeCard({ passportId }: { passportId: string | null }
 
   return (
     <section>
-      <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-black/40">Incident notices</h2>
+      <div className="mb-2 flex items-center justify-between">
+        <h2 className="text-xs font-semibold uppercase tracking-wide text-black/40">Incident notices</h2>
+        <Link href="/parent-dashboard/incidents" className="text-xs font-semibold text-brand-prussian-blue">
+          View all
+        </Link>
+      </div>
       <div className="flex flex-col gap-2">
         {entries.map((entry) => (
           <div key={entry.incidentId} className="rounded-2xl border border-black/5 bg-white p-4 shadow-sm">

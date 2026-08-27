@@ -13,6 +13,7 @@ import { ProgressSurface } from "@/components/progress/ProgressSurface";
 import { useCalmButtonLiveStatus } from "@/hooks/useCalmButtonLiveStatus";
 import { ClinicalFileFbaTab } from "@/components/clinician/fba/ClinicalFileFbaTab";
 import { ClinicalFileMessagesTab } from "@/components/clinician/ClinicalFileMessagesTab";
+import { ClinicalFileIncidentsTab } from "@/components/clinician/ClinicalFileIncidentsTab";
 import { EffectivenessSurface } from "@/components/clinician/passport/EffectivenessSurface";
 
 type TabKey =
@@ -21,6 +22,7 @@ type TabKey =
   | "communication"
   | "supports"
   | "incidents"
+  | "incidentLog"
   | "clinicalTeam"
   | "fba"
   | "messages"
@@ -33,6 +35,11 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: "communication", label: "Communication" },
   { key: "supports", label: "Supports" },
   { key: "incidents", label: "Incidents" },
+  // Phase 5: distinct label/key from "Incidents" above on purpose --
+  // that tab is the ABC log timeline (an unrelated, pre-existing
+  // feature with an unfortunately overlapping name), this one is the
+  // formal School Incident Log via get_clinician_incidents().
+  { key: "incidentLog", label: "Incident Log" },
   { key: "clinicalTeam", label: "Clinical Team" },
   { key: "fba", label: "FBA" },
   { key: "messages", label: "Messages" },
@@ -355,6 +362,8 @@ export default function ClinicianPassportPage() {
             highlightLogId={searchParams.get("logId")}
           />
         )}
+
+        {activeTab === "incidentLog" && <ClinicalFileIncidentsTab passportId={passportId} />}
 
         {activeTab === "clinicalTeam" && (
           <>

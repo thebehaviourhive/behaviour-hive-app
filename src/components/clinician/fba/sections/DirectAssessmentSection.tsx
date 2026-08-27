@@ -3,6 +3,7 @@
 import { useEffect, useMemo } from "react";
 import { format } from "date-fns";
 import { useAbcLogs } from "@/hooks/useAbcLogs";
+import { useIncidents } from "@/hooks/useIncidents";
 import { useDailyPatterns } from "@/hooks/useDailyPatterns";
 import { countByFunction, tallyAntecedents, tallyBehaviours, tallyConsequences } from "@/lib/fba/abcAnalysis";
 import { NarrativeField } from "../NarrativeField";
@@ -11,6 +12,7 @@ import { HorizontalBarChart } from "../charts/HorizontalBarChart";
 import { PieChart } from "../charts/PieChart";
 import { AbcIncidentCard } from "./direct/AbcIncidentCard";
 import { DailyPatternsPanel } from "./direct/DailyPatternsPanel";
+import { IncidentSummaryCard } from "@/components/clinician/incidents/IncidentSummaryCard";
 import type { AbcHypothesisedFunction } from "@/lib/fba/types";
 import type { FbaSectionBodyProps } from "./types";
 
@@ -23,6 +25,7 @@ export function DirectAssessmentSection({
   readOnly,
 }: FbaSectionBodyProps & { passportId: string }) {
   const { logs, isLoading, loadError } = useAbcLogs(passportId);
+  const { incidents, isLoading: isLoadingIncidents, loadError: incidentsLoadError } = useIncidents(passportId);
   const {
     checkins: dailyCheckins,
     updates: dailyUpdates,
@@ -37,6 +40,22 @@ export function DirectAssessmentSection({
       (log) => log.incidentDate >= content.abcRangeStart! && log.incidentDate <= content.abcRangeEnd!
     );
   }, [logs, hasRange, content.abcRangeStart, content.abcRangeEnd]);
+
+  // Separate window from the ABC range above -- see types.ts's own
+  // comment on incidentRangeStart/End.
+  const hasIncidentRange = Boolean(content.incidentRangeStart && content.incidentRangeEnd);
+  const filteredIncidents = useMemo(() => {
+    if (!hasIncidentRange) return [];
+    // occurredAt is a full timestamptz, not a plain date like ABC logs'
+    // incidentDate above -- comparing the whole string against a bare
+    // YYYY-MM-DD range bound would wrongly exclude anything on the end
+    // date itself (a longer string that starts with the shorter bound
+    // sorts after it lexicographically). Compare the date portion only.
+    return incidents.filter((incident) => {
+      const occurredDate = incident.occurredAt.slice(0, 10);
+      return occurredDate >= content.incidentRangeStart! && occurredDate <= content.incidentRangeEnd!;
+    });
+  }, [incidents, hasIncidentRange, content.incidentRangeStart, content.incidentRangeEnd]);
 
   const tags = content.abcFunctionTags ?? {};
 
@@ -185,6 +204,67 @@ export function DirectAssessmentSection({
           </>
         )}
 
+      </div>
+
+      <div>
+        <p className="mb-2 font-heading text-base font-bold text-brand-neutral-black">Incident Log</p>
+
+        {!readOnly && (
+          <div className="mb-4 flex gap-3">
+            <div className="flex-1">
+              <label className="mb-1.5 block text-sm font-semibold text-brand-neutral-black">From</label>
+              <input
+                type="date"
+                value={content.incidentRangeStart ?? ""}
+                onChange={(e) => onStructuralChange({ ...content, incidentRangeStart: e.target.value })}
+                className="w-full rounded-xl border border-black/10 bg-white px-3 py-2.5 text-sm text-brand-neutral-black focus:border-brand-prussian-blue focus:outline-none focus:ring-2 focus:ring-brand-pastel-blue"
+              />
+            </div>
+            <div className="flex-1">
+              <label className="mb-1.5 block text-sm font-semibold text-brand-neutral-black">To</label>
+              <input
+                type="date"
+                value={content.incidentRangeEnd ?? ""}
+                onChange={(e) => onStructuralChange({ ...content, incidentRangeEnd: e.target.value })}
+                className="w-full rounded-xl border border-black/10 bg-white px-3 py-2.5 text-sm text-brand-neutral-black focus:border-brand-prussian-blue focus:outline-none focus:ring-2 focus:ring-brand-pastel-blue"
+              />
+            </div>
+          </div>
+        )}
+
+        {readOnly && hasIncidentRange && (
+          <p className="mb-4 text-sm text-brand-neutral-black/60">
+            {format(new Date(content.incidentRangeStart!), "d MMM yyyy")} –{" "}
+            {format(new Date(content.incidentRangeEnd!), "d MMM yyyy")}
+          </p>
+        )}
+
+        {!hasIncidentRange ? (
+          <div className="rounded-2xl border-2 border-dashed border-brand-pastel-blue bg-white/60 p-6 text-center">
+            <p className="text-sm text-brand-neutral-black/70">
+              {readOnly
+                ? "No incident log date range was set."
+                : "Set a date range to pull incidents from this child's Incident Log."}
+            </p>
+          </div>
+        ) : isLoadingIncidents ? (
+          <div className="flex flex-col gap-2">
+            <div className="h-16 animate-pulse rounded-2xl bg-brand-off-white" />
+            <div className="h-16 animate-pulse rounded-2xl bg-brand-off-white" />
+          </div>
+        ) : incidentsLoadError ? (
+          <InlineErrorState message={incidentsLoadError} onRetry={() => window.location.reload()} />
+        ) : filteredIncidents.length === 0 ? (
+          <div className="rounded-2xl border-2 border-dashed border-brand-pastel-blue bg-white/60 p-6 text-center">
+            <p className="text-sm text-brand-neutral-black/70">No incident log records in this range.</p>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {filteredIncidents.map((incident) => (
+              <IncidentSummaryCard key={incident.incidentId} incident={incident} />
+            ))}
+          </div>
+        )}
       </div>
 
       <div>

@@ -116,6 +116,13 @@ export interface FbaContentData {
   // Same denormalization rationale as indirectAssessmentSummary above --
   // total logs in the current range vs. how many are tagged.
   abcAnalysisSummary?: { totalLogsInRange: number; taggedCount: number };
+  // Incident pull: Phase 5, School Incident Log. A SEPARATE window from
+  // abcRangeStart/End above -- the two logs' relevant investigation
+  // periods don't have to coincide. Re-queried against
+  // get_clinician_incidents() (read-only, narrative included, clinician's
+  // own case only) whenever it changes -- see DirectAssessmentSection.
+  incidentRangeStart?: string;
+  incidentRangeEnd?: string;
 
   // Section 9 -- Hypothesised Behavioural Functions
   hypothesisedFunctions?: string;
