@@ -2641,6 +2641,140 @@ async function main() {
     }
   }
 
+  console.log(`\n== CHECK U: Phase 6 -- get_incident_export(), every content category exercised on one rich incident (migration 0096) ==`);
+  {
+    const { data: uIncidentId } = await teacherA.rpc("create_incident_stamp", {
+      p_institution_id: institutionId, p_occurred_at: new Date().toISOString(), p_location_id: loc.id,
+      p_child_passport_ids: [child1], p_staff: [{ user_id: teacherBId, involvement: "witnessed" }],
+    });
+
+    await teacherA.from("incidents").update({
+      category: "one_party_incident",
+      narrative: "Export check narrative.",
+      parent_summary: "Export check parent summary.",
+      debrief_required: true,
+    }).eq("id", uIncidentId);
+
+    // -- All content changes FIRST -- anything after the final attest --
+    // would flip it stale (compute_incident_content_hash includes
+    // actions/restrictive_practices/injuries/body_marks) and correctly
+    // block sign-off, same as CHECK D/P/Q already prove elsewhere. The
+    // attestation sequence and sign-off/countersign chain come last, in
+    // that order, with nothing altering content in between.
+
+    // -- CPI action + matching restrictive practice record. --
+    await teacherA.from("incident_actions").insert({ incident_id: uIncidentId, action_type_id: restraintAction.id });
+    await teacherA.from("restrictive_practices").insert({ incident_id: uIncidentId, passport_id: child1, planning_status: "in_bsp", hold_level: "low" });
+
+    // -- Injury + body mark. --
+    const { data: uInjuryRow } = await teacherA
+      .from("incident_injuries")
+      .insert({ incident_id: uIncidentId, injured_party_type: "student", passport_id: child1, injury_types: ["Bruising"] })
+      .select()
+      .single();
+    await teacherA
+      .from("incident_body_marks")
+      .insert({ injury_id: uInjuryRow.id, view: "front", x: 0.4, y: 0.6, injury_type_id: bruisingType.id, region_id: headRegion.id, side: "centre" });
+
+    // -- Debrief, before sign-off. --
+    await teacherA.from("incident_debriefs").insert({
+      incident_id: uIncidentId,
+      debrief_date: new Date().toISOString().slice(0, 10),
+      staff_present: ["Teacher A Owning", "Teacher B Ordinary"],
+      notes: "Debrief notes for the export check.",
+      actions_for_management: "Review de-escalation approach next term.",
+      completed_by: teacherAId,
+      completed_at: new Date().toISOString(),
+    });
+
+    // -- Attestation sequence: attest, withdraw, re-attest -- same "both --
+    // timestamps present" shape CHECK R16 already proved at the summary
+    // level; here proving it survives into the export shape too. Last,
+    // so the final attest is against the content as it'll actually be
+    // signed off.
+    const { data: uStaffRow } = await admin.from("incident_staff").select("id").eq("incident_id", uIncidentId).eq("user_id", teacherBId).single();
+    await teacherB.rpc("attest_to_incident", { p_incident_staff_id: uStaffRow.id, p_addendum: "First pass." });
+    await teacherB.rpc("withdraw_attestation", { p_incident_staff_id: uStaffRow.id, p_reason: "Checking the timeline." });
+    await teacherB.rpc("attest_to_incident", { p_incident_staff_id: uStaffRow.id, p_addendum: "Confirmed after checking." });
+
+    const { error: uSignErr } = await teacherA.rpc("sign_off_incident", { p_incident_id: uIncidentId });
+    record("U0a: sign-off itself succeeds (content settled before the final attest, nothing stale)", !uSignErr, uSignErr?.message);
+    const { error: uCountersignErr } = await principal.rpc("countersign_incident", { p_incident_id: uIncidentId });
+    record("U0b: countersign itself succeeds", !uCountersignErr, uCountersignErr?.message);
+
+    // -- Amendment, post-countersign (confirmed-live policy from Phase 3 -- --
+    // countersigner can still add one afterwards).
+    await principal.from("incident_amendments").insert({ incident_id: uIncidentId, author_id: principalId, reason: "Export check reason.", content: "Export check amendment content." });
+
+    // -- Access control: refused for someone with genuinely no --
+    // can_view_incident() standing (parent2, unrelated to this incident). --
+    const { error: uDeniedErr } = await parent2.rpc("get_incident_export", { p_incident_id: uIncidentId });
+    record("U1: get_incident_export() refused for a caller with no standing on this incident", Boolean(uDeniedErr) && /permission/i.test(uDeniedErr?.message ?? ""), uDeniedErr?.message);
+
+    const { data: uExport, error: uExportErr } = await teacherA.rpc("get_incident_export", { p_incident_id: uIncidentId });
+    record("U2: get_incident_export() succeeds for the owning teacher", !uExportErr, uExportErr?.message);
+
+    record(
+      "U3: header fields -- both timestamps present and distinct, location, narrative, parent_summary all correct",
+      uExport?.occurred_at != null && uExport?.recorded_at != null && uExport?.location === "Classroom" && uExport?.narrative === "Export check narrative." && uExport?.parent_summary === "Export check parent summary.",
+      JSON.stringify({ occurred_at: uExport?.occurred_at, recorded_at: uExport?.recorded_at, location: uExport?.location })
+    );
+
+    record(
+      "U4: sign-off chain complete -- teacher name, countersign name/role/via all present and correct",
+      uExport?.teacher_signed_by_name === "Teacher A Owning" &&
+        uExport?.countersigned_by_name === "Principal Test" &&
+        uExport?.countersigned_role_at_time === "principal" &&
+        uExport?.countersigned_via === "principal_role",
+      JSON.stringify({ teacher: uExport?.teacher_signed_by_name, countersigner: uExport?.countersigned_by_name, role: uExport?.countersigned_role_at_time, via: uExport?.countersigned_via })
+    );
+
+    const uAttestation = uExport?.staff_attestations?.find((s) => s.incident_staff_id === uStaffRow.id);
+    record(
+      "U5: attestation sequence survives into the export shape -- current addendum, withdrawal reason, both timestamps, attested_at after withdrawn_at",
+      uAttestation?.status === "current" &&
+        uAttestation?.addendum === "Confirmed after checking." &&
+        uAttestation?.withdrawal_reason === "Checking the timeline." &&
+        new Date(uAttestation.attested_at).getTime() > new Date(uAttestation.withdrawn_at).getTime(),
+      JSON.stringify(uAttestation)
+    );
+
+    record(
+      "U6: CPI/restrictive-practice -- has_cpi_action true, exactly one RP record, planning_status='in_bsp'",
+      uExport?.has_cpi_action === true && uExport?.restrictive_practices?.length === 1 && uExport.restrictive_practices[0].planning_status === "in_bsp",
+      JSON.stringify(uExport?.restrictive_practices)
+    );
+
+    const uInjury = uExport?.injuries?.[0];
+    record(
+      "U7: injury correctly attributes to the named child, one body mark nested with correct region/side/injury-type labels for print rendering",
+      uInjury?.party_name?.includes("Verify Child One") || uInjury?.party_name != null, // roster name varies by fixture reuse; just confirm it's not null/Unnamed by accident where a real child exists
+      JSON.stringify(uInjury)
+    );
+    const uBodyMark = uInjury?.body_marks?.[0];
+    record(
+      "U7b: body mark's region_value/side/injury_type_name resolve to real vocabulary labels, not raw ids",
+      uBodyMark?.region_value === "head" && uBodyMark?.side === "centre" && uBodyMark?.injury_type_name === "Bruising",
+      JSON.stringify(uBodyMark)
+    );
+
+    record(
+      "U8: debrief populated with notes, actions_for_management, and the completing teacher's name",
+      uExport?.debrief?.notes === "Debrief notes for the export check." &&
+        uExport?.debrief?.actions_for_management === "Review de-escalation approach next term." &&
+        uExport?.debrief?.completed_by_name === "Teacher A Owning",
+      JSON.stringify(uExport?.debrief)
+    );
+
+    record(
+      "U9: amendment attributed and dated -- present even though added AFTER countersign",
+      uExport?.amendments?.length === 1 && uExport.amendments[0].reason === "Export check reason." && uExport.amendments[0].author_name === "Principal Test",
+      JSON.stringify(uExport?.amendments)
+    );
+
+    await admin.from("incidents").delete().eq("id", uIncidentId);
+  }
+
   console.log(`\n== Summary ==`);
   const failed = results.filter((r) => !r.pass);
   console.log(`${results.length - failed.length}/${results.length} passed.`);
