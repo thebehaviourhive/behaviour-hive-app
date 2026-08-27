@@ -3307,6 +3307,251 @@ async function main() {
     }
   }
 
+  console.log(`\n== CHECK W: approve_staff_join()/reject_staff_join()/get_rejected_staff_joins() -- the RPC pair's OWN guards, not just their downstream effects (migration 0100, approval_source via 0101) ==`);
+  {
+    // Every fixture across the suite has depended on this RPC pair's happy
+    // path since 0100 shipped -- zero checks asserted on the RPC pair
+    // itself until now. See CLAUDE.md "COVERAGE GAPS ARE NOT WRONG-REASON
+    // PASSES".
+    //
+    // "A pending principal" and "a rejected principal" are deliberately
+    // NOT covered here -- confirmed structurally impossible, not just
+    // untested. institution_staff_one_principal_per_institution is keyed
+    // on role='principal' and deactivated_at is null and rejected_at is
+    // null, with no dependency on approved_at -- a second principal-role
+    // insert at an institution that already has one fails at the unique
+    // index outright, before the row can exist in ANY state. See
+    // CLAUDE.md "Deferred work", fifth structural check.
+    const { data: instW, error: instWErr } = await admin
+      .from("institutions")
+      .insert({ name: "Join Approval Verify School", institution_code: CODE + "W", status: "verified" })
+      .select()
+      .single();
+    if (instWErr) throw instWErr;
+    const institutionWId = instW.id;
+
+    const { data: instWOther, error: instWOtherErr } = await admin
+      .from("institutions")
+      .insert({ name: "Join Approval Cross School", institution_code: CODE + "WX", status: "verified" })
+      .select()
+      .single();
+    if (instWOtherErr) throw instWOtherErr;
+    const institutionWOtherId = instWOther.id;
+
+    // status: 'pending' -- not yet verified. The auto-approve trigger
+    // doesn't check institution status at all (only approve_staff_join()/
+    // reject_staff_join() do), so a first-ever principal here still
+    // bootstraps -- deliberately, so the caller in the unverified check
+    // below is a REAL active principal at their own institution, isolating
+    // the inst.status = 'verified' guard specifically, not a caller-
+    // authorization failure in disguise.
+    const { data: instWUnverified, error: instWUnverifiedErr } = await admin
+      .from("institutions")
+      .insert({ name: "Join Approval Unverified School", institution_code: CODE + "WU", status: "pending" })
+      .select()
+      .single();
+    if (instWUnverifiedErr) throw instWUnverifiedErr;
+    const institutionWUnverifiedId = instWUnverified.id;
+
+    const { data: instWFresh, error: instWFreshErr } = await admin
+      .from("institutions")
+      .insert({ name: "Join Approval Fresh School", institution_code: CODE + "WF", status: "verified" })
+      .select()
+      .single();
+    if (instWFreshErr) throw instWFreshErr;
+    const institutionWFreshId = instWFresh.id;
+
+    const principalW1Id = await createUser("joinapproval.principal1@thebehaviourhive.com", "Principal W One", "principal");
+    const principalWOtherId = await createUser("joinapproval.principalother@thebehaviourhive.com", "Principal W Other", "principal");
+    const principalWUnverifiedId = await createUser("joinapproval.principalunverified@thebehaviourhive.com", "Principal W Unverified", "principal");
+    const teacherWId = await createUser("joinapproval.teacher@thebehaviourhive.com", "Teacher W", "class_teacher");
+    const targetDoubleId = await createUser("joinapproval.targetdouble@thebehaviourhive.com", "Target Double W", "class_teacher");
+    const targetRejectThenApproveId = await createUser("joinapproval.targetrejectapprove@thebehaviourhive.com", "Target Reject Then Approve W", "class_teacher");
+    const targetApproveThenRejectId = await createUser("joinapproval.targetapprovereject@thebehaviourhive.com", "Target Approve Then Reject W", "class_teacher");
+    const targetReasonRequiredId = await createUser("joinapproval.targetreason@thebehaviourhive.com", "Target Reason Required W", "class_teacher");
+    const targetSpoofId = await createUser("joinapproval.targetspoof@thebehaviourhive.com", "Target Spoof W", "class_teacher");
+    const targetNonPrincipalId = await createUser("joinapproval.targetnonprincipal@thebehaviourhive.com", "Target Non Principal W", "class_teacher");
+    const targetCrossInstitutionId = await createUser("joinapproval.targetcross@thebehaviourhive.com", "Target Cross W", "class_teacher");
+    const targetGetRejectedScopeId = await createUser("joinapproval.targetscope@thebehaviourhive.com", "Target Scope W", "class_teacher");
+    const targetUnverifiedId = await createUser("joinapproval.targetunverified@thebehaviourhive.com", "Target Unverified W", "class_teacher");
+    const freshTeacherId = await createUser("joinapproval.freshteacher@thebehaviourhive.com", "Fresh Teacher W", "class_teacher");
+
+    const { data: staffWRows, error: staffWErr } = await admin
+      .from("institution_staff")
+      .insert([
+        { institution_id: institutionWId, user_id: principalW1Id, role: "principal" },
+        { institution_id: institutionWId, user_id: teacherWId, role: "class_teacher" },
+        { institution_id: institutionWId, user_id: targetDoubleId, role: "class_teacher" },
+        { institution_id: institutionWId, user_id: targetRejectThenApproveId, role: "class_teacher" },
+        { institution_id: institutionWId, user_id: targetApproveThenRejectId, role: "class_teacher" },
+        { institution_id: institutionWId, user_id: targetReasonRequiredId, role: "class_teacher" },
+        { institution_id: institutionWId, user_id: targetSpoofId, role: "class_teacher" },
+        { institution_id: institutionWId, user_id: targetNonPrincipalId, role: "class_teacher" },
+        { institution_id: institutionWId, user_id: targetCrossInstitutionId, role: "class_teacher" },
+        { institution_id: institutionWId, user_id: targetGetRejectedScopeId, role: "class_teacher" },
+        { institution_id: institutionWOtherId, user_id: principalWOtherId, role: "principal" },
+        { institution_id: institutionWUnverifiedId, user_id: principalWUnverifiedId, role: "principal" },
+        { institution_id: institutionWUnverifiedId, user_id: targetUnverifiedId, role: "class_teacher" },
+      ])
+      .select();
+    if (staffWErr) throw staffWErr;
+
+    const byUser = (uid) => staffWRows.find((r) => r.user_id === uid);
+    const principalW1StaffId = byUser(principalW1Id).id;
+    const teacherWStaffId = byUser(teacherWId).id;
+    const targetDoubleStaffId = byUser(targetDoubleId).id;
+    const targetRejectThenApproveStaffId = byUser(targetRejectThenApproveId).id;
+    const targetApproveThenRejectStaffId = byUser(targetApproveThenRejectId).id;
+    const targetReasonRequiredStaffId = byUser(targetReasonRequiredId).id;
+    const targetSpoofStaffId = byUser(targetSpoofId).id;
+    const targetNonPrincipalStaffId = byUser(targetNonPrincipalId).id;
+    const targetCrossInstitutionStaffId = byUser(targetCrossInstitutionId).id;
+    const targetGetRejectedScopeStaffId = byUser(targetGetRejectedScopeId).id;
+    const principalWOtherStaffId = byUser(principalWOtherId).id;
+    const targetUnverifiedStaffId = byUser(targetUnverifiedId).id;
+
+    // Bootstrap sanity, before anything else touches these rows.
+    record("W0a: principalW1's own row auto-approved on insert (first-ever principal at institutionW)", byUser(principalW1Id).approved_at !== null, JSON.stringify(byUser(principalW1Id)));
+    record("W0b: principalWOther's own row auto-approved on insert (first-ever principal at institutionWOther)", byUser(principalWOtherId).approved_at !== null, JSON.stringify(byUser(principalWOtherId)));
+    record("W0c: principalWUnverified's own row auto-approved on insert -- the trigger doesn't check institution status, only approve/reject_staff_join() do", byUser(principalWUnverifiedId).approved_at !== null, JSON.stringify(byUser(principalWUnverifiedId)));
+    record("W0d: every non-principal row inserted above stays PENDING -- class_teacher is never auto-approved", [teacherWId, targetDoubleId, targetRejectThenApproveId, targetApproveThenRejectId, targetReasonRequiredId, targetSpoofId, targetNonPrincipalId, targetCrossInstitutionId, targetGetRejectedScopeId, targetUnverifiedId].every((uid) => byUser(uid).approved_at === null && byUser(uid).rejected_at === null), null);
+
+    console.log(`-- the trigger's role-gate: "no active principal exists" is also trivially true for a class_teacher, but the trigger only auto-approves role='principal' --`);
+    const { data: freshRow, error: freshErr } = await admin
+      .from("institution_staff")
+      .insert({ institution_id: institutionWFreshId, user_id: freshTeacherId, role: "class_teacher" })
+      .select()
+      .single();
+    if (freshErr) throw freshErr;
+    record("W1: a class_teacher is the FIRST-EVER staff row at a brand new institution (no principal has ever existed there) and still stays pending -- proves the trigger's auto-approve is gated on role='principal', not merely 'no active principal exists'", freshRow.approved_at === null && freshRow.approval_source === null, JSON.stringify(freshRow));
+
+    const principalW1 = await signedInClient("joinapproval.principal1@thebehaviourhive.com");
+    const principalWOther = await signedInClient("joinapproval.principalother@thebehaviourhive.com");
+    const principalWUnverified = await signedInClient("joinapproval.principalunverified@thebehaviourhive.com");
+
+    console.log(`-- approve one, reject one, as the real active principal -- the baseline positive path --`);
+    // targetNonPrincipal and targetCrossInstitution are approved/rejected
+    // here ONLY after the negative attempts below against them fail, so
+    // the same row proves both "the wrong caller is refused" and "the
+    // right caller still finds it genuinely actionable afterward" --
+    // not secretly mutated by the failed attempts.
+
+    console.log(`-- item: a non-principal cannot approve or reject, though otherwise legitimate active staff --`);
+    // teacherW is made genuinely active FIRST, so this attempt comes from
+    // someone who would otherwise be allowed to do plenty at this
+    // institution -- isolating "not a principal", not "not active".
+    {
+      const { error: teacherApproveTeacherErr } = await principalW1.rpc("approve_staff_join", { p_institution_staff_id: teacherWStaffId });
+      if (teacherApproveTeacherErr) throw teacherApproveTeacherErr;
+    }
+    const teacherW = await signedInClient("joinapproval.teacher@thebehaviourhive.com");
+    const { error: nonPrincipalApproveErr } = await teacherW.rpc("approve_staff_join", { p_institution_staff_id: targetNonPrincipalStaffId });
+    record("W2a: an active, otherwise-legitimate class_teacher cannot approve -- 'Only an active principal...'", Boolean(nonPrincipalApproveErr) && /only an active principal/i.test(nonPrincipalApproveErr.message), nonPrincipalApproveErr?.message);
+    const { error: nonPrincipalRejectErr } = await teacherW.rpc("reject_staff_join", { p_institution_staff_id: targetNonPrincipalStaffId, p_reason: "Attempted as a non-principal." });
+    record("W2b: an active, otherwise-legitimate class_teacher cannot reject -- 'Only an active principal...'", Boolean(nonPrincipalRejectErr) && /only an active principal/i.test(nonPrincipalRejectErr.message), nonPrincipalRejectErr?.message);
+    const { data: unaffectedNonPrincipalRow } = await admin.from("institution_staff").select("approved_at, rejected_at").eq("id", targetNonPrincipalStaffId).single();
+    record("W2c: the target row is genuinely untouched by the two failed attempts above (both still null)", unaffectedNonPrincipalRow.approved_at === null && unaffectedNonPrincipalRow.rejected_at === null, JSON.stringify(unaffectedNonPrincipalRow));
+
+    console.log(`-- item: a principal at ANOTHER institution cannot approve or reject --`);
+    const { error: crossApproveErr } = await principalWOther.rpc("approve_staff_join", { p_institution_staff_id: targetCrossInstitutionStaffId });
+    record("W3a: an active principal at a DIFFERENT institution cannot approve -- 'Only an active principal...'", Boolean(crossApproveErr) && /only an active principal/i.test(crossApproveErr.message), crossApproveErr?.message);
+    const { error: crossRejectErr } = await principalWOther.rpc("reject_staff_join", { p_institution_staff_id: targetCrossInstitutionStaffId, p_reason: "Attempted cross-institution." });
+    record("W3b: an active principal at a DIFFERENT institution cannot reject -- 'Only an active principal...'", Boolean(crossRejectErr) && /only an active principal/i.test(crossRejectErr.message), crossRejectErr?.message);
+    const { data: unaffectedCrossRow } = await admin.from("institution_staff").select("approved_at, rejected_at").eq("id", targetCrossInstitutionStaffId).single();
+    record("W3c: the target row is genuinely untouched by the two failed cross-institution attempts (both still null)", unaffectedCrossRow.approved_at === null && unaffectedCrossRow.rejected_at === null, JSON.stringify(unaffectedCrossRow));
+
+    console.log(`-- now the real principal, at the right institution: both verbs genuinely work --`);
+    const { error: realApproveErr } = await principalW1.rpc("approve_staff_join", { p_institution_staff_id: targetNonPrincipalStaffId });
+    record("W4a: the active principal at this institution CAN approve -- the row W2 proved was untouched is genuinely still actionable", !realApproveErr, realApproveErr?.message);
+    const { error: realRejectErr } = await principalW1.rpc("reject_staff_join", { p_institution_staff_id: targetCrossInstitutionStaffId, p_reason: "Not proceeding with this request." });
+    record("W4b: the active principal at this institution CAN reject -- the row W3 proved was untouched is genuinely still actionable", !realRejectErr, realRejectErr?.message);
+
+    console.log(`-- item: approve fails at an unverified institution, explicitly -- same caller, same institution, right role, everything but verification --`);
+    const { error: unverifiedApproveErr } = await principalWUnverified.rpc("approve_staff_join", { p_institution_staff_id: targetUnverifiedStaffId });
+    record("W5: an active, correctly-scoped principal cannot approve at an institution whose status isn't 'verified'", Boolean(unverifiedApproveErr) && /only an active principal/i.test(unverifiedApproveErr.message), unverifiedApproveErr?.message);
+    const { data: unaffectedUnverifiedRow } = await admin.from("institution_staff").select("approved_at").eq("id", targetUnverifiedStaffId).single();
+    record("W5b: the unverified-institution target row is untouched", unaffectedUnverifiedRow.approved_at === null, JSON.stringify(unaffectedUnverifiedRow));
+
+    console.log(`-- item: double-approval refused --`);
+    const { error: firstApproveErr } = await principalW1.rpc("approve_staff_join", { p_institution_staff_id: targetDoubleStaffId });
+    record("W6a: first approval of targetDouble succeeds", !firstApproveErr, firstApproveErr?.message);
+    const { error: secondApproveErr } = await principalW1.rpc("approve_staff_join", { p_institution_staff_id: targetDoubleStaffId });
+    record("W6b: second approval of the same row refused -- 'already been approved'", Boolean(secondApproveErr) && /already been approved/i.test(secondApproveErr.message), secondApproveErr?.message);
+
+    console.log(`-- item: approving an already-rejected row refused --`);
+    const { error: firstRejectErr } = await principalW1.rpc("reject_staff_join", { p_institution_staff_id: targetRejectThenApproveStaffId, p_reason: "Not a fit for this role." });
+    record("W7a: rejecting targetRejectThenApprove succeeds", !firstRejectErr, firstRejectErr?.message);
+    const { error: approveAfterRejectErr } = await principalW1.rpc("approve_staff_join", { p_institution_staff_id: targetRejectThenApproveStaffId });
+    record("W7b: approving the same, now-rejected row refused -- 'already been rejected'", Boolean(approveAfterRejectErr) && /already been rejected/i.test(approveAfterRejectErr.message), approveAfterRejectErr?.message);
+
+    console.log(`-- item: rejecting an already-approved row refused -- AGREED as the answer, verb separation matching the pending-guard: reject only closes an OPEN request, removing an approved person is deactivate_institution_staff()'s job. No new SQL -- reject_staff_join() already guards this --`);
+    const { error: approveForRejectTestErr } = await principalW1.rpc("approve_staff_join", { p_institution_staff_id: targetApproveThenRejectStaffId });
+    record("W8a: approving targetApproveThenReject succeeds", !approveForRejectTestErr, approveForRejectTestErr?.message);
+    const { error: rejectAfterApproveErr } = await principalW1.rpc("reject_staff_join", { p_institution_staff_id: targetApproveThenRejectStaffId, p_reason: "Trying to reject an approved person." });
+    record("W8b: rejecting the same, now-approved row refused -- 'already been approved' -- removing them is deactivate_institution_staff()'s job, not reject_staff_join()'s", Boolean(rejectAfterApproveErr) && /already been approved/i.test(rejectAfterApproveErr.message), rejectAfterApproveErr?.message);
+
+    console.log(`-- item: rejection reason required --`);
+    const { error: emptyReasonRejectErr } = await principalW1.rpc("reject_staff_join", { p_institution_staff_id: targetReasonRequiredStaffId, p_reason: "" });
+    record("W9a: rejecting with an empty reason refused -- 'A reason is required...'", Boolean(emptyReasonRejectErr) && /reason is required/i.test(emptyReasonRejectErr.message), emptyReasonRejectErr?.message);
+    const { error: nullReasonRejectErr } = await principalW1.rpc("reject_staff_join", { p_institution_staff_id: targetReasonRequiredStaffId, p_reason: null });
+    record("W9b: rejecting with a null reason refused -- 'A reason is required...'", Boolean(nullReasonRejectErr) && /reason is required/i.test(nullReasonRejectErr.message), nullReasonRejectErr?.message);
+    const { data: unaffectedReasonRow } = await admin.from("institution_staff").select("approved_at, rejected_at").eq("id", targetReasonRequiredStaffId).single();
+    record("W9c: the target row is genuinely untouched by both failed attempts", unaffectedReasonRow.approved_at === null && unaffectedReasonRow.rejected_at === null, JSON.stringify(unaffectedReasonRow));
+
+    console.log(`-- item: approved_by is server-derived, cannot be spoofed by the caller -- institution_staff has no UPDATE policy at all (migration 0033's own design comment), so a direct client update should silently affect zero rows, not error --`);
+    const { data: spoofUpdateData, error: spoofUpdateErr } = await teacherW
+      .from("institution_staff")
+      .update({ approved_at: new Date().toISOString(), approved_by: teacherWId, approval_source: "principal" })
+      .eq("id", targetSpoofStaffId)
+      .select();
+    const { data: spoofRowAfter } = await admin.from("institution_staff").select("approved_at, approved_by, approval_source").eq("id", targetSpoofStaffId).single();
+    record(
+      "W10: a direct client UPDATE attempting to self-approve is not silently trusted -- re-read via a privileged query proves the row is still genuinely pending, regardless of what the client-side call returned",
+      spoofRowAfter.approved_at === null && spoofRowAfter.approved_by === null && spoofRowAfter.approval_source === null,
+      `client update returned ${spoofUpdateErr ? "error: " + spoofUpdateErr.message : JSON.stringify(spoofUpdateData) + " (rows affected)"}; privileged re-read: ${JSON.stringify(spoofRowAfter)}`
+    );
+
+    console.log(`-- item: approval_source set correctly for all three paths (migration 0101) --`);
+    const { data: bootstrapRow } = await admin.from("institution_staff").select("approval_source, approved_by").eq("id", principalW1StaffId).single();
+    record("W11a: bootstrap path -- principalW1's own auto-approved row has approval_source='bootstrap', approved_by null", bootstrapRow.approval_source === "bootstrap" && bootstrapRow.approved_by === null, JSON.stringify(bootstrapRow));
+    const { data: principalPathRow } = await admin.from("institution_staff").select("approval_source, approved_by").eq("id", teacherWStaffId).single();
+    record("W11b: principal path -- teacherW's row, approved via the RPC by principalW1, has approval_source='principal', approved_by=principalW1's own user id", principalPathRow.approval_source === "principal" && principalPathRow.approved_by === principalW1Id, JSON.stringify(principalPathRow));
+    // Grandfathered has no ongoing production path to drive -- it's a
+    // one-time historical backfill, not something a fixture can construct
+    // without hand-setting the column (which CLAUDE.md's own FIXTURES rule
+    // forbids). Tested against REAL historical state instead: one of the
+    // 10 rows the 0101 backfill actually touched, confirmed live before
+    // 0101 was written (ZZFIXTURE's own principal row, built well before
+    // 0100 existed).
+    const { data: zzfixtureInst } = await admin.from("institutions").select("id").eq("institution_code", "ZZFIXTURESTAGE1").maybeSingle();
+    if (zzfixtureInst) {
+      const { data: grandfatheredRow } = await admin
+        .from("institution_staff")
+        .select("approval_source, approved_by")
+        .eq("institution_id", zzfixtureInst.id)
+        .eq("role", "principal")
+        .maybeSingle();
+      record("W11c: grandfathered path -- ZZFIXTURE's real principal row (pre-0100) has approval_source='grandfathered', approved_by null", grandfatheredRow?.approval_source === "grandfathered" && grandfatheredRow?.approved_by === null, JSON.stringify(grandfatheredRow));
+    } else {
+      record("W11c: grandfathered path -- SKIPPED, ZZFIXTURE no longer exists to check against (tell Daniel before trusting this suite's approval_source coverage)", false, "ZZFIXTURE institution not found");
+    }
+
+    console.log(`-- item: get_rejected_staff_joins() is principal-only and same-institution-only --`);
+    const { error: scopeRejectErr } = await principalW1.rpc("reject_staff_join", { p_institution_staff_id: targetGetRejectedScopeStaffId, p_reason: "Reference for scope checks." });
+    if (scopeRejectErr) throw scopeRejectErr;
+    const { data: rejectedForOwner, error: rejectedForOwnerErr } = await principalW1.rpc("get_rejected_staff_joins", { p_institution_id: institutionWId });
+    record("W12a: the active principal at this institution sees the rejected row", !rejectedForOwnerErr && (rejectedForOwner ?? []).some((r) => r.id === targetGetRejectedScopeStaffId), JSON.stringify(rejectedForOwner));
+    const { data: rejectedForNonPrincipal, error: rejectedForNonPrincipalErr } = await teacherW.rpc("get_rejected_staff_joins", { p_institution_id: institutionWId });
+    record("W12b: an active non-principal at the SAME institution sees an empty list, not an error -- the row exists, they just don't qualify", !rejectedForNonPrincipalErr && (rejectedForNonPrincipal ?? []).length === 0, JSON.stringify(rejectedForNonPrincipal));
+    const { data: rejectedForCrossPrincipal, error: rejectedForCrossPrincipalErr } = await principalWOther.rpc("get_rejected_staff_joins", { p_institution_id: institutionWId });
+    record("W12c: an active principal at a DIFFERENT institution sees an empty list for institutionW, not an error -- same-institution boundary, not just principal-only", !rejectedForCrossPrincipalErr && (rejectedForCrossPrincipal ?? []).length === 0, JSON.stringify(rejectedForCrossPrincipal));
+
+    await admin.from("institutions").delete().in("id", [institutionWId, institutionWOtherId, institutionWUnverifiedId, institutionWFreshId]);
+    for (const id of [principalW1Id, principalWOtherId, principalWUnverifiedId, teacherWId, targetDoubleId, targetRejectThenApproveId, targetApproveThenRejectId, targetReasonRequiredId, targetSpoofId, targetNonPrincipalId, targetCrossInstitutionId, targetGetRejectedScopeId, targetUnverifiedId, freshTeacherId]) {
+      await admin.auth.admin.deleteUser(id);
+    }
+  }
+
   console.log(`\n== Summary ==`);
   const failed = results.filter((r) => !r.pass);
   console.log(`${results.length - failed.length}/${results.length} passed.`);
