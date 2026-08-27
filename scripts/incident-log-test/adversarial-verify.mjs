@@ -280,11 +280,22 @@ async function main() {
 
   console.log(`\n== CHECK 6: parent redaction, structurally ==`);
   {
+    // -- 0093: get_parent_incidents() now gates on teacher_signed_at, --
+    // not status <> 'draft' (the bug piece 4 found and fixed -- status
+    // left 'draft' as soon as this session's own earlier setup requested
+    // attestations, well before the point in the script where this
+    // incident actually gets signed off, in CHECK 7). Both parents
+    // correctly see NOTHING here now -- that's the fix working, not a
+    // regression. The column-shape check (does the row leak narrative)
+    // and the full post-signoff content check both need a REAL signed-
+    // off row to mean anything -- that's CHECK S's own dedicated,
+    // purpose-built fixture (migration 0093), not this one.
     const { data: p1Rows, error: p1Err2 } = await parent1.rpc("get_parent_incidents", { p_passport_id: child1 });
-    const row = p1Rows?.[0];
-    const leaksNarrative = row && Object.prototype.hasOwnProperty.call(row, "narrative");
-    record("get_parent_incidents column set excludes narrative entirely", !leaksNarrative, `keys=${row ? Object.keys(row).join(",") : "none"}`);
-    record("Parent sees exactly 1 row (their own child, non-draft)", (p1Rows?.length ?? 0) === 1, `rows=${p1Rows?.length}, err=${p1Err2?.message}`);
+    record(
+      "Parent sees ZERO rows pre-signoff, even though status left 'draft' earlier in this fixture -- the actual redaction boundary is teacher_signed_at, not status",
+      (p1Rows?.length ?? 0) === 0,
+      `rows=${p1Rows?.length}, err=${p1Err2?.message}`
+    );
 
     const { data: p1Direct, error: p1DirectErr } = await parent1.from("incidents").select("*").eq("id", incidentId);
     record("Parent direct .select() on incidents returns nothing (no policy grants it)", (p1Direct?.length ?? 0) === 0, `rows=${p1Direct?.length}, err=${p1DirectErr?.message}`);
@@ -293,7 +304,7 @@ async function main() {
     record("Parent direct .select() on incident_children returns nothing", (p1Children?.length ?? 0) === 0, `rows=${p1Children?.length}`);
 
     const { data: p2Rows } = await parent2.rpc("get_parent_incidents", { p_passport_id: child2 });
-    record("Parent 2 (child B) sees the incident via their own child's slice", (p2Rows?.length ?? 0) === 1, `rows=${p2Rows?.length}`);
+    record("Parent 2 (child B) also sees ZERO rows pre-signoff, same reason", (p2Rows?.length ?? 0) === 0, `rows=${p2Rows?.length}`);
   }
 
   console.log(`\n== CHECK F: roster RPCs for the stamp UI (migration 0074) ==`);
@@ -2255,6 +2266,193 @@ async function main() {
     );
 
     await admin.from("incidents").delete().eq("id", rSeqId);
+  }
+
+  console.log(`\n== CHECK S: Phase 4 piece 4 (part 1) -- two-stage parent notification, dormant-account handling, get_parent_incidents() draft fix, mark_parent_called() (migration 0093) ==`);
+  {
+    // -- Dedicated fixture: two children, two DIFFERENT parents, so --
+    // cross-child isolation is a genuine two-account test, not just a
+    // single-passport sanity check. parent1S signs in immediately
+    // (active); parent2S is created but deliberately never signed in
+    // yet (last_sign_in_at stays null -- dormant by construction) until
+    // explicitly signed in later in this block, to prove the
+    // independent re-check at stage 2.
+    const { data: instS } = await admin
+      .from("institutions")
+      .insert({ name: "Check S Institution", institution_code: "CHECKS" + Math.floor(Math.random() * 10000), status: "verified" })
+      .select()
+      .single();
+    const institutionSId = instS.id;
+
+    const teacherSId = await createUser("checks.teacher@thebehaviourhive.com", "Check S Teacher", "class_teacher");
+    const snaSId = await createUser("checks.sna@thebehaviourhive.com", "Check S SNA", "sna");
+    const parent1SId = await createUser("checks.parent1@thebehaviourhive.com", "Check S Parent One", "parent");
+    const parent2SId = await createUser("checks.parent2@thebehaviourhive.com", "Check S Parent Two", "parent");
+
+    await admin.from("institution_staff").insert([
+      { institution_id: institutionSId, user_id: teacherSId, role: "class_teacher" },
+      { institution_id: institutionSId, user_id: snaSId, role: "sna" },
+    ]);
+
+    const { data: child1S } = await admin.from("passports").insert({ user_id: parent1SId, child_name: "Check S Child One", passport_status: "complete" }).select().single();
+    const { data: child2S } = await admin.from("passports").insert({ user_id: parent2SId, child_name: "Check S Child Two", passport_status: "complete" }).select().single();
+    await admin.from("passport_institution_links").insert([
+      { passport_id: child1S.id, institution_id: institutionSId, approved_by_parent: true },
+      { passport_id: child2S.id, institution_id: institutionSId, approved_by_parent: true },
+    ]);
+
+    const teacherS = await signedInClient("checks.teacher@thebehaviourhive.com");
+    const snaS = await signedInClient("checks.sna@thebehaviourhive.com");
+    const parent1S = await signedInClient("checks.parent1@thebehaviourhive.com"); // signs in -> active
+    // parent2S deliberately NOT signed in yet.
+
+    // -- S1: the stamp itself -- two-child incident, both children --
+    // inserted atomically. teacherS is named staff too (self-witnessed),
+    // not required for the test, just realistic.
+    const { data: sIncidentId } = await teacherS.rpc("create_incident_stamp", {
+      p_institution_id: institutionSId, p_occurred_at: new Date().toISOString(), p_location_id: loc.id,
+      p_child_passport_ids: [child1S.id, child2S.id],
+      p_staff: [{ user_id: snaSId, involvement: "witnessed" }],
+    });
+
+    const { data: sChildRows } = await admin.from("incident_children").select("id, passport_id, parent_notified_at, parent_notified_by, parent_notification_blocked_reason").eq("incident_id", sIncidentId);
+    const sChild1Row = sChildRows.find((r) => r.passport_id === child1S.id);
+    const sChild2Row = sChildRows.find((r) => r.passport_id === child2S.id);
+
+    record(
+      "S1a: stage 1 -- active parent (child1) gets notified immediately, attributed to the real teacher",
+      sChild1Row.parent_notified_at !== null && sChild1Row.parent_notified_by === teacherSId && sChild1Row.parent_notification_blocked_reason === null,
+      JSON.stringify(sChild1Row)
+    );
+    record(
+      "S1b: stage 1 -- dormant parent (child2, never signed in) is BLOCKED, not silently skipped -- a real, staff-visible reason is recorded instead of a notification",
+      sChild2Row.parent_notified_at === null && sChild2Row.parent_notification_blocked_reason === "dormant_account",
+      JSON.stringify(sChild2Row)
+    );
+
+    // -- S2: cross-child isolation, parent_incident_notices -- parent1S --
+    // sees exactly their own child's stage-1 notice and NOTHING for
+    // child2, through any field, via direct RLS-scoped select (not an
+    // RPC -- proving the table's own policy, not a function's filtering).
+    const { data: sParent1Notices } = await parent1S.from("parent_incident_notices").select("*");
+    record(
+      "S2a: parent1S sees exactly one notice, for child1, notice_type='incident_recorded'",
+      sParent1Notices.length === 1 && sParent1Notices[0].passport_id === child1S.id && sParent1Notices[0].notice_type === "incident_recorded",
+      JSON.stringify(sParent1Notices)
+    );
+    record(
+      "S2b: NO row in parent1S's own result set references child2's passport_id, anywhere",
+      !sParent1Notices.some((n) => n.passport_id === child2S.id),
+      JSON.stringify(sParent1Notices)
+    );
+    const { data: sParent1CrossAttempt } = await parent1S.from("parent_incident_notices").select("*").eq("passport_id", child2S.id);
+    record("S2c: parent1S explicitly querying for child2's passport_id gets zero rows (RLS, not client-side filtering)", (sParent1CrossAttempt?.length ?? 0) === 0, `rows=${sParent1CrossAttempt?.length}`);
+
+    // -- S3: draft-incident non-exposure, BOTH channels. Status has left --
+    // 'draft' (toggle attestations_requested) but teacher has NOT signed
+    // off -- get_parent_incidents() must still return nothing (the fix
+    // under test), proving the gate is teacher_signed_at, not status.
+    await teacherS.from("incidents").update({ attestations_requested: true }).eq("id", sIncidentId);
+    const { data: sStatusRow } = await admin.from("incidents").select("status").eq("id", sIncidentId).single();
+    record("S3a: status has genuinely left draft (setup check)", sStatusRow.status === "awaiting_signoff", sStatusRow.status);
+    const { data: sPrematureRead } = await parent1S.rpc("get_parent_incidents", { p_passport_id: child1S.id });
+    record(
+      "S3b: get_parent_incidents() returns ZERO rows pre-signoff even though status <> 'draft' -- the actual fix, proven live not just read from source",
+      (sPrematureRead?.length ?? 0) === 0,
+      `rows=${sPrematureRead?.length}`
+    );
+
+    // -- S4: parent2S signs in BETWEEN stage 1 (blocked) and stage 2 -- --
+    // proving the dormant check re-runs independently at each stage,
+    // not cached from stage 1's result.
+    const parent2S = await signedInClient("checks.parent2@thebehaviourhive.com"); // this sign-in itself sets last_sign_in_at, making them active from here on
+
+    const { error: sSignErr } = await teacherS.rpc("sign_off_incident", { p_incident_id: sIncidentId });
+    record("S4a: teacher sign-off succeeds", !sSignErr, sSignErr?.message);
+
+    const { data: sChildRowsAfter } = await admin.from("incident_children").select("id, passport_id, parent_notified_at, parent_notification_blocked_reason").eq("incident_id", sIncidentId);
+    const sChild1RowAfter = sChildRowsAfter.find((r) => r.passport_id === child1S.id);
+    const sChild2RowAfter = sChildRowsAfter.find((r) => r.passport_id === child2S.id);
+    record(
+      "S4b: stage 2 -- child2's parent, now active (signed in since stage 1), IS notified this time -- blocked_reason cleared, parent_notified_at now set",
+      sChild2RowAfter.parent_notified_at !== null && sChild2RowAfter.parent_notification_blocked_reason === null,
+      JSON.stringify(sChild2RowAfter)
+    );
+    record("S4c: child1's parent also gets stage 2 (already active both times)", sChild1RowAfter.parent_notified_at !== null, JSON.stringify(sChild1RowAfter));
+
+    // -- S5: post-signoff -- both parents now have their own, --
+    // correctly-scoped notice history; still zero cross-child leakage.
+    const { data: sParent1NoticesAfter } = await parent1S.from("parent_incident_notices").select("notice_type, passport_id");
+    record(
+      "S5a: parent1S now has BOTH stage notices, both for child1, still none for child2",
+      sParent1NoticesAfter.length === 2
+        && sParent1NoticesAfter.every((n) => n.passport_id === child1S.id)
+        && sParent1NoticesAfter.some((n) => n.notice_type === "incident_recorded")
+        && sParent1NoticesAfter.some((n) => n.notice_type === "incident_summary_ready"),
+      JSON.stringify(sParent1NoticesAfter)
+    );
+    const { data: sParent2Notices } = await parent2S.from("parent_incident_notices").select("notice_type, passport_id");
+    record(
+      "S5b: parent2S has exactly ONE notice (stage 1 was blocked, never created) -- stage 2 only, for child2 only",
+      sParent2Notices.length === 1 && sParent2Notices[0].notice_type === "incident_summary_ready" && sParent2Notices[0].passport_id === child2S.id,
+      JSON.stringify(sParent2Notices)
+    );
+
+    // -- S6: get_parent_incidents() post-signoff -- full content now --
+    // visible, correctly scoped; a cross-passport call (parent1S asking
+    // for child2's data) still returns nothing, RLS-level.
+    const { data: sFullRead } = await parent1S.rpc("get_parent_incidents", { p_passport_id: child1S.id });
+    record(
+      "S6a: post-signoff, get_parent_incidents() returns the full parent_summary for the real owner",
+      sFullRead?.length === 1 && sFullRead[0].parent_summary !== undefined,
+      JSON.stringify(sFullRead)
+    );
+    const { data: sCrossPassportRead } = await parent1S.rpc("get_parent_incidents", { p_passport_id: child2S.id });
+    record("S6b: parent1S calling get_parent_incidents() for child2's passport_id gets nothing (owns_passport fails)", (sCrossPassportRead?.length ?? 0) === 0, `rows=${sCrossPassportRead?.length}`);
+    const sLeaksNarrative = sFullRead?.[0] && Object.prototype.hasOwnProperty.call(sFullRead[0], "narrative");
+    record(
+      "S6c: get_parent_incidents() column set excludes narrative entirely, even on a real signed-off row (moved here from CHECK 6, which no longer has a signed-off row to check by this point in its own fixture)",
+      !sLeaksNarrative,
+      `keys=${sFullRead?.[0] ? Object.keys(sFullRead[0]).join(",") : "none"}`
+    );
+
+    // -- S7: mark_parent_called() -- authorization, real reason. snaS is --
+    // named staff with genuine standing on this incident (can view it),
+    // but is neither creator/owning teacher nor principal.
+    const { error: sSnaCallErr } = await snaS.rpc("mark_parent_called", { p_incident_children_id: sChild1Row.id });
+    record("S7a: mark_parent_called() refused for named staff with real visibility but no owner/principal standing", Boolean(sSnaCallErr) && /permission/i.test(sSnaCallErr?.message ?? ""), sSnaCallErr?.message);
+
+    const { error: sTeacherCallErr } = await teacherS.rpc("mark_parent_called", { p_incident_children_id: sChild1Row.id });
+    const { data: sCalledRow } = await admin.from("incident_children").select("parent_called_at, parent_called_by").eq("id", sChild1Row.id).single();
+    record(
+      "S7b: mark_parent_called() succeeds for the owning teacher, records who and when",
+      !sTeacherCallErr && sCalledRow.parent_called_at !== null && sCalledRow.parent_called_by === teacherSId,
+      `err=${sTeacherCallErr?.message}, ${JSON.stringify(sCalledRow)}`
+    );
+
+    // -- S8: manual parent_call_required toggle + restrictive-practice --
+    // auto-raise (CHECK 9 already proved the injury path; this proves
+    // the other two, on child2's fresh, still-unflagged row).
+    const { data: sPreToggle } = await admin.from("incident_children").select("id").eq("incident_id", sIncidentId).eq("passport_id", child2S.id).single();
+    const { data: sNoticesBeforeManual } = await admin.from("school_notices").select("id").eq("incident_id", sIncidentId).eq("notice_type", "incident_parent_call");
+    record("S8a setup: no incident_parent_call notice yet on this incident", (sNoticesBeforeManual?.length ?? 0) === 0, `rows=${sNoticesBeforeManual?.length}`);
+
+    // Manual toggle only works pre-signoff; this incident is already
+    // signed off from S4, so use the RP trigger instead (fires on
+    // insert regardless of sign-off state -- restrictive_practices has
+    // its own insert policy, not gated on this) to prove the SECOND of
+    // the two auto-raise paths.
+    const { error: sRpInsertErr } = await admin.from("restrictive_practices").insert({ incident_id: sIncidentId, passport_id: child2S.id, planning_status: "not_planned" });
+    record("S8a-bis: restrictive_practices insert itself succeeds (planning_status is required, not omitted this time)", !sRpInsertErr, sRpInsertErr?.message);
+    const { data: sChild2AfterRp } = await admin.from("incident_children").select("parent_call_required").eq("id", sPreToggle.id).single();
+    record("S8b: restrictive-practice insert auto-flips parent_call_required (the second of the two auto-raise paths, not yet exercised this session)", sChild2AfterRp.parent_call_required === true, JSON.stringify(sChild2AfterRp));
+    const { data: sNoticesAfterRp } = await admin.from("school_notices").select("id").eq("incident_id", sIncidentId).eq("notice_type", "incident_parent_call");
+    record("S8c: exactly one incident_parent_call notice raised from the RP path", (sNoticesAfterRp?.length ?? 0) === 1, `rows=${sNoticesAfterRp?.length}`);
+
+    await admin.from("institutions").delete().eq("id", institutionSId);
+    for (const id of [teacherSId, snaSId, parent1SId, parent2SId]) {
+      await admin.auth.admin.deleteUser(id);
+    }
   }
 
   console.log(`\n== Summary ==`);
