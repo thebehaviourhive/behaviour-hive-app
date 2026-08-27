@@ -1112,9 +1112,25 @@ export default function IncidentRecordPage() {
             </div>
 
             {isLocked && (
-              <p className="rounded-2xl border border-brand-golden-brown/30 bg-brand-golden-brown/10 p-4 text-sm text-brand-neutral-black">
-                This incident is teacher-signed and immutable. Corrections go through an amendment, not this form.
-              </p>
+              <>
+                <p className="rounded-2xl border border-brand-golden-brown/30 bg-brand-golden-brown/10 p-4 text-sm text-brand-neutral-black">
+                  This incident is teacher-signed and immutable. Corrections go through an amendment, not this form.
+                </p>
+                {/* Export -- Phase 6, moved here from the bottom of the
+                    page (2026-08-27): once signed, exporting the record
+                    is one of the main reasons anyone comes to this page
+                    at all -- it shouldn't sit past the whole form and
+                    the attestation/countersign cards. get_incident_export()'s
+                    own can_view_incident() gate is the real access
+                    control; this link is just where it's reasonable to
+                    surface the entry point. */}
+                <Link
+                  href={`/teacher/incidents/${params.incidentId}/print`}
+                  className="block rounded-2xl bg-brand-prussian-blue py-3.5 text-center text-base font-semibold text-white shadow-sm"
+                >
+                  Export incident report
+                </Link>
+              </>
             )}
 
             {!canEdit && !isLocked && (
@@ -2107,20 +2123,6 @@ export default function IncidentRecordPage() {
                 userId={user.id}
                 onCountersigned={() => window.location.reload()}
               />
-            )}
-
-            {/* Export -- Phase 6. Offered once the record is stable
-                (teacher-signed); get_incident_export()'s own
-                can_view_incident() gate is the real access control,
-                same as CountersignCard/AttestationCard above -- this is
-                just where it's reasonable to surface the entry point. */}
-            {isLocked && (
-              <Link
-                href={`/teacher/incidents/${params.incidentId}/print`}
-                className="block rounded-2xl border-2 border-brand-prussian-blue py-3.5 text-center text-base font-semibold text-brand-prussian-blue"
-              >
-                Export incident report
-              </Link>
             )}
           </div>
         ) : null}

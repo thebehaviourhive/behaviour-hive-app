@@ -248,31 +248,41 @@ export default function PrincipalIncidentsListPage() {
         ) : (
           <div className="flex flex-col gap-2">
             {rows.map((r) => (
-              <Link
-                key={r.incident_id}
-                href={`/teacher/incidents/${r.incident_id}`}
-                className="block rounded-2xl border border-black/5 bg-white p-4 shadow-sm"
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <p className="text-sm font-semibold text-brand-neutral-black">{formatDate(r.occurred_at)}</p>
-                  <span className="flex-shrink-0 rounded-full bg-brand-pastel-blue/20 px-2.5 py-1 text-xs font-semibold text-brand-prussian-blue">
-                    {STATUS_LABEL[r.status] ?? r.status}
-                  </span>
-                </div>
-                <p className="mt-1 text-sm text-brand-neutral-black/80">
-                  {r.location} · {(r.child_indices ?? []).length} child{(r.child_indices ?? []).length === 1 ? "" : "ren"}
-                  {r.owning_teacher_name ? ` · ${r.owning_teacher_name}` : ""}
-                </p>
-                {r.has_restrictive_practice && (
-                  <div className="mt-2 flex flex-wrap gap-1.5 text-xs">
-                    {(r.planning_status ?? []).map((s, i) => (
-                      <span key={i} className="rounded-full bg-brand-golden-brown/10 px-2 py-0.5 font-semibold text-brand-golden-brown">
-                        {s === "in_bsp" ? "In BSP" : "Not planned"}
-                      </span>
-                    ))}
+              <div key={r.incident_id} className="rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
+                <Link href={`/teacher/incidents/${r.incident_id}`} className="block">
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="text-sm font-semibold text-brand-neutral-black">{formatDate(r.occurred_at)}</p>
+                    <span className="flex-shrink-0 rounded-full bg-brand-pastel-blue/20 px-2.5 py-1 text-xs font-semibold text-brand-prussian-blue">
+                      {STATUS_LABEL[r.status] ?? r.status}
+                    </span>
                   </div>
+                  <p className="mt-1 text-sm text-brand-neutral-black/80">
+                    {r.location} · {(r.child_indices ?? []).length} child{(r.child_indices ?? []).length === 1 ? "" : "ren"}
+                    {r.owning_teacher_name ? ` · ${r.owning_teacher_name}` : ""}
+                  </p>
+                  {r.has_restrictive_practice && (
+                    <div className="mt-2 flex flex-wrap gap-1.5 text-xs">
+                      {(r.planning_status ?? []).map((s, i) => (
+                        <span key={i} className="rounded-full bg-brand-golden-brown/10 px-2 py-0.5 font-semibold text-brand-golden-brown">
+                          {s === "in_bsp" ? "In BSP" : "Not planned"}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </Link>
+                {/* Direct route to the document, not just the form -- a --
+                    principal working from this list wants the PDF.
+                    Signed records only, same gate the export page and
+                    the detail page's own export link both use. */}
+                {r.teacher_signed_at && (
+                  <Link
+                    href={`/teacher/incidents/${r.incident_id}/print`}
+                    className="mt-3 block rounded-xl border border-brand-prussian-blue py-2 text-center text-xs font-semibold text-brand-prussian-blue"
+                  >
+                    Export PDF
+                  </Link>
                 )}
-              </Link>
+              </div>
             ))}
           </div>
         )}
