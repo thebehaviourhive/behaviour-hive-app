@@ -2449,6 +2449,41 @@ async function main() {
     const { data: sNoticesAfterRp } = await admin.from("school_notices").select("id").eq("incident_id", sIncidentId).eq("notice_type", "incident_parent_call");
     record("S8c: exactly one incident_parent_call notice raised from the RP path", (sNoticesAfterRp?.length ?? 0) === 1, `rows=${sNoticesAfterRp?.length}`);
 
+    // -- S9: clinician_incident_notices (migration 0094) -- a fresh --
+    // incident so the signoff transition is clean. Child1S gets a
+    // linked, verified clinician; child2S deliberately gets none, to
+    // prove no orphaned row is created when nobody can see it.
+    const clinicianSId = await createUser("checks.clinician@thebehaviourhive.com", "Check S Clinician", "clinician");
+    await admin.from("clinicians").insert({ user_id: clinicianSId, specialty: "behavioural_psychologist", verification_status: "verified" });
+    await admin.from("clinician_access").insert({ passport_id: child1S.id, clinician_id: clinicianSId, is_active: true });
+    const clinicianS = await signedInClient("checks.clinician@thebehaviourhive.com");
+
+    const { data: sClinIncidentId } = await teacherS.rpc("create_incident_stamp", {
+      p_institution_id: institutionSId, p_occurred_at: new Date().toISOString(), p_location_id: loc.id,
+      p_child_passport_ids: [child1S.id, child2S.id], p_staff: [],
+    });
+
+    const { data: sClinPreSignoff } = await clinicianS.from("clinician_incident_notices").select("id").eq("incident_id", sClinIncidentId);
+    record("S9a: clinician gets NOTHING pre-signoff (not before, per spec)", (sClinPreSignoff?.length ?? 0) === 0, `rows=${sClinPreSignoff?.length}`);
+
+    await teacherS.rpc("sign_off_incident", { p_incident_id: sClinIncidentId });
+
+    const { data: sClinPostSignoff } = await clinicianS.from("clinician_incident_notices").select("notice_type, passport_id");
+    record(
+      "S9b: clinician notified at teacher sign-off, exactly one notice, for child1S only (their own case), never child2S",
+      sClinPostSignoff.length === 1 && sClinPostSignoff[0].passport_id === child1S.id && sClinPostSignoff[0].notice_type === "incident_summary_ready",
+      JSON.stringify(sClinPostSignoff)
+    );
+
+    const { data: sOrphanCheck } = await admin.from("clinician_incident_notices").select("id").eq("incident_id", sClinIncidentId).eq("passport_id", child2S.id);
+    record("S9c: no row at all for child2S (no linked clinician to notify) -- not an invisible orphaned row, genuinely absent", (sOrphanCheck?.length ?? 0) === 0, `rows=${sOrphanCheck?.length}`);
+
+    const { data: sSnaClinAttempt } = await snaS.from("clinician_incident_notices").select("id").eq("incident_id", sClinIncidentId);
+    record("S9d: ordinary staff (SNA, not a clinician) sees nothing via this table's own RLS", (sSnaClinAttempt?.length ?? 0) === 0, `rows=${sSnaClinAttempt?.length}`);
+
+    await admin.from("incidents").delete().eq("id", sClinIncidentId);
+    await admin.auth.admin.deleteUser(clinicianSId);
+
     await admin.from("institutions").delete().eq("id", institutionSId);
     for (const id of [teacherSId, snaSId, parent1SId, parent2SId]) {
       await admin.auth.admin.deleteUser(id);
