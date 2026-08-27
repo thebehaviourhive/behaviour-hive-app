@@ -255,8 +255,7 @@ export default function TeacherJoinInstitutionPage() {
                 <LockIcon className="h-6 w-6" />
               </span>
               <p className="mb-4 text-base font-semibold text-brand-neutral-black">
-                Your request to join{pendingInstitutionName ? ` ${pendingInstitutionName}` : " this school"} is
-                waiting on your principal&apos;s approval. You&apos;ll get access as soon as they confirm it.
+                {`Your request to join ${pendingInstitutionName ?? "this school"} is waiting on your principal's approval. You'll get access as soon as they confirm it.`}
               </p>
               <button
                 type="button"
