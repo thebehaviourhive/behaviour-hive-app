@@ -129,13 +129,21 @@ export default function PrincipalDashboardPage() {
             <p className="mt-0.5 text-sm text-brand-neutral-black/60">{institutionName}</p>
           )}
         </div>
-        <Link
-          href="/teacher/incidents/new"
-          aria-label="Record incident"
-          className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-brand-golden-brown text-white shadow-sm"
-        >
-          <AlertTriangleIcon className="h-5 w-5" />
-        </Link>
+        <div className="flex flex-shrink-0 items-center gap-2">
+          <Link
+            href="/principal/incidents"
+            className="flex h-10 items-center rounded-full border-2 border-brand-prussian-blue px-3 text-xs font-semibold text-brand-prussian-blue"
+          >
+            Filter / Export
+          </Link>
+          <Link
+            href="/teacher/incidents/new"
+            aria-label="Record incident"
+            className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-brand-golden-brown text-white shadow-sm"
+          >
+            <AlertTriangleIcon className="h-5 w-5" />
+          </Link>
+        </div>
       </header>
 
       <main className="flex-1 px-4">

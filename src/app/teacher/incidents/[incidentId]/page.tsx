@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { createClient } from "@/lib/supabase/client";
@@ -2106,6 +2107,20 @@ export default function IncidentRecordPage() {
                 userId={user.id}
                 onCountersigned={() => window.location.reload()}
               />
+            )}
+
+            {/* Export -- Phase 6. Offered once the record is stable
+                (teacher-signed); get_incident_export()'s own
+                can_view_incident() gate is the real access control,
+                same as CountersignCard/AttestationCard above -- this is
+                just where it's reasonable to surface the entry point. */}
+            {isLocked && (
+              <Link
+                href={`/teacher/incidents/${params.incidentId}/print`}
+                className="block rounded-2xl border-2 border-brand-prussian-blue py-3.5 text-center text-base font-semibold text-brand-prussian-blue"
+              >
+                Export incident report
+              </Link>
             )}
           </div>
         ) : null}
