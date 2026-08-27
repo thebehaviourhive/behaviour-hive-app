@@ -2775,6 +2775,386 @@ async function main() {
     await admin.from("incidents").delete().eq("id", uIncidentId);
   }
 
+  console.log(`\n== CHECK V: Staff Lifecycle Stage 1 -- deactivation, cascade, guards (migration 0097) ==`);
+  {
+    const { data: instV, error: instVErr } = await admin
+      .from("institutions")
+      .insert({ name: "Staff Lifecycle Verify School", institution_code: CODE + "V", status: "verified" })
+      .select()
+      .single();
+    if (instVErr) throw instVErr;
+    const institutionVId = instV.id;
+
+    const { data: instVOther, error: instVOtherErr } = await admin
+      .from("institutions")
+      .insert({ name: "Staff Lifecycle Cross School", institution_code: CODE + "VX", status: "verified" })
+      .select()
+      .single();
+    if (instVOtherErr) throw instVOtherErr;
+    const institutionVOtherId = instVOther.id;
+
+    // Only ONE principal, deliberately -- institution_staff_one_principal_
+    // per_institution permits at most one ACTIVE principal per institution
+    // (true since 0068, unchanged by this migration). A second row would
+    // fail the unique index outright, which is itself the proof behind
+    // the V6 structural exhibit below: no principal-role row can ever be
+    // deactivated, because deactivating one requires a DIFFERENT active
+    // principal at the same institution to call the RPC, and that second
+    // active principal can't coexist with the first.
+    const principalV1Id = await createUser("lifecycle.principal1@thebehaviourhive.com", "Principal V One", "principal");
+    const teacherVTargetId = await createUser("lifecycle.teacherTarget@thebehaviourhive.com", "Teacher V Target", "class_teacher");
+    const teacherVOtherId = await createUser("lifecycle.teacherOther@thebehaviourhive.com", "Teacher V Other", "class_teacher");
+    const grantHolderId = await createUser("lifecycle.grantholder@thebehaviourhive.com", "Grant Holder V", "class_teacher");
+    const snaVId = await createUser("lifecycle.sna@thebehaviourhive.com", "SNA V", "sna");
+    const crossTeacherId = await createUser("lifecycle.crossteacher@thebehaviourhive.com", "Cross Teacher V", "class_teacher");
+    const parentV1Id = await createUser("lifecycle.parent1@thebehaviourhive.com", "Parent V One", "parent");
+    const parentV2Id = await createUser("lifecycle.parent2@thebehaviourhive.com", "Parent V Two", "parent");
+    const parentV3Id = await createUser("lifecycle.parent3@thebehaviourhive.com", "Parent V Three", "parent");
+    const parentV4Id = await createUser("lifecycle.parent4@thebehaviourhive.com", "Parent V Four", "parent");
+
+    const { data: staffVRows, error: staffVErr } = await admin
+      .from("institution_staff")
+      .insert([
+        { institution_id: institutionVId, user_id: principalV1Id, role: "principal" },
+        { institution_id: institutionVId, user_id: teacherVTargetId, role: "class_teacher" },
+        { institution_id: institutionVId, user_id: teacherVOtherId, role: "class_teacher" },
+        { institution_id: institutionVId, user_id: grantHolderId, role: "class_teacher" },
+        { institution_id: institutionVId, user_id: snaVId, role: "sna" },
+        { institution_id: institutionVOtherId, user_id: crossTeacherId, role: "class_teacher" },
+      ])
+      .select();
+    if (staffVErr) throw staffVErr;
+    const teacherVTargetStaffId = staffVRows.find((r) => r.user_id === teacherVTargetId).id;
+    const principalV1StaffId = staffVRows.find((r) => r.user_id === principalV1Id).id;
+    const grantHolderStaffId = staffVRows.find((r) => r.user_id === grantHolderId).id;
+    const crossTeacherStaffId = staffVRows.find((r) => r.user_id === crossTeacherId).id;
+
+    const { data: cv1 } = await admin.from("passports").insert({ user_id: parentV1Id, child_name: "Lifecycle Child One", passport_status: "complete" }).select().single();
+    const { data: cv2 } = await admin.from("passports").insert({ user_id: parentV2Id, child_name: "Lifecycle Child Two", passport_status: "complete" }).select().single();
+    const { data: cv3 } = await admin.from("passports").insert({ user_id: parentV3Id, child_name: "Lifecycle Child Three", passport_status: "complete" }).select().single();
+    const { data: cv4 } = await admin.from("passports").insert({ user_id: parentV4Id, child_name: "Lifecycle Child Four", passport_status: "complete" }).select().single();
+    const childV1 = cv1.id, childV2 = cv2.id, childV3 = cv3.id, childV4 = cv4.id;
+    await admin.from("passport_institution_links").insert([
+      { passport_id: childV1, institution_id: institutionVId, approved_by_parent: true },
+      { passport_id: childV2, institution_id: institutionVId, approved_by_parent: true },
+      { passport_id: childV3, institution_id: institutionVId, approved_by_parent: true },
+      { passport_id: childV4, institution_id: institutionVId, approved_by_parent: true },
+    ]);
+
+    // teacherVTarget holds two ACTIVE grants -- the cascade must close
+    // both, one activity_log row each, on the CHILD's own history (not
+    // stacked on one). teacherVOther shares childV1 -- proves the cascade
+    // is scoped to the deactivated person's OWN grants, not every grant
+    // on a child they happened to also touch. childV3's grant for
+    // teacherVTarget starts REVOKED, used later to prove a deactivated
+    // person can't reactivate one either. childV4 has no grant for
+    // teacherVTarget at all yet, used to prove they can't create a new one.
+    await admin.from("passport_access").insert([
+      { passport_id: childV1, teacher_id: teacherVTargetId, institution_id: institutionVId, is_active: true, actor_role: "class_teacher" },
+      { passport_id: childV2, teacher_id: teacherVTargetId, institution_id: institutionVId, is_active: true, actor_role: "class_teacher" },
+      { passport_id: childV1, teacher_id: teacherVOtherId, institution_id: institutionVId, is_active: true, actor_role: "class_teacher" },
+    ]);
+    const { data: revokedGrantV3 } = await admin
+      .from("passport_access")
+      .insert({ passport_id: childV3, teacher_id: teacherVTargetId, institution_id: institutionVId, is_active: false, actor_role: "class_teacher" })
+      .select()
+      .single();
+
+    // One row per vocab table, scoped to institution V -- used by item 2's
+    // read-access checks below. incident_action_types has is_restraint
+    // instead of is_active; the rest share the same shape.
+    await admin.from("incident_action_types").insert({ institution_id: institutionVId, value: "Lifecycle Vocab Action", is_restraint: false });
+    await admin.from("incident_recovery_types").insert({ institution_id: institutionVId, value: "Lifecycle Vocab Recovery" });
+    await admin.from("cpi_reason_types").insert({ institution_id: institutionVId, value: "Lifecycle Vocab CPI Reason" });
+    await admin.from("cpi_disengagement_types").insert({ institution_id: institutionVId, value: "Lifecycle Vocab CPI Disengagement" });
+    await admin.from("cpi_result_types").insert({ institution_id: institutionVId, value: "Lifecycle Vocab CPI Result" });
+    await admin.from("incident_injury_types").insert({ institution_id: institutionVId, value: "Lifecycle Vocab Injury" });
+    await admin.from("incident_body_regions").insert({ institution_id: institutionVId, value: "Lifecycle Vocab Region" });
+    const { data: locVRow } = await admin
+      .from("incident_locations")
+      .insert({ institution_id: institutionVId, value: "Lifecycle Vocab Location" })
+      .select()
+      .single();
+
+    const { data: globalLoc } = await admin.from("incident_locations").select("id").eq("value", "Classroom").is("institution_id", null).single();
+
+    const principalV1 = await signedInClient("lifecycle.principal1@thebehaviourhive.com");
+    const teacherVTarget = await signedInClient("lifecycle.teacherTarget@thebehaviourhive.com");
+    const teacherVOther = await signedInClient("lifecycle.teacherOther@thebehaviourhive.com");
+    const grantHolder = await signedInClient("lifecycle.grantholder@thebehaviourhive.com");
+    const snaV = await signedInClient("lifecycle.sna@thebehaviourhive.com");
+
+    console.log(`-- item 1: active staff, no regression --`);
+    const { data: incident1Id, error: incident1Err } = await teacherVTarget.rpc("create_incident_stamp", {
+      p_institution_id: institutionVId, p_occurred_at: new Date().toISOString(), p_location_id: globalLoc.id,
+      p_child_passport_ids: [childV1], p_staff: [],
+    });
+    record("V1: active class_teacher creates an incident exactly as before -- no regression from this migration", !incident1Err, incident1Err?.message);
+
+    console.log(`-- item 7: non-principal cannot deactivate anyone --`);
+    const { error: nonPrincipalErr } = await teacherVOther.rpc("deactivate_institution_staff", {
+      p_institution_staff_id: teacherVTargetStaffId, p_reason: "Attempted by a non-principal.",
+    });
+    record("V7: a non-principal (active class_teacher) is refused -- 'Only an active principal...'", Boolean(nonPrincipalErr) && /active principal/i.test(nonPrincipalErr.message), nonPrincipalErr?.message);
+
+    console.log(`-- item 8: principal cannot deactivate staff at another institution --`);
+    const { error: crossInstErr } = await principalV1.rpc("deactivate_institution_staff", {
+      p_institution_staff_id: crossTeacherStaffId, p_reason: "Attempted cross-institution.",
+    });
+    record("V8: principal of institution V refused deactivating staff at a different institution", Boolean(crossInstErr) && /active principal/i.test(crossInstErr.message), crossInstErr?.message);
+
+    console.log(`-- item 5: a principal cannot deactivate themselves --`);
+    const { error: selfErr } = await principalV1.rpc("deactivate_institution_staff", {
+      p_institution_staff_id: principalV1StaffId, p_reason: "Attempted self-deactivation.",
+    });
+    record("V5: principal refused deactivating their own staff row -- 'cannot deactivate your own'", Boolean(selfErr) && /own staff membership/i.test(selfErr.message), selfErr?.message);
+
+    console.log(`-- V5b: no OTHER caller can ever be an active principal at the same institution while this one still holds the role --`);
+    const { error: nonPrincipalTargetsPrincipalErr } = await teacherVOther.rpc("deactivate_institution_staff", {
+      p_institution_staff_id: principalV1StaffId, p_reason: "Attempted by a non-principal, targeting the sole principal.",
+    });
+    record(
+      "V5b: a non-principal caller (teacherVOther) is refused targeting the sole principal too -- 'Only an active principal...', same reason as V7, not a coincidence",
+      Boolean(nonPrincipalTargetsPrincipalErr) && /active principal/i.test(nonPrincipalTargetsPrincipalErr.message),
+      nonPrincipalTargetsPrincipalErr?.message
+    );
+
+    console.log(`-- building incident2 (teacherVOther owns, teacherVTarget named + attests, signed off, left uncountersigned) --`);
+    const { data: incident2Id } = await teacherVOther.rpc("create_incident_stamp", {
+      p_institution_id: institutionVId, p_occurred_at: new Date().toISOString(), p_location_id: globalLoc.id,
+      p_child_passport_ids: [childV1], p_staff: [{ user_id: teacherVTargetId, involvement: "witnessed" }],
+    });
+    await teacherVOther.from("incidents").update({
+      category: "one_party_incident", narrative: "Lifecycle check narrative.", parent_summary: "Lifecycle check parent summary.",
+    }).eq("id", incident2Id);
+    const { data: targetStaffRow2 } = await admin.from("incident_staff").select("id").eq("incident_id", incident2Id).eq("user_id", teacherVTargetId).single();
+    const { error: attestErr } = await teacherVTarget.rpc("attest_to_incident", { p_incident_staff_id: targetStaffRow2.id, p_addendum: "Confirmed, before I'm deactivated." });
+    record("Setup: teacherVTarget's own attestation on incident2 succeeds while still active", !attestErr, attestErr?.message);
+    const { error: signoff2Err } = await teacherVOther.rpc("sign_off_incident", { p_incident_id: incident2Id });
+    record("Setup: incident2 signs off cleanly", !signoff2Err, signoff2Err?.message);
+    const { data: incident2ChildRow } = await admin.from("incident_children").select("id").eq("incident_id", incident2Id).eq("passport_id", childV1).single();
+
+    console.log(`-- building incident4 (teacherVOther owns, teacherVTarget named but does NOT attest -- the outstanding-attestation proof) --`);
+    const { data: incident4Id } = await teacherVOther.rpc("create_incident_stamp", {
+      p_institution_id: institutionVId, p_occurred_at: new Date().toISOString(), p_location_id: globalLoc.id,
+      p_child_passport_ids: [childV1], p_staff: [{ user_id: teacherVTargetId, involvement: "witnessed" }],
+    });
+
+    console.log(`-- get_staff_deactivation_preview() (migration 0098) -- called BEFORE deactivation, while the state it previews is still real --`);
+    const { error: previewNonPrincipalErr } = await teacherVOther.rpc("get_staff_deactivation_preview", { p_institution_staff_id: teacherVTargetStaffId });
+    record("Preview: non-principal caller refused -- 'Only an active principal...'", Boolean(previewNonPrincipalErr) && /active principal/i.test(previewNonPrincipalErr.message), previewNonPrincipalErr?.message);
+
+    const { error: previewCrossInstErr } = await principalV1.rpc("get_staff_deactivation_preview", { p_institution_staff_id: crossTeacherStaffId });
+    record("Preview: refused across institutions, same as deactivate_institution_staff() itself", Boolean(previewCrossInstErr) && /active principal/i.test(previewCrossInstErr.message), previewCrossInstErr?.message);
+
+    const { data: preview, error: previewErr } = await principalV1.rpc("get_staff_deactivation_preview", { p_institution_staff_id: teacherVTargetStaffId });
+    record("Preview: succeeds for the active principal", !previewErr, previewErr?.message);
+    record(
+      "Preview: unsigned_incidents includes incident1 (created+owned by teacherVTarget, teacher_signed_at still null)",
+      preview?.unsigned_incidents?.some((i) => i.incident_id === incident1Id),
+      JSON.stringify(preview?.unsigned_incidents)
+    );
+    record(
+      "Preview: outstanding_attestations includes incident4 (named, real account, not yet attested) but NOT incident2 (already attested)",
+      preview?.outstanding_attestations?.some((i) => i.incident_id === incident4Id) && !preview?.outstanding_attestations?.some((i) => i.incident_id === incident2Id),
+      JSON.stringify(preview?.outstanding_attestations)
+    );
+    record(
+      "Preview: active_children lists BOTH childV1 and childV2 -- the real list, not empty, now that the cascade makes it consequential",
+      preview?.active_children?.length === 2 && [childV1, childV2].every((c) => preview.active_children.some((row) => row.passport_id === c)),
+      JSON.stringify(preview?.active_children)
+    );
+
+    console.log(`-- granting grantHolder countersign authority while still active --`);
+    const { error: grantErr } = await principalV1.from("institution_permissions").insert({
+      institution_id: institutionVId, user_id: grantHolderId, permission: "countersign_incident", granted_by: principalV1Id,
+    });
+    record("Setup: principalV1 grants countersign_incident to grantHolder while grantHolder is still active", !grantErr, grantErr?.message);
+
+    console.log(`-- building incident3 (teacherVOther owns, signed off, COUNTERSIGNED by grantHolder while still active) --`);
+    const { data: incident3Id } = await teacherVOther.rpc("create_incident_stamp", {
+      p_institution_id: institutionVId, p_occurred_at: new Date().toISOString(), p_location_id: globalLoc.id,
+      p_child_passport_ids: [childV2], p_staff: [],
+    });
+    await teacherVOther.from("incidents").update({
+      category: "one_party_incident", narrative: "Lifecycle check narrative 3.", parent_summary: "Lifecycle check parent summary 3.",
+    }).eq("id", incident3Id);
+    await teacherVOther.rpc("sign_off_incident", { p_incident_id: incident3Id });
+    const { error: grantHolderCountersignErr } = await grantHolder.rpc("countersign_incident", { p_incident_id: incident3Id });
+    record("Setup: grantHolder countersigns incident3 (via grant, not role) while still active", !grantHolderCountersignErr, grantHolderCountersignErr?.message);
+
+    console.log(`-- building incidentUnowned (sna stamp, no owning teacher, for the claim_incident refusal) --`);
+    const { data: incidentUnownedId } = await snaV.rpc("create_incident_stamp", {
+      p_institution_id: institutionVId, p_occurred_at: new Date().toISOString(), p_location_id: globalLoc.id,
+      p_child_passport_ids: [childV1], p_staff: [],
+    });
+    const { data: unownedCheck } = await admin.from("incidents").select("owning_teacher_id").eq("id", incidentUnownedId).single();
+    record("Setup: sna-created stamp has no owning teacher (sna cannot own)", unownedCheck.owning_teacher_id === null, unownedCheck.owning_teacher_id);
+
+    console.log(`-- item 6 & the structural exhibit: one finding, one exhibit, covering all four principal-only gates --`);
+    const { data: activePrincipalsBefore } = await admin
+      .from("institution_staff")
+      .select("user_id")
+      .eq("institution_id", institutionVId).eq("role", "principal").is("deactivated_at", null);
+    record(
+      "V6: STRUCTURAL, not live-fired -- deactivate_institution_staff()'s last-principal guard, can_countersign_incident()'s principal branch, incident_locations add/edit's principal branches, and mark_parent_called()'s principal branch (four call sites, one root cause) are all unreachable by construction: V5 shows the sole principal can't target themselves, V5b shows no other caller can ever be an active principal at the same institution while this one holds the role (institution_staff_one_principal_per_institution permits only one). No path exists to ever set deactivated_at on a principal-role row today -- asserted here as exactly one active principal (principalV1), unchanged, with no deactivation attempt on a principal-role row possible to construct. Stage 1b (handover) is what makes this reachable -- see CLAUDE.md, Deferred work.",
+      activePrincipalsBefore?.length === 1 && activePrincipalsBefore[0].user_id === principalV1Id,
+      JSON.stringify(activePrincipalsBefore)
+    );
+
+    console.log(`-- item 6, the real deactivations that ARE reachable --`);
+    const { error: grantHolderDeactivateErr } = await principalV1.rpc("deactivate_institution_staff", {
+      p_institution_staff_id: grantHolderStaffId, p_reason: "Lifecycle check: grant holder deactivated.",
+    });
+    record("V: principalV1 deactivates grantHolder (no grants to revoke)", !grantHolderDeactivateErr, grantHolderDeactivateErr?.message);
+
+    const { data: targetDeactivateResult, error: targetDeactivateErr } = await principalV1.rpc("deactivate_institution_staff", {
+      p_institution_staff_id: teacherVTargetStaffId, p_reason: "Lifecycle check: main cascade target.",
+    });
+    record("V: principalV1 deactivates teacherVTarget (the main cascade test)", !targetDeactivateErr, targetDeactivateErr?.message);
+    record("V-cascade: exactly 2 grants revoked (childV1 + childV2, the two teacherVTarget actually held)", targetDeactivateResult?.grants_revoked === 2, JSON.stringify(targetDeactivateResult));
+
+    const { data: targetGrantsAfter } = await admin.from("passport_access").select("passport_id, is_active").eq("teacher_id", teacherVTargetId).eq("institution_id", institutionVId);
+    record(
+      "V-cascade: both of teacherVTarget's own grants (childV1, childV2) now is_active=false",
+      targetGrantsAfter?.length === 3 && targetGrantsAfter.filter((g) => g.passport_id !== childV3).every((g) => g.is_active === false),
+      JSON.stringify(targetGrantsAfter)
+    );
+    const { data: otherGrantAfter } = await admin.from("passport_access").select("is_active").eq("teacher_id", teacherVOtherId).eq("passport_id", childV1).single();
+    record("V-cascade: teacherVOther's OWN, separate grant on the SAME child (childV1) is untouched -- cascade scoped to the deactivated person only", otherGrantAfter?.is_active === true, JSON.stringify(otherGrantAfter));
+
+    const { data: activityRowsChild1 } = await admin.from("activity_log").select("event_type, event_description").eq("passport_id", childV1).eq("event_type", "access_revoked");
+    const { data: activityRowsChild2 } = await admin.from("activity_log").select("event_type, event_description").eq("passport_id", childV2).eq("event_type", "access_revoked");
+    record(
+      "V-cascade: exactly one access_revoked activity_log row on childV1's OWN history, naming Teacher V Target explicitly",
+      activityRowsChild1?.length === 1 && activityRowsChild1[0].event_description === "Access removed for Teacher V Target (staff member deactivated)",
+      JSON.stringify(activityRowsChild1)
+    );
+    record(
+      "V-cascade: exactly one access_revoked activity_log row on childV2's OWN history too -- one row per child, not stacked",
+      activityRowsChild2?.length === 1 && activityRowsChild2[0].event_description === "Access removed for Teacher V Target (staff member deactivated)",
+      JSON.stringify(activityRowsChild2)
+    );
+
+    console.log(`-- item 2: deactivated staff refused at every call site, named --`);
+
+    const { data: vocabAction } = await teacherVTarget.from("incident_action_types").select("id").eq("institution_id", institutionVId);
+    record("V2a: incident_action_types -- deactivated staff gets zero rows for their own institution's vocabulary", (vocabAction?.length ?? 0) === 0, `rows=${vocabAction?.length}`);
+    const { data: vocabRecovery } = await teacherVTarget.from("incident_recovery_types").select("id").eq("institution_id", institutionVId);
+    record("V2b: incident_recovery_types -- same", (vocabRecovery?.length ?? 0) === 0, `rows=${vocabRecovery?.length}`);
+    const { data: vocabCpiReason } = await teacherVTarget.from("cpi_reason_types").select("id").eq("institution_id", institutionVId);
+    record("V2c: cpi_reason_types -- same", (vocabCpiReason?.length ?? 0) === 0, `rows=${vocabCpiReason?.length}`);
+    const { data: vocabCpiDis } = await teacherVTarget.from("cpi_disengagement_types").select("id").eq("institution_id", institutionVId);
+    record("V2d: cpi_disengagement_types -- same", (vocabCpiDis?.length ?? 0) === 0, `rows=${vocabCpiDis?.length}`);
+    const { data: vocabCpiResult } = await teacherVTarget.from("cpi_result_types").select("id").eq("institution_id", institutionVId);
+    record("V2e: cpi_result_types -- same", (vocabCpiResult?.length ?? 0) === 0, `rows=${vocabCpiResult?.length}`);
+    const { data: vocabInjury } = await teacherVTarget.from("incident_injury_types").select("id").eq("institution_id", institutionVId);
+    record("V2f: incident_injury_types -- same", (vocabInjury?.length ?? 0) === 0, `rows=${vocabInjury?.length}`);
+    const { data: vocabLoc } = await teacherVTarget.from("incident_locations").select("id").eq("institution_id", institutionVId);
+    record("V2g: incident_locations (read) -- same", (vocabLoc?.length ?? 0) === 0, `rows=${vocabLoc?.length}`);
+    const { data: vocabRegion } = await teacherVTarget.from("incident_body_regions").select("id").eq("institution_id", institutionVId);
+    record("V2h: incident_body_regions -- same", (vocabRegion?.length ?? 0) === 0, `rows=${vocabRegion?.length}`);
+
+    // V2i/V2j (incident_locations add/edit, principal branch) are not
+    // live-fired here -- see the V6 structural exhibit above. locVRow
+    // stays unused by design; kept in the fixture for Stage 1b to pick up.
+    void locVRow;
+
+    const { error: createErr } = await teacherVTarget.rpc("create_incident_stamp", {
+      p_institution_id: institutionVId, p_occurred_at: new Date().toISOString(), p_location_id: globalLoc.id,
+      p_child_passport_ids: [childV1], p_staff: [],
+    });
+    record("V2k: create_incident_stamp() -- deactivated staff refused, 'not registered as school staff'", Boolean(createErr) && /not registered as school staff/i.test(createErr.message), createErr?.message);
+
+    const { error: claimErr } = await teacherVTarget.rpc("claim_incident", { p_incident_id: incidentUnownedId });
+    record("V2l: claim_incident() -- deactivated class_teacher refused", Boolean(claimErr) && /only a class teacher/i.test(claimErr.message), claimErr?.message);
+
+    // V2m (mark_parent_called, principal branch) is not live-fired here --
+    // see the V6 structural exhibit above. incident2ChildRow stays unused
+    // by design; kept in the fixture for Stage 1b to pick up.
+    void incident2ChildRow;
+
+    const { error: newGrantErr } = await teacherVTarget.from("passport_access").insert({
+      passport_id: childV4, teacher_id: teacherVTargetId, institution_id: institutionVId, is_active: true, actor_role: "class_teacher",
+    });
+    record("V2n: passport_access insert (new grant) -- deactivated staff refused creating a brand-new grant", Boolean(newGrantErr), newGrantErr?.message);
+
+    const { error: reactivateErr } = await teacherVTarget.from("passport_access").update({ is_active: true }).eq("id", revokedGrantV3.id);
+    record("V2o: passport_access reactivate -- deactivated staff refused reactivating their own revoked grant", Boolean(reactivateErr), reactivateErr?.message);
+
+    // V2p (can_countersign_incident, principal branch, item 3's principal
+    // half) is not live-fired here -- see the V6 structural exhibit above.
+    // The grant branch (item 3's other half) IS fully reachable and real
+    // -- grantHolder was legitimately deactivated a moment ago (unlike a
+    // principal, nothing stops a class_teacher losing their grant-holder
+    // standing), so this is a genuine end-to-end proof, not a helper check.
+    const { data: canGrantHolderCountersign } = await admin.rpc("can_countersign_incident", { p_user_id: grantHolderId, p_institution_id: institutionVId });
+    record("V2p / item 3 (grant branch): can_countersign_incident() returns FALSE for a deactivated grant-holder -- the grant branch's own new check", canGrantHolderCountersign === false, canGrantHolderCountersign);
+    const { error: grantHolderCountersignAttemptErr } = await grantHolder.rpc("countersign_incident", { p_incident_id: incident2Id });
+    record("V2p / item 3 (grant branch): countersign_incident() -- deactivated grant-holder refused end-to-end, not just the helper", Boolean(grantHolderCountersignAttemptErr), grantHolderCountersignAttemptErr?.message);
+
+    const { data: incident2StillUncountersigned } = await admin.from("incidents").select("countersigned_at").eq("id", incident2Id).single();
+    record("V2p: incident2 stayed uncountersigned throughout the refused attempt", incident2StillUncountersigned?.countersigned_at === null, incident2StillUncountersigned?.countersigned_at);
+
+    const { error: grantToDeactivatedErr } = await principalV1.from("institution_permissions").insert({
+      institution_id: institutionVId, user_id: teacherVTargetId, permission: "countersign_incident", granted_by: principalV1Id,
+    });
+    record(
+      "V2r / item 4: guard_institution_permissions_grantee_is_staff() -- an active principal cannot grant countersign authority to a deactivated person",
+      Boolean(grantToDeactivatedErr) && /not an active member/i.test(grantToDeactivatedErr.message),
+      grantToDeactivatedErr?.message
+    );
+
+    console.log(`-- item 9: a deactivated person's authored records are unchanged --`);
+    const { data: principalV1IncidentList } = await principalV1.rpc("get_institution_incidents", { p_institution_id: institutionVId });
+    const incident1Row = principalV1IncidentList?.find((r) => r.incident_id === incident1Id);
+    record("V9a: incident1's owning_teacher_name still resolves to 'Teacher V Target' after deactivation -- their name stays on what they created", incident1Row?.owning_teacher_name === "Teacher V Target", incident1Row?.owning_teacher_name);
+
+    const { data: countersignSummary2 } = await principalV1.rpc("get_countersign_summary", { p_incident_id: incident2Id });
+    const targetAttestation = countersignSummary2?.staff_attestations?.find((s) => s.name === "Teacher V Target");
+    record(
+      "V9b: teacherVTarget's own attestation on incident2 still shows as valid/current after deactivation -- 'attestations they gave still valid'",
+      targetAttestation?.status === "current" && targetAttestation?.has_account === true,
+      JSON.stringify(targetAttestation)
+    );
+
+    const { data: incident3AfterDeactivation } = await teacherVOther.from("incidents").select("countersigned_at, countersigned_by, countersigned_role_at_time, countersigned_via").eq("id", incident3Id).single();
+    record(
+      "V9c: incident3's countersignature by grantHolder stands unchanged after their deactivation -- 'countersignatures still standing' (via='grant', role_at_time='class_teacher', frozen at the moment of signing, not re-derived from their now-revoked standing)",
+      incident3AfterDeactivation?.countersigned_by === grantHolderId &&
+        incident3AfterDeactivation?.countersigned_role_at_time === "class_teacher" &&
+        incident3AfterDeactivation?.countersigned_via === "grant" &&
+        incident3AfterDeactivation?.countersigned_at !== null,
+      JSON.stringify(incident3AfterDeactivation)
+    );
+
+    console.log(`-- item 10: rejoin creates a new membership row, doesn't resurrect the old one --`);
+    const { error: rejoinErr } = await teacherVTarget.from("institution_staff").insert({
+      institution_id: institutionVId, user_id: teacherVTargetId, role: "class_teacher",
+    });
+    record("V10a: deactivated person rejoining via the real self-link INSERT succeeds -- the new active-only unique index doesn't collide with their old row", !rejoinErr, rejoinErr?.message);
+
+    const { data: allTargetRows } = await admin.from("institution_staff").select("id, deactivated_at, deactivated_by, deactivation_reason").eq("institution_id", institutionVId).eq("user_id", teacherVTargetId).order("created_at");
+    record("V10b: exactly 2 rows now exist for teacherVTarget at this institution -- the old one, plus the new one", allTargetRows?.length === 2, JSON.stringify(allTargetRows));
+    const oldRow = allTargetRows?.find((r) => r.id === teacherVTargetStaffId);
+    record("V10c: the OLD row's deactivation fields are unchanged, not nulled out -- deactivation is append-only, reactivation is a new row", oldRow?.deactivated_at !== null && oldRow?.deactivation_reason === "Lifecycle check: main cascade target.", JSON.stringify(oldRow));
+    const newRow = allTargetRows?.find((r) => r.id !== teacherVTargetStaffId);
+    record("V10d: the NEW row is genuinely active (deactivated_at is null)", newRow?.deactivated_at === null, JSON.stringify(newRow));
+
+    console.log(`-- bonus: the two remaining input guards on deactivate_institution_staff() itself --`);
+    const { error: emptyReasonErr } = await principalV1.rpc("deactivate_institution_staff", { p_institution_staff_id: newRow.id, p_reason: "" });
+    record("V-bonus: empty reason refused -- 'A reason is required'", Boolean(emptyReasonErr) && /reason is required/i.test(emptyReasonErr.message), emptyReasonErr?.message);
+    const { error: alreadyDeactivatedErr } = await principalV1.rpc("deactivate_institution_staff", { p_institution_staff_id: teacherVTargetStaffId, p_reason: "Trying again." });
+    record("V-bonus: deactivating an already-deactivated row refused -- 'already deactivated'", Boolean(alreadyDeactivatedErr) && /already deactivated/i.test(alreadyDeactivatedErr.message), alreadyDeactivatedErr?.message);
+
+    await admin.from("incidents").delete().in("id", [incident1Id, incident2Id, incident3Id, incident4Id, incidentUnownedId]);
+    await admin.from("institutions").delete().eq("id", institutionVId);
+    await admin.from("institutions").delete().eq("id", institutionVOtherId);
+    for (const id of [principalV1Id, teacherVTargetId, teacherVOtherId, grantHolderId, snaVId, crossTeacherId, parentV1Id, parentV2Id, parentV3Id, parentV4Id]) {
+      await admin.auth.admin.deleteUser(id);
+    }
+  }
+
   console.log(`\n== Summary ==`);
   const failed = results.filter((r) => !r.pass);
   console.log(`${results.length - failed.length}/${results.length} passed.`);

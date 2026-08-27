@@ -131,6 +131,12 @@ export default function PrincipalDashboardPage() {
         </div>
         <div className="flex flex-shrink-0 items-center gap-2">
           <Link
+            href="/principal/staff"
+            className="flex h-10 items-center rounded-full border-2 border-brand-prussian-blue px-3 text-xs font-semibold text-brand-prussian-blue"
+          >
+            Staff
+          </Link>
+          <Link
             href="/principal/incidents"
             className="flex h-10 items-center rounded-full border-2 border-brand-prussian-blue px-3 text-xs font-semibold text-brand-prussian-blue"
           >
