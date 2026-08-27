@@ -12,7 +12,39 @@ migration `0097_institution_staff_lifecycle.sql`.
 
 ---
 
+## 2.4b Institution join approval
+
+**Ordering: this comes before 2.4c (handover), not after.** Handover hands the highest-privilege role in the product to someone who joined through an unapproved path — approval has to exist first, or handover just moves the problem to a more privileged seat.
+
+**Why this is an access problem, not an empty-dashboard problem.** Institution codes are openly readable by design (migration `0009`'s own stated model). Today that's low-stakes: joining with a code gets you a dashboard with nothing in it until a parent separately grants `passport_access`. Under this PRD, institution membership itself confers roster-tier read access to every child in the school — the incident log's own `get_institution_child_roster()`/`get_institution_staff_roster()` shape, not a per-child grant. The moment that's true, "anyone who knows a code can join" stops being a UX gap and becomes a real access boundary with nothing behind it.
+
+**Shape:**
+
+- A pending state on `institution_staff` — `approved_at`/`approved_by`, nullable, same shape as `deactivated_at`/`deactivated_by`. Not approved means not active, full stop: every Stage 1 call site that now checks `deactivated_at is null` also needs `approved_at is not null` alongside it — the exact same call-site map Stage 1 already built becomes this feature's scaffolding, not new discovery work.
+- A principal-facing approve/reject action, mirroring `deactivate_institution_staff()`'s own shape (active-principal-only, same-institution-only).
+- A notice to the principal when someone requests — reuse `school_notices` with a new `notice_type`, not a new table; this is exactly the "something needs a principal's attention" pattern that table already exists for.
+- A clear pending screen for the requester — not the join form again, not a broken dashboard; a third, honest state alongside "here's the form" and "here's your dashboard."
+- Append-only. A rejected request is never deleted — same discipline as attestation withdrawal and amendments elsewhere in this build. A rejected row is terminal; if the person should join later, that's a new request, not a reopened one — matching "reactivation is a new row," not a null-out.
+
+**Grandfathering existing joins: approved.** Backfill every existing `institution_staff` row with `approved_at = created_at`, `approved_by = null` — null, not a fabricated approver, since nothing in the old ungated model recorded one and inventing one would break the same "two honest facts, nothing invented" discipline `countersigned_via` was built on. The alternative — retroactively unapproving everyone — locks out every live fixture and any real school mid-build for no real gain; there is no way to reconstruct after the fact whether an old join would have been approved.
+
+**The bootstrap problem: auto-approve a principal-role join if and only if the institution currently has no active principal.** Bounded by the constraint that already exists — `institution_staff_one_principal_per_institution` caps this at exactly one wrong founding principal, discoverable the same way a second-principal collision already surfaces today. Every `class_teacher`/`sna` join is gated unconditionally, including ones that arrive before any principal exists — they sit pending until one does. This rule has a useful second property, not a coincidence: "no active principal" is also true for 2.4c's own abandoned-principal case once Behaviour Hive resolves it out-of-band — the same auto-approve rule covers both a genuinely new institution and a recovered abandoned one, with no second mechanism.
+
+This is deliberately NOT built on `institution_admin` (C-08, no reachable onboarding since migration `0033`). That role is the more principled long-term answer — approving on the institution's behalf as a real, onboarded role rather than a bounded-risk bootstrap rule — but it's separate, materially bigger work, and nothing here blocks building it later. The bootstrap rule above would simply become unreachable once it exists, the same way four of Stage 1's own checks are structural until handover ships.
+
+**Stage prompt shape, for whenever this is built — not written as a runnable prompt yet:**
+
+- *Mission*: institution join requires principal approval before any access is granted; no ordinary path exists today for a principal to see, approve, or reject who joins their school.
+- *Step 0 — Recon*: every current read/write of `institution_staff`'s INSERT policy and the self-link flow; every downstream consumer that currently treats "row exists" as "may act" and will now need "row exists AND approved" instead (the Stage 1 call-site list, re-audited, not re-discovered).
+- *Step 1 — SQL*: `approved_at`/`approved_by` columns, the auto-approve rule (no-active-principal), the grandfathering backfill, `approve`/`reject_staff_join()` RPCs mirroring `deactivate_institution_staff()`'s authorization shape, the `school_notices` notice type.
+- *Step 2 — Adversarial coverage*: written before client code, per the standing rule. Must include: a pending join grants nothing until approved; grandfathered rows still work exactly as before; the auto-approve rule fires only when genuinely no active principal exists, and not otherwise; a rejected request stays rejected and visible, never deleted, and re-requesting creates a new row; principal-only approve/reject, same-institution-only.
+- *Step 3 — Client*: the pending screen for the requester, the principal's approve/reject surface (likely folded into the existing `/principal/staff` list rather than a separate page — a pending row is just another state alongside active/deactivated).
+- *VERIFY*: same checklist as Stage 1 — every call site listed with its check, full suite green, `tsc`/`eslint` clean, live-verified on the DEPLOYED app (not local-dev) against a disposable fixture, migration run and committed, deployed SHA confirmed.
+- *Do not build in this pass*: `institution_admin` onboarding itself (the bootstrap rule stands in for it); any change to `passport_access`/child-level grants; anything from Stage 2 (classes, assignment).
+
 ## 2.4c Principal handover
+
+**Depends on 2.4b (join approval) shipping first.** Handover promotes an existing active staff member to principal — if that staff member joined through an unapproved path, handover would be handing the highest-privilege role in the product to someone nobody vetted. 2.4b closes that before this is built.
 
 `institution_staff_one_principal_per_institution` permits one active principal per institution, and `deactivate_institution_staff()` requires an active principal caller who is not the target. Together those mean a principal can never be deactivated by any ordinary path - a departed principal would keep institution-wide access to every child's record indefinitely.
 
