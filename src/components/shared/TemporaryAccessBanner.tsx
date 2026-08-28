@@ -16,11 +16,15 @@ import { formatCutoffTime, getTemporaryAccessWindowStatus } from "@/lib/temporar
 // usage across the ABC logger and incident detail page.
 
 interface TemporaryAccessBannerProps {
-  className: string;
+  // The COVERED CLASS's name (e.g. "Room 3"), not a CSS class -- named
+  // coveringClassName specifically to avoid colliding with this
+  // codebase's ordinary `className` (Tailwind) convention, which every
+  // sibling card component (QuestionnairePromptCard, etc.) actually uses.
+  coveringClassName: string;
   cutoffTime: string;
 }
 
-export function TemporaryAccessBanner({ className, cutoffTime }: TemporaryAccessBannerProps) {
+export function TemporaryAccessBanner({ coveringClassName, cutoffTime }: TemporaryAccessBannerProps) {
   const status = getTemporaryAccessWindowStatus(cutoffTime);
   if (!status.isActive) return null;
 
@@ -35,7 +39,7 @@ export function TemporaryAccessBanner({ className, cutoffTime }: TemporaryAccess
       }`}
     >
       <p className="font-semibold">
-        Covering {className} today until {formattedCutoff}
+        Covering {coveringClassName} today until {formattedCutoff}
       </p>
       {status.isLate && (
         <p className="mt-0.5 text-xs">

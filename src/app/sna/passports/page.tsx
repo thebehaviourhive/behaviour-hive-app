@@ -9,6 +9,7 @@ import { useTeacherMorningCheckins, type MorningPupilStatus } from "@/hooks/useT
 import { getChildDisplayName } from "@/lib/childDisplayName";
 import { AddChildSheet } from "@/components/teacher/AddChildSheet";
 import { SnaBottomNav } from "@/components/sna/SnaBottomNav";
+import { TemporaryAccessBanner } from "@/components/shared/TemporaryAccessBanner";
 import { AlertTriangleIcon, PeopleIcon } from "@/components/ui/icons";
 import { QuestionnairePromptCard } from "@/components/questionnaire/QuestionnairePromptCard";
 import { AttestationPromptCard } from "@/components/incident-log/AttestationPromptCard";
@@ -66,6 +67,7 @@ export default function SnaPassportsPage() {
     institutionId,
     institutionCode,
     children,
+    activeCoverage,
     refresh,
   } = useSnaChildren(user?.id ?? null);
   const { isLoading: isLoadingCheckins, pupils } = useTeacherMorningCheckins(user?.id ?? null, {
@@ -147,6 +149,18 @@ export default function SnaPassportsPage() {
           )}
         </div>
       </header>
+
+      {activeCoverage.length > 0 && (
+        <div className="px-4">
+          {activeCoverage.map((coverage) => (
+            <TemporaryAccessBanner
+              key={coverage.classId}
+              coveringClassName={coverage.className}
+              cutoffTime={coverage.cutoffTime}
+            />
+          ))}
+        </div>
+      )}
 
       <QuestionnairePromptCard track="sna" className="px-4 pb-4" />
       <AttestationPromptCard className="px-4 pb-4" />

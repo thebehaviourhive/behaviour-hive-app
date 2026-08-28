@@ -31,12 +31,24 @@ export interface SnaChild extends TeacherPassport {
   isAssigned: boolean;
 }
 
+export interface ActiveCoverage {
+  classId: string;
+  className: string;
+  cutoffTime: string;
+}
+
 interface UseSnaChildrenResult {
   isLoading: boolean;
   error: string | null;
   institutionId: string | null;
   institutionCode: string | null;
   children: SnaChild[];
+  // Feeds TemporaryAccessBanner -- kept here rather than re-derived by
+  // each consuming page, since this hook already resolves the exact
+  // same activeGrantClassIds/cutoffTime this needs. Empty whenever the
+  // caller holds no currently-active grant (an ordinary permanent SNA
+  // reads this as [], the banner renders nothing).
+  activeCoverage: ActiveCoverage[];
   refresh: () => void;
 }
 
@@ -53,12 +65,14 @@ export function useSnaChildren(userId: string | null): UseSnaChildrenResult {
   const [isLoadingExtra, setIsLoadingExtra] = useState(true);
   const [extraError, setExtraError] = useState<string | null>(null);
   const [merged, setMerged] = useState<SnaChild[]>([]);
+  const [activeCoverage, setActiveCoverage] = useState<ActiveCoverage[]>([]);
 
   useEffect(() => {
     if (isLoadingGranted) return;
     if (!userId || !institutionId) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setMerged(grantedPassports.map((p) => ({ ...p, isTemporary: false, isAssigned: false })));
+      setActiveCoverage([]);
       setIsLoadingExtra(false);
       return;
     }
@@ -122,13 +136,21 @@ export function useSnaChildren(userId: string | null): UseSnaChildrenResult {
       // and returns full passport fields directly (skipping a second
       // round-trip through the generic extraIds resolution below).
       let temporaryChildren: TeacherPassport[] = [];
+      let coverage: ActiveCoverage[] = [];
       if (activeGrantClassIds.length > 0) {
-        const results = await Promise.all(
-          activeGrantClassIds.map((classId) =>
-            supabase.rpc("get_temporary_access_covered_children", { p_class_id: classId })
-          )
-        );
-        const rows = results.flatMap((r) => r.data ?? []);
+        const [childResults, classNameResult] = await Promise.all([
+          Promise.all(
+            activeGrantClassIds.map((classId) =>
+              supabase.rpc("get_temporary_access_covered_children", { p_class_id: classId })
+            )
+          ),
+          // "Active staff can view their institution's classes" (0104)
+          // is institution-wide -- the auto-created row this grant
+          // produces (Decision 4) already satisfies it, so this needs
+          // no new access path the way the roster read above did.
+          supabase.from("classes").select("id, name").in("id", activeGrantClassIds),
+        ]);
+        const rows = childResults.flatMap((r) => r.data ?? []);
         temporaryChildren = rows.map((row) => ({
           passportId: row.passport_id,
           childName: row.child_name || "This child",
@@ -137,8 +159,14 @@ export function useSnaChildren(userId: string | null): UseSnaChildrenResult {
           diagnoses: row.diagnoses,
           diagnosisOther: row.diagnosis_other,
         }));
+        coverage = (classNameResult.data ?? []).map((c) => ({
+          classId: c.id,
+          className: c.name,
+          cutoffTime,
+        }));
       }
       const temporaryPassportIds = new Set(temporaryChildren.map((p) => p.passportId));
+      setActiveCoverage(coverage);
 
       const grantedById = new Map(grantedPassports.map((p) => [p.passportId, p]));
       const extraIds = [...assignedPassportIds].filter(
@@ -199,6 +227,7 @@ export function useSnaChildren(userId: string | null): UseSnaChildrenResult {
     institutionId,
     institutionCode,
     children: merged,
+    activeCoverage,
     refresh,
   };
 }
