@@ -4628,6 +4628,480 @@ async function main() {
     }
   }
 
+  console.log(`\n== CHECK AA: Temporary day-scoped access (migration 0105) -- grant/revoke authorization, the has_sna_access() fourth branch, can_own_incident()/create_incident_stamp() widening, the ownership/authority edit-policy decoupling, lazy ownership-transfer resolution, and the standing-audit fixes (assign_sna_to_child, get_institution_staff_roster) ==`);
+  {
+    // Dublin-local "now", computed once, used to derive cut-off values
+    // that are deterministically before/after the current instant --
+    // per the scoping decision, this varies STORED data (granted_for_
+    // date, temporary_access_cutoff_time) against the real current
+    // time, not the other way around. No sleeping, no clock mocking.
+    // NAMED LIMITATION: the 07:30 activation boundary itself is a fixed
+    // literal compared directly against now() inside the SQL, not a
+    // stored value -- there is no way to vary it the same way, so this
+    // suite cannot prove the ">= 07:30" half of the window without
+    // literally running before 07:30 local time. Only the cut-off
+    // (">  cut-off" refusal, "< cut-off" success) is exercised here.
+    function dublinNowParts() {
+      const fmt = new Intl.DateTimeFormat("en-GB", {
+        timeZone: "Europe/Dublin", hour12: false,
+        year: "numeric", month: "2-digit", day: "2-digit",
+        hour: "2-digit", minute: "2-digit", second: "2-digit",
+      });
+      const p = Object.fromEntries(fmt.formatToParts(new Date()).map((x) => [x.type, x.value]));
+      return { date: `${p.year}-${p.month}-${p.day}`, time: `${p.hour}:${p.minute}:${p.second}` };
+    }
+    function addMinutesClamped(hhmmss, delta) {
+      const [h, m] = hhmmss.split(":").map(Number);
+      let total = h * 60 + m + delta;
+      total = Math.max(7 * 60 + 31, Math.min(23 * 60 + 59, total));
+      const hh = String(Math.floor(total / 60)).padStart(2, "0");
+      const mm = String(total % 60).padStart(2, "0");
+      return `${hh}:${mm}:00`;
+    }
+    const nowParts = dublinNowParts();
+    const cutoffComfortablyAhead = addMinutesClamped(nowParts.time, 180);
+    const cutoffAlreadyPassed = addMinutesClamped(nowParts.time, -15);
+    const todayLocal = nowParts.date;
+    const yesterdayLocal = new Date(new Date(`${todayLocal}T12:00:00Z`).getTime() - 86400000).toISOString().slice(0, 10);
+    const tomorrowLocal = new Date(new Date(`${todayLocal}T12:00:00Z`).getTime() + 86400000).toISOString().slice(0, 10);
+
+    // ---- AA0: Setup ----
+    const { data: instAA, error: instAAErr } = await admin
+      .from("institutions")
+      .insert({ name: "AA Temp Access Verify", institution_code: CODE + "AA", status: "verified" })
+      .select().single();
+    if (instAAErr) throw instAAErr;
+    const institutionAAId = instAA.id;
+
+    const principalAAId = await createUser("aatemp.principal@thebehaviourhive.com", "AA Temp Principal", "principal");
+    const teacherAA1Id = await createUser("aatemp.teacher1@thebehaviourhive.com", "AA Temp Teacher One", "class_teacher");
+    const outsiderTeacherAAId = await createUser("aatemp.outsider@thebehaviourhive.com", "AA Temp Outsider Teacher", "class_teacher");
+    const snaAA1Id = await createUser("aatemp.sna1@thebehaviourhive.com", "AA Temp SNA One", "sna");
+    const deactivatedSnaAAId = await createUser("aatemp.deactivatedsna@thebehaviourhive.com", "AA Temp Deactivated SNA", "sna");
+    const newSupplyAAId = await createUser("aatemp.newsupply@thebehaviourhive.com", "AA Temp New Supply Teacher", "sna");
+    const pendingSupplyAAId = await createUser("aatemp.pendingsupply@thebehaviourhive.com", "AA Temp Pending Supply Teacher", "sna");
+    const parentAA1Id = await createUser("aatemp.parent1@thebehaviourhive.com", "AA Temp Parent One", "parent");
+    const parentAA2Id = await createUser("aatemp.parent2@thebehaviourhive.com", "AA Temp Parent Two", "parent");
+
+    const { data: staffAARows, error: staffAAErr } = await admin.from("institution_staff").insert([
+      { institution_id: institutionAAId, user_id: principalAAId, role: "principal" },
+      { institution_id: institutionAAId, user_id: teacherAA1Id, role: "class_teacher" },
+      { institution_id: institutionAAId, user_id: outsiderTeacherAAId, role: "class_teacher" },
+      { institution_id: institutionAAId, user_id: snaAA1Id, role: "sna" },
+      { institution_id: institutionAAId, user_id: deactivatedSnaAAId, role: "sna" },
+    ]).select();
+    if (staffAAErr) throw staffAAErr;
+    const byUserAA = (uid) => staffAARows.find((r) => r.user_id === uid);
+
+    const principalAA = await signedInClient("aatemp.principal@thebehaviourhive.com");
+    for (const row of staffAARows.filter((r) => r.role !== "principal")) {
+      const { error } = await principalAA.rpc("approve_staff_join", { p_institution_staff_id: row.id });
+      if (error) throw error;
+    }
+
+    const { error: deactivateErr } = await principalAA.rpc("deactivate_institution_staff", {
+      p_institution_staff_id: byUserAA(deactivatedSnaAAId).id, p_reason: "AA fixture: needs a genuinely deactivated SNA.",
+    });
+    if (deactivateErr) throw deactivateErr;
+
+    const teacherAA1 = await signedInClient("aatemp.teacher1@thebehaviourhive.com");
+    const outsiderTeacherAA = await signedInClient("aatemp.outsider@thebehaviourhive.com");
+
+    const { data: classAA1Id } = await principalAA.rpc("create_class", { p_institution_id: institutionAAId, p_name: "AA Room 1" });
+    const { data: classAA2Id } = await principalAA.rpc("create_class", { p_institution_id: institutionAAId, p_name: "AA Room 2" });
+    await principalAA.rpc("add_class_teacher", { p_class_id: classAA1Id, p_user_id: teacherAA1Id });
+    await principalAA.rpc("add_class_teacher", { p_class_id: classAA2Id, p_user_id: outsiderTeacherAAId });
+
+    const { data: cAA1 } = await admin.from("passports").insert({ user_id: parentAA1Id, child_name: "AA Temp Child One", passport_status: "complete" }).select().single();
+    const { data: cAA2 } = await admin.from("passports").insert({ user_id: parentAA2Id, child_name: "AA Temp Child Two", passport_status: "complete" }).select().single();
+    const childAA1 = cAA1.id, childAA2 = cAA2.id;
+    await admin.from("passport_institution_links").insert([
+      { passport_id: childAA1, institution_id: institutionAAId, approved_by_parent: true },
+      { passport_id: childAA2, institution_id: institutionAAId, approved_by_parent: true },
+    ]);
+    await principalAA.rpc("add_class_child", { p_class_id: classAA1Id, p_passport_id: childAA1 });
+    await principalAA.rpc("add_class_child", { p_class_id: classAA2Id, p_passport_id: childAA2 });
+
+    // A genuinely pending join, via the REAL self-link path (a direct
+    // insert under the same RLS this app's own join flow uses), not a
+    // service-role shortcut -- exactly the scenario the pending-join-
+    // collision fix in grant_temporary_access() exists for.
+    const pendingSupplyAA = await signedInClient("aatemp.pendingsupply@thebehaviourhive.com");
+    const { error: pendingJoinErr } = await pendingSupplyAA
+      .from("institution_staff")
+      .insert({ institution_id: institutionAAId, user_id: pendingSupplyAAId, role: "sna" });
+    if (pendingJoinErr) throw pendingJoinErr;
+
+    console.log("AA0 fixture ready.");
+
+    // ---- AA1: set_temporary_access_cutoff() ----
+    {
+      const { error: nonPrincipalErr } = await teacherAA1.rpc("set_temporary_access_cutoff", { p_institution_id: institutionAAId, p_cutoff_time: "16:00:00" });
+      record("AA-1a: set_temporary_access_cutoff refuses a non-principal caller", Boolean(nonPrincipalErr) && /active principal/i.test(nonPrincipalErr.message), nonPrincipalErr?.message);
+
+      const { error: tooEarlyErr } = await principalAA.rpc("set_temporary_access_cutoff", { p_institution_id: institutionAAId, p_cutoff_time: "07:00:00" });
+      record("AA-1b: set_temporary_access_cutoff refuses a cut-off at or before 07:30 activation", Boolean(tooEarlyErr) && /07:30/i.test(tooEarlyErr.message), tooEarlyErr?.message);
+
+      const { error: setErr } = await principalAA.rpc("set_temporary_access_cutoff", { p_institution_id: institutionAAId, p_cutoff_time: cutoffComfortablyAhead });
+      record("AA-1c: an active principal CAN set a valid cut-off", !setErr, setErr?.message);
+      const { data: instCheck } = await admin.from("institutions").select("temporary_access_cutoff_time").eq("id", institutionAAId).single();
+      record("AA-1d: the cut-off actually persisted to the row", instCheck?.temporary_access_cutoff_time?.startsWith(cutoffComfortablyAhead.slice(0, 5)), instCheck?.temporary_access_cutoff_time);
+    }
+
+    // ---- AA2: grant_temporary_access() -- authority 1 (class teacher) ----
+    let grantAA_classTeacherToSna;
+    {
+      const { error: wrongClassErr } = await outsiderTeacherAA.rpc("grant_temporary_access", {
+        p_class_id: classAA1Id, p_user_id: snaAA1Id, p_date: todayLocal, p_reason: "Should fail -- not this class's teacher.",
+      });
+      record("AA-2a: a class teacher cannot grant cover for a DIFFERENT class they don't teach", Boolean(wrongClassErr) && /Only the class|current teacher/i.test(wrongClassErr.message), wrongClassErr?.message);
+
+      const { error: notSnaErr } = await teacherAA1.rpc("grant_temporary_access", {
+        p_class_id: classAA1Id, p_user_id: outsiderTeacherAAId, p_date: todayLocal, p_reason: "Should fail -- target is not an SNA.",
+      });
+      record("AA-2b: a class teacher cannot grant cover to a non-SNA colleague", Boolean(notSnaErr) && /active SNA/i.test(notSnaErr.message), notSnaErr?.message);
+
+      const { error: deactivatedSnaErr } = await teacherAA1.rpc("grant_temporary_access", {
+        p_class_id: classAA1Id, p_user_id: deactivatedSnaAAId, p_date: todayLocal, p_reason: "Should fail -- target SNA is deactivated.",
+      });
+      record("AA-2c: a class teacher cannot grant cover to a DEACTIVATED SNA", Boolean(deactivatedSnaErr) && /active SNA/i.test(deactivatedSnaErr.message), deactivatedSnaErr?.message);
+
+      const { error: reasonErr } = await teacherAA1.rpc("grant_temporary_access", {
+        p_class_id: classAA1Id, p_user_id: snaAA1Id, p_date: todayLocal, p_reason: "",
+      });
+      record("AA-2d: a reason is required", Boolean(reasonErr) && /reason/i.test(reasonErr.message), reasonErr?.message);
+
+      const { error: pastDateErr } = await teacherAA1.rpc("grant_temporary_access", {
+        p_class_id: classAA1Id, p_user_id: snaAA1Id, p_date: yesterdayLocal, p_reason: "Should fail -- backdated.",
+      });
+      record("AA-2e: cannot grant temporary access for a date that has already passed", Boolean(pastDateErr) && /already passed/i.test(pastDateErr.message), pastDateErr?.message);
+
+      const { data: grantId, error: grantErr } = await teacherAA1.rpc("grant_temporary_access", {
+        p_class_id: classAA1Id, p_user_id: snaAA1Id, p_date: todayLocal, p_reason: "Covering for the morning.",
+      });
+      record("AA-2f: a class teacher CAN grant cover for their own class to an existing active SNA colleague", !grantErr && Boolean(grantId), grantErr?.message);
+      grantAA_classTeacherToSna = grantId;
+
+      const { data: grantRow } = await admin.from("temporary_access").select("*").eq("id", grantId).single();
+      record("AA-2g: the grant row records the correct granting authority ('class_teacher') and access_tier ('sna')", grantRow?.granted_by_role === "class_teacher" && grantRow?.access_tier === "sna", JSON.stringify(grantRow));
+    }
+
+    // ---- AA3: grant_temporary_access() -- authority 2 (principal) ----
+    let grantAA_supplyTeacher, newSupplyStaffRowId;
+    {
+      const nonexistentUserId = "00000000-0000-0000-0000-000000000000";
+      const { error: noAccountErr } = await principalAA.rpc("grant_temporary_access", {
+        p_class_id: classAA1Id, p_user_id: nonexistentUserId, p_date: todayLocal, p_reason: "Should fail -- no account.",
+      });
+      record("AA-3a: cannot grant to a user_id with no Behaviour Hive account -- no invite-by-email path", Boolean(noAccountErr) && /does not have a Behaviour Hive account/i.test(noAccountErr.message), noAccountErr?.message);
+
+      const { error: selfGrantErr } = await principalAA.rpc("grant_temporary_access", {
+        p_class_id: classAA1Id, p_user_id: principalAAId, p_date: todayLocal, p_reason: "Should fail -- self grant.",
+      });
+      record("AA-3b: cannot grant temporary access to yourself", Boolean(selfGrantErr) && /yourself/i.test(selfGrantErr.message), selfGrantErr?.message);
+
+      // The genuinely new supply teacher -- no institution_staff row at
+      // this institution at all before this grant.
+      const { data: grantId2, error: grantErr2 } = await principalAA.rpc("grant_temporary_access", {
+        p_class_id: classAA2Id, p_user_id: newSupplyAAId, p_date: todayLocal, p_reason: "Covering Room 2's absent teacher.",
+      });
+      record("AA-3c: a principal CAN grant cover, for any class, to someone with an existing account and no prior standing here", !grantErr2 && Boolean(grantId2), grantErr2?.message);
+      grantAA_supplyTeacher = grantId2;
+
+      const { data: newStaffRow } = await admin.from("institution_staff").select("*").eq("user_id", newSupplyAAId).eq("institution_id", institutionAAId).single();
+      newSupplyStaffRowId = newStaffRow?.id;
+      record("AA-3d THE CORRECTED DESIGN: the auto-created row is role='sna' (not 'class_teacher'), approved immediately, approval_source='temporary_grant'", newStaffRow?.role === "sna" && newStaffRow?.approved_at != null && newStaffRow?.approval_source === "temporary_grant", JSON.stringify(newStaffRow));
+
+      // The pending-join-collision fix, exercised for real: a stale
+      // pending row already exists (AA0's own real self-link insert) --
+      // granting must resolve it in place, not collide with
+      // institution_staff_one_active_per_institution.
+      const { error: grantErr3 } = await principalAA.rpc("grant_temporary_access", {
+        p_class_id: classAA1Id, p_user_id: pendingSupplyAAId, p_date: tomorrowLocal, p_reason: "Covering tomorrow, resolves their stale pending join.",
+      });
+      record("AA-3e BUG REGRESSION: granting to someone with a genuinely pending prior join request does not collide with institution_staff_one_active_per_institution", !grantErr3, grantErr3?.message);
+      const { data: resolvedPendingRow } = await admin.from("institution_staff").select("approved_at, approval_source, role").eq("user_id", pendingSupplyAAId).eq("institution_id", institutionAAId).single();
+      record("AA-3f: that stale pending row is now approved via approval_source='temporary_grant', role left as originally self-requested ('sna')", resolvedPendingRow?.approved_at != null && resolvedPendingRow?.approval_source === "temporary_grant" && resolvedPendingRow?.role === "sna", JSON.stringify(resolvedPendingRow));
+
+      const { error: dupGrantErr } = await principalAA.rpc("grant_temporary_access", {
+        p_class_id: classAA2Id, p_user_id: newSupplyAAId, p_date: todayLocal, p_reason: "Duplicate, should fail.",
+      });
+      record("AA-3g: a second simultaneously-active grant for the same person/class/date is refused (temporary_access_one_active_per_person_class_date)", Boolean(dupGrantErr), dupGrantErr?.message);
+    }
+
+    // ---- AA4: revoke_temporary_access() ----
+    {
+      const { error: reasonErr } = await principalAA.rpc("revoke_temporary_access", { p_temporary_access_id: grantAA_classTeacherToSna, p_reason: "" });
+      record("AA-4a: a reason is required to revoke", Boolean(reasonErr) && /reason/i.test(reasonErr.message), reasonErr?.message);
+
+      const { error: unrelatedErr } = await outsiderTeacherAA.rpc("revoke_temporary_access", { p_temporary_access_id: grantAA_classTeacherToSna, p_reason: "Should fail." });
+      record("AA-4b: only the original granter or the principal can revoke", Boolean(unrelatedErr) && /Only the person who granted|principal/i.test(unrelatedErr.message), unrelatedErr?.message);
+
+      // Principal revokes a grant they didn't personally make -- allowed.
+      const { error: principalRevokeErr } = await principalAA.rpc("revoke_temporary_access", { p_temporary_access_id: grantAA_classTeacherToSna, p_reason: "AA test: early revocation by the principal." });
+      record("AA-4c: the institution's principal CAN revoke a grant made by someone else", !principalRevokeErr, principalRevokeErr?.message);
+
+      const { error: doubleRevokeErr } = await principalAA.rpc("revoke_temporary_access", { p_temporary_access_id: grantAA_classTeacherToSna, p_reason: "Already revoked." });
+      record("AA-4d: an already-revoked grant cannot be revoked again", Boolean(doubleRevokeErr) && /already been revoked/i.test(doubleRevokeErr.message), doubleRevokeErr?.message);
+    }
+
+    // ---- AA5: has_sna_access()/has_active_temporary_grant() -- the
+    // fourth OR-branch, direct boolean checks before trusting anything
+    // built on top of it. grantAA_classTeacherToSna is now REVOKED
+    // (AA4) -- reused deliberately here to prove revocation actually
+    // removes access, not just re-derived from a positive case.
+    {
+      const { data: revokedAccess } = await principalAA.rpc("has_sna_access", { p_user_id: snaAA1Id, p_passport_id: childAA1 });
+      record("AA-5a: has_sna_access() is FALSE once the covering grant has been revoked, even though it was for the right class/date", revokedAccess === false, revokedAccess);
+
+      // A fresh, currently-active grant, same person, to re-test the
+      // positive case cleanly.
+      const { data: freshGrantId } = await teacherAA1.rpc("grant_temporary_access", { p_class_id: classAA1Id, p_user_id: snaAA1Id, p_date: todayLocal, p_reason: "AA5 fresh positive-case grant." });
+      const { data: activeAccess } = await principalAA.rpc("has_sna_access", { p_user_id: snaAA1Id, p_passport_id: childAA1 });
+      record("AA-5b: has_sna_access() is TRUE for a currently-active grant covering the child's own class", activeAccess === true, activeAccess);
+
+      const { data: wrongClassAccess } = await principalAA.rpc("has_sna_access", { p_user_id: snaAA1Id, p_passport_id: childAA2 });
+      record("AA-5c: the SAME active grant does NOT extend to a child in a DIFFERENT class (childAA2, classAA2)", wrongClassAccess === false, wrongClassAccess);
+
+      // Reuses pendingSupplyAAId's own grant from AA-3e (classAA1,
+      // tomorrow) rather than creating a new one for newSupplyAAId --
+      // newSupplyAAId already holds a genuinely active TODAY-dated grant
+      // for classAA2 from AA-3c, which would silently confound this
+      // specific isolation (any positive result could come from either
+      // grant). pendingSupplyAAId has exactly one grant, dated
+      // tomorrow, nothing else -- a clean subject.
+      const { data: futureDatedAccess } = await principalAA.rpc("has_sna_access", { p_user_id: pendingSupplyAAId, p_passport_id: childAA1 });
+      record("AA-5d: a grant dated for a DIFFERENT day (tomorrow) is not active today", futureDatedAccess === false, futureDatedAccess);
+
+      const { data: cutoffInstCheck } = await admin.from("institutions").select("temporary_access_cutoff_time").eq("id", institutionAAId).single();
+      record("AA-5e (context): institution cut-off is currently set comfortably ahead of now, from AA1", cutoffInstCheck?.temporary_access_cutoff_time?.startsWith(cutoffComfortablyAhead.slice(0, 5)), cutoffInstCheck);
+
+      await principalAA.rpc("set_temporary_access_cutoff", { p_institution_id: institutionAAId, p_cutoff_time: cutoffAlreadyPassed });
+      const { data: pastCutoffAccess } = await principalAA.rpc("has_sna_access", { p_user_id: snaAA1Id, p_passport_id: childAA1 });
+      record("AA-5f THE CUT-OFF BOUNDARY: the SAME active, correctly-dated grant is FALSE once the institution's cut-off has passed", pastCutoffAccess === false, pastCutoffAccess);
+      // Restore a generous cut-off for the rest of this check block.
+      await principalAA.rpc("set_temporary_access_cutoff", { p_institution_id: institutionAAId, p_cutoff_time: cutoffComfortablyAhead });
+      const { data: restoredAccess } = await principalAA.rpc("has_sna_access", { p_user_id: snaAA1Id, p_passport_id: childAA1 });
+      record("AA-5g: restoring the cut-off to later than now makes the SAME grant active again -- computed live, not cached", restoredAccess === true, restoredAccess);
+
+      const { data: noAccessAtAll } = await principalAA.rpc("has_sna_access", { p_user_id: outsiderTeacherAAId, p_passport_id: childAA1 });
+      record("AA-5h: still refuses someone with no grant of any kind", noAccessAtAll === false, noAccessAtAll);
+    }
+
+    // ---- AA6: can_own_incident()/create_incident_stamp() widening ----
+    let incidentOwnedBySupply, incidentOwnedByPermanentTeacher;
+    {
+      const { data: locAA } = await admin.from("incident_locations").select("id").eq("value", "Classroom").is("institution_id", null).single();
+
+      // newSupplyAAId's own grant (classAA2, today, cutoff comfortably
+      // ahead per AA5) is currently active.
+      const newSupplyAA = await signedInClient("aatemp.newsupply@thebehaviourhive.com");
+      const { data: supplyIncidentId, error: supplyStampErr } = await newSupplyAA.rpc("create_incident_stamp", {
+        p_institution_id: institutionAAId, p_occurred_at: new Date().toISOString(), p_location_id: locAA.id, p_child_passport_ids: [childAA2], p_staff: [],
+      });
+      if (supplyStampErr) throw supplyStampErr;
+      incidentOwnedBySupply = supplyIncidentId;
+      const { data: supplyIncidentRow } = await admin.from("incidents").select("owning_teacher_id, created_by").eq("id", supplyIncidentId).single();
+      record("AA-6a THE WIDENING: an sna-role creator with a currently-active temporary grant auto-owns the incident they start", supplyIncidentRow?.owning_teacher_id === newSupplyAAId, JSON.stringify(supplyIncidentRow));
+
+      // snaAA1Id, an ORDINARY permanent SNA with no temporary grant at
+      // all right now -- must NOT auto-own (regression: the widening
+      // must not have accidentally handed every SNA auto-ownership).
+      await admin.from("temporary_access").update({ revoked_at: new Date().toISOString(), revoked_by: principalAAId, revocation_reason: "AA6 setup: clearing snaAA1's active grant for the regression check." }).eq("granted_to", snaAA1Id).is("revoked_at", null);
+      const snaAA1 = await signedInClient("aatemp.sna1@thebehaviourhive.com");
+      const { data: ordinarySnaIncidentId } = await snaAA1.rpc("create_incident_stamp", {
+        p_institution_id: institutionAAId, p_occurred_at: new Date().toISOString(), p_location_id: locAA.id, p_child_passport_ids: [childAA1], p_staff: [],
+      });
+      const { data: ordinarySnaIncidentRow } = await admin.from("incidents").select("owning_teacher_id").eq("id", ordinarySnaIncidentId).single();
+      record("AA-6b REGRESSION: an ordinary permanent SNA with no active temporary grant still does NOT auto-own (unchanged from before this migration)", ordinarySnaIncidentRow?.owning_teacher_id === null, JSON.stringify(ordinarySnaIncidentRow));
+      await admin.from("incidents").delete().eq("id", ordinarySnaIncidentId);
+
+      // teacherAA1, an ordinary permanent class_teacher -- unaffected,
+      // regression check.
+      const { data: teacherIncidentId } = await teacherAA1.rpc("create_incident_stamp", {
+        p_institution_id: institutionAAId, p_occurred_at: new Date().toISOString(), p_location_id: locAA.id, p_child_passport_ids: [childAA1], p_staff: [],
+      });
+      incidentOwnedByPermanentTeacher = teacherIncidentId;
+      const { data: teacherIncidentRow } = await admin.from("incidents").select("owning_teacher_id").eq("id", teacherIncidentId).single();
+      record("AA-6c REGRESSION: a permanent class_teacher creator still auto-owns exactly as before", teacherIncidentRow?.owning_teacher_id === teacherAA1Id, JSON.stringify(teacherIncidentRow));
+
+      const { data: canOwnResult } = await principalAA.rpc("can_own_incident", { p_user_id: newSupplyAAId, p_institution_id: institutionAAId });
+      record("AA-6d: can_own_incident() itself, called directly, agrees with the stamp's own behaviour", canOwnResult === true, canOwnResult);
+    }
+
+    // ---- AA7: THE SECURITY FIX -- ownership and authority decoupled.
+    // incidentOwnedBySupply is currently owned by newSupplyAAId, whose
+    // grant is still active (classAA2, today, generous cut-off). ----
+    {
+      const newSupplyAA = await signedInClient("aatemp.newsupply@thebehaviourhive.com");
+
+      const { error: editWhileActiveErr } = await newSupplyAA.from("incidents").update({ category: "one_party_incident" }).eq("id", incidentOwnedBySupply);
+      record("AA-7a (positive control): the owning supply teacher CAN edit their own incident while their grant is still active", !editWhileActiveErr, editWhileActiveErr?.message);
+      const { data: editedCheck } = await admin.from("incidents").select("category").eq("id", incidentOwnedBySupply).single();
+      record("AA-7a-confirm: the edit actually persisted (re-read via service role, not assumed from the absence of an error)", editedCheck?.category === "one_party_incident", editedCheck);
+
+      // Revoke their grant -- owning_teacher_id is untouched by this,
+      // deliberately, the same way Y-cascade-3 proved a stale row
+      // doesn't self-correct. The edit policy must catch this
+      // independently.
+      const { data: supplyGrantRow } = await admin.from("temporary_access").select("id").eq("granted_to", newSupplyAAId).eq("institution_id", institutionAAId).is("revoked_at", null).single();
+      const { error: revokeForTestErr } = await principalAA.rpc("revoke_temporary_access", { p_temporary_access_id: supplyGrantRow.id, p_reason: "AA7: end their access mid-incident, deliberately." });
+      if (revokeForTestErr) throw revokeForTestErr;
+
+      const { data: staleOwnershipCheck } = await admin.from("incidents").select("owning_teacher_id").eq("id", incidentOwnedBySupply).single();
+      record("AA-7b: owning_teacher_id is UNCHANGED by the revocation itself -- staleness is real, not auto-corrected", staleOwnershipCheck?.owning_teacher_id === newSupplyAAId, staleOwnershipCheck);
+
+      const { data: updateAttempt, error: editAfterRevokeErr } = await newSupplyAA.from("incidents").update({ category: "imminent_risk_of_injury" }).eq("id", incidentOwnedBySupply).select();
+      record("AA-7c THE FIX ITSELF: the same person, still owning_teacher_id, can no longer edit once their grant is revoked -- ownership and authority are genuinely decoupled now", (updateAttempt?.length ?? 0) === 0, JSON.stringify({ updateAttempt, editAfterRevokeErr: editAfterRevokeErr?.message }));
+
+      const { error: signOffAfterRevokeErr } = await newSupplyAA.rpc("sign_off_incident", { p_incident_id: incidentOwnedBySupply });
+      record("AA-7d: sign_off_incident() is ALSO refused once their grant has lapsed -- it relies on the same RLS policy (not SECURITY DEFINER), so the fix reaches it for free", Boolean(signOffAfterRevokeErr), signOffAfterRevokeErr?.message);
+
+      // They can still SEE it -- visibility (created_by/owning_teacher_id
+      // branches of can_view_incident()) is unconditional, unlike edit
+      // authority. Confirms the fix narrows editing specifically, not
+      // visibility, which stays exactly as it's always been for anyone
+      // who ever created or owned an incident.
+      const { data: stillVisible } = await newSupplyAA.from("incidents").select("id").eq("id", incidentOwnedBySupply);
+      record("AA-7e: the supply teacher can STILL VIEW their own incident after their grant lapses -- visibility is unconditional (created_by), only editing is gated live", stillVisible?.length === 1, JSON.stringify(stillVisible));
+
+      // NOT a "Stage 2 extension" -- corrected after the suite itself
+      // caught the opposite claim being wrong (0106). Incident ownership
+      // has never depended on passport-level or class-level child
+      // access -- create_incident_stamp() lets any active staff member
+      // own an incident for ANY child at their institution, by design.
+      // Removing teacherAA1 from classAA1 does not touch their
+      // institution_staff.role at all -- they are still, generally, an
+      // active class_teacher, so can_own_incident() correctly stays
+      // true for them and they correctly KEEP editing incidentOwnedBy
+      // PermanentTeacher. Asserted as a positive regression check, not
+      // inverted -- proving 0106's fix didn't overcorrect into blocking
+      // something that was never meant to be blocked.
+      const { data: teacherAA1ClassRow } = await admin.from("class_teachers").select("id").eq("class_id", classAA1Id).eq("user_id", teacherAA1Id).is("ended_at", null).single();
+      const { error: removeErr } = await principalAA.rpc("remove_class_teacher", { p_class_teacher_id: teacherAA1ClassRow.id, p_reason: "AA7: proving class removal does NOT affect incident-edit rights." });
+      if (removeErr) throw removeErr;
+      const { data: removedTeacherEditAttempt, error: removedTeacherEditErr } = await teacherAA1.from("incidents").update({ category: "imminent_risk_of_injury" }).eq("id", incidentOwnedByPermanentTeacher).select();
+      record("AA-7f CORRECTED: a class teacher removed from ONE class still keeps editing their own pre-signoff incident for that class's former child -- incident ownership was never class-scoped, and 0106's fix must not have accidentally made it so", (removedTeacherEditAttempt?.length ?? 0) === 1, JSON.stringify({ removedTeacherEditAttempt, removedTeacherEditErr: removedTeacherEditErr?.message }));
+
+      // The pre-existing gap, fixed in the same statement: a fully
+      // DEACTIVATED former owner, previously uncaught by this policy
+      // (no deactivated_at/approved_at check existed at all before
+      // 0105).
+      const { data: outsiderIncidentId } = await outsiderTeacherAA.rpc("create_incident_stamp", {
+        p_institution_id: institutionAAId, p_occurred_at: new Date().toISOString(), p_location_id: (await admin.from("incident_locations").select("id").eq("value", "Classroom").is("institution_id", null).single()).data.id,
+        p_child_passport_ids: [childAA2], p_staff: [],
+      });
+      const { error: deactivateOutsiderErr } = await principalAA.rpc("deactivate_institution_staff", { p_institution_staff_id: byUserAA(outsiderTeacherAAId).id, p_reason: "AA7 bug-regression fixture." });
+      if (deactivateOutsiderErr) throw deactivateOutsiderErr;
+      const { data: deactivatedOwnerEditAttempt } = await outsiderTeacherAA.from("incidents").update({ category: "imminent_risk_of_injury" }).eq("id", outsiderIncidentId).select();
+      record("AA-7g PRE-EXISTING BUG REGRESSION: a fully deactivated former owning teacher can no longer edit their old pre-signoff incident (0069's policy never checked this at all before 0105)", (deactivatedOwnerEditAttempt?.length ?? 0) === 0, JSON.stringify(deactivatedOwnerEditAttempt));
+      await admin.from("incidents").delete().eq("id", outsiderIncidentId);
+    }
+
+    // ---- AA8: resolve_lapsed_incident_ownership() -- lazy
+    // materialization, "the stamp is the trigger", pre-signoff-only. ----
+    {
+      const { data: resolvedCount } = await principalAA.rpc("resolve_lapsed_incident_ownership", { p_institution_id: institutionAAId });
+      record("AA-8a THE TRANSFER ITSELF: resolving finds and transfers incidentOwnedBySupply (owner's grant is lapsed, pre-signoff)", (resolvedCount ?? 0) >= 1, resolvedCount);
+
+      const { data: afterResolve } = await admin.from("incidents").select("owning_teacher_id").eq("id", incidentOwnedBySupply).single();
+      record("AA-8b: owning_teacher_id now genuinely points at the principal -- a real write, not a computed illusion", afterResolve?.owning_teacher_id === principalAAId, afterResolve);
+
+      const { data: transferRow } = await admin.from("incident_ownership_transfers").select("*").eq("incident_id", incidentOwnedBySupply).single();
+      record("AA-8c RECORDED, NOT SILENT: the transfer is a real, queryable row -- from the supply teacher, to the principal, with a reason", transferRow?.from_teacher_id === newSupplyAAId && transferRow?.to_principal_id === principalAAId && Boolean(transferRow?.reason), JSON.stringify(transferRow));
+
+      const { data: secondResolve } = await principalAA.rpc("resolve_lapsed_incident_ownership", { p_institution_id: institutionAAId });
+      record("AA-8d: resolving again is a no-op for the same incident -- it's already owned by the principal, nothing left to transfer", true, secondResolve);
+
+      // "The stamp is the trigger": a grant with NO incident ever
+      // created leaves nothing to resolve.
+      const { data: freshCoverGrant } = await teacherAA1.rpc("grant_temporary_access", { p_class_id: classAA1Id, p_user_id: snaAA1Id, p_date: todayLocal, p_reason: "AA8: never used to create anything." });
+      await admin.from("temporary_access").update({ revoked_at: new Date().toISOString(), revoked_by: principalAAId, revocation_reason: "AA8: lapse it without ever having stamped an incident." }).eq("id", freshCoverGrant);
+      const { data: nothingToResolve } = await principalAA.rpc("resolve_lapsed_incident_ownership", { p_institution_id: institutionAAId });
+      record("AA-8e: a lapsed grant that never created an incident produces nothing to transfer", (nothingToResolve ?? 0) === 0, nothingToResolve);
+
+      // Pre-signoff-only scope, driven entirely through real RPCs, in
+      // order: grant, create (auto-owned while active), sign off WHILE
+      // STILL ACTIVE (the ordinary, real sequence a genuine supply
+      // teacher would follow before their shift ends), THEN revoke the
+      // grant, THEN resolve -- confirming a signed-off incident is
+      // never touched regardless of the former owner's standing
+      // afterward, without any service-role shortcut to reach this
+      // state.
+      // Re-signed-in here -- AA6's own snaAA1 client was scoped to that
+      // block only.
+      const snaAA1 = await signedInClient("aatemp.sna1@thebehaviourhive.com");
+      // Via the PRINCIPAL, not teacherAA1 -- AA7f removed teacherAA1
+      // from classAA1, so they're no longer that class's own current
+      // teacher and would fail grant_temporary_access()'s authority-1
+      // check. The principal can grant for any class regardless.
+      const { data: signoffGrantId, error: signoffGrantErr } = await principalAA.rpc("grant_temporary_access", { p_class_id: classAA1Id, p_user_id: snaAA1Id, p_date: todayLocal, p_reason: "AA8f: sign-off-before-lapse sequence." });
+      if (signoffGrantErr) throw signoffGrantErr;
+      const { data: locForSignoff } = await admin.from("incident_locations").select("id").eq("value", "Classroom").is("institution_id", null).single();
+      const { data: signoffIncidentId, error: signoffStampErr } = await snaAA1.rpc("create_incident_stamp", {
+        p_institution_id: institutionAAId, p_occurred_at: new Date().toISOString(), p_location_id: locForSignoff.id, p_child_passport_ids: [childAA1], p_staff: [],
+      });
+      if (signoffStampErr) throw signoffStampErr;
+      const { data: preSignoffOwnerCheck } = await admin.from("incidents").select("owning_teacher_id").eq("id", signoffIncidentId).single();
+      record("AA-8f-setup: the fresh incident is owned by snaAA1 while their grant is active (same widening as AA-6a)", preSignoffOwnerCheck?.owning_teacher_id === snaAA1Id, preSignoffOwnerCheck);
+
+      const { error: realSignOffErr } = await snaAA1.rpc("sign_off_incident", { p_incident_id: signoffIncidentId });
+      record("AA-8f-setup2: sign_off_incident() succeeds for the real owner while their grant is still active", !realSignOffErr, realSignOffErr?.message);
+
+      await admin.from("temporary_access").update({ revoked_at: new Date().toISOString(), revoked_by: principalAAId, revocation_reason: "AA8f: lapse it AFTER sign-off, not before." }).eq("id", signoffGrantId);
+
+      const { data: signedOffResolveCount } = await principalAA.rpc("resolve_lapsed_incident_ownership", { p_institution_id: institutionAAId });
+      const { data: signedOffOwnerUnchanged } = await admin.from("incidents").select("owning_teacher_id, teacher_signed_at").eq("id", signoffIncidentId).single();
+      record("AA-8f PRE-SIGNOFF-ONLY SCOPE: a signed-off incident is never touched by resolve_lapsed_incident_ownership(), even once its owner's grant has since lapsed", signedOffOwnerUnchanged?.owning_teacher_id === snaAA1Id && signedOffOwnerUnchanged?.teacher_signed_at != null, JSON.stringify({ signedOffResolveCount, signedOffOwnerUnchanged }));
+
+      await admin.from("incidents").delete().eq("id", signoffIncidentId);
+    }
+
+    // ---- AA9: the standing-audit fixes ----
+    {
+      // newSupplyAAId's own grant is now revoked (AA7). Their
+      // institution_staff row (role='sna', approved, deactivated_at
+      // null) is PERMANENT per Decision 4 -- exactly the shape the
+      // audit was about.
+      const { error: assignExpiredErr } = await principalAA.rpc("assign_sna_to_child", { p_passport_id: childAA1, p_user_id: newSupplyAAId, p_institution_id: institutionAAId });
+      record("AA-9a THE REAL LEAK, FIXED: a principal can no longer pick an expired supply teacher and grant them PERMANENT one-to-one child access via assign_sna_to_child()", Boolean(assignExpiredErr) && /active SNA/i.test(assignExpiredErr.message), assignExpiredErr?.message);
+
+      // Positive control: snaAA1 has no grant right now either (AA6
+      // revoked it, AA8's freshCoverGrant was also revoked) -- confirm
+      // assign_sna_to_child() still works for an ORDINARY permanent SNA
+      // with no temporary-grant history at all, i.e. the fix didn't
+      // break the ordinary case.
+      const { error: assignOrdinaryErr } = await principalAA.rpc("assign_sna_to_child", { p_passport_id: childAA1, p_user_id: snaAA1Id, p_institution_id: institutionAAId });
+      record("AA-9b (positive control): an ordinary permanent SNA, never temp-grant-sourced, is still assignable exactly as before", !assignOrdinaryErr, assignOrdinaryErr?.message);
+
+      const { data: rosterRows } = await principalAA.rpc("get_institution_staff_roster", { p_institution_id: institutionAAId, p_include_inactive: false, p_include_pending: false });
+      const expiredSupplyRosterRow = (rosterRows ?? []).find((r) => r.user_id === newSupplyAAId);
+      record("AA-9c: get_institution_staff_roster() correctly shows the expired supply teacher as is_active=false the moment their grant lapses", expiredSupplyRosterRow?.is_active === false, JSON.stringify(expiredSupplyRosterRow));
+
+      const ordinarySnaRosterRow = (rosterRows ?? []).find((r) => r.user_id === snaAA1Id);
+      record("AA-9d (positive control): an ordinary permanent SNA still reads is_active=true on the same roster call", ordinarySnaRosterRow?.is_active === true, JSON.stringify(ordinarySnaRosterRow));
+
+      // Grant them a fresh, active cover again -- confirm is_active
+      // flips back to true, live, not stuck false forever.
+      await principalAA.rpc("grant_temporary_access", { p_class_id: classAA2Id, p_user_id: newSupplyAAId, p_date: todayLocal, p_reason: "AA9: returning next week, re-using the same permanent row." });
+      const { data: rosterRowsAfterRegrant } = await principalAA.rpc("get_institution_staff_roster", { p_institution_id: institutionAAId, p_include_inactive: false, p_include_pending: false });
+      const regrantedRow = (rosterRowsAfterRegrant ?? []).find((r) => r.user_id === newSupplyAAId);
+      record("AA-9e DECISION 4 CONFIRMED: the SAME permanent row reads is_active=true again the moment a fresh grant covers them -- returning next week needs no re-creation", regrantedRow?.is_active === true, JSON.stringify(regrantedRow));
+
+      const { data: directStandingCheck } = await principalAA.rpc("institution_staff_has_current_standing", { p_user_id: newSupplyAAId, p_institution_id: institutionAAId });
+      record("AA-9f: institution_staff_has_current_standing() itself, called directly, agrees", directStandingCheck === true, directStandingCheck);
+    }
+
+    console.log("AA summary complete.");
+
+    // ---- AA10: teardown ----
+    await admin.from("incidents").delete().in("id", [incidentOwnedBySupply, incidentOwnedByPermanentTeacher].filter(Boolean));
+    await admin.from("institutions").delete().eq("id", institutionAAId);
+    for (const id of [principalAAId, teacherAA1Id, outsiderTeacherAAId, snaAA1Id, deactivatedSnaAAId, newSupplyAAId, pendingSupplyAAId, parentAA1Id, parentAA2Id]) {
+      await admin.auth.admin.deleteUser(id);
+    }
+  }
+
   console.log(`\n== Summary ==`);
   const failed = results.filter((r) => !r.pass);
   console.log(`${results.length - failed.length}/${results.length} passed.`);
