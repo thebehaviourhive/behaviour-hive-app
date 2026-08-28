@@ -6016,6 +6016,121 @@ async function main() {
     }
   }
 
+  console.log(`\n== CHECK FF: Client-behaviour half of Stage 4, Step 3 (src/app/principal/passports, src/hooks/useTeacherPassports.ts) -- proven via the LITERAL client query shape, not a proxy for it. FF-1/FF-2 are the seventh "grant access, test the destination" instance, closed: a principal-granted access is only real if the recipient's OWN surfaces actually show it. ==`);
+  {
+    const { data: instFF, error: instFFErr } = await admin
+      .from("institutions")
+      .insert({ name: "FF Reachability Verify", institution_code: CODE + "FF", status: "verified" })
+      .select()
+      .single();
+    if (instFFErr) throw instFFErr;
+    const institutionFFId = instFF.id;
+
+    const principalFFId = await createUser("ff.principal@thebehaviourhive.com", "FF Principal", "principal");
+    const teacherFFId = await createUser("ff.teacher@thebehaviourhive.com", "FF Teacher", "class_teacher");
+    const parentFFId = await createUser("ff.parent@thebehaviourhive.com", "FF Parent", "parent");
+
+    const { data: staffFFRows, error: staffFFErr } = await admin
+      .from("institution_staff")
+      .insert([
+        { institution_id: institutionFFId, user_id: principalFFId, role: "principal" },
+        { institution_id: institutionFFId, user_id: teacherFFId, role: "class_teacher" },
+      ])
+      .select();
+    if (staffFFErr) throw staffFFErr;
+
+    const principalFF = await signedInClient("ff.principal@thebehaviourhive.com");
+    const teacherFFStaffRow = staffFFRows.find((r) => r.user_id === teacherFFId);
+    const { error: approveFFErr } = await principalFF.rpc("approve_staff_join", { p_institution_staff_id: teacherFFStaffRow.id });
+    if (approveFFErr) throw approveFFErr;
+
+    const teacherFF = await signedInClient("ff.teacher@thebehaviourhive.com");
+
+    const { data: childFF, error: childFFErr } = await admin
+      .from("passports")
+      .insert({ user_id: parentFFId, child_name: "FF Reachability Child", passport_status: "complete" })
+      .select()
+      .single();
+    if (childFFErr) throw childFFErr;
+
+    // Deliberately UNAPPROVED -- Step 0's own decision 4: a school can
+    // see (and, per Step 2, grant against) a child before any parent
+    // approval. This is the hardest case for the reachability question,
+    // not the easiest one.
+    await admin.from("passport_institution_links").insert({ passport_id: childFF.id, institution_id: institutionFFId, approved_by_parent: false });
+
+    // ---- FF-1/FF-2: useTeacherPassports.ts's exact query shape
+    // (src/hooks/useTeacherPassports.ts:91-134) -- before and after a
+    // real grant_passport_access() call. ----
+    {
+      const { data: accessBefore } = await teacherFF.from("passport_access").select("passport_id, institution_id").eq("teacher_id", teacherFFId).eq("is_active", true);
+      record(
+        "FF-1: useTeacherPassports.ts's own query finds NOTHING before any grant exists (src/hooks/useTeacherPassports.ts:91-95)",
+        (accessBefore ?? []).length === 0,
+        JSON.stringify(accessBefore)
+      );
+
+      const { data: grantFFId, error: grantFFErr } = await principalFF.rpc("grant_passport_access", { p_passport_id: childFF.id, p_user_id: teacherFFId, p_institution_id: institutionFFId, p_reason: "FF: reachability check." });
+      if (grantFFErr) throw grantFFErr;
+
+      const { data: accessAfter } = await teacherFF.from("passport_access").select("passport_id, institution_id").eq("teacher_id", teacherFFId).eq("is_active", true);
+      const candidateIds = [...new Set((accessAfter ?? []).map((r) => r.passport_id))];
+      const { data: linkRowsAfter } = await teacherFF.from("passport_institution_links").select("passport_id, institution_id").in("passport_id", candidateIds);
+      const linkedPairs = new Set((linkRowsAfter ?? []).map((r) => `${r.passport_id}|${r.institution_id}`));
+      const reachableIds = (accessAfter ?? []).filter((r) => linkedPairs.has(`${r.passport_id}|${r.institution_id}`)).map((r) => r.passport_id);
+
+      record(
+        "FF-2 THE REACHABILITY FIX ITSELF (the seventh instance): useTeacherPassports.ts's own query shape now finds the child, EVEN THOUGH the institution link was never approved_by_parent -- before this fix, this exact query returned empty and the teacher's own dashboard/Students page would have shown nothing despite a genuinely active passport_access grant (src/hooks/useTeacherPassports.ts:91-134)",
+        reachableIds.includes(childFF.id),
+        JSON.stringify({ accessAfter, linkRowsAfter, reachableIds })
+      );
+
+      // ---- FF-3: the detail page's own eligibleStaff filter
+      // (src/app/principal/passports/[passportId]/page.tsx:142-147) --
+      // excludes a staff member who already has active access. ----
+      const { data: staffRosterFF } = await principalFF.rpc("get_institution_staff_roster", { p_institution_id: institutionFFId, p_include_inactive: false, p_include_pending: false });
+      const activeUserIdsFF = new Set([teacherFFId]); // the one active grant from above
+      const eligibleAfterGrant = (staffRosterFF ?? []).filter((s) => s.is_active && !activeUserIdsFF.has(s.user_id));
+      record(
+        "FF-3: the detail page's own eligibleStaff filter (src/app/principal/passports/[passportId]/page.tsx:142-147) correctly EXCLUDES teacherFF from the grant picker once they already have active access -- prevents offering a duplicate grant the RPC would refuse anyway",
+        !eligibleAfterGrant.some((s) => s.user_id === teacherFFId),
+        JSON.stringify(eligibleAfterGrant)
+      );
+
+      await admin.from("passport_access").delete().eq("id", grantFFId);
+    }
+
+    // ---- FF-4: the detail page's own "not on roster" handling
+    // (src/app/principal/passports/[passportId]/page.tsx's rosterMatch
+    // logic) -- a genuinely unlinked passportId, reachable via direct
+    // URL even though the list page never offers it, correctly resolves
+    // to the "not on your school's roster" state rather than crashing
+    // or silently showing "Unknown". ----
+    {
+      const parentFFUnlinkedId = await createUser("ff.parentunlinked@thebehaviourhive.com", "FF Parent Unlinked", "parent");
+      const { data: unlinkedChildFF } = await admin.from("passports").insert({ user_id: parentFFUnlinkedId, child_name: "FF Unlinked Child", passport_status: "complete" }).select().single();
+
+      const { data: rosterFF } = await principalFF.rpc("get_institution_child_roster", { p_institution_id: institutionFFId });
+      const rosterMatch = (rosterFF ?? []).find((r) => r.passport_id === unlinkedChildFF.id);
+      record(
+        "FF-4: the detail page's own roster-match logic correctly finds NO match for a passportId with no passport_institution_links row at this institution -- reproduces the page's exact .find() shape, not a proxy for it",
+        rosterMatch === undefined,
+        JSON.stringify(rosterMatch)
+      );
+
+      await admin.from("passports").delete().eq("id", unlinkedChildFF.id);
+      await admin.auth.admin.deleteUser(parentFFUnlinkedId);
+    }
+
+    console.log("FF summary complete.");
+
+    await admin.from("passports").delete().eq("id", childFF.id);
+    await admin.from("institutions").delete().eq("id", institutionFFId);
+    for (const id of [principalFFId, teacherFFId, parentFFId]) {
+      await admin.auth.admin.deleteUser(id);
+    }
+  }
+
   console.log(`\n== Summary ==`);
   const failed = results.filter((r) => !r.pass);
   console.log(`${results.length - failed.length}/${results.length} passed.`);

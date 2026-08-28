@@ -23,12 +23,28 @@ interface UseTeacherPassportsResult {
 }
 
 // A passport_access row alone isn't enough to count as "this teacher's
-// student" -- the parent's approval (passport_institution_links) must also
-// be in place, otherwise revoking either side wouldn't drop the child from
-// view. This join is the one true definition of "real student" shared by
-// the dashboard stats, morning grid, ABC log passport-select, and the
+// student" -- passport_institution_links must have a row for the SAME
+// institution too (institution-matched existence), otherwise a stale
+// passport_access.institution_id pointing nowhere real would silently
+// count. This join is the one true definition of "real student" shared
+// by the dashboard stats, morning grid, ABC log passport-select, and the
 // Students page -- kept in one place rather than four copies of the same
 // two-step query.
+//
+// PRD 1, Stage 4: no longer requires approved_by_parent = true. Found
+// live while building the principal's grant screen (Step 3) -- the
+// seventh instance of "grant access, never test the destination":
+// grant_passport_access() (Step 2) deliberately allows granting against
+// an UNAPPROVED link (Step 0's own decision 4 -- roster visibility, and
+// now grantability, was never approval-gated), but this hook's old
+// approved_by_parent filter meant a teacher granted access this way
+// would have a genuinely active passport_access row and still see
+// nothing on their own dashboard/Students page -- confirmed empirically,
+// not assumed, before this line changed. Revoke durability is
+// UNAFFECTED by this: handleRevoke() (passport/dashboard) flips
+// passport_access.is_active = false unconditionally for the whole
+// institution, which this hook's FIRST filter (line below) already
+// checks -- that's what drops a revoked child from view, not this join.
 export function useTeacherPassports(userId: string | null): UseTeacherPassportsResult {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -115,8 +131,7 @@ export function useTeacherPassports(userId: string | null): UseTeacherPassportsR
       const { data: linkRows, error: linkError } = await supabase
         .from("passport_institution_links")
         .select("passport_id, institution_id")
-        .in("passport_id", candidatePassportIds)
-        .eq("approved_by_parent", true);
+        .in("passport_id", candidatePassportIds);
 
       if (!isMounted) return;
 
@@ -126,12 +141,12 @@ export function useTeacherPassports(userId: string | null): UseTeacherPassportsR
         return;
       }
 
-      const approvedPairs = new Set(
+      const linkedPairs = new Set(
         (linkRows ?? []).map((row) => `${row.passport_id}|${row.institution_id}`)
       );
 
       const passportIds = (accessRows ?? [])
-        .filter((row) => approvedPairs.has(`${row.passport_id}|${row.institution_id}`))
+        .filter((row) => linkedPairs.has(`${row.passport_id}|${row.institution_id}`))
         .map((row) => row.passport_id);
 
       if (passportIds.length === 0) {
