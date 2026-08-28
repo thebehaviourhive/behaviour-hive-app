@@ -10,6 +10,7 @@
 // Run with: node --env-file=.env.local scripts/incident-log-test/adversarial-verify.mjs
 
 import { createClient } from "@supabase/supabase-js";
+import { randomUUID } from "node:crypto";
 
 const URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -3983,6 +3984,546 @@ async function main() {
     await admin.from("incidents").delete().in("id", [xIncidentId, xMarkCalledIncidentId]);
     await admin.from("institutions").delete().in("id", [institutionXLeavingId, institutionXStayingId, institutionXOtherId]);
     for (const id of [principalA1Id, successorAId, extraTeacherLeavingId, deactivatedCandidateId, principalA2Id, successorBId, principalOtherId, otherStaffId, parentXL1Id, parentXL2Id, parentXS1Id, parentXS2Id]) {
+      await admin.auth.admin.deleteUser(id);
+    }
+  }
+
+  console.log(`\n== CHECK Y: Classes and Assignment -- has_child_access() chokepoint, all rewritten call sites, RPC guards, caps, cascade, defense-in-depth (migration 0104) ==`);
+  {
+    const DENIED = /permission|row-level security|policy/i;
+
+    // ---- Y0: Setup ----
+    const { data: instY, error: instYErr } = await admin
+      .from("institutions")
+      .insert({ name: "Classes Verify", institution_code: CODE + "Y", status: "verified" })
+      .select()
+      .single();
+    if (instYErr) throw instYErr;
+    const institutionYId = instY.id;
+
+    const principalYId = await createUser("classesy.principal@thebehaviourhive.com", "Classes Principal", "principal");
+    const teacherY1Id = await createUser("classesy.teacher1@thebehaviourhive.com", "Classes Teacher One", "class_teacher");
+    const teacherY2Id = await createUser("classesy.teacher2@thebehaviourhive.com", "Classes Teacher Two", "class_teacher");
+    const teacherY3Id = await createUser("classesy.teacher3@thebehaviourhive.com", "Classes Teacher Three", "class_teacher");
+    const teacherY4Id = await createUser("classesy.teacher4@thebehaviourhive.com", "Classes Teacher Four", "class_teacher");
+    const snaYId = await createUser("classesy.sna@thebehaviourhive.com", "Classes SNA", "sna");
+    const noAccessTeacherYId = await createUser("classesy.noaccessteacher@thebehaviourhive.com", "Classes No-Access Teacher", "class_teacher");
+    const noAccessSnaYId = await createUser("classesy.noaccesssna@thebehaviourhive.com", "Classes No-Access SNA", "sna");
+    const outsiderTeacherYId = await createUser("classesy.outsider@thebehaviourhive.com", "Classes Outsider Teacher", "class_teacher");
+    const parentClassYId = await createUser("classesy.parentclass@thebehaviourhive.com", "Classes Parent Class", "parent");
+    const parentStricterYId = await createUser("classesy.parentstricter@thebehaviourhive.com", "Classes Parent Stricter", "parent");
+    const parentAssignYId = await createUser("classesy.parentassign@thebehaviourhive.com", "Classes Parent Assign", "parent");
+    const parentMoveYId = await createUser("classesy.parentmove@thebehaviourhive.com", "Classes Parent Move", "parent");
+    const parentDelegateYId = await createUser("classesy.parentdelegate@thebehaviourhive.com", "Classes Parent Delegate", "parent");
+
+    const { data: staffYRows, error: staffYErr } = await admin
+      .from("institution_staff")
+      .insert([
+        { institution_id: institutionYId, user_id: principalYId, role: "principal" },
+        { institution_id: institutionYId, user_id: teacherY1Id, role: "class_teacher" },
+        { institution_id: institutionYId, user_id: teacherY2Id, role: "class_teacher" },
+        { institution_id: institutionYId, user_id: teacherY3Id, role: "class_teacher" },
+        { institution_id: institutionYId, user_id: teacherY4Id, role: "class_teacher" },
+        { institution_id: institutionYId, user_id: snaYId, role: "sna" },
+        { institution_id: institutionYId, user_id: noAccessTeacherYId, role: "class_teacher" },
+        { institution_id: institutionYId, user_id: noAccessSnaYId, role: "sna" },
+        { institution_id: institutionYId, user_id: outsiderTeacherYId, role: "class_teacher" },
+      ])
+      .select();
+    if (staffYErr) throw staffYErr;
+    const byUserY = (uid) => staffYRows.find((r) => r.user_id === uid);
+    const teacherY1StaffId = byUserY(teacherY1Id).id;
+
+    const principalY = await signedInClient("classesy.principal@thebehaviourhive.com");
+    for (const row of staffYRows.filter((r) => r.role !== "principal")) {
+      const { error } = await principalY.rpc("approve_staff_join", { p_institution_staff_id: row.id });
+      if (error) throw error;
+    }
+
+    const teacherY1 = await signedInClient("classesy.teacher1@thebehaviourhive.com");
+    const snaY = await signedInClient("classesy.sna@thebehaviourhive.com");
+    const noAccessTeacherY = await signedInClient("classesy.noaccessteacher@thebehaviourhive.com");
+    const noAccessSnaY = await signedInClient("classesy.noaccesssna@thebehaviourhive.com");
+    const outsiderTeacherY = await signedInClient("classesy.outsider@thebehaviourhive.com");
+    const parentClassY = await signedInClient("classesy.parentclass@thebehaviourhive.com");
+    const parentAssignY = await signedInClient("classesy.parentassign@thebehaviourhive.com");
+
+    const { data: cClassY } = await admin.from("passports").insert({ user_id: parentClassYId, child_name: "Classes Child Class", passport_status: "complete" }).select().single();
+    const { data: cStricterY } = await admin.from("passports").insert({ user_id: parentStricterYId, child_name: "Classes Child Stricter", passport_status: "complete" }).select().single();
+    const { data: cAssignY } = await admin.from("passports").insert({ user_id: parentAssignYId, child_name: "Classes Child Assign", passport_status: "complete" }).select().single();
+    const { data: cMoveY } = await admin.from("passports").insert({ user_id: parentMoveYId, child_name: "Classes Child Move", passport_status: "complete" }).select().single();
+    const { data: cDelegateY } = await admin.from("passports").insert({ user_id: parentDelegateYId, child_name: "Classes Child Delegate", passport_status: "complete" }).select().single();
+    const childClassY = cClassY.id, childStricterY = cStricterY.id, childAssignY = cAssignY.id, childMoveY = cMoveY.id, childDelegateY = cDelegateY.id;
+
+    // childStricterY's link is deliberately NOT approved -- this is the
+    // fixture the four preserved-stricter-site checks (Y-10, Y-19, Y-22,
+    // Y-23) depend on: the SAME teacher, the SAME kind of genuine
+    // class-derived standing, only the approval state differs, isolating
+    // exactly the variable those checks are about.
+    await admin.from("passport_institution_links").insert([
+      { passport_id: childClassY, institution_id: institutionYId, approved_by_parent: true },
+      { passport_id: childStricterY, institution_id: institutionYId, approved_by_parent: false },
+      { passport_id: childAssignY, institution_id: institutionYId, approved_by_parent: true },
+      { passport_id: childMoveY, institution_id: institutionYId, approved_by_parent: true },
+      { passport_id: childDelegateY, institution_id: institutionYId, approved_by_parent: true },
+    ]);
+
+    const { data: classYId } = await principalY.rpc("create_class", { p_institution_id: institutionYId, p_name: "Room Y" });
+    const { data: classY2Id } = await principalY.rpc("create_class", { p_institution_id: institutionYId, p_name: "Room Y2" });
+    const { data: teacherY1ClassRowId } = await principalY.rpc("add_class_teacher", { p_class_id: classYId, p_user_id: teacherY1Id });
+    const { data: childClassYRowId } = await principalY.rpc("add_class_child", { p_class_id: classYId, p_passport_id: childClassY });
+    await principalY.rpc("add_class_child", { p_class_id: classYId, p_passport_id: childStricterY });
+    await principalY.rpc("add_class_child", { p_class_id: classYId, p_passport_id: childMoveY });
+    await principalY.rpc("add_class_child", { p_class_id: classYId, p_passport_id: childDelegateY });
+    await principalY.rpc("assign_sna_to_child", { p_passport_id: childAssignY, p_user_id: snaYId, p_institution_id: institutionYId });
+
+    console.log("Y0 fixture ready.");
+
+    // ---- Y1: RPC guards -- class/teacher-list/child-roster edits are
+    // principal-only; SNA assignment is delegated to the child's own
+    // current class teacher (or the principal, for any child) ----
+    {
+      const { error } = await outsiderTeacherY.rpc("create_class", { p_institution_id: institutionYId, p_name: "Should Fail" });
+      record("Y-rpc-1: create_class refuses a non-principal caller", Boolean(error) && /active principal/i.test(error.message), error?.message);
+    }
+    {
+      const { error } = await outsiderTeacherY.rpc("add_class_teacher", { p_class_id: classYId, p_user_id: outsiderTeacherYId });
+      record("Y-rpc-2: add_class_teacher refuses a non-principal caller", Boolean(error) && /active principal/i.test(error.message), error?.message);
+    }
+    {
+      const { error } = await outsiderTeacherY.rpc("add_class_child", { p_class_id: classYId, p_passport_id: childAssignY });
+      record("Y-rpc-3: add_class_child refuses a non-principal caller", Boolean(error) && /active principal/i.test(error.message), error?.message);
+    }
+    {
+      const { error } = await outsiderTeacherY.rpc("remove_class_teacher", { p_class_teacher_id: teacherY1ClassRowId, p_reason: "Should fail." });
+      record("Y-rpc-4: remove_class_teacher refuses a non-principal caller", Boolean(error) && /active principal/i.test(error.message), error?.message);
+    }
+    {
+      const { error } = await outsiderTeacherY.rpc("remove_class_child", { p_class_children_id: childClassYRowId, p_reason: "Should fail." });
+      record("Y-rpc-5: remove_class_child refuses a non-principal caller", Boolean(error) && /active principal/i.test(error.message), error?.message);
+    }
+    {
+      const { error } = await outsiderTeacherY.rpc("assign_sna_to_child", { p_passport_id: childDelegateY, p_user_id: noAccessSnaYId, p_institution_id: institutionYId });
+      record("Y-rpc-6: assign_sna_to_child refuses a caller who is neither the principal nor a teacher of the child's own class", Boolean(error) && /Only the principal, or a teacher/i.test(error.message), error?.message);
+    }
+    {
+      // Delegated authority, positive case: teacherY1 IS a teacher of
+      // childDelegateY's own class (classY), so this must succeed without
+      // being the principal.
+      const { data, error } = await teacherY1.rpc("assign_sna_to_child", { p_passport_id: childDelegateY, p_user_id: noAccessSnaYId, p_institution_id: institutionYId });
+      record("Y-rpc-7: assign_sna_to_child SUCCEEDS for the child's own class teacher, not just the principal (delegated authority, per Q6)", !error && Boolean(data), error?.message);
+    }
+    {
+      const { data: delegateAssignmentRow } = await admin.from("child_assignments").select("id, user_id, ended_at").eq("passport_id", childDelegateY).is("ended_at", null).maybeSingle();
+      record("Y-rpc-7b: the delegated assignment actually persisted, assigned to the right SNA", delegateAssignmentRow?.user_id === noAccessSnaYId, JSON.stringify(delegateAssignmentRow));
+    }
+
+    // ---- Y2: Caps -- position (max 3 per class), one class per child,
+    // one active SNA per child ----
+    {
+      const { error: e2 } = await principalY.rpc("add_class_teacher", { p_class_id: classYId, p_user_id: teacherY2Id });
+      const { error: e3 } = await principalY.rpc("add_class_teacher", { p_class_id: classYId, p_user_id: teacherY3Id });
+      record("Y-cap-1: a class can hold a second teacher (position 2)", !e2, e2?.message);
+      record("Y-cap-2: a class can hold a third teacher (position 3)", !e3, e3?.message);
+      const { error: e4 } = await principalY.rpc("add_class_teacher", { p_class_id: classYId, p_user_id: teacherY4Id });
+      record("Y-cap-3: a class refuses a FOURTH teacher -- the position cap (class_teachers_one_active_position_per_class) holds", Boolean(e4) && /already has three teachers/i.test(e4.message), e4?.message);
+    }
+    {
+      const { error: dupErr } = await principalY.rpc("add_class_child", { p_class_id: classYId, p_passport_id: childClassY });
+      record("Y-cap-4: add_class_child refuses re-adding a child already in that same class", Boolean(dupErr) && /already in this class/i.test(dupErr.message), dupErr?.message);
+    }
+    {
+      const { data: moveResult, error: moveErr } = await principalY.rpc("add_class_child", { p_class_id: classY2Id, p_passport_id: childMoveY });
+      record("Y-cap-5: moving a child to a second class succeeds", !moveErr && Boolean(moveResult), moveErr?.message);
+      const { data: closedRows } = await admin.from("class_children").select("class_id, ended_at, end_reason").eq("passport_id", childMoveY).eq("class_id", classYId);
+      const { data: activeRows } = await admin.from("class_children").select("class_id, ended_at").eq("passport_id", childMoveY).is("ended_at", null);
+      record("Y-cap-6: the move is atomic -- the OLD class_children row is closed, not left dangling", closedRows?.[0]?.ended_at != null && closedRows[0].end_reason === "Moved to a different class.", JSON.stringify(closedRows));
+      record("Y-cap-7: the move is atomic -- exactly ONE active class_children row exists afterward, never zero or two", activeRows?.length === 1 && activeRows[0].class_id === classY2Id, JSON.stringify(activeRows));
+    }
+    {
+      const { error: secondSnaErr } = await principalY.rpc("assign_sna_to_child", { p_passport_id: childAssignY, p_user_id: noAccessSnaYId, p_institution_id: institutionYId });
+      record("Y-cap-8: assign_sna_to_child refuses a second concurrent SNA for a child who already has one", Boolean(secondSnaErr) && /already has an assigned SNA/i.test(secondSnaErr.message), secondSnaErr?.message);
+    }
+
+    // ---- Y3: has_child_access()/has_class_teacher_access()/
+    // has_sna_access() -- direct boolean checks, the chokepoint itself,
+    // before trusting any call site built on top of it ----
+    {
+      const { data: r1 } = await principalY.rpc("has_class_teacher_access", { p_user_id: teacherY1Id, p_passport_id: childClassY });
+      record("Y-helper-1: has_class_teacher_access(teacherY1, childClassY) -- TRUE, genuine class-derived standing", r1 === true, r1);
+      const { data: r2 } = await principalY.rpc("has_class_teacher_access", { p_user_id: snaYId, p_passport_id: childClassY });
+      record("Y-helper-2: has_class_teacher_access(snaY, childClassY) -- FALSE, role layering: an SNA's own assignment elsewhere does not confer class_teacher-scoped standing", r2 === false, r2);
+      const { data: r3 } = await principalY.rpc("has_sna_access", { p_user_id: snaYId, p_passport_id: childAssignY });
+      record("Y-helper-3: has_sna_access(snaY, childAssignY) -- TRUE, genuine assignment-derived standing", r3 === true, r3);
+      const { data: r4 } = await principalY.rpc("has_sna_access", { p_user_id: teacherY1Id, p_passport_id: childAssignY });
+      record("Y-helper-4: has_sna_access(teacherY1, childAssignY) -- FALSE, role layering: a class teacher's own class standing does not confer sna-scoped standing", r4 === false, r4);
+      const { data: r5 } = await principalY.rpc("has_child_access", { p_user_id: noAccessTeacherYId, p_passport_id: childClassY });
+      record("Y-helper-5: has_child_access(noAccessTeacher, childClassY) -- FALSE, no relationship of any kind", r5 === false, r5);
+      const { data: r6 } = await principalY.rpc("has_child_access", { p_user_id: noAccessSnaYId, p_passport_id: childAssignY });
+      record("Y-helper-6: has_child_access(noAccessSna, childAssignY) -- FALSE, no relationship of any kind", r6 === false, r6);
+      const { data: r7 } = await principalY.rpc("has_class_teacher_access", { p_user_id: teacherY1Id, p_passport_id: childStricterY });
+      record("Y-helper-7: has_class_teacher_access(teacherY1, childStricterY) -- TRUE, the helper itself is NOT approved_by_parent-gated (only the four stricter call sites are, layered on separately)", r7 === true, r7);
+    }
+
+    // ---- Y4a: role-blind sites (either role qualifies) ----
+    {
+      const { data: bySelectTeacher } = await teacherY1.from("passports").select("id").eq("id", childClassY);
+      record("Y-1a: passports SELECT -- class-derived class_teacher CAN reach it", bySelectTeacher?.length === 1, JSON.stringify(bySelectTeacher));
+      const { data: bySelectSna } = await snaY.from("passports").select("id").eq("id", childAssignY);
+      record("Y-1b: passports SELECT -- assignment-derived SNA CAN reach it (role-blind site, both roles work)", bySelectSna?.length === 1, JSON.stringify(bySelectSna));
+      const { data: bySelectNoAccess } = await noAccessTeacherY.from("passports").select("id").eq("id", childClassY);
+      record("Y-1c: passports SELECT -- still refuses someone with no access of any kind", (bySelectNoAccess?.length ?? 0) === 0, JSON.stringify(bySelectNoAccess));
+    }
+    {
+      await admin.from("passport_section_b").insert({ passport_id: childClassY, user_id: parentClassYId });
+      await admin.from("passport_section_b").insert({ passport_id: childAssignY, user_id: parentAssignYId });
+      const { data: t } = await teacherY1.from("passport_section_b").select("id").eq("passport_id", childClassY);
+      const { data: s } = await snaY.from("passport_section_b").select("id").eq("passport_id", childAssignY);
+      const { data: n } = await noAccessTeacherY.from("passport_section_b").select("id").eq("passport_id", childClassY);
+      record("Y-2a: passport_section_b SELECT -- class-derived teacher CAN reach it", t?.length === 1, JSON.stringify(t));
+      record("Y-2b: passport_section_b SELECT -- assignment-derived SNA CAN reach it", s?.length === 1, JSON.stringify(s));
+      record("Y-2c: passport_section_b SELECT -- still refuses no access", (n?.length ?? 0) === 0, JSON.stringify(n));
+    }
+    {
+      await admin.from("passport_section_c").insert({ passport_id: childClassY, user_id: parentClassYId });
+      await admin.from("passport_section_c").insert({ passport_id: childAssignY, user_id: parentAssignYId });
+      const { data: t } = await teacherY1.from("passport_section_c").select("id").eq("passport_id", childClassY);
+      const { data: s } = await snaY.from("passport_section_c").select("id").eq("passport_id", childAssignY);
+      const { data: n } = await noAccessTeacherY.from("passport_section_c").select("id").eq("passport_id", childClassY);
+      record("Y-3a: passport_section_c SELECT -- class-derived teacher CAN reach it", t?.length === 1, JSON.stringify(t));
+      record("Y-3b: passport_section_c SELECT -- assignment-derived SNA CAN reach it", s?.length === 1, JSON.stringify(s));
+      record("Y-3c: passport_section_c SELECT -- still refuses no access", (n?.length ?? 0) === 0, JSON.stringify(n));
+    }
+    {
+      await admin.from("passport_section_d").insert({ passport_id: childClassY, user_id: parentClassYId });
+      await admin.from("passport_section_d").insert({ passport_id: childAssignY, user_id: parentAssignYId });
+      const { data: t } = await teacherY1.from("passport_section_d").select("id").eq("passport_id", childClassY);
+      const { data: s } = await snaY.from("passport_section_d").select("id").eq("passport_id", childAssignY);
+      const { data: n } = await noAccessTeacherY.from("passport_section_d").select("id").eq("passport_id", childClassY);
+      record("Y-4a: passport_section_d SELECT -- class-derived teacher CAN reach it", t?.length === 1, JSON.stringify(t));
+      record("Y-4b: passport_section_d SELECT -- assignment-derived SNA CAN reach it", s?.length === 1, JSON.stringify(s));
+      record("Y-4c: passport_section_d SELECT -- still refuses no access", (n?.length ?? 0) === 0, JSON.stringify(n));
+    }
+    {
+      await admin.from("morning_checkins").insert({ passport_id: childClassY, user_id: parentClassYId });
+      await admin.from("morning_checkins").insert({ passport_id: childAssignY, user_id: parentAssignYId });
+      const { data: t } = await teacherY1.from("morning_checkins").select("id").eq("passport_id", childClassY);
+      const { data: s } = await snaY.from("morning_checkins").select("id").eq("passport_id", childAssignY);
+      const { data: n } = await noAccessTeacherY.from("morning_checkins").select("id").eq("passport_id", childClassY);
+      record("Y-5a: morning_checkins SELECT -- class-derived teacher CAN reach it", t?.length === 1, JSON.stringify(t));
+      record("Y-5b: morning_checkins SELECT -- assignment-derived SNA CAN reach it", s?.length === 1, JSON.stringify(s));
+      record("Y-5c: morning_checkins SELECT -- still refuses no access", (n?.length ?? 0) === 0, JSON.stringify(n));
+    }
+    {
+      const { error: tErr } = await teacherY1.from("activity_log").insert({ passport_id: childClassY, actor_id: teacherY1Id, event_type: "team_linked", event_description: "Y test" });
+      record("Y-9a: activity_log INSERT -- class-derived teacher CAN insert (role-blind, write access deliberately untouched)", !tErr, tErr?.message);
+      const { error: sErr } = await snaY.from("activity_log").insert({ passport_id: childAssignY, actor_id: snaYId, event_type: "team_linked", event_description: "Y test" });
+      record("Y-9b: activity_log INSERT -- assignment-derived SNA CAN insert", !sErr, sErr?.message);
+      const { error: nErr } = await noAccessTeacherY.from("activity_log").insert({ passport_id: childClassY, actor_id: noAccessTeacherYId, event_type: "team_linked", event_description: "Y test" });
+      record("Y-9c: activity_log INSERT -- still refuses no access", Boolean(nErr) && DENIED.test(nErr.message), nErr?.message);
+    }
+
+    // ---- Y4b: class_teacher-only sites, non-stricter ----
+    let ledgerRowIdForBugRegression;
+    {
+      const { error: tErr } = await teacherY1.from("strategy_ledger").insert({ passport_id: childClassY, submitted_by: teacherY1Id, entry_type: "observation", description: "Y test" });
+      record("Y-6a: strategy_ledger INSERT -- class-derived class_teacher CAN insert", !tErr, tErr?.message);
+      const { error: sErr } = await snaY.from("strategy_ledger").insert({ passport_id: childAssignY, submitted_by: snaYId, entry_type: "observation", description: "Y test" });
+      record("Y-6b: strategy_ledger INSERT -- assignment-derived SNA is REFUSED (class_teacher-only site)", Boolean(sErr) && DENIED.test(sErr.message), sErr?.message);
+      const { error: nErr } = await noAccessTeacherY.from("strategy_ledger").insert({ passport_id: childClassY, submitted_by: noAccessTeacherYId, entry_type: "observation", description: "Y test" });
+      record("Y-6c: strategy_ledger INSERT -- still refuses no access", Boolean(nErr) && DENIED.test(nErr.message), nErr?.message);
+
+      const { data: ledgerRow } = await admin.from("strategy_ledger").insert({ passport_id: childClassY, submitted_by: principalYId, entry_type: "observation", description: "Y select test" }).select().single();
+      const { data: t } = await teacherY1.from("strategy_ledger").select("id").eq("id", ledgerRow.id);
+      const { data: s } = await snaY.from("strategy_ledger").select("id").eq("id", ledgerRow.id);
+      const { data: n } = await noAccessTeacherY.from("strategy_ledger").select("id").eq("id", ledgerRow.id);
+      record("Y-7a: strategy_ledger SELECT -- class-derived class_teacher CAN reach it", t?.length === 1, JSON.stringify(t));
+      record("Y-7b: strategy_ledger SELECT -- assignment-derived SNA is REFUSED (class_teacher-only site)", (s?.length ?? 0) === 0, JSON.stringify(s));
+      record("Y-7c: strategy_ledger SELECT -- still refuses no access", (n?.length ?? 0) === 0, JSON.stringify(n));
+
+      // REAL BUG REGRESSION: the original third branch never checked
+      // pa.is_active, only actor_role -- a revoked class teacher's grant
+      // (is_active=false) would have silently still passed. Prove it's
+      // fixed with the exact shape of grant that used to slip through.
+      await admin.from("passport_access").insert({ passport_id: childClassY, teacher_id: outsiderTeacherYId, institution_id: institutionYId, is_active: false, actor_role: "class_teacher" });
+      const { data: revoked } = await outsiderTeacherY.from("strategy_ledger").select("id").eq("id", ledgerRow.id);
+      record("Y-7d BUG REGRESSION: strategy_ledger SELECT -- a REVOKED passport_access grant (is_active=false, actor_role=class_teacher) is refused, not silently honoured (the exact bug found and fixed in 0104)", (revoked?.length ?? 0) === 0, JSON.stringify(revoked));
+      ledgerRowIdForBugRegression = ledgerRow.id;
+    }
+    {
+      const { error: tErr } = await teacherY1.from("teacher_updates").insert({ passport_id: childClassY, teacher_id: teacherY1Id, settled_state: "settled" });
+      record("Y-8a: teacher_updates INSERT -- class-derived class_teacher CAN insert", !tErr, tErr?.message);
+      const { error: sErr } = await snaY.from("teacher_updates").insert({ passport_id: childAssignY, teacher_id: snaYId, settled_state: "settled" });
+      record("Y-8b: teacher_updates INSERT -- assignment-derived SNA is REFUSED (class_teacher-only site)", Boolean(sErr) && DENIED.test(sErr.message), sErr?.message);
+      const { error: nErr } = await noAccessTeacherY.from("teacher_updates").insert({ passport_id: childClassY, teacher_id: noAccessTeacherYId, settled_state: "settled" });
+      record("Y-8c: teacher_updates INSERT -- still refuses no access", Boolean(nErr) && DENIED.test(nErr.message), nErr?.message);
+    }
+    let abcLogClassYId, abcLogAssignYId;
+    {
+      // Client-generated id, NOT a chained .select() -- ABCLogger.tsx's own
+      // documented reason applies exactly here too: `authenticated` only
+      // has a column-level SELECT grant on abc_logs (migration 0021) that
+      // predates 0067's sensory columns, so a `Prefer: return=representation`
+      // RETURNING * from a chained .select() hits those ungranted columns
+      // and fails with a confusing "permission denied for table abc_logs"
+      // -- caught here as my own test bug, not a real access-control gap
+      // (production already works around the identical issue).
+      abcLogClassYId = randomUUID();
+      const { error: tErr } = await teacherY1
+        .from("abc_logs")
+        .insert({ id: abcLogClassYId, passport_id: childClassY, logged_by: teacherY1Id, logged_by_role: "class_teacher", intensity: 3, antecedents: ["demand"], behaviours: ["shouting"], consequences: ["removed"] });
+      record("Y-11a: abc_logs INSERT (class_teacher) -- class-derived class_teacher CAN insert", !tErr, tErr?.message);
+      const { error: sErr } = await snaY
+        .from("abc_logs")
+        .insert({ passport_id: childAssignY, logged_by: snaYId, logged_by_role: "class_teacher", intensity: 3, antecedents: ["demand"], behaviours: ["shouting"], consequences: ["removed"] });
+      record("Y-11b: abc_logs INSERT (class_teacher) -- assignment-derived SNA is REFUSED under a class_teacher-role claim (role layering, both the check constraint's own role match AND has_class_teacher_access must hold)", Boolean(sErr) && DENIED.test(sErr.message), sErr?.message);
+      const { error: nErr } = await noAccessTeacherY
+        .from("abc_logs")
+        .insert({ passport_id: childClassY, logged_by: noAccessTeacherYId, logged_by_role: "class_teacher", intensity: 3, antecedents: ["demand"], behaviours: ["shouting"], consequences: ["removed"] });
+      record("Y-11c: abc_logs INSERT (class_teacher) -- still refuses no access", Boolean(nErr) && DENIED.test(nErr.message), nErr?.message);
+    }
+    {
+      const { data: cccRow } = await admin
+        .from("passport_clinical_content")
+        .insert({ passport_id: childClassY, author_id: principalYId, author_role: "clinician", source_document_type: "fba_report", source_document_id: "11111111-1111-1111-1111-111111111111", item_type: "strategy_school", content: { text: "Y test strategy" } })
+        .select()
+        .single();
+      const { error: tErr } = await teacherY1
+        .from("strategy_feedback")
+        .insert({ passport_id: childClassY, strategy_content_id: cccRow.id, context: "eod", rating: "helped", rater_role: "teacher", rater_id: teacherY1Id });
+      record("Y-15a: strategy_feedback INSERT (teacher) -- class-derived class_teacher CAN insert", !tErr, tErr?.message);
+      const { error: sErr } = await snaY
+        .from("strategy_feedback")
+        .insert({ passport_id: childClassY, strategy_content_id: cccRow.id, context: "eod", rating: "helped", rater_role: "teacher", rater_id: snaYId });
+      record("Y-15b: strategy_feedback INSERT (teacher) -- assignment-derived SNA is REFUSED (class_teacher-only site, never in SNA's grant list)", Boolean(sErr) && DENIED.test(sErr.message), sErr?.message);
+      const { error: nErr } = await noAccessTeacherY
+        .from("strategy_feedback")
+        .insert({ passport_id: childClassY, strategy_content_id: cccRow.id, context: "eod", rating: "helped", rater_role: "teacher", rater_id: noAccessTeacherYId });
+      record("Y-15c: strategy_feedback INSERT (teacher) -- still refuses no access", Boolean(nErr) && DENIED.test(nErr.message), nErr?.message);
+    }
+    {
+      const { error: tErr } = await teacherY1.from("strategy_feedback_prompts").insert({ passport_id: childClassY, teacher_id: teacherY1Id });
+      record("Y-16a: strategy_feedback_prompts INSERT -- class-derived class_teacher CAN insert", !tErr, tErr?.message);
+      const { error: sErr } = await snaY.from("strategy_feedback_prompts").insert({ passport_id: childAssignY, teacher_id: snaYId });
+      record("Y-16b: strategy_feedback_prompts INSERT -- assignment-derived SNA is REFUSED (class_teacher-only site)", Boolean(sErr) && DENIED.test(sErr.message), sErr?.message);
+      const { error: nErr } = await noAccessTeacherY.from("strategy_feedback_prompts").insert({ passport_id: childClassY, teacher_id: noAccessTeacherYId });
+      record("Y-16c: strategy_feedback_prompts INSERT -- still refuses no access", Boolean(nErr) && DENIED.test(nErr.message), nErr?.message);
+    }
+    {
+      const { data: t } = await teacherY1.rpc("get_abc_trend_data", { p_passport_id: childClassY });
+      record("Y-18a: get_abc_trend_data() -- class-derived class_teacher CAN reach it", (t?.length ?? 0) >= 1, JSON.stringify(t));
+      const { data: s } = await snaY.rpc("get_abc_trend_data", { p_passport_id: childAssignY });
+      record("Y-18b: get_abc_trend_data() -- assignment-derived SNA is REFUSED -- Daniel's own named example: SNA is deliberately excluded from Progress/trend data, an assignment must not silently widen that", (s?.length ?? 0) === 0, JSON.stringify(s));
+      const { data: n } = await noAccessTeacherY.rpc("get_abc_trend_data", { p_passport_id: childClassY });
+      record("Y-18c: get_abc_trend_data() -- still refuses no access", (n?.length ?? 0) === 0, JSON.stringify(n));
+    }
+
+    // ---- Y4c: sna-only site ----
+    {
+      abcLogAssignYId = randomUUID();
+      const { error: sErr } = await snaY
+        .from("abc_logs")
+        .insert({ id: abcLogAssignYId, passport_id: childAssignY, logged_by: snaYId, logged_by_role: "sna", intensity: 3, antecedents: ["demand"], behaviours: ["shouting"], consequences: ["removed"] });
+      record("Y-12a: abc_logs INSERT (sna) -- assignment-derived SNA CAN insert", !sErr, sErr?.message);
+      const { error: tErr } = await teacherY1
+        .from("abc_logs")
+        .insert({ passport_id: childClassY, logged_by: teacherY1Id, logged_by_role: "sna", intensity: 3, antecedents: ["demand"], behaviours: ["shouting"], consequences: ["removed"] });
+      record("Y-12b: abc_logs INSERT (sna) -- class-derived class_teacher is REFUSED under an sna-role claim (role layering, sna-only site)", Boolean(tErr) && DENIED.test(tErr.message), tErr?.message);
+      const { error: nErr } = await noAccessSnaY
+        .from("abc_logs")
+        .insert({ passport_id: childAssignY, logged_by: noAccessSnaYId, logged_by_role: "sna", intensity: 3, antecedents: ["demand"], behaviours: ["shouting"], consequences: ["removed"] });
+      record("Y-12c: abc_logs INSERT (sna) -- still refuses an SNA-role staff member with NO assignment anywhere (proves has_sna_access, not merely the role claim, gates this)", Boolean(nErr) && DENIED.test(nErr.message), nErr?.message);
+    }
+
+    // ---- remaining role-blind sites: abc_logs SELECT, passport_clinical_
+    // content SELECT, get_abc_logs(), get_passport_clinical_content() ----
+    {
+      const { data: t } = await teacherY1.from("abc_logs").select("id").eq("id", abcLogClassYId);
+      const { data: s } = await snaY.from("abc_logs").select("id").eq("id", abcLogAssignYId);
+      const { data: n } = await noAccessTeacherY.from("abc_logs").select("id").eq("id", abcLogClassYId);
+      record("Y-13a: abc_logs SELECT -- class-derived class_teacher CAN reach their own log", t?.length === 1, JSON.stringify(t));
+      record("Y-13b: abc_logs SELECT -- assignment-derived SNA CAN reach their own log (role-blind site)", s?.length === 1, JSON.stringify(s));
+      record("Y-13c: abc_logs SELECT -- still refuses no access", (n?.length ?? 0) === 0, JSON.stringify(n));
+    }
+    {
+      const { data: cccStrict } = await admin.from("passport_clinical_content").select("id").eq("passport_id", childClassY).eq("item_type", "strategy_school").limit(1).single();
+      const { data: t } = await teacherY1.from("passport_clinical_content").select("id").eq("id", cccStrict.id);
+      const { data: n } = await noAccessTeacherY.from("passport_clinical_content").select("id").eq("id", cccStrict.id);
+      record("Y-14a: passport_clinical_content SELECT -- class-derived class_teacher CAN reach it", t?.length === 1, JSON.stringify(t));
+      record("Y-14b: passport_clinical_content SELECT -- still refuses no access", (n?.length ?? 0) === 0, JSON.stringify(n));
+      // Assignment-derived SNA, own item_type-eligible row.
+      const { data: cccAssign } = await admin.from("passport_clinical_content").insert({ passport_id: childAssignY, author_id: principalYId, author_role: "clinician", source_document_type: "fba_report", source_document_id: "11111111-1111-1111-1111-111111111111", item_type: "strategy_shared", content: { text: "Y test shared" } }).select().single();
+      const { data: s } = await snaY.from("passport_clinical_content").select("id").eq("id", cccAssign.id);
+      record("Y-14c: passport_clinical_content SELECT -- assignment-derived SNA CAN reach it (role-blind site)", s?.length === 1, JSON.stringify(s));
+    }
+    {
+      const { data: t } = await teacherY1.rpc("get_abc_logs", { p_passport_id: childClassY });
+      const { data: s } = await snaY.rpc("get_abc_logs", { p_passport_id: childAssignY });
+      const { data: n } = await noAccessTeacherY.rpc("get_abc_logs", { p_passport_id: childClassY });
+      record("Y-17a: get_abc_logs() -- class-derived class_teacher CAN reach their own log", (t ?? []).some((r) => r.id === abcLogClassYId), JSON.stringify(t?.length));
+      record("Y-17b: get_abc_logs() -- assignment-derived SNA CAN reach their own log (role-blind)", (s ?? []).some((r) => r.id === abcLogAssignYId), JSON.stringify(s?.length));
+      record("Y-17c: get_abc_logs() -- still refuses no access", (n ?? []).length === 0, JSON.stringify(n?.length));
+    }
+    {
+      const { data: t } = await teacherY1.rpc("get_passport_clinical_content", { p_passport_id: childClassY });
+      const { data: s } = await snaY.rpc("get_passport_clinical_content", { p_passport_id: childAssignY });
+      const { data: n } = await noAccessTeacherY.rpc("get_passport_clinical_content", { p_passport_id: childClassY });
+      record("Y-20a: get_passport_clinical_content() -- class-derived class_teacher CAN reach eligible content", (t ?? []).some((r) => r.item_type === "strategy_school"), JSON.stringify(t?.length));
+      record("Y-20b: get_passport_clinical_content() -- assignment-derived SNA CAN reach eligible content (role-blind branch, either role)", (s ?? []).some((r) => r.item_type === "strategy_shared"), JSON.stringify(s?.length));
+      record("Y-20c: get_passport_clinical_content() -- still refuses no access", (n ?? []).length === 0, JSON.stringify(n?.length));
+    }
+
+    // ---- Y4d: can_view_message() -- class_teacher-only, no
+    // approved_by_parent gate (not a stricter site) ----
+    const { data: otherCategory } = await admin.from("message_categories").select("id").eq("label", "Other").maybeSingle();
+    let messageIdForCanView;
+    {
+      const { data: msgId, error: sendErr } = await teacherY1.rpc("send_message", {
+        p_passport_id: childClassY, p_category_id: otherCategory.id, p_body: "Y test message", p_response_required: false, p_recipient_ids: [parentClassYId],
+      });
+      if (sendErr) throw sendErr;
+      messageIdForCanView = msgId;
+      const { data: t } = await teacherY1.rpc("can_view_message", { p_message_id: msgId });
+      record("Y-21a: can_view_message() -- the class-derived class_teacher who sent it CAN view it", t === true, t);
+      const { data: s } = await snaY.rpc("can_view_message", { p_message_id: msgId });
+      record("Y-21b: can_view_message() -- an unrelated assignment-derived SNA is REFUSED (class_teacher-only site)", s === false, s);
+      const { data: n } = await noAccessTeacherY.rpc("can_view_message", { p_message_id: msgId });
+      record("Y-21c: can_view_message() -- still refuses no access", n === false, n);
+    }
+
+    // ---- Y4e: get_message_recipient_candidates() -- class_teacher-only
+    // AND a stricter approved_by_parent site (both aspects tested here) ----
+    {
+      const { data: t } = await teacherY1.rpc("get_message_recipient_candidates", { p_passport_id: childClassY });
+      record("Y-22a: get_message_recipient_candidates() -- class-derived class_teacher (approved link) gets a non-empty candidate list", (t?.length ?? 0) >= 1, JSON.stringify(t?.length));
+      const { data: s } = await snaY.rpc("get_message_recipient_candidates", { p_passport_id: childClassY });
+      record("Y-22b: get_message_recipient_candidates() -- an unrelated SNA gets nothing (class_teacher-only site, and Messages stays class_teacher-only by design -- no SNA branch was added)", (s?.length ?? 0) === 0, JSON.stringify(s?.length));
+    }
+
+    // ---- Y5: get_passport_team() extension + dedup ----
+    {
+      const { data: teamClass } = await parentClassY.rpc("get_passport_team", { p_passport_id: childClassY });
+      const classTeacherEntries = (teamClass ?? []).filter((r) => r.teacher_id === teacherY1Id);
+      record("Y-team-1: get_passport_team() -- the class-derived teacher appears, role='class_teacher'", classTeacherEntries.length >= 1 && classTeacherEntries[0].role === "class_teacher", JSON.stringify(classTeacherEntries));
+      record("Y-team-2: get_passport_team() -- the class-derived teacher appears EXACTLY ONCE (dedup works before the redundant grant below is added)", classTeacherEntries.length === 1, JSON.stringify(classTeacherEntries));
+
+      // Now give the same teacher a REDUNDANT passport_access grant too --
+      // coexistence, not backfill -- and confirm they still appear once.
+      await admin.from("passport_access").insert({ passport_id: childClassY, teacher_id: teacherY1Id, institution_id: institutionYId, is_active: true, actor_role: "class_teacher" });
+      const { data: teamClassAfter } = await parentClassY.rpc("get_passport_team", { p_passport_id: childClassY });
+      const afterEntries = (teamClassAfter ?? []).filter((r) => r.teacher_id === teacherY1Id);
+      record("Y-team-3: get_passport_team() -- holding BOTH a passport_access grant AND class-derived standing still surfaces the teacher exactly once, not twice", afterEntries.length === 1, JSON.stringify(afterEntries));
+
+      const { data: teamAssign } = await parentAssignY.rpc("get_passport_team", { p_passport_id: childAssignY });
+      const snaEntries = (teamAssign ?? []).filter((r) => r.teacher_id === snaYId);
+      record("Y-team-4: get_passport_team() -- the assignment-derived SNA appears, role='sna'", snaEntries.length === 1 && snaEntries[0].role === "sna", JSON.stringify(snaEntries));
+    }
+
+    // ---- Y6: can_view_incident() -- role-blind branch, incident created
+    // AND OWNED by outsiderTeacherY, a genuine class_teacher who is
+    // neither teacherY1/snaY (under test) nor a principal -- 0069 narrowed
+    // the incidents UPDATE policy to "owning teacher, role=class_teacher
+    // only", so a principal-created incident can never leave 'draft' via
+    // this path (RLS on UPDATE silently filters, per CLAUDE.md -- caught
+    // here, not assumed). Using a class_teacher creator/owner avoids both
+    // that dead end AND the creator/owner-visibility bypass that would
+    // otherwise mask the branch actually under test.
+    {
+      const { data: locY } = await admin.from("incident_locations").select("id").eq("value", "Classroom").is("institution_id", null).single();
+      const { data: incClassY, error: incClassYErr } = await outsiderTeacherY.rpc("create_incident_stamp", {
+        p_institution_id: institutionYId, p_occurred_at: new Date().toISOString(), p_location_id: locY.id, p_child_passport_ids: [childClassY], p_staff: [],
+      });
+      if (incClassYErr) throw incClassYErr;
+      const { error: updClassYErr } = await outsiderTeacherY.from("incidents").update({ attestations_requested: true }).eq("id", incClassY);
+      if (updClassYErr) throw updClassYErr;
+      const { data: incAssignY, error: incAssignYErr } = await outsiderTeacherY.rpc("create_incident_stamp", {
+        p_institution_id: institutionYId, p_occurred_at: new Date().toISOString(), p_location_id: locY.id, p_child_passport_ids: [childAssignY], p_staff: [],
+      });
+      if (incAssignYErr) throw incAssignYErr;
+      const { error: updAssignYErr } = await outsiderTeacherY.from("incidents").update({ attestations_requested: true }).eq("id", incAssignY);
+      if (updAssignYErr) throw updAssignYErr;
+
+      // Re-read the persisted state via a privileged query rather than
+      // trusting the absence of a client-visible error -- CLAUDE.md's own
+      // standing rule for RLS-on-UPDATE.
+      const { data: statusCheck } = await admin.from("incidents").select("id, status").in("id", [incClassY, incAssignY]);
+      record("Y-24pre: both incidents genuinely left 'draft' before the visibility checks below run (re-read via service role, not assumed from the absence of an error)", (statusCheck ?? []).every((r) => r.status !== "draft") && statusCheck?.length === 2, JSON.stringify(statusCheck));
+
+      const { data: t } = await teacherY1.from("incidents").select("id").eq("id", incClassY);
+      record("Y-24a: can_view_incident() -- class-derived class_teacher CAN view an incident for their own class's child (role-blind chokepoint)", t?.length === 1, JSON.stringify(t));
+      const { data: nForClass } = await noAccessTeacherY.from("incidents").select("id").eq("id", incClassY);
+      record("Y-24b: can_view_incident() -- still refuses no access", (nForClass?.length ?? 0) === 0, JSON.stringify(nForClass));
+      const { data: s } = await snaY.from("incidents").select("id").eq("id", incAssignY);
+      record("Y-24c: can_view_incident() -- assignment-derived SNA CAN view an incident for their assigned child (role-blind)", s?.length === 1, JSON.stringify(s));
+      const { data: nForAssign } = await noAccessSnaY.from("incidents").select("id").eq("id", incAssignY);
+      record("Y-24d: can_view_incident() -- still refuses an SNA with no assignment to this child", (nForAssign?.length ?? 0) === 0, JSON.stringify(nForAssign));
+
+      await admin.from("incidents").delete().in("id", [incClassY, incAssignY]);
+    }
+
+    // ---- Y7: the FOUR preserved-stricter sites -- activity_log SELECT,
+    // get_teacher_activity_feed(), get_message_recipient_candidates(),
+    // send_message(). teacherY1 has GENUINE class-derived standing over
+    // childStricterY (same class as childClassY) -- only the
+    // passport_institution_links.approved_by_parent flag differs. If any
+    // of these four let a class-derived caller through anyway, the
+    // stricter/looser split collapsed during the rewrite. ----
+    {
+      // Positive control first -- childClassY (approved) must still work,
+      // proving these sites are not simply broken outright.
+      const { data: alRow } = await admin.from("activity_log").insert({ passport_id: childClassY, actor_id: principalYId, event_type: "team_linked", event_description: "Y stricter positive control" }).select().single();
+      const { data: tPositive } = await teacherY1.from("activity_log").select("id").eq("id", alRow.id);
+      record("Y-10a (positive control): activity_log SELECT -- class-derived teacher reaches it when the link IS approved", tPositive?.length === 1, JSON.stringify(tPositive));
+
+      const { data: alStrictRow } = await admin.from("activity_log").insert({ passport_id: childStricterY, actor_id: principalYId, event_type: "team_linked", event_description: "Y stricter negative test" }).select().single();
+      const { data: tStrict } = await teacherY1.from("activity_log").select("id").eq("id", alStrictRow.id);
+      record("Y-10b STRICTER SITE: activity_log SELECT -- the SAME class-derived teacher is REFUSED when childStricterY's institution link is NOT approved_by_parent -- the stricter gate survived the rewrite", (tStrict?.length ?? 0) === 0, JSON.stringify(tStrict));
+
+      const { data: feedPositive } = await teacherY1.rpc("get_teacher_activity_feed", {});
+      record("Y-19a (positive control): get_teacher_activity_feed() -- includes the approved-link row", (feedPositive ?? []).some((r) => r.id === alRow.id), JSON.stringify(feedPositive?.length));
+      const { data: feedStrict } = await teacherY1.rpc("get_teacher_activity_feed", {});
+      record("Y-19b STRICTER SITE: get_teacher_activity_feed() -- does NOT include the unapproved-link row for the same class-derived teacher", !(feedStrict ?? []).some((r) => r.id === alStrictRow.id), JSON.stringify(feedStrict?.length));
+
+      const { data: candidatesStrict } = await teacherY1.rpc("get_message_recipient_candidates", { p_passport_id: childStricterY });
+      record("Y-22c STRICTER SITE: get_message_recipient_candidates() -- the same class-derived teacher gets NOTHING for the unapproved-link child, even though they get real candidates for the approved one (Y-22a)", (candidatesStrict?.length ?? 0) === 0, JSON.stringify(candidatesStrict?.length));
+
+      const { error: sendStrictErr } = await teacherY1.rpc("send_message", {
+        p_passport_id: childStricterY, p_category_id: otherCategory.id, p_body: "Should be refused", p_response_required: false, p_recipient_ids: [parentStricterYId],
+      });
+      record("Y-23 STRICTER SITE (found while writing 0104, not originally named): send_message() -- the same class-derived teacher is refused for the unapproved-link child, same as the three sites Daniel named explicitly", Boolean(sendStrictErr) && /not authorized/i.test(sendStrictErr.message), sendStrictErr?.message);
+    }
+
+    // ---- Y8: departure cascade + defense-in-depth ----
+    {
+      const { error: deactErr } = await principalY.rpc("deactivate_institution_staff", { p_institution_staff_id: teacherY1StaffId, p_reason: "Y cascade test." });
+      if (deactErr) throw deactErr;
+
+      const { data: closedRow } = await admin.from("class_teachers").select("ended_at, ended_by, end_reason").eq("id", teacherY1ClassRowId).single();
+      record("Y-cascade-1: deactivate_institution_staff() closes the class_teachers row via the renamed/extended cascade helper", closedRow.ended_at != null && closedRow.ended_by === principalYId, JSON.stringify(closedRow));
+
+      const { data: afterDeact } = await principalY.rpc("has_class_teacher_access", { p_user_id: teacherY1Id, p_passport_id: childClassY });
+      record("Y-cascade-2: has_class_teacher_access() is FALSE after deactivation (cascade correctly closed the row)", afterDeact === false, afterDeact);
+
+      // DEFENSE-IN-DEPTH, isolated: simulate a cascade MISS by directly
+      // reopening the class_teachers row the cascade above just closed --
+      // this state is not reachable via any real production path (the
+      // cascade and the deactivation are atomic in the same transaction),
+      // so it is deliberately created here with a service-role write, not
+      // driven through an RPC, purely to prove the SEPARATE, independent
+      // institution_staff re-check inside has_class_teacher_access() is
+      // the actual security boundary -- not merely implied by the cascade
+      // having worked in Y-cascade-1/2 above.
+      await admin.from("class_teachers").update({ ended_at: null, ended_by: null, end_reason: null }).eq("id", teacherY1ClassRowId);
+      const { data: reopenedRow } = await admin.from("class_teachers").select("ended_at").eq("id", teacherY1ClassRowId).single();
+      const { data: defenseInDepth } = await principalY.rpc("has_class_teacher_access", { p_user_id: teacherY1Id, p_passport_id: childClassY });
+      record("Y-cascade-3 DEFENSE IN DEPTH: with the class_teachers row artificially reopened (simulating a cascade miss) but institution_staff still deactivated, has_class_teacher_access() is STILL FALSE -- the access check does not rely on the cascade having run", reopenedRow.ended_at === null && defenseInDepth === false, JSON.stringify({ reopenedRow, defenseInDepth }));
+    }
+
+    console.log(`Y summary: ${ledgerRowIdForBugRegression ? "bug-regression fixture present" : "MISSING"}, messageIdForCanView=${messageIdForCanView}`);
+
+    // ---- Y9: teardown ----
+    await admin.from("institutions").delete().eq("id", institutionYId);
+    for (const id of [principalYId, teacherY1Id, teacherY2Id, teacherY3Id, teacherY4Id, snaYId, noAccessTeacherYId, noAccessSnaYId, outsiderTeacherYId, parentClassYId, parentStricterYId, parentAssignYId, parentMoveYId, parentDelegateYId]) {
       await admin.auth.admin.deleteUser(id);
     }
   }
