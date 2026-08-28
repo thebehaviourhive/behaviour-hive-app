@@ -3943,6 +3943,43 @@ async function main() {
     const { error: x_markParentCalledErr } = await principalA1.rpc("mark_parent_called", { p_incident_children_id: xMarkCalledChildId });
     record("X-structural-3 (mark_parent_called principal branch): a handover-deactivated principal -- not the creator/owner of THIS incident -- is refused via the principal branch specifically, same as Stage 1's own deactivated-principal branch would refuse", Boolean(x_markParentCalledErr) && /permission/i.test(x_markParentCalledErr.message), x_markParentCalledErr?.message);
 
+    console.log(`-- Step 3 client behaviour: /principal/dashboard's own resolution query (src/app/principal/dashboard/page.tsx), replicated exactly -- not a proxy for it. The RLS policy on institution_staff is unconditional auth.uid()=user_id, so reusing the ALREADY-signed-in principalA1/principalA2 clients (their session identity is untouched by an app_metadata write -- only the JWT's ROLE CLAIM would be stale, which this specific query doesn't depend on) genuinely exercises this exact code path, not a simulation of it --`);
+    const { data: xDashboardPrincipalRow } = await principalA1
+      .from("institution_staff")
+      .select("institution_id, institutions(name)")
+      .eq("user_id", principalA1Id)
+      .eq("role", "principal")
+      .is("deactivated_at", null)
+      .not("approved_at", "is", null)
+      .maybeSingle();
+    record("X-dashboard-1: the principal-scoped resolution query finds NOTHING for a 'leaving'-handover predecessor (their only principal row is now deactivated) -- this is what actually triggers the redirect-away, not the plain join form V10 already proved for class_teacher/sna", xDashboardPrincipalRow === null, JSON.stringify(xDashboardPrincipalRow));
+    const { data: xDashboardAnyActiveRow } = await principalA1
+      .from("institution_staff")
+      .select("id")
+      .eq("user_id", principalA1Id)
+      .is("deactivated_at", null)
+      .not("approved_at", "is", null)
+      .maybeSingle();
+    record("X-dashboard-2: the graceful-fallback query ALSO finds nothing for the same 'leaving' predecessor -- correctly falls through to the ordinary join-institution redirect, not the ROLE_MISMATCH message (they have no active row anywhere, this genuinely is 'no institution', not a stale claim)", xDashboardAnyActiveRow === null, JSON.stringify(xDashboardAnyActiveRow));
+
+    const { data: xDashboardStayingPrincipalRow } = await principalA2
+      .from("institution_staff")
+      .select("institution_id, institutions(name)")
+      .eq("user_id", principalA2Id)
+      .eq("role", "principal")
+      .is("deactivated_at", null)
+      .not("approved_at", "is", null)
+      .maybeSingle();
+    record("X-dashboard-3: the principal-scoped resolution query ALSO finds nothing for a 'staying'-handover predecessor (their principal row is closed too, even though they're still active staff overall)", xDashboardStayingPrincipalRow === null, JSON.stringify(xDashboardStayingPrincipalRow));
+    const { data: xDashboardStayingAnyActiveRow } = await principalA2
+      .from("institution_staff")
+      .select("id")
+      .eq("user_id", principalA2Id)
+      .is("deactivated_at", null)
+      .not("approved_at", "is", null)
+      .maybeSingle();
+    record("X-dashboard-4: the graceful-fallback query DOES find a row for the 'staying' predecessor (their new class_teacher row) -- this is what shows 'your role has changed, sign in again' instead of silently, wrongly, sending a real active staff member to the join form", xDashboardStayingAnyActiveRow !== null, JSON.stringify(xDashboardStayingAnyActiveRow));
+
     await admin.from("incidents").delete().in("id", [xIncidentId, xMarkCalledIncidentId]);
     await admin.from("institutions").delete().in("id", [institutionXLeavingId, institutionXStayingId, institutionXOtherId]);
     for (const id of [principalA1Id, successorAId, extraTeacherLeavingId, deactivatedCandidateId, principalA2Id, successorBId, principalOtherId, otherStaffId, parentXL1Id, parentXL2Id, parentXS1Id, parentXS2Id]) {
