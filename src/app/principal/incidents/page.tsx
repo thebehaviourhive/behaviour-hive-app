@@ -26,6 +26,10 @@ interface InstitutionIncidentRow {
   has_restrictive_practice: boolean;
   planning_status: string[] | null;
   ncse_report_complete: boolean[] | null;
+  created_by_name: string | null;
+  is_inherited: boolean;
+  inherited_from_name: string | null;
+  inherited_transferred_at: string | null;
 }
 
 const STATUS_LABEL: Record<string, string> = {
@@ -102,6 +106,15 @@ export default function PrincipalIncidentsListPage() {
       setIsLoading(true);
       setLoadError(null);
       const supabase = createClient();
+      // PRD 1, Stage 3: same lazy-materialization call as /principal/
+      // dashboard -- this is a second, separate principal-facing
+      // incident list, so it needs the same call, not assumed covered
+      // by the dashboard's own. Best-effort, never blocks the load.
+      try {
+        await supabase.rpc("resolve_lapsed_incident_ownership", { p_institution_id: institutionId });
+      } catch {
+        // best-effort; see comment above
+      }
       const { data, error } = await supabase.rpc("get_institution_incidents", {
         p_institution_id: institutionId,
         p_start: start || null,
@@ -264,6 +277,16 @@ export default function PrincipalIncidentsListPage() {
                     {r.location} · {(r.child_indices ?? []).length} child{(r.child_indices ?? []).length === 1 ? "" : "ren"}
                     {r.owning_teacher_name ? ` · ${r.owning_teacher_name}` : ""}
                   </p>
+                  {/* Same "visibly inherited" requirement as the
+                      dashboard's own queue -- this is a second, separate
+                      principal-facing incident list, not assumed to
+                      inherit the dashboard's own copy of this badge. */}
+                  {r.is_inherited && (
+                    <p className="mt-1.5 rounded-xl bg-brand-golden-brown/10 px-2.5 py-1.5 text-xs text-brand-golden-brown">
+                      Inherited from {r.inherited_from_name ?? "a departed supply teacher"}
+                      {r.inherited_transferred_at ? ` · transferred ${formatDate(r.inherited_transferred_at)}` : ""}
+                    </p>
+                  )}
                   {r.has_restrictive_practice && (
                     <div className="mt-2 flex flex-wrap gap-1.5 text-xs">
                       {(r.planning_status ?? []).map((s, i) => (

@@ -16,6 +16,7 @@ import {
 import { loadDraft, saveDraft, clearDraft, type ABCDraft } from "./draftStorage";
 import { logActivity } from "@/lib/logActivity";
 import { CLINICIAN_SPECIALTY_LABEL, type ClinicianSpecialty } from "@/lib/clinicianSpecialties";
+import { friendlyAccessLapsedMessage } from "@/lib/temporaryAccessTime";
 
 const TOTAL_STEPS = 4;
 
@@ -357,7 +358,17 @@ export function ABCLogger({
           return;
         }
 
-        setSubmitError("Something went wrong. Please try again.");
+        // PRD 1, Stage 3: the mid-session design's reactive half, on the
+        // one write path a temporary-access holder is most likely to be
+        // mid-way through when a cut-off passes. An INSERT's own RLS
+        // refusal is never silent the way an UPDATE's is (CLAUDE.md's
+        // own first gotcha is specifically about UPDATE) -- a genuine
+        // WITH CHECK failure always carries a real error here, already
+        // caught by the branch above; this only decides which MESSAGE to
+        // show for it. Matches the same RLS-shaped signal this app's own
+        // adversarial suite already tests against, not a new heuristic.
+        const looksLikeAccessRefusal = /permission|row-level security|policy/i.test(error.message ?? "");
+        setSubmitError(looksLikeAccessRefusal ? friendlyAccessLapsedMessage("This log") : "Something went wrong. Please try again.");
         return;
       }
 

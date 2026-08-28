@@ -33,6 +33,10 @@ interface InstitutionIncident {
   has_restrictive_practice: boolean;
   planning_status: string[] | null;
   ncse_report_complete: boolean[] | null;
+  created_by_name: string | null;
+  is_inherited: boolean;
+  inherited_from_name: string | null;
+  inherited_transferred_at: string | null;
 }
 
 // Four states (0089), not the original five -- awaiting_attestation and
@@ -130,6 +134,21 @@ export default function PrincipalDashboardPage() {
       const institutionRecord = staffRow.institutions as unknown as { name: string } | { name: string }[] | null;
       const name = Array.isArray(institutionRecord) ? institutionRecord[0]?.name : institutionRecord?.name;
       setInstitutionName(name ?? null);
+
+      // PRD 1, Stage 3: lazy materialization, best-effort. resolve_
+      // lapsed_incident_ownership() is a real write (0105/0107) --
+      // called here, on the principal's own queue load, so an
+      // incident sitting owned by a departed supply teacher for a week
+      // doesn't wait on someone remembering to trigger it separately.
+      // Its own failure is never allowed to block the page from
+      // loading incidents at all -- errors here are swallowed
+      // deliberately, not surfaced as a page-level error for a
+      // correctness nicety, not the main job of this load.
+      try {
+        await supabase.rpc("resolve_lapsed_incident_ownership", { p_institution_id: staffRow.institution_id });
+      } catch {
+        // best-effort; see comment above
+      }
 
       const { data: rows, error: rpcError } = await supabase.rpc("get_institution_incidents", {
         p_institution_id: staffRow.institution_id,
@@ -290,6 +309,22 @@ function IncidentRow({ incident, needsSignoff }: { incident: InstitutionIncident
         {(incident.child_indices ?? []).length === 1 ? "" : "ren"} named
         {incident.owning_teacher_name ? ` · ${incident.owning_teacher_name}` : ""}
       </p>
+
+      {/* PRD 1, Stage 3: "visibly inherited, with who created it and when
+          it transferred -- not silently theirs" (Daniel's own wording).
+          is_inherited/inherited_from_name/inherited_transferred_at come
+          from get_institution_incidents()'s own LEFT JOIN to
+          incident_ownership_transfers (0107) -- this is never inferred
+          from owning_teacher_name alone, which by this point already
+          reads as the principal, indistinguishable from an incident they
+          created themselves. */}
+      {incident.is_inherited && (
+        <p className="mt-1.5 rounded-xl bg-brand-golden-brown/10 px-2.5 py-1.5 text-xs text-brand-golden-brown">
+          Inherited from {incident.inherited_from_name ?? "a departed supply teacher"}
+          {incident.inherited_transferred_at ? ` · transferred ${formatDateTime(incident.inherited_transferred_at)}` : ""}
+          {incident.created_by_name ? ` · originally recorded by ${incident.created_by_name}` : ""}
+        </p>
+      )}
 
       {incident.has_restrictive_practice && (
         <div className="mt-2 flex flex-wrap gap-1.5 text-xs">

@@ -43,6 +43,32 @@ function resolveStatus(rows) {
   return current.rejected_at !== null ? "rejected" : "pending";
 }
 
+// Dublin-local "now", computed once per call, used to derive cut-off
+// values that are deterministically before/after the current instant --
+// this varies STORED data (granted_for_date, temporary_access_cutoff_
+// time) against the real current time, not the other way around. No
+// sleeping, no clock mocking. Hoisted here (originally local to CHECK
+// AA) so CHECK BB can set a live-comfortable cutoff for its own
+// institution too, rather than relying on the 15:00 schema default,
+// which the current run may already be past.
+function dublinNowParts() {
+  const fmt = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/Dublin", hour12: false,
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", second: "2-digit",
+  });
+  const p = Object.fromEntries(fmt.formatToParts(new Date()).map((x) => [x.type, x.value]));
+  return { date: `${p.year}-${p.month}-${p.day}`, time: `${p.hour}:${p.minute}:${p.second}` };
+}
+function addMinutesClamped(hhmmss, delta) {
+  const [h, m] = hhmmss.split(":").map(Number);
+  let total = h * 60 + m + delta;
+  total = Math.max(7 * 60 + 31, Math.min(23 * 60 + 59, total));
+  const hh = String(Math.floor(total / 60)).padStart(2, "0");
+  const mm = String(total % 60).padStart(2, "0");
+  return `${hh}:${mm}:00`;
+}
+
 async function signedInClient(email) {
   const c = createClient(URL, ANON_KEY, { auth: { autoRefreshToken: false, persistSession: false } });
   const { error } = await c.auth.signInWithPassword({ email, password: PASSWORD });
@@ -4630,34 +4656,14 @@ async function main() {
 
   console.log(`\n== CHECK AA: Temporary day-scoped access (migration 0105) -- grant/revoke authorization, the has_sna_access() fourth branch, can_own_incident()/create_incident_stamp() widening, the ownership/authority edit-policy decoupling, lazy ownership-transfer resolution, and the standing-audit fixes (assign_sna_to_child, get_institution_staff_roster) ==`);
   {
-    // Dublin-local "now", computed once, used to derive cut-off values
-    // that are deterministically before/after the current instant --
-    // per the scoping decision, this varies STORED data (granted_for_
-    // date, temporary_access_cutoff_time) against the real current
-    // time, not the other way around. No sleeping, no clock mocking.
+    // dublinNowParts()/addMinutesClamped() are module-level (hoisted
+    // above main(), CHECK BB reuses them for the same reason).
     // NAMED LIMITATION: the 07:30 activation boundary itself is a fixed
     // literal compared directly against now() inside the SQL, not a
     // stored value -- there is no way to vary it the same way, so this
     // suite cannot prove the ">= 07:30" half of the window without
     // literally running before 07:30 local time. Only the cut-off
     // (">  cut-off" refusal, "< cut-off" success) is exercised here.
-    function dublinNowParts() {
-      const fmt = new Intl.DateTimeFormat("en-GB", {
-        timeZone: "Europe/Dublin", hour12: false,
-        year: "numeric", month: "2-digit", day: "2-digit",
-        hour: "2-digit", minute: "2-digit", second: "2-digit",
-      });
-      const p = Object.fromEntries(fmt.formatToParts(new Date()).map((x) => [x.type, x.value]));
-      return { date: `${p.year}-${p.month}-${p.day}`, time: `${p.hour}:${p.minute}:${p.second}` };
-    }
-    function addMinutesClamped(hhmmss, delta) {
-      const [h, m] = hhmmss.split(":").map(Number);
-      let total = h * 60 + m + delta;
-      total = Math.max(7 * 60 + 31, Math.min(23 * 60 + 59, total));
-      const hh = String(Math.floor(total / 60)).padStart(2, "0");
-      const mm = String(total % 60).padStart(2, "0");
-      return `${hh}:${mm}:00`;
-    }
     const nowParts = dublinNowParts();
     const cutoffComfortablyAhead = addMinutesClamped(nowParts.time, 180);
     const cutoffAlreadyPassed = addMinutesClamped(nowParts.time, -15);
@@ -5115,6 +5121,292 @@ async function main() {
     await admin.from("incidents").delete().in("id", [incidentOwnedBySupply, incidentOwnedByPermanentTeacher].filter(Boolean));
     await admin.from("institutions").delete().eq("id", institutionAAId);
     for (const id of [principalAAId, teacherAA1Id, outsiderTeacherAAId, snaAA1Id, deactivatedSnaAAId, newSupplyAAId, pendingSupplyAAId, parentAA1Id, parentAA2Id]) {
+      await admin.auth.admin.deleteUser(id);
+    }
+  }
+
+  console.log(`\n== CHECK BB: Client-behaviour half of Stage 3, Step 3 -- src/hooks/useSnaChildren.ts's merged access-source query shapes, and the active/past cover-grant split in src/app/teacher/class/page.tsx and src/app/principal/classes/[classId]/page.tsx, proven via the LITERAL client query shape, not a proxy for it. What this check does NOT prove: the RPC-level correctness behind these shapes (grant_temporary_access, has_sna_access, get_institution_staff_roster) is CHECK AA's job, not this one's; this check only proves the CLIENT reproduces the right filter over rows that RLS has already let it see. It also doesn't prove anything renders on screen -- no component is mounted, no DOM is read. ==`);
+  {
+    const { data: instBB, error: instBBErr } = await admin
+      .from("institutions")
+      .insert({ name: "Temp Access Client Verify", institution_code: CODE + "BB", status: "verified" })
+      .select()
+      .single();
+    if (instBBErr) throw instBBErr;
+    const institutionBBId = instBB.id;
+
+    const principalBBId = await createUser("bb.principal@thebehaviourhive.com", "BB Principal", "principal");
+    const teacherBBId = await createUser("bb.teacher@thebehaviourhive.com", "BB Teacher", "class_teacher");
+    const snaBBId = await createUser("bb.sna@thebehaviourhive.com", "BB SNA", "sna");
+    const parentBB1Id = await createUser("bb.parent1@thebehaviourhive.com", "BB Parent One", "parent");
+    const parentBB2Id = await createUser("bb.parent2@thebehaviourhive.com", "BB Parent Two", "parent");
+
+    const { data: staffBBRows, error: staffBBErr } = await admin
+      .from("institution_staff")
+      .insert([
+        { institution_id: institutionBBId, user_id: principalBBId, role: "principal" },
+        { institution_id: institutionBBId, user_id: teacherBBId, role: "class_teacher" },
+        { institution_id: institutionBBId, user_id: snaBBId, role: "sna" },
+      ])
+      .select();
+    if (staffBBErr) throw staffBBErr;
+
+    const principalBB = await signedInClient("bb.principal@thebehaviourhive.com");
+    for (const row of staffBBRows.filter((r) => r.user_id !== principalBBId)) {
+      const { error } = await principalBB.rpc("approve_staff_join", { p_institution_staff_id: row.id });
+      if (error) throw error;
+    }
+
+    const teacherBB = await signedInClient("bb.teacher@thebehaviourhive.com");
+    const snaBB = await signedInClient("bb.sna@thebehaviourhive.com");
+
+    const { data: cAssignedBB } = await admin.from("passports").insert({ user_id: parentBB1Id, child_name: "BB Assigned Child", passport_status: "complete" }).select().single();
+    const { data: cCoverBB } = await admin.from("passports").insert({ user_id: parentBB2Id, child_name: "BB Covered Child", passport_status: "complete" }).select().single();
+    const childAssignedBB = cAssignedBB.id;
+    const childCoverBB = cCoverBB.id;
+
+    const { data: classBBId } = await principalBB.rpc("create_class", { p_institution_id: institutionBBId, p_name: "BB Room" });
+    await principalBB.rpc("add_class_teacher", { p_class_id: classBBId, p_user_id: teacherBBId });
+    await principalBB.rpc("add_class_child", { p_class_id: classBBId, p_passport_id: childAssignedBB });
+    await principalBB.rpc("add_class_child", { p_class_id: classBBId, p_passport_id: childCoverBB });
+
+    // The schema default cut-off (15:00) may already be in the past by
+    // the time this suite runs -- BB never varies the cut-off itself
+    // (that's CHECK AA's job), it just needs an active window to exist
+    // at all for the grant it creates below to read as live. Same
+    // "vary stored data against real now(), don't wait" technique AA
+    // uses for its own cut-off boundary checks.
+    const nowPartsBB = dublinNowParts();
+    const { error: cutoffBBErr } = await principalBB.rpc("set_temporary_access_cutoff", {
+      p_institution_id: institutionBBId,
+      p_cutoff_time: addMinutesClamped(nowPartsBB.time, 180),
+    });
+    if (cutoffBBErr) throw cutoffBBErr;
+
+    const todayBB = nowPartsBB.date;
+
+    // BB-1/BB-2 -- src/hooks/useSnaChildren.ts:72-78's exact child_
+    // assignments query shape (userId + institutionId + ended_at is
+    // null). Before any assignment exists, empty; after a real
+    // assign_sna_to_child() call, the identical query finds the row.
+    {
+      const { data: beforeAssign } = await snaBB
+        .from("child_assignments")
+        .select("passport_id")
+        .eq("user_id", snaBBId)
+        .eq("institution_id", institutionBBId)
+        .is("ended_at", null);
+      record(
+        "BB-1: useSnaChildren.ts's child_assignments query finds NOTHING before any assignment exists (src/hooks/useSnaChildren.ts:72-78)",
+        (beforeAssign?.length ?? 0) === 0,
+        JSON.stringify(beforeAssign)
+      );
+
+      const { error: assignErr } = await principalBB.rpc("assign_sna_to_child", { p_passport_id: childAssignedBB, p_user_id: snaBBId, p_institution_id: institutionBBId });
+      if (assignErr) throw assignErr;
+
+      const { data: afterAssign } = await snaBB
+        .from("child_assignments")
+        .select("passport_id")
+        .eq("user_id", snaBBId)
+        .eq("institution_id", institutionBBId)
+        .is("ended_at", null);
+      record(
+        "BB-2 THE FIX ITSELF: the IDENTICAL query finds the assigned child after a real assign_sna_to_child() call -- this is the query that was missing from /sna/passports entirely before this stage (src/hooks/useSnaChildren.ts:72-78)",
+        afterAssign?.length === 1 && afterAssign[0].passport_id === childAssignedBB,
+        JSON.stringify(afterAssign)
+      );
+    }
+
+    // BB-3/BB-4 -- src/hooks/useSnaChildren.ts:84-90 and :117-121's
+    // temporary_access + class_children query pair: granted_to +
+    // institution_id + today's date + not revoked, then the granted
+    // class's current children. Before any grant, empty; after a real
+    // grant_temporary_access() call, the identical pair resolves the
+    // covered child; after a real revoke_temporary_access() call, empty
+    // again -- proving the client's OWN re-derivation of has_sna_access()'s
+    // live-window logic, not the RPC's authorization (that's CHECK AA).
+    //
+    // grantBBId is declared outside this block (not const-scoped to it)
+    // -- BB-6/7 below reuses this exact, already-revoked row rather than
+    // manufacturing a redundant one.
+    let grantBBId;
+    {
+      const { data: beforeGrant } = await snaBB
+        .from("temporary_access")
+        .select("class_id, granted_for_date")
+        .eq("granted_to", snaBBId)
+        .eq("institution_id", institutionBBId)
+        .eq("granted_for_date", todayBB)
+        .is("revoked_at", null);
+      record(
+        "BB-3: useSnaChildren.ts's temporary_access query finds NOTHING before any grant exists (src/hooks/useSnaChildren.ts:84-90)",
+        (beforeGrant?.length ?? 0) === 0,
+        JSON.stringify(beforeGrant)
+      );
+
+      const { data: grantBBIdResult, error: grantBBErr } = await principalBB.rpc("grant_temporary_access", {
+        p_class_id: classBBId,
+        p_user_id: snaBBId,
+        p_date: todayBB,
+        p_reason: "BB: client query-shape check.",
+      });
+      grantBBId = grantBBIdResult;
+      if (grantBBErr) throw grantBBErr;
+
+      const { data: afterGrant } = await snaBB
+        .from("temporary_access")
+        .select("class_id, granted_for_date")
+        .eq("granted_to", snaBBId)
+        .eq("institution_id", institutionBBId)
+        .eq("granted_for_date", todayBB)
+        .is("revoked_at", null);
+      const grantedClassIds = [...new Set((afterGrant ?? []).map((r) => r.class_id))];
+      // 0109: class_children's own SELECT policy never covered a
+      // temporary-access holder (BB-4 caught this live, class_children
+      // returned empty even though afterGrant itself was correct) --
+      // useSnaChildren.ts now resolves the covered roster via
+      // get_temporary_access_covered_children() instead, one call per
+      // granted class. Reproduced here as the SAME RPC call, not the
+      // class_children read it replaced.
+      let coveredPassportIds = new Set();
+      if (grantedClassIds.length > 0) {
+        const results = await Promise.all(
+          grantedClassIds.map((classId) => snaBB.rpc("get_temporary_access_covered_children", { p_class_id: classId }))
+        );
+        const rows = results.flatMap((r) => r.data ?? []);
+        coveredPassportIds = new Set(rows.map((r) => r.passport_id));
+      }
+      record(
+        "BB-4 THE FIX ITSELF (0109): after a real grant_temporary_access() call, get_temporary_access_covered_children() resolves the covered child via the class -- the SNA's actual route to the child they were just granted cover for, after class_children's own RLS was proven (live) to refuse them (src/hooks/useSnaChildren.ts:115-140)",
+        afterGrant?.length === 1 && coveredPassportIds.has(childCoverBB) && coveredPassportIds.has(childAssignedBB),
+        JSON.stringify({ afterGrant, coveredPassportIds: [...coveredPassportIds] })
+      );
+
+      // BB-4b: the class_children read this replaced is confirmed STILL
+      // refused for the same caller/class -- 0109 didn't quietly widen
+      // that policy as a side effect, the narrow RPC is doing the work.
+      const { data: directClassChildren } = await snaBB
+        .from("class_children")
+        .select("passport_id")
+        .in("class_id", grantedClassIds)
+        .is("ended_at", null);
+      record(
+        "BB-4b: the direct class_children read stays refused for a covering (non-teacher, non-principal) SNA -- 0109 added a narrow RPC, not a class_children RLS widening",
+        (directClassChildren?.length ?? 0) === 0,
+        JSON.stringify(directClassChildren)
+      );
+
+      const { error: revokeBBErr } = await principalBB.rpc("revoke_temporary_access", { p_temporary_access_id: grantBBId, p_reason: "BB: revoke for query-shape check." });
+      if (revokeBBErr) throw revokeBBErr;
+
+      const { data: afterRevoke } = await snaBB
+        .from("temporary_access")
+        .select("class_id, granted_for_date")
+        .eq("granted_to", snaBBId)
+        .eq("institution_id", institutionBBId)
+        .eq("granted_for_date", todayBB)
+        .is("revoked_at", null);
+      record(
+        "BB-5: the SAME query finds NOTHING again after a real revoke_temporary_access() call -- the covering child disappears from the client's own source query, not just a stale cached flag (src/hooks/useSnaChildren.ts:84-90)",
+        (afterRevoke?.length ?? 0) === 0,
+        JSON.stringify(afterRevoke)
+      );
+    }
+
+    // BB-6/BB-7 -- the active/past cover-grant split BOTH /teacher/
+    // class/page.tsx:250-251 and /principal/classes/[classId]/
+    // page.tsx:158-160 compute client-side from the same raw
+    // temporary_access rows: !revokedAt && grantedForDate >= today is
+    // active, anything else (revoked, or dated before today) is past.
+    // Reproduced literally at both call sites -- they're independently
+    // written, not shared code, so a divergence between them would not
+    // be caught by testing only one.
+    //
+    // temporary_access has NO client-facing INSERT policy at all
+    // (0105's own comment: "grant_temporary_access()/revoke_temporary_
+    // access() are the only write paths") -- so every row here is
+    // either the real, already-revoked grant from BB-3/4/5 above (reused
+    // rather than duplicated), a genuinely fresh grant via the real RPC,
+    // or -- for the one state the RPC structurally cannot produce
+    // (a grant dated in the past; grant_temporary_access() refuses that
+    // at creation, AA-2e) -- a service-role backdate, the same
+    // "simulate the passage of time via admin, not by waiting"
+    // technique AA-5f already uses for the cut-off.
+    {
+      // Reuse: grantBBId (BB-3/4/5) is already revoked at this point --
+      // a real revoked row, not a fixture stand-in for one.
+      const revokedRowId = grantBBId;
+
+      const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+      const { data: pastDatedRow, error: pastDatedErr } = await admin
+        .from("temporary_access")
+        .insert({
+          institution_id: institutionBBId,
+          class_id: classBBId,
+          granted_to: teacherBBId,
+          granted_for_date: yesterday,
+          granted_by: principalBBId,
+          granted_by_role: "principal",
+          reason: "BB: past-dated split check.",
+        })
+        .select()
+        .single();
+      if (pastDatedErr) throw pastDatedErr;
+
+      const { data: activeRow, error: activeRowErr } = await principalBB.rpc("grant_temporary_access", {
+        p_class_id: classBBId,
+        p_user_id: teacherBBId,
+        p_date: todayBB,
+        p_reason: "BB: active split check.",
+      });
+      if (activeRowErr) throw activeRowErr;
+
+      const { data: allRowsForSplit } = await principalBB
+        .from("temporary_access")
+        .select("id, granted_for_date, revoked_at")
+        .eq("class_id", classBBId)
+        .order("granted_for_date", { ascending: false });
+
+      // /teacher/class/page.tsx:250-251's exact predicates.
+      const teacherActive = (allRowsForSplit ?? []).filter((g) => !g.revoked_at && g.granted_for_date >= todayBB);
+      const teacherPast = (allRowsForSplit ?? []).filter((g) => g.revoked_at || g.granted_for_date < todayBB);
+      record(
+        "BB-6: /teacher/class's own active/past split (src/app/teacher/class/page.tsx:250-251) puts the revoked row and the past-dated row in 'past', and only the genuinely active row in 'active'",
+        teacherActive.length === 1 &&
+          teacherActive[0].id === activeRow &&
+          teacherPast.length === 2 &&
+          teacherPast.some((g) => g.id === revokedRowId) &&
+          teacherPast.some((g) => g.id === pastDatedRow.id),
+        JSON.stringify({ teacherActive, teacherPast })
+      );
+
+      // /principal/classes/[classId]/page.tsx:158-160's exact predicate
+      // -- written independently, ternary rather than two filters, and
+      // proven to agree rather than assumed to.
+      const principalActive = [];
+      const principalPast = [];
+      for (const g of allRowsForSplit ?? []) {
+        (g.revoked_at || g.granted_for_date < todayBB ? principalPast : principalActive).push(g);
+      }
+      record(
+        "BB-7: the principal's class-detail page's independently-written split (src/app/principal/classes/[classId]/page.tsx:158-160) agrees with BB-6's result exactly",
+        principalActive.length === 1 &&
+          principalActive[0].id === activeRow &&
+          principalPast.length === 2 &&
+          principalPast.some((g) => g.id === revokedRowId) &&
+          principalPast.some((g) => g.id === pastDatedRow.id),
+        JSON.stringify({ principalActive, principalPast })
+      );
+
+      await admin.from("temporary_access").delete().eq("id", pastDatedRow.id);
+    }
+
+    console.log("BB summary complete.");
+
+    // ---- BB teardown ----
+    await admin.from("institutions").delete().eq("id", institutionBBId);
+    for (const id of [principalBBId, teacherBBId, snaBBId, parentBB1Id, parentBB2Id]) {
       await admin.auth.admin.deleteUser(id);
     }
   }

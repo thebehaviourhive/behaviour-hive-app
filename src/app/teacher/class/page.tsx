@@ -4,8 +4,11 @@ import { useCallback, useEffect, useState } from "react";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { createClient } from "@/lib/supabase/client";
 import { AssignSnaSheet } from "@/components/shared/AssignSnaSheet";
+import { GrantTemporaryAccessSheet } from "@/components/shared/GrantTemporaryAccessSheet";
+import { ReasonConfirmSheet } from "@/components/shared/ReasonConfirmSheet";
 import { TeacherBottomNav } from "@/components/teacher/TeacherBottomNav";
 import { PeopleIcon } from "@/components/ui/icons";
+import { formatCutoffTime, todayLocalDateString } from "@/lib/temporaryAccessTime";
 
 // PRD 1, Stage 2, Step 3. A class teacher's own class(es) -- roster
 // (read-only: adding/removing a CHILD is principal-only, per Step 0's
@@ -64,6 +67,15 @@ interface ChildRosterRow {
   child_name: string;
 }
 
+interface CoverGrant {
+  id: string;
+  classId: string;
+  grantedTo: string;
+  grantedForDate: string;
+  reason: string;
+  revokedAt: string | null;
+}
+
 export default function TeacherClassPage() {
   const { user, isReady } = useRequireRole("class_teacher");
   const [institutionId, setInstitutionId] = useState<string | null>(null);
@@ -72,9 +84,14 @@ export default function TeacherClassPage() {
   const [nameMap, setNameMap] = useState<Map<string, string>>(new Map());
   const [assignmentMap, setAssignmentMap] = useState<Map<string, Assignment>>(new Map());
   const [eligibleSnas, setEligibleSnas] = useState<{ userId: string; fullName: string }[]>([]);
+  const [cutoffTime, setCutoffTime] = useState<string>("15:00:00");
+  const [coverGrants, setCoverGrants] = useState<CoverGrant[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [assignSnaTarget, setAssignSnaTarget] = useState<RosterChild | null>(null);
+  const [grantCoverClass, setGrantCoverClass] = useState<MyClass | null>(null);
+  const [revokeCoverTarget, setRevokeCoverTarget] = useState<CoverGrant | null>(null);
+  const [showCoverHistoryFor, setShowCoverHistoryFor] = useState<Set<string>>(new Set());
 
   const load = useCallback(async () => {
     if (!user) return;
@@ -115,12 +132,28 @@ export default function TeacherClassPage() {
       return;
     }
 
-    const [classRowsResult, childRowsResult, staffRosterResult, childRosterResult] = await Promise.all([
+    const [classRowsResult, childRowsResult, staffRosterResult, childRosterResult, instResult, coverResult] = await Promise.all([
       supabase.from("classes").select("id, name").in("id", classIds),
       supabase.from("class_children").select("passport_id, class_id").in("class_id", classIds).is("ended_at", null),
       supabase.rpc("get_institution_staff_roster", { p_institution_id: staffRow.institution_id }),
       supabase.rpc("get_institution_child_roster", { p_institution_id: staffRow.institution_id }),
+      supabase.from("institutions").select("temporary_access_cutoff_time").eq("id", staffRow.institution_id).single(),
+      supabase.from("temporary_access").select("id, class_id, granted_to, granted_for_date, reason, revoked_at").in("class_id", classIds).order("granted_for_date", { ascending: false }),
     ]);
+
+    if (instResult.data?.temporary_access_cutoff_time) {
+      setCutoffTime(instResult.data.temporary_access_cutoff_time);
+    }
+    setCoverGrants(
+      (coverResult.data ?? []).map((g) => ({
+        id: g.id,
+        classId: g.class_id,
+        grantedTo: g.granted_to,
+        grantedForDate: g.granted_for_date,
+        reason: g.reason,
+        revokedAt: g.revoked_at,
+      }))
+    );
 
     const staffRoster = (staffRosterResult.data ?? []) as StaffRosterRow[];
     const childRoster = (childRosterResult.data ?? []) as ChildRosterRow[];
@@ -212,6 +245,11 @@ export default function TeacherClassPage() {
           <div className="flex flex-col gap-6">
             {myClasses.map((cls) => {
               const classRoster = roster.filter((r) => r.classId === cls.id);
+              const classCoverGrants = coverGrants.filter((g) => g.classId === cls.id);
+              const today = todayLocalDateString();
+              const activeCover = classCoverGrants.filter((g) => !g.revokedAt && g.grantedForDate >= today);
+              const pastCover = classCoverGrants.filter((g) => g.revokedAt || g.grantedForDate < today);
+              const isHistoryOpen = showCoverHistoryFor.has(cls.id);
               return (
                 <section key={cls.id}>
                   <h2 className="mb-2 font-heading text-sm font-bold uppercase tracking-wide text-brand-neutral-black/60">
@@ -243,6 +281,75 @@ export default function TeacherClassPage() {
                       })}
                     </div>
                   )}
+
+                  <div className="mt-3 flex items-center justify-between">
+                    <h3 className="text-xs font-semibold uppercase tracking-wide text-brand-neutral-black/50">Cover</h3>
+                    <button
+                      type="button"
+                      onClick={() => setGrantCoverClass(cls)}
+                      className="text-xs font-semibold text-brand-prussian-blue"
+                    >
+                      + Grant Cover
+                    </button>
+                  </div>
+                  {activeCover.length === 0 ? (
+                    <p className="mt-1 text-xs text-brand-neutral-black/50">No cover granted for this class.</p>
+                  ) : (
+                    <div className="mt-1 flex flex-col gap-2">
+                      {activeCover.map((g) => (
+                        <div key={g.id} className="rounded-2xl border border-black/5 bg-white p-3 shadow-sm">
+                          <p className="text-sm font-semibold text-brand-neutral-black">
+                            {nameMap.get(g.grantedTo) ?? "Unknown"}
+                          </p>
+                          <p className="mt-0.5 text-xs text-brand-neutral-black/50">
+                            {g.grantedForDate === today ? "Today" : g.grantedForDate} · until {formatCutoffTime(cutoffTime)}
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() => setRevokeCoverTarget(g)}
+                            className="mt-2 block w-full rounded-xl border border-brand-golden-brown py-1.5 text-center text-xs font-semibold text-brand-golden-brown"
+                          >
+                            Revoke
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {pastCover.length > 0 && (
+                    <div className="mt-2">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setShowCoverHistoryFor((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(cls.id)) next.delete(cls.id);
+                            else next.add(cls.id);
+                            return next;
+                          })
+                        }
+                        className="flex w-full items-center justify-between rounded-xl border border-dashed border-black/10 bg-white/60 px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-brand-neutral-black/50"
+                      >
+                        <span>Past cover ({pastCover.length})</span>
+                        <span>{isHistoryOpen ? "−" : "+"}</span>
+                      </button>
+                      {isHistoryOpen && (
+                        <div className="mt-2 flex flex-col gap-2">
+                          {pastCover.map((g) => (
+                            <div key={g.id} className="rounded-2xl border border-black/5 bg-white/60 p-3">
+                              <p className="text-sm font-semibold text-brand-neutral-black">
+                                {nameMap.get(g.grantedTo) ?? "Unknown"}
+                              </p>
+                              <p className="mt-0.5 text-xs text-brand-neutral-black/50">
+                                {g.grantedForDate}
+                                {g.revokedAt ? " · revoked early" : ""}
+                              </p>
+                              <p className="mt-1 text-sm text-brand-neutral-black/70">&ldquo;{g.reason}&rdquo;</p>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </section>
               );
             })}
@@ -269,6 +376,46 @@ export default function TeacherClassPage() {
           onClose={() => setAssignSnaTarget(null)}
           onChanged={() => {
             setAssignSnaTarget(null);
+            load();
+          }}
+        />
+      )}
+
+      {grantCoverClass && institutionId && (
+        <GrantTemporaryAccessSheet
+          isOpen={Boolean(grantCoverClass)}
+          mode="classTeacher"
+          classId={grantCoverClass.id}
+          className={grantCoverClass.name}
+          institutionId={institutionId}
+          cutoffTime={cutoffTime}
+          eligibleExisting={eligibleSnas}
+          onClose={() => setGrantCoverClass(null)}
+          onGranted={() => {
+            setGrantCoverClass(null);
+            load();
+          }}
+        />
+      )}
+
+      {revokeCoverTarget && (
+        <ReasonConfirmSheet
+          isOpen={Boolean(revokeCoverTarget)}
+          title={`Revoke ${nameMap.get(revokeCoverTarget.grantedTo) ?? "this"} cover?`}
+          description="Their access for the rest of today ends immediately. This is a revocation, not a delete -- it stays in this class's cover history."
+          confirmLabel="Revoke Cover"
+          submittingLabel="Revoking…"
+          onClose={() => setRevokeCoverTarget(null)}
+          onConfirm={async (reason) => {
+            const supabase = createClient();
+            const { error } = await supabase.rpc("revoke_temporary_access", {
+              p_temporary_access_id: revokeCoverTarget.id,
+              p_reason: reason,
+            });
+            return { error: error?.message ?? null };
+          }}
+          onConfirmed={() => {
+            setRevokeCoverTarget(null);
             load();
           }}
         />

@@ -16,6 +16,7 @@ import { SignOffCard } from "@/components/incident-log/SignOffCard";
 import { AttestationCard } from "@/components/incident-log/AttestationCard";
 import { RequestAttestationsCard } from "@/components/incident-log/RequestAttestationsCard";
 import { CountersignCard } from "@/components/incident-log/CountersignCard";
+import { friendlyAccessLapsedMessage } from "@/lib/temporaryAccessTime";
 
 // School Incident Log -- Phase 3 stage two, built in sections per
 // explicit instruction: category & narrative first (this round), then
@@ -334,6 +335,21 @@ export default function IncidentRecordPage() {
         setError("Could not find this incident.");
         setIsLoading(false);
         return;
+      }
+
+      // PRD 1, Stage 3: the second of the two read paths Daniel named
+      // explicitly ("the principal's incident queue and incident detail
+      // page both calling resolve_lapsed_incident_ownership() -- both,
+      // not one"). Called unconditionally for whoever can reach this
+      // page, not gated to principals client-side -- 0107's own
+      // authorization fix already scopes this correctly server-side to
+      // any active institution staff, so duplicating that check here
+      // would just be a second copy of the same logic to keep in sync.
+      // Best-effort: never blocks the rest of this load.
+      try {
+        await supabase.rpc("resolve_lapsed_incident_ownership", { p_institution_id: incident.institution_id });
+      } catch {
+        // best-effort; see comment above
       }
 
       const institutionOrGlobal = `institution_id.is.null,institution_id.eq.${incident.institution_id}`;
@@ -1017,7 +1033,21 @@ export default function IncidentRecordPage() {
 
     const supabase = createClient();
 
-    const { error: incidentUpdateError } = await supabase
+    // PRD 1, Stage 3 finding, fixed alongside the mid-session design
+    // work: this update never chained .select(), so RLS silently
+    // filtering it (CLAUDE.md's own first documented gotcha -- a
+    // .update() whose target fails the policy's USING clause returns
+    // {data: [], error: null}, no thrown error) meant a lapsed-access
+    // save previously showed FALSE SUCCESS, not even an error. Now
+    // chains .select("id") and checks the row actually came back --
+    // safe here specifically because anyone who could pass the
+    // narrower UPDATE policy (owning_teacher_id + can_own_incident() +
+    // has_child_access()) already trivially satisfies the broader
+    // can_view_incident() SELECT policy via its own unconditional
+    // created_by/owning_teacher_id branches (confirmed live, CHECK
+    // AA-7e), so this isn't the insert-before-children ordering trap
+    // CLAUDE.md's second gotcha warns about.
+    const { data: updatedIncidentRows, error: incidentUpdateError } = await supabase
       .from("incidents")
       .update({
         category,
@@ -1031,16 +1061,22 @@ export default function IncidentRecordPage() {
         risk_reduction_future: riskReductionFuture.trim() || null,
         other_information: otherInformation.trim() || null,
       })
-      .eq("id", params.incidentId);
+      .eq("id", params.incidentId)
+      .select("id");
 
     if (incidentUpdateError) {
       setIsSaving(false);
       setSaveError(incidentUpdateError.message);
       return;
     }
+    if (!updatedIncidentRows || updatedIncidentRows.length === 0) {
+      setIsSaving(false);
+      setSaveError(friendlyAccessLapsedMessage("This incident"));
+      return;
+    }
 
     for (const child of children) {
-      const { error: childUpdateError } = await supabase
+      const { data: updatedChildRows, error: childUpdateError } = await supabase
         .from("incident_children")
         .update({
           distress_level: child.distressLevel,
@@ -1049,11 +1085,17 @@ export default function IncidentRecordPage() {
           recovery_methods: child.recoveryMethods.length > 0 ? child.recoveryMethods : null,
           recovery_methods_other: child.recoveryMethodsOther.trim() || null,
         })
-        .eq("id", child.id);
+        .eq("id", child.id)
+        .select("id");
 
       if (childUpdateError) {
         setIsSaving(false);
         setSaveError(childUpdateError.message);
+        return;
+      }
+      if (!updatedChildRows || updatedChildRows.length === 0) {
+        setIsSaving(false);
+        setSaveError(friendlyAccessLapsedMessage("This incident"));
         return;
       }
     }

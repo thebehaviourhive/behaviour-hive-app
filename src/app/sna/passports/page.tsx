@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { useRequireRole } from "@/hooks/useRequireRole";
-import { useTeacherPassports } from "@/hooks/useTeacherPassports";
+import { useSnaChildren } from "@/hooks/useSnaChildren";
 import { useTeacherMorningCheckins, type MorningPupilStatus } from "@/hooks/useTeacherMorningCheckins";
 import { getChildDisplayName } from "@/lib/childDisplayName";
 import { AddChildSheet } from "@/components/teacher/AddChildSheet";
@@ -20,13 +20,15 @@ import { AttestationPromptCard } from "@/components/incident-log/AttestationProm
 // Students page's tap-through list, because SNA has nowhere else for
 // either of those to live.
 //
-// useTeacherPassports/useTeacherMorningCheckins are reused verbatim,
-// not forked: both already query passport_access scoped to
-// `teacher_id = auth.uid()` with no role filter, so an SNA calling them
-// gets exactly their own linked children -- the same "role-blind and
-// therefore already correct" reasoning documented throughout migration
-// 0065 (get_abc_logs, the passports/section SELECT policies, etc.)
-// applies identically to these two client-side hooks.
+// PRD 1, Stage 3 fix -- named in CLAUDE.md ("WHEN ACCESS OR AUTHORITY
+// IS GRANTED, TEST THE DESTINATION"): this page used to call
+// useTeacherPassports() directly, which only ever returns passport_
+// access-derived children. useSnaChildren() merges that with Stage 2's
+// child_assignments and Stage 3's temporary_access -- an assigned or
+// covering SNA now actually sees the child the database has already
+// been granting them access to since Stage 2. useTeacherMorningCheckins()
+// still does the RAG-status/sort work, fed this page's own merged list
+// via its optional override param rather than re-deriving that logic.
 const RAG_LABEL: Record<MorningPupilStatus["rag"], string> = {
   green: "Settled",
   amber: "Anxious",
@@ -63,23 +65,39 @@ export default function SnaPassportsPage() {
     error,
     institutionId,
     institutionCode,
-    passports,
+    children,
     refresh,
-  } = useTeacherPassports(user?.id ?? null);
-  const { isLoading: isLoadingCheckins, pupils } = useTeacherMorningCheckins(user?.id ?? null);
+  } = useSnaChildren(user?.id ?? null);
+  const { isLoading: isLoadingCheckins, pupils } = useTeacherMorningCheckins(user?.id ?? null, {
+    isLoading: isLoadingPassports,
+    error,
+    passports: children,
+  });
 
   const [query, setQuery] = useState("");
   const [isAddChildOpen, setIsAddChildOpen] = useState(false);
 
   const isLoading = isLoadingPassports || isLoadingCheckins;
 
-  const diagnosesByPassportId = useMemo(() => {
-    const map = new Map<string, { diagnoses: string[] | null; diagnosisOther: string | null; childName: string }>();
-    for (const p of passports) {
-      map.set(p.passportId, { diagnoses: p.diagnoses, diagnosisOther: p.diagnosisOther, childName: p.childName });
+  // childName/diagnoses AND the isTemporary flag both come from the same
+  // merged useSnaChildren() list -- pupils (from useTeacherMorningCheckins)
+  // carries the RAG status but not the source flags, so this map is what
+  // lets ChildRow render "Covering today" without duplicating the merge.
+  const childInfoByPassportId = useMemo(() => {
+    const map = new Map<
+      string,
+      { diagnoses: string[] | null; diagnosisOther: string | null; childName: string; isTemporary: boolean }
+    >();
+    for (const c of children) {
+      map.set(c.passportId, {
+        diagnoses: c.diagnoses,
+        diagnosisOther: c.diagnosisOther,
+        childName: c.childName,
+        isTemporary: c.isTemporary,
+      });
     }
     return map;
-  }, [passports]);
+  }, [children]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -133,7 +151,7 @@ export default function SnaPassportsPage() {
       <QuestionnairePromptCard track="sna" className="px-4 pb-4" />
       <AttestationPromptCard className="px-4 pb-4" />
 
-      {passports.length > 0 && (
+      {children.length > 0 && (
         <div className="sticky top-0 z-[1] bg-brand-off-white/40 px-4 pb-4">
           <input
             type="text"
@@ -156,7 +174,7 @@ export default function SnaPassportsPage() {
           <div className="mx-4 rounded-xl border-2 border-dashed border-red-200 bg-white/60 p-6 text-center">
             <p className="font-sans text-sm text-red-600">{error}</p>
           </div>
-        ) : passports.length === 0 ? (
+        ) : children.length === 0 ? (
           <EmptyState institutionCode={institutionCode} onAddChild={() => setIsAddChildOpen(true)} />
         ) : filtered.length === 0 ? (
           <p className="px-4 pt-6 text-center font-sans text-sm text-brand-neutral-black/60">
@@ -165,13 +183,14 @@ export default function SnaPassportsPage() {
         ) : (
           <div className="flex flex-col">
             {filtered.map((pupil) => {
-              const info = diagnosesByPassportId.get(pupil.passportId);
+              const info = childInfoByPassportId.get(pupil.passportId);
               return (
                 <ChildRow
                   key={pupil.passportId}
                   pupil={pupil}
                   childName={info?.childName ?? pupil.displayName}
                   pills={getDiagnosisPills(info?.diagnoses ?? null, info?.diagnosisOther ?? null)}
+                  isTemporary={info?.isTemporary ?? false}
                   onTap={() => router.push(`/sna/passport/${pupil.passportId}`)}
                 />
               );
@@ -202,11 +221,13 @@ function ChildRow({
   pupil,
   childName,
   pills,
+  isTemporary,
   onTap,
 }: {
   pupil: MorningPupilStatus;
   childName: string;
   pills: string[];
+  isTemporary: boolean;
   onTap: () => void;
 }) {
   return (
@@ -219,9 +240,20 @@ function ChildRow({
         {getInitials(pupil.firstName, childName)}
       </span>
       <div className="min-w-0 flex-1">
-        <p className="truncate font-sans text-base font-bold text-brand-neutral-black">
-          {getChildDisplayName(childName)}
-        </p>
+        <div className="flex items-center gap-1.5">
+          <p className="truncate font-sans text-base font-bold text-brand-neutral-black">
+            {getChildDisplayName(childName)}
+          </p>
+          {isTemporary && (
+            // Daniel's own instruction: "a covering child must never
+            // look permanent." Golden Brown, not a neutral pill --
+            // matches this stage's proactive-indicator styling so the
+            // same "today only" signal is visually consistent app-wide.
+            <span className="flex-shrink-0 whitespace-nowrap rounded-full bg-brand-golden-brown/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-brand-golden-brown">
+              Covering today
+            </span>
+          )}
+        </div>
         {pills.length > 0 && (
           <div className="mt-1 flex gap-1.5 overflow-x-auto scrollbar-hide">
             {pills.map((pill) => (

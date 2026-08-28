@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getRagStatus, RAG_TIER_ORDER, type RagStatus } from "@/lib/ragStatus";
-import { useTeacherPassports } from "./useTeacherPassports";
+import { useTeacherPassports, type TeacherPassport } from "./useTeacherPassports";
 
 type SleepQuality = "slept_through" | "woke_briefly" | "very_restless" | "barely_slept" | null;
 type RegulationState = "settled" | "unsettled" | "dysregulated" | null;
@@ -38,12 +38,22 @@ function sortPupils(pupils: MorningPupilStatus[]): MorningPupilStatus[] {
   });
 }
 
-export function useTeacherMorningCheckins(userId: string | null): UseTeacherMorningCheckinsResult {
-  const {
-    isLoading: isLoadingPassports,
-    error: passportsError,
-    passports,
-  } = useTeacherPassports(userId);
+// passportsOverride: optional, additive -- when provided, this hook
+// enriches THAT list with morning check-ins instead of calling
+// useTeacherPassports() itself. Every existing caller (teacher/
+// dashboard, teacher/morning-updates) omits it and is completely
+// unaffected. Added for /sna/passports specifically, whose own
+// useSnaChildren() hook merges three access sources (Stage 2 + 3),
+// not just passport_access -- this lets that merged list reuse the
+// SAME RAG/sort logic rather than duplicating it.
+export function useTeacherMorningCheckins(
+  userId: string | null,
+  passportsOverride?: { isLoading: boolean; error: string | null; passports: TeacherPassport[] }
+): UseTeacherMorningCheckinsResult {
+  const ownResult = useTeacherPassports(passportsOverride ? null : userId);
+  const isLoadingPassports = passportsOverride ? passportsOverride.isLoading : ownResult.isLoading;
+  const passportsError = passportsOverride ? passportsOverride.error : ownResult.error;
+  const passports = passportsOverride ? passportsOverride.passports : ownResult.passports;
 
   const [isLoadingCheckins, setIsLoadingCheckins] = useState(true);
   const [checkinError, setCheckinError] = useState<string | null>(null);

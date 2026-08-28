@@ -5,6 +5,8 @@ import { useCallback, useEffect, useState } from "react";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { createClient } from "@/lib/supabase/client";
 import { CreateClassSheet } from "@/components/principal/CreateClassSheet";
+import { SetCutoffSheet } from "@/components/principal/SetCutoffSheet";
+import { formatCutoffTime } from "@/lib/temporaryAccessTime";
 
 // PRD 1, Stage 2, Step 3. Reuses /principal/staff's own list idiom
 // exactly (header with a back chevron + title, rounded-2xl white cards,
@@ -32,6 +34,8 @@ export default function PrincipalClassesPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [cutoffTime, setCutoffTime] = useState<string>("15:00:00");
+  const [isCutoffOpen, setIsCutoffOpen] = useState(false);
 
   const load = useCallback(async (instId: string) => {
     setIsLoading(true);
@@ -105,6 +109,16 @@ export default function PrincipalClassesPage() {
       }
 
       setInstitutionId(staffRow.institution_id);
+
+      const { data: instRow } = await supabase
+        .from("institutions")
+        .select("temporary_access_cutoff_time")
+        .eq("id", staffRow.institution_id)
+        .single();
+      if (isMounted && instRow?.temporary_access_cutoff_time) {
+        setCutoffTime(instRow.temporary_access_cutoff_time);
+      }
+
       await load(staffRow.institution_id);
     }
 
@@ -140,6 +154,17 @@ export default function PrincipalClassesPage() {
           </button>
         )}
       </header>
+
+      {institutionId && (
+        <div className="mx-4 mb-4 flex items-center justify-between rounded-2xl border border-black/5 bg-white/60 px-4 py-2.5 text-xs">
+          <span className="text-brand-neutral-black/60">
+            Temporary cover ends at <span className="font-semibold text-brand-neutral-black">{formatCutoffTime(cutoffTime)}</span> daily
+          </span>
+          <button type="button" onClick={() => setIsCutoffOpen(true)} className="font-semibold text-brand-prussian-blue">
+            Change
+          </button>
+        </div>
+      )}
 
       <main className="flex-1 px-4">
         {isLoading ? (
@@ -180,6 +205,19 @@ export default function PrincipalClassesPage() {
           onCreated={() => {
             setIsCreateOpen(false);
             load(institutionId);
+          }}
+        />
+      )}
+
+      {institutionId && (
+        <SetCutoffSheet
+          isOpen={isCutoffOpen}
+          institutionId={institutionId}
+          currentCutoffTime={cutoffTime}
+          onClose={() => setIsCutoffOpen(false)}
+          onSaved={(newCutoff) => {
+            setCutoffTime(newCutoff);
+            setIsCutoffOpen(false);
           }}
         />
       )}

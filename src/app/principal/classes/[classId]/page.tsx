@@ -8,7 +8,9 @@ import { createClient } from "@/lib/supabase/client";
 import { AddClassTeacherSheet } from "@/components/principal/AddClassTeacherSheet";
 import { AddClassChildSheet } from "@/components/principal/AddClassChildSheet";
 import { AssignSnaSheet } from "@/components/shared/AssignSnaSheet";
+import { GrantTemporaryAccessSheet } from "@/components/shared/GrantTemporaryAccessSheet";
 import { ReasonConfirmSheet } from "@/components/shared/ReasonConfirmSheet";
+import { formatCutoffTime, todayLocalDateString } from "@/lib/temporaryAccessTime";
 
 // PRD 1, Stage 2, Step 3. Principal's class detail: teachers (add/remove
 // within the 3-slot cap), roster (add/remove a child), and per-child SNA
@@ -62,6 +64,14 @@ interface ChildRosterRow {
   child_name: string;
 }
 
+interface CoverGrant {
+  id: string;
+  grantedTo: string;
+  grantedForDate: string;
+  reason: string;
+  revokedAt: string | null;
+}
+
 export default function PrincipalClassDetailPage() {
   const params = useParams();
   const classId = params.classId as string;
@@ -77,17 +87,23 @@ export default function PrincipalClassDetailPage() {
   const [eligibleTeachers, setEligibleTeachers] = useState<{ userId: string; fullName: string }[]>([]);
   const [eligibleSnas, setEligibleSnas] = useState<{ userId: string; fullName: string }[]>([]);
   const [eligibleChildren, setEligibleChildren] = useState<{ passportId: string; childName: string }[]>([]);
+  const [eligibleStaffForCover, setEligibleStaffForCover] = useState<{ userId: string; fullName: string }[]>([]);
+  const [cutoffTime, setCutoffTime] = useState<string>("15:00:00");
+  const [coverGrants, setCoverGrants] = useState<{ active: CoverGrant[]; past: CoverGrant[] }>({ active: [], past: [] });
 
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showRemovedTeachers, setShowRemovedTeachers] = useState(false);
   const [showRemovedChildren, setShowRemovedChildren] = useState(false);
+  const [showCoverHistory, setShowCoverHistory] = useState(false);
 
   const [isAddTeacherOpen, setIsAddTeacherOpen] = useState(false);
   const [isAddChildOpen, setIsAddChildOpen] = useState(false);
+  const [isGrantCoverOpen, setIsGrantCoverOpen] = useState(false);
   const [removeTeacherTarget, setRemoveTeacherTarget] = useState<TeacherRow | null>(null);
   const [removeChildTarget, setRemoveChildTarget] = useState<ChildRow | null>(null);
   const [assignSnaTarget, setAssignSnaTarget] = useState<ChildRow | null>(null);
+  const [revokeCoverTarget, setRevokeCoverTarget] = useState<CoverGrant | null>(null);
 
   const load = useCallback(async () => {
     setIsLoading(true);
@@ -108,7 +124,7 @@ export default function PrincipalClassDetailPage() {
     setClassName(classRow.name);
     setInstitutionId(classRow.institution_id);
 
-    const [teacherRowsResult, childRowsResult, staffRosterResult, childRosterResult] = await Promise.all([
+    const [teacherRowsResult, childRowsResult, staffRosterResult, childRosterResult, instResult, coverResult] = await Promise.all([
       supabase
         .from("class_teachers")
         .select("id, user_id, position, started_at, ended_at, ended_by, end_reason")
@@ -125,7 +141,25 @@ export default function PrincipalClassDetailPage() {
         p_include_pending: false,
       }),
       supabase.rpc("get_institution_child_roster", { p_institution_id: classRow.institution_id }),
+      supabase.from("institutions").select("temporary_access_cutoff_time").eq("id", classRow.institution_id).single(),
+      supabase
+        .from("temporary_access")
+        .select("id, granted_to, granted_for_date, reason, revoked_at")
+        .eq("class_id", classId)
+        .order("granted_for_date", { ascending: false }),
     ]);
+
+    if (instResult.data?.temporary_access_cutoff_time) {
+      setCutoffTime(instResult.data.temporary_access_cutoff_time);
+    }
+    const today = todayLocalDateString();
+    const coverActive: CoverGrant[] = [];
+    const coverPast: CoverGrant[] = [];
+    for (const g of coverResult.data ?? []) {
+      const row: CoverGrant = { id: g.id, grantedTo: g.granted_to, grantedForDate: g.granted_for_date, reason: g.reason, revokedAt: g.revoked_at };
+      (g.revoked_at || g.granted_for_date < today ? coverPast : coverActive).push(row);
+    }
+    setCoverGrants({ active: coverActive, past: coverPast });
 
     const staffRoster = (staffRosterResult.data ?? []) as StaffRosterRow[];
     const childRoster = (childRosterResult.data ?? []) as ChildRosterRow[];
@@ -203,6 +237,15 @@ export default function PrincipalClassDetailPage() {
       staffRoster
         .filter((s) => s.role === "sna" && s.is_active)
         .map((s) => ({ userId: s.user_id, fullName: s.full_name }))
+    );
+    // Principal's own temporary-cover picker -- unlike SNA assignment,
+    // not restricted to any one role, since access_tier is always 'sna'
+    // regardless of who's granted (Step 0, #2) -- excludes the principal
+    // themselves the same way GrantTemporaryAccessSheet's own RPC would
+    // refuse a self-grant anyway, just surfaced earlier as a picker
+    // filter rather than a runtime error.
+    setEligibleStaffForCover(
+      staffRoster.filter((s) => s.is_active).map((s) => ({ userId: s.user_id, fullName: s.full_name }))
     );
     const activeChildPassportIds = new Set(activeChildren.map((c) => c.passportId));
     setEligibleChildren(
@@ -400,6 +443,71 @@ export default function PrincipalClassDetailPage() {
                 </div>
               )}
             </section>
+
+            <section className="mt-6">
+              <div className="mb-2 flex items-center justify-between">
+                <h2 className="font-heading text-sm font-bold uppercase tracking-wide text-brand-neutral-black/60">
+                  Temporary Cover
+                </h2>
+                <button
+                  type="button"
+                  onClick={() => setIsGrantCoverOpen(true)}
+                  className="text-xs font-semibold text-brand-prussian-blue"
+                >
+                  + Grant Cover
+                </button>
+              </div>
+              {coverGrants.active.length === 0 ? (
+                <p className="rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-center text-sm text-brand-neutral-black/60">
+                  No cover granted for this class.
+                </p>
+              ) : (
+                <div className="flex flex-col gap-2">
+                  {coverGrants.active.map((g) => (
+                    <div key={g.id} className="rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
+                      <p className="text-sm font-semibold text-brand-neutral-black">{nameMap.get(g.grantedTo) ?? "Unknown"}</p>
+                      <p className="mt-0.5 text-xs text-brand-neutral-black/50">
+                        {g.grantedForDate === todayLocalDateString() ? "Today" : g.grantedForDate} · until {formatCutoffTime(cutoffTime)}
+                      </p>
+                      <p className="mt-1 text-sm text-brand-neutral-black/70">&ldquo;{g.reason}&rdquo;</p>
+                      <button
+                        type="button"
+                        onClick={() => setRevokeCoverTarget(g)}
+                        className="mt-2 block w-full rounded-xl border border-brand-golden-brown py-1.5 text-center text-xs font-semibold text-brand-golden-brown"
+                      >
+                        Revoke
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {coverGrants.past.length > 0 && (
+                <div className="mt-3">
+                  <button
+                    type="button"
+                    onClick={() => setShowCoverHistory((v) => !v)}
+                    className="flex w-full items-center justify-between rounded-2xl border border-dashed border-black/10 bg-white/60 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-brand-neutral-black/50"
+                  >
+                    <span>Past cover ({coverGrants.past.length})</span>
+                    <span>{showCoverHistory ? "−" : "+"}</span>
+                  </button>
+                  {showCoverHistory && (
+                    <div className="mt-2 flex flex-col gap-2">
+                      {coverGrants.past.map((g) => (
+                        <div key={g.id} className="rounded-2xl border border-black/5 bg-white/60 p-4">
+                          <p className="text-sm font-semibold text-brand-neutral-black">{nameMap.get(g.grantedTo) ?? "Unknown"}</p>
+                          <p className="mt-0.5 text-xs text-brand-neutral-black/50">
+                            {g.grantedForDate}
+                            {g.revokedAt ? " · revoked early" : ""}
+                          </p>
+                          <p className="mt-1 text-sm text-brand-neutral-black/70">&ldquo;{g.reason}&rdquo;</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </section>
           </>
         )}
       </main>
@@ -498,6 +606,46 @@ export default function PrincipalClassDetailPage() {
           onClose={() => setAssignSnaTarget(null)}
           onChanged={() => {
             setAssignSnaTarget(null);
+            load();
+          }}
+        />
+      )}
+
+      {institutionId && (
+        <GrantTemporaryAccessSheet
+          isOpen={isGrantCoverOpen}
+          mode="principal"
+          classId={classId}
+          className={className ?? "this class"}
+          institutionId={institutionId}
+          cutoffTime={cutoffTime}
+          eligibleExisting={eligibleStaffForCover}
+          onClose={() => setIsGrantCoverOpen(false)}
+          onGranted={() => {
+            setIsGrantCoverOpen(false);
+            load();
+          }}
+        />
+      )}
+
+      {revokeCoverTarget && (
+        <ReasonConfirmSheet
+          isOpen={Boolean(revokeCoverTarget)}
+          title={`Revoke ${nameMap.get(revokeCoverTarget.grantedTo) ?? "this"} cover?`}
+          description="Their access for the rest of today ends immediately. This is a revocation, not a delete -- it stays in this class's cover history."
+          confirmLabel="Revoke Cover"
+          submittingLabel="Revoking…"
+          onClose={() => setRevokeCoverTarget(null)}
+          onConfirm={async (reason) => {
+            const supabase = createClient();
+            const { error } = await supabase.rpc("revoke_temporary_access", {
+              p_temporary_access_id: revokeCoverTarget.id,
+              p_reason: reason,
+            });
+            return { error: error?.message ?? null };
+          }}
+          onConfirmed={() => {
+            setRevokeCoverTarget(null);
             load();
           }}
         />
