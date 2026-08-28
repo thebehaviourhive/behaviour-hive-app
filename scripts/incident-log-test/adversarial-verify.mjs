@@ -3588,6 +3588,368 @@ async function main() {
     }
   }
 
+  console.log(`\n== CHECK X: Principal handover -- hand_over_principal() (migration 0102) ==`);
+  {
+    const { data: instXLeaving, error: instXLeavingErr } = await admin
+      .from("institutions")
+      .insert({ name: "Handover Verify -- Leaving", institution_code: CODE + "XL", status: "verified" })
+      .select()
+      .single();
+    if (instXLeavingErr) throw instXLeavingErr;
+    const institutionXLeavingId = instXLeaving.id;
+
+    const { data: instXStaying, error: instXStayingErr } = await admin
+      .from("institutions")
+      .insert({ name: "Handover Verify -- Staying", institution_code: CODE + "XS", status: "verified" })
+      .select()
+      .single();
+    if (instXStayingErr) throw instXStayingErr;
+    const institutionXStayingId = instXStaying.id;
+
+    const { data: instXOther, error: instXOtherErr } = await admin
+      .from("institutions")
+      .insert({ name: "Handover Verify -- Other", institution_code: CODE + "XO", status: "verified" })
+      .select()
+      .single();
+    if (instXOtherErr) throw instXOtherErr;
+    const institutionXOtherId = instXOther.id;
+
+    const principalA1Id = await createUser("handoverx.principal1@thebehaviourhive.com", "Handover Principal One", "principal");
+    const successorAId = await createUser("handoverx.successora@thebehaviourhive.com", "Handover Successor A", "class_teacher");
+    const extraTeacherLeavingId = await createUser("handoverx.extra@thebehaviourhive.com", "Handover Extra Teacher", "class_teacher");
+    const deactivatedCandidateId = await createUser("handoverx.deactivated@thebehaviourhive.com", "Handover Deactivated Candidate", "class_teacher");
+    const principalA2Id = await createUser("handoverx.principal2@thebehaviourhive.com", "Handover Principal Two", "principal");
+    const successorBId = await createUser("handoverx.successorb@thebehaviourhive.com", "Handover Successor B", "class_teacher");
+    const principalOtherId = await createUser("handoverx.principalother@thebehaviourhive.com", "Handover Principal Other", "principal");
+    const otherStaffId = await createUser("handoverx.otherstaff@thebehaviourhive.com", "Handover Other Staff", "class_teacher");
+    // passports.user_id is unique -- one passport per parent -- so each
+    // child needs its own parent, not two children sharing one.
+    const parentXL1Id = await createUser("handoverx.parentl1@thebehaviourhive.com", "Handover Parent L1", "parent");
+    const parentXL2Id = await createUser("handoverx.parentl2@thebehaviourhive.com", "Handover Parent L2", "parent");
+    const parentXS1Id = await createUser("handoverx.parents1@thebehaviourhive.com", "Handover Parent S1", "parent");
+    const parentXS2Id = await createUser("handoverx.parents2@thebehaviourhive.com", "Handover Parent S2", "parent");
+
+    const { data: staffXRows, error: staffXErr } = await admin
+      .from("institution_staff")
+      .insert([
+        { institution_id: institutionXLeavingId, user_id: principalA1Id, role: "principal" },
+        { institution_id: institutionXLeavingId, user_id: successorAId, role: "class_teacher" },
+        { institution_id: institutionXLeavingId, user_id: extraTeacherLeavingId, role: "class_teacher" },
+        { institution_id: institutionXLeavingId, user_id: deactivatedCandidateId, role: "class_teacher" },
+        { institution_id: institutionXStayingId, user_id: principalA2Id, role: "principal" },
+        { institution_id: institutionXStayingId, user_id: successorBId, role: "class_teacher" },
+        { institution_id: institutionXOtherId, user_id: principalOtherId, role: "principal" },
+        { institution_id: institutionXOtherId, user_id: otherStaffId, role: "class_teacher" },
+      ])
+      .select();
+    if (staffXErr) throw staffXErr;
+    const byUserX = (uid) => staffXRows.find((r) => r.user_id === uid);
+    const successorAStaffId = byUserX(successorAId).id;
+    const extraTeacherLeavingStaffId = byUserX(extraTeacherLeavingId).id;
+    const deactivatedCandidateStaffId = byUserX(deactivatedCandidateId).id;
+    const successorBStaffId = byUserX(successorBId).id;
+    const otherStaffStaffId = byUserX(otherStaffId).id;
+
+    const principalA1 = await signedInClient("handoverx.principal1@thebehaviourhive.com");
+    const principalA2 = await signedInClient("handoverx.principal2@thebehaviourhive.com");
+
+    // Approve every non-principal row through the real RPC.
+    for (const id of [successorAStaffId, extraTeacherLeavingStaffId, deactivatedCandidateStaffId]) {
+      const { error } = await principalA1.rpc("approve_staff_join", { p_institution_staff_id: id });
+      if (error) throw error;
+    }
+    for (const id of [successorBStaffId]) {
+      const { error } = await principalA2.rpc("approve_staff_join", { p_institution_staff_id: id });
+      if (error) throw error;
+    }
+    {
+      const principalOther = await signedInClient("handoverx.principalother@thebehaviourhive.com");
+      const { error } = await principalOther.rpc("approve_staff_join", { p_institution_staff_id: otherStaffStaffId });
+      if (error) throw error;
+    }
+
+    // deactivatedCandidate -- deactivated via the ORDINARY, already-
+    // tested path (check 8 needs a real deactivated staff member, not a
+    // fixture shortcut -- CLAUDE.md's own FIXTURES rule).
+    const { error: deactivateCandidateErr } = await principalA1.rpc("deactivate_institution_staff", { p_institution_staff_id: deactivatedCandidateStaffId, p_reason: "Reference for handover guard checks." });
+    if (deactivateCandidateErr) throw deactivateCandidateErr;
+
+    // Children + grants -- one per person whose grants must be proven to
+    // survive or cascade, so those checks aren't testing an empty set.
+    const { data: cXL1 } = await admin.from("passports").insert({ user_id: parentXL1Id, child_name: "Handover Child Leaving One", passport_status: "complete" }).select().single();
+    const { data: cXL2 } = await admin.from("passports").insert({ user_id: parentXL2Id, child_name: "Handover Child Leaving Two", passport_status: "complete" }).select().single();
+    const { data: cXS1 } = await admin.from("passports").insert({ user_id: parentXS1Id, child_name: "Handover Child Staying One", passport_status: "complete" }).select().single();
+    const { data: cXS2 } = await admin.from("passports").insert({ user_id: parentXS2Id, child_name: "Handover Child Staying Two", passport_status: "complete" }).select().single();
+    await admin.from("passport_institution_links").insert([
+      { passport_id: cXL1.id, institution_id: institutionXLeavingId, approved_by_parent: true },
+      { passport_id: cXL2.id, institution_id: institutionXLeavingId, approved_by_parent: true },
+      { passport_id: cXS1.id, institution_id: institutionXStayingId, approved_by_parent: true },
+      { passport_id: cXS2.id, institution_id: institutionXStayingId, approved_by_parent: true },
+    ]);
+    // principalA1 holds a teaching grant too (a principal CAN also hold
+    // passport_access rows -- nothing in this schema forbids it) -- this
+    // is what item 3's cascade-on-leaving check proves closes.
+    await admin.from("passport_access").insert([
+      { passport_id: cXL1.id, teacher_id: principalA1Id, institution_id: institutionXLeavingId, is_active: true, actor_role: "class_teacher" },
+      { passport_id: cXL2.id, teacher_id: successorAId, institution_id: institutionXLeavingId, is_active: true, actor_role: "class_teacher" },
+      { passport_id: cXS1.id, teacher_id: principalA2Id, institution_id: institutionXStayingId, is_active: true, actor_role: "class_teacher" },
+      { passport_id: cXS2.id, teacher_id: successorBId, institution_id: institutionXStayingId, is_active: true, actor_role: "class_teacher" },
+    ]);
+
+    const { data: globalLocX } = await admin.from("incident_locations").select("id").eq("value", "Classroom").is("institution_id", null).single();
+
+    // -- item 13, half one: an incident awaiting countersign, BEFORE the --
+    // handover, so its later refusal (old principal) / success (new
+    // principal) is provably about WHO is asking, not about the
+    // incident's own state. create_incident_stamp() only auto-assigns
+    // owning_teacher_id when the CALLER's own role is class_teacher
+    // (0069) -- a principal-created stamp stays unowned, needing
+    // claim_incident() -- so this must be created by a real class
+    // teacher (extraTeacherLeaving), not principalA1, or sign_off_
+    // incident() has no owning row to act on and silently does nothing.
+    // Found live, running this check, not assumed from the RPC's name.
+    const extraTeacherLeavingForIncident = await signedInClient("handoverx.extra@thebehaviourhive.com");
+    const { data: xIncidentId } = await extraTeacherLeavingForIncident.rpc("create_incident_stamp", {
+      p_institution_id: institutionXLeavingId, p_occurred_at: new Date().toISOString(), p_location_id: globalLocX.id,
+      p_child_passport_ids: [cXL1.id], p_staff: [],
+    });
+    const { error: xSignOffErr } = await extraTeacherLeavingForIncident.rpc("sign_off_incident", { p_incident_id: xIncidentId });
+    if (xSignOffErr) throw xSignOffErr;
+
+    console.log(`-- negative guards, run BEFORE any real handover executes, against principalA1/principalA2 who both remain genuinely active principals throughout this block --`);
+
+    console.log(`-- item 5: a non-principal cannot call it --`);
+    const extraTeacherLeaving = await signedInClient("handoverx.extra@thebehaviourhive.com");
+    const { error: nonPrincipalHandoverErr } = await extraTeacherLeaving.rpc("hand_over_principal", { p_successor_user_id: successorAId, p_outcome: "leaving", p_staying_role: null, p_reason: "Attempting as a non-principal." });
+    record("X5: an active, otherwise-legitimate class_teacher cannot call hand_over_principal()", Boolean(nonPrincipalHandoverErr) && /only an active principal/i.test(nonPrincipalHandoverErr.message), nonPrincipalHandoverErr?.message);
+
+    console.log(`-- item 7: cannot hand over to someone who is not staff at that institution --`);
+    const { error: notStaffHereErr } = await principalA1.rpc("hand_over_principal", { p_successor_user_id: otherStaffId, p_outcome: "leaving", p_staying_role: null, p_reason: "Attempting to hand over to a stranger to this school." });
+    record("X7: cannot hand over to someone active at a DIFFERENT institution", Boolean(notStaffHereErr) && /active staff member at this institution/i.test(notStaffHereErr.message), notStaffHereErr?.message);
+
+    console.log(`-- item 8 (+ item 11, atomicity): cannot hand over to a deactivated staff member, and nothing persists from the attempt --`);
+    const { error: deactivatedSuccessorErr } = await principalA1.rpc("hand_over_principal", { p_successor_user_id: deactivatedCandidateId, p_outcome: "leaving", p_staying_role: null, p_reason: "Attempting to hand over to someone deactivated." });
+    record("X8: cannot hand over to a deactivated staff member", Boolean(deactivatedSuccessorErr) && /active staff member at this institution/i.test(deactivatedSuccessorErr.message), deactivatedSuccessorErr?.message);
+
+    const { data: x11HandoverRows } = await admin.from("principal_handovers").select("id").eq("institution_id", institutionXLeavingId);
+    const { data: x11PredecessorRow } = await admin.from("institution_staff").select("deactivated_at, role").eq("id", byUserX(principalA1Id).id).single();
+    const { data: x11TargetRow } = await admin.from("institution_staff").select("deactivated_at").eq("id", deactivatedCandidateStaffId).single();
+    const { data: x11PredecessorAuth } = await admin.auth.admin.getUserById(principalA1Id);
+    record(
+      "X11: a guard failure that occurs AFTER caller-authorization already succeeded (X8's attempt) leaves zero footprint -- no principal_handovers row, predecessor still genuinely active principal, target's deactivation unchanged, predecessor's own auth claim untouched",
+      (x11HandoverRows ?? []).length === 0
+        && x11PredecessorRow.deactivated_at === null && x11PredecessorRow.role === "principal"
+        && x11TargetRow.deactivated_at !== null
+        && x11PredecessorAuth?.user?.app_metadata?.role === "principal",
+      JSON.stringify({ handovers: x11HandoverRows, predecessor: x11PredecessorRow, target: x11TargetRow, predecessorAuthRole: x11PredecessorAuth?.user?.app_metadata?.role })
+    );
+
+    console.log(`-- item 9: cannot hand over to yourself --`);
+    const { error: selfHandoverErr } = await principalA1.rpc("hand_over_principal", { p_successor_user_id: principalA1Id, p_outcome: "leaving", p_staying_role: null, p_reason: "Attempting to hand over to myself." });
+    record("X9: cannot hand over to yourself", Boolean(selfHandoverErr) && /cannot hand over.*to yourself/i.test(selfHandoverErr.message), selfHandoverErr?.message);
+
+    console.log(`-- item 10: reason is required --`);
+    const { error: emptyReasonHandoverErr } = await principalA1.rpc("hand_over_principal", { p_successor_user_id: successorAId, p_outcome: "leaving", p_staying_role: null, p_reason: "" });
+    record("X10a: empty reason refused", Boolean(emptyReasonHandoverErr) && /reason is required/i.test(emptyReasonHandoverErr.message), emptyReasonHandoverErr?.message);
+    const { error: nullReasonHandoverErr } = await principalA1.rpc("hand_over_principal", { p_successor_user_id: successorAId, p_outcome: "leaving", p_staying_role: null, p_reason: null });
+    record("X10b: null reason refused", Boolean(nullReasonHandoverErr) && /reason is required/i.test(nullReasonHandoverErr.message), nullReasonHandoverErr?.message);
+
+    console.log(`-- input-shape guards beyond the prompt's own 14 -- found while writing the SQL, worth proving directly --`);
+    const { error: badOutcomeErr } = await principalA1.rpc("hand_over_principal", { p_successor_user_id: successorAId, p_outcome: "retiring", p_staying_role: null, p_reason: "Bad outcome value." });
+    record("X-bonus: an outcome other than 'leaving'/'staying' is refused", Boolean(badOutcomeErr) && /outcome must be/i.test(badOutcomeErr.message), badOutcomeErr?.message);
+    const { error: badStayingRoleErr } = await principalA1.rpc("hand_over_principal", { p_successor_user_id: successorAId, p_outcome: "staying", p_staying_role: "principal", p_reason: "Bad staying role value." });
+    record("X-bonus: outcome='staying' with an invalid staying role (e.g. 'principal') is refused", Boolean(badStayingRoleErr) && /class_teacher or sna/i.test(badStayingRoleErr.message), badStayingRoleErr?.message);
+    const { error: nullStayingRoleErr } = await principalA1.rpc("hand_over_principal", { p_successor_user_id: successorAId, p_outcome: "staying", p_staying_role: null, p_reason: "Null staying role -- the three-valued-logic bug this guard was rewritten to avoid." });
+    record("X-bonus: outcome='staying' with p_staying_role NULL is refused, not silently waved through by SQL's three-valued logic", Boolean(nullStayingRoleErr) && /class_teacher or sna/i.test(nullStayingRoleErr.message), nullStayingRoleErr?.message);
+    const { error: contradictoryStayingRoleErr } = await principalA1.rpc("hand_over_principal", { p_successor_user_id: successorAId, p_outcome: "leaving", p_staying_role: "class_teacher", p_reason: "Providing a staying role while leaving." });
+    record("X-bonus: a staying role provided alongside outcome='leaving' is refused as contradictory input", Boolean(contradictoryStayingRoleErr) && /must not be provided/i.test(contradictoryStayingRoleErr.message), contradictoryStayingRoleErr?.message);
+
+    console.log(`-- seeding successorA's OWN auth claim with GoTrue's real keys before the real handover -- provider, providers, AND an arbitrary extra key, deliberately, so the "other keys survive" proof below is adversarial, not a fixture that happens to only have 'role' to begin with --`);
+    const { error: seedAuthErr } = await admin.auth.admin.updateUserById(successorAId, {
+      app_metadata: { role: "class_teacher", provider: "email", providers: ["email"], custom_test_marker: "should-survive-handover" },
+    });
+    if (seedAuthErr) throw seedAuthErr;
+    const { data: successorAAuthBefore } = await admin.auth.admin.getUserById(successorAId);
+
+    console.log(`-- THE REAL HANDOVER, outcome='leaving' --`);
+    const { data: handoverLeavingResult, error: handoverLeavingErr } = await principalA1.rpc("hand_over_principal", {
+      p_successor_user_id: successorAId, p_outcome: "leaving", p_staying_role: null, p_reason: "Retiring from the school.",
+    });
+    record("X-leaving: hand_over_principal() succeeds for a genuinely eligible caller/successor pair", !handoverLeavingErr, handoverLeavingErr?.message);
+
+    console.log(`-- item 1 + item 12: successor is principal, predecessor deactivated, exactly one active principal throughout --`);
+    const { data: x1PredecessorRow } = await admin.from("institution_staff").select("role, deactivated_at, deactivated_by, deactivation_reason").eq("id", byUserX(principalA1Id).id).single();
+    record("X1a: predecessor's principal row is deactivated -- role unchanged ('principal'), reachable for the first time via any real path", x1PredecessorRow.deactivated_at !== null && x1PredecessorRow.role === "principal" && x1PredecessorRow.deactivated_by === principalA1Id && x1PredecessorRow.deactivation_reason === "Retiring from the school.", JSON.stringify(x1PredecessorRow));
+    const successorANewStaffId = handoverLeavingResult?.successor_institution_staff_id;
+    const { data: x1SuccessorRow } = await admin.from("institution_staff").select("role, approved_at, approved_by, approval_source, deactivated_at").eq("id", successorANewStaffId).single();
+    record("X1b: successor's NEW row is an active principal, approval_source='handover', approved_by is the predecessor", x1SuccessorRow.role === "principal" && x1SuccessorRow.deactivated_at === null && x1SuccessorRow.approved_at !== null && x1SuccessorRow.approval_source === "handover" && x1SuccessorRow.approved_by === principalA1Id, JSON.stringify(x1SuccessorRow));
+    const { data: x1SuccessorOldRow } = await admin.from("institution_staff").select("deactivated_at, deactivation_reason").eq("id", successorAStaffId).single();
+    record("X1c: successor's OLD class_teacher row is closed, reason names the role change (never deleted)", x1SuccessorOldRow.deactivated_at !== null && /role changed/i.test(x1SuccessorOldRow.deactivation_reason), JSON.stringify(x1SuccessorOldRow));
+    const { data: x12LeavingActiveCount } = await admin.from("institution_staff").select("id").eq("institution_id", institutionXLeavingId).eq("role", "principal").is("deactivated_at", null).is("rejected_at", null);
+    record("X12 (leaving): exactly one active principal row at this institution after handover -- the index's own invariant, confirmed", (x12LeavingActiveCount ?? []).length === 1, JSON.stringify(x12LeavingActiveCount));
+
+    console.log(`-- item 3: predecessor's OWN grants cascade on leaving --`);
+    const { data: x3PredecessorGrant } = await admin.from("passport_access").select("is_active").eq("passport_id", cXL1.id).eq("teacher_id", principalA1Id).single();
+    record("X3: predecessor's own passport_access grant is revoked on 'leaving' -- the cascade fired for them too, not just ordinary staff", x3PredecessorGrant.is_active === false, JSON.stringify(x3PredecessorGrant));
+
+    console.log(`-- item 4a: successor's OWN grants survive promotion (outcome='leaving') --`);
+    const { data: x4aSuccessorGrant } = await admin.from("passport_access").select("is_active").eq("passport_id", cXL2.id).eq("teacher_id", successorAId).single();
+    record("X4a: successor's own pre-existing grant is untouched by their own promotion -- a role change never cascades", x4aSuccessorGrant.is_active === true, JSON.stringify(x4aSuccessorGrant));
+
+    console.log(`-- the auth-write, adversarially: seeded with real GoTrue keys plus an arbitrary marker, only 'role' may change --`);
+    const { data: successorAAuthAfter } = await admin.auth.admin.getUserById(successorAId);
+    const beforeMeta = successorAAuthBefore?.user?.app_metadata ?? {};
+    const afterMeta = successorAAuthAfter?.user?.app_metadata ?? {};
+    record(
+      "X-auth-1: provider survives byte-identical",
+      afterMeta.provider === beforeMeta.provider && beforeMeta.provider === "email",
+      JSON.stringify({ before: beforeMeta.provider, after: afterMeta.provider })
+    );
+    record(
+      "X-auth-2: providers array survives byte-identical",
+      JSON.stringify(afterMeta.providers) === JSON.stringify(beforeMeta.providers) && JSON.stringify(beforeMeta.providers) === JSON.stringify(["email"]),
+      JSON.stringify({ before: beforeMeta.providers, after: afterMeta.providers })
+    );
+    record(
+      "X-auth-3: the arbitrary, unrelated key survives byte-identical -- proof this is a merge, not an overwrite",
+      afterMeta.custom_test_marker === beforeMeta.custom_test_marker && beforeMeta.custom_test_marker === "should-survive-handover",
+      JSON.stringify({ before: beforeMeta.custom_test_marker, after: afterMeta.custom_test_marker })
+    );
+    record(
+      "X-auth-4: role is the ONLY key that actually changed, class_teacher -> principal",
+      beforeMeta.role === "class_teacher" && afterMeta.role === "principal",
+      JSON.stringify({ before: beforeMeta.role, after: afterMeta.role })
+    );
+
+    console.log(`-- item 6: a deactivated principal cannot call it again --`);
+    const { error: deactivatedPrincipalCallErr } = await principalA1.rpc("hand_over_principal", { p_successor_user_id: extraTeacherLeavingId, p_outcome: "leaving", p_staying_role: null, p_reason: "Attempting again after already handing over." });
+    record("X6: the now-deactivated predecessor (role still 'principal' on their closed row) cannot call hand_over_principal() again", Boolean(deactivatedPrincipalCallErr) && /only an active principal/i.test(deactivatedPrincipalCallErr.message), deactivatedPrincipalCallErr?.message);
+
+    console.log(`-- item 13: the new principal can countersign, the old one cannot -- same incident, order matters --`);
+    const { error: x13OldPrincipalErr } = await principalA1.rpc("countersign_incident", { p_incident_id: xIncidentId });
+    record("X13a: the now-deactivated OLD principal is refused countersigning", Boolean(x13OldPrincipalErr) && /permission/i.test(x13OldPrincipalErr?.message ?? ""), x13OldPrincipalErr?.message);
+    const successorA = await signedInClient("handoverx.successora@thebehaviourhive.com");
+    const { error: x13NewPrincipalErr } = await successorA.rpc("countersign_incident", { p_incident_id: xIncidentId });
+    const { data: x13After } = await admin.from("incidents").select("countersigned_by, countersigned_role_at_time, countersigned_via, status").eq("id", xIncidentId).single();
+    record(
+      "X13b: the NEW principal succeeds countersigning the same incident, correctly attributed",
+      !x13NewPrincipalErr && x13After.countersigned_by === successorAId && x13After.countersigned_role_at_time === "principal" && x13After.countersigned_via === "principal_role" && x13After.status === "finalised",
+      `err=${x13NewPrincipalErr?.message}, ${JSON.stringify(x13After)}`
+    );
+
+    console.log(`-- item 14: the handover record is written, complete, and cannot be edited or deleted --`);
+    const { data: x14Record } = await admin.from("principal_handovers").select("*").eq("id", handoverLeavingResult?.handover_id).single();
+    record(
+      "X14a: the handover record is complete -- predecessor, successor, outcome, reason, and all four institution_staff references present",
+      x14Record?.predecessor_user_id === principalA1Id
+        && x14Record?.successor_user_id === successorAId
+        && x14Record?.outcome === "leaving"
+        && x14Record?.reason === "Retiring from the school."
+        && x14Record?.staying_role === null
+        && x14Record?.predecessor_new_institution_staff_id === null
+        && x14Record?.predecessor_institution_staff_id === byUserX(principalA1Id).id
+        && x14Record?.successor_old_institution_staff_id === successorAStaffId
+        && x14Record?.successor_new_institution_staff_id === successorANewStaffId,
+      JSON.stringify(x14Record)
+    );
+    const { data: x14UpdateAttempt, error: x14UpdateErr } = await successorA.from("principal_handovers").update({ reason: "Tampered." }).eq("id", x14Record.id).select();
+    const { data: x14DeleteAttempt, error: x14DeleteErr } = await successorA.from("principal_handovers").delete().eq("id", x14Record.id).select();
+    const { data: x14AfterTamperAttempts } = await admin.from("principal_handovers").select("reason").eq("id", x14Record.id).single();
+    record(
+      "X14b: neither an UPDATE nor a DELETE attempt (even by the successor themselves, who is named on the record) changes it -- re-read via a privileged query, not trusted from either client response",
+      x14AfterTamperAttempts?.reason === "Retiring from the school.",
+      `update returned ${x14UpdateErr ? "error: " + x14UpdateErr.message : JSON.stringify(x14UpdateAttempt) + " rows"}; delete returned ${x14DeleteErr ? "error: " + x14DeleteErr.message : JSON.stringify(x14DeleteAttempt) + " rows"}; privileged re-read reason: "${x14AfterTamperAttempts?.reason}"`
+    );
+
+    console.log(`-- item 2 + item 4b: THE REAL HANDOVER, outcome='staying' --`);
+    const { data: handoverStayingResult, error: handoverStayingErr } = await principalA2.rpc("hand_over_principal", {
+      p_successor_user_id: successorBId, p_outcome: "staying", p_staying_role: "class_teacher", p_reason: "Stepping back to focus on teaching.",
+    });
+    record("X-staying: hand_over_principal() succeeds with outcome='staying'", !handoverStayingErr, handoverStayingErr?.message);
+
+    const { data: x2PredecessorOldRow } = await admin.from("institution_staff").select("role, deactivated_at").eq("id", byUserX(principalA2Id).id).single();
+    record("X2a: predecessor's OLD principal row is closed (same mechanism as leaving)", x2PredecessorOldRow.deactivated_at !== null && x2PredecessorOldRow.role === "principal", JSON.stringify(x2PredecessorOldRow));
+    const predecessorA2NewStaffId = handoverStayingResult?.predecessor_new_institution_staff_id;
+    const { data: x2PredecessorNewRow } = await admin.from("institution_staff").select("role, deactivated_at, approved_at, approval_source").eq("id", predecessorA2NewStaffId).single();
+    record("X2b: predecessor's NEW row is an active class_teacher, approval_source='handover'", x2PredecessorNewRow.role === "class_teacher" && x2PredecessorNewRow.deactivated_at === null && x2PredecessorNewRow.approved_at !== null && x2PredecessorNewRow.approval_source === "handover", JSON.stringify(x2PredecessorNewRow));
+    const { data: x2PredecessorGrant } = await admin.from("passport_access").select("is_active").eq("passport_id", cXS1.id).eq("teacher_id", principalA2Id).single();
+    record("X2c: predecessor's OWN grant is INTACT after staying -- no cascade on a role change, only on departure", x2PredecessorGrant.is_active === true, JSON.stringify(x2PredecessorGrant));
+
+    const { data: x4bSuccessorGrant } = await admin.from("passport_access").select("is_active").eq("passport_id", cXS2.id).eq("teacher_id", successorBId).single();
+    record("X4b: successor's own pre-existing grant survives promotion (outcome='staying')", x4bSuccessorGrant.is_active === true, JSON.stringify(x4bSuccessorGrant));
+
+    console.log(`-- item 12 (staying institution) --`);
+    const { data: x12StayingActiveCount } = await admin.from("institution_staff").select("id").eq("institution_id", institutionXStayingId).eq("role", "principal").is("deactivated_at", null).is("rejected_at", null);
+    record("X12 (staying): exactly one active principal row at this institution after handover", (x12StayingActiveCount ?? []).length === 1, JSON.stringify(x12StayingActiveCount));
+
+    console.log(`-- both sides of 'staying' agree -- auth claim AND institution_staff.role, for BOTH people. Two separate writes; only their agreement makes the feature work --`);
+    const { data: predecessorA2Auth } = await admin.auth.admin.getUserById(principalA2Id);
+    record(
+      "X-both-sides-1: predecessor's auth claim role is 'class_teacher' AND their institution_staff row role is 'class_teacher' -- not just one of the two",
+      predecessorA2Auth?.user?.app_metadata?.role === "class_teacher" && x2PredecessorNewRow.role === "class_teacher",
+      JSON.stringify({ authRole: predecessorA2Auth?.user?.app_metadata?.role, institutionStaffRole: x2PredecessorNewRow.role })
+    );
+    const { data: successorBAuth } = await admin.auth.admin.getUserById(successorBId);
+    const { data: x_successorBNewRow } = await admin.from("institution_staff").select("role").eq("id", handoverStayingResult?.successor_institution_staff_id).single();
+    record(
+      "X-both-sides-2: successor's auth claim role is 'principal' AND their institution_staff row role is 'principal' -- not just one of the two",
+      successorBAuth?.user?.app_metadata?.role === "principal" && x_successorBNewRow?.role === "principal",
+      JSON.stringify({ authRole: successorBAuth?.user?.app_metadata?.role, institutionStaffRole: x_successorBNewRow?.role })
+    );
+
+    console.log(`-- the four Stage-1-structural checks, converted: a genuinely handed-over, deactivated principal (principalA1) exists now. Confirming each behaves the SAME as it would for an ordinarily-deactivated principal (which remains impossible to construct directly), not assumed equivalent --`);
+    const { data: x_canCountersignOld, error: x_canCountersignOldErr } = await admin.rpc("can_countersign_incident", { p_user_id: principalA1Id, p_institution_id: institutionXLeavingId });
+    const { data: x_canCountersignNew, error: x_canCountersignNewErr } = await admin.rpc("can_countersign_incident", { p_user_id: successorAId, p_institution_id: institutionXLeavingId });
+    record(
+      "X-structural-1 (can_countersign_incident principal branch): FALSE for the handover-deactivated old principal, TRUE for the newly-handed-over active principal -- called directly, not just inferred from countersign_incident()'s own end-to-end refusal/success (X13a/X13b) above",
+      !x_canCountersignOldErr && x_canCountersignOld === false && !x_canCountersignNewErr && x_canCountersignNew === true,
+      `old=${JSON.stringify(x_canCountersignOld)} (err ${x_canCountersignOldErr?.message}), new=${JSON.stringify(x_canCountersignNew)} (err ${x_canCountersignNewErr?.message})`
+    );
+
+    const { error: x_locationAddErr } = await principalA1.from("incident_locations").insert({ institution_id: institutionXLeavingId, value: "Handover Deactivated Attempt Location" });
+    record("X-structural-2a (incident_locations add, principal branch): a handover-deactivated principal is refused adding institution vocabulary, same as Stage 1's own deactivated-principal branch would refuse", Boolean(x_locationAddErr), x_locationAddErr?.message);
+
+    // The add/edit policies are two SEPARATE branches (0097/0100) --
+    // proving add refused says nothing about edit. A real, pre-existing
+    // institution-scoped location row is required: the global "Classroom"
+    // row (institution_id is null) fails this policy's own institution_id
+    // is not null condition regardless of caller, which would prove
+    // nothing about the principal branch specifically.
+    const { data: x_editableLocation } = await admin.from("incident_locations").insert({ institution_id: institutionXLeavingId, value: "Handover Pre-existing Location" }).select().single();
+    const { error: x_locationEditErr } = await principalA1.from("incident_locations").update({ value: "Handover Deactivated Edit Attempt" }).eq("id", x_editableLocation.id);
+    const { data: x_locationAfterEditAttempt } = await admin.from("incident_locations").select("value").eq("id", x_editableLocation.id).single();
+    record(
+      "X-structural-2b (incident_locations edit, principal branch): a handover-deactivated principal is refused editing an existing institution location -- the SEPARATE edit policy branch, not inferred from add above -- re-read via a privileged query, not trusted from the client response alone",
+      x_locationAfterEditAttempt?.value === "Handover Pre-existing Location",
+      `update error: ${x_locationEditErr?.message ?? "(none -- RLS silently filters, per CLAUDE.md)"}; value after attempt: "${x_locationAfterEditAttempt?.value}"`
+    );
+
+    // mark_parent_called() ALSO grants the incident's own creator/
+    // owning_teacher a bypass, independent of the principal branch --
+    // xIncidentId was created BY principalA1, so testing their refusal
+    // against it would actually pass through the creator bypass, proving
+    // nothing about the principal branch specifically. A second,
+    // separate incident -- created by extraTeacherLeaving, who is never
+    // principalA1 -- isolates the branch under test correctly. Found
+    // while double-checking mark_parent_called()'s exact signature
+    // (p_incident_children_id, not p_incident_id -- also wrong in an
+    // earlier draft of this check) before running it, not after.
+    const { data: xMarkCalledIncidentId } = await extraTeacherLeaving.rpc("create_incident_stamp", {
+      p_institution_id: institutionXLeavingId, p_occurred_at: new Date().toISOString(), p_location_id: globalLocX.id,
+      p_child_passport_ids: [cXL1.id], p_staff: [],
+    });
+    const { data: xMarkCalledChildRows } = await admin.from("incident_children").select("id, passport_id").eq("incident_id", xMarkCalledIncidentId);
+    const xMarkCalledChildId = xMarkCalledChildRows.find((r) => r.passport_id === cXL1.id).id;
+    const { error: x_markParentCalledErr } = await principalA1.rpc("mark_parent_called", { p_incident_children_id: xMarkCalledChildId });
+    record("X-structural-3 (mark_parent_called principal branch): a handover-deactivated principal -- not the creator/owner of THIS incident -- is refused via the principal branch specifically, same as Stage 1's own deactivated-principal branch would refuse", Boolean(x_markParentCalledErr) && /permission/i.test(x_markParentCalledErr.message), x_markParentCalledErr?.message);
+
+    await admin.from("incidents").delete().in("id", [xIncidentId, xMarkCalledIncidentId]);
+    await admin.from("institutions").delete().in("id", [institutionXLeavingId, institutionXStayingId, institutionXOtherId]);
+    for (const id of [principalA1Id, successorAId, extraTeacherLeavingId, deactivatedCandidateId, principalA2Id, successorBId, principalOtherId, otherStaffId, parentXL1Id, parentXL2Id, parentXS1Id, parentXS2Id]) {
+      await admin.auth.admin.deleteUser(id);
+    }
+  }
+
   console.log(`\n== Summary ==`);
   const failed = results.filter((r) => !r.pass);
   console.log(`${results.length - failed.length}/${results.length} passed.`);
