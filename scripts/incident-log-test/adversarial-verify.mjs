@@ -5402,6 +5402,40 @@ async function main() {
       await admin.from("temporary_access").delete().eq("id", pastDatedRow.id);
     }
 
+    // BB-8/BB-9 -- src/app/sna/passport/[passportId]/page.tsx's own
+    // access guard, found live on the deployed app: /sna/passports'
+    // list (BB-1/BB-2 above) correctly surfaces childAssignedBB via
+    // child_assignments, but tapping through to its detail page hit a
+    // DIFFERENT, older guard that only ever checked passport_access
+    // directly -- "we couldn't find this classroom profile" for a
+    // child the list had just shown as accessible. Fixed by replacing
+    // that direct table check with has_sna_access(), the same function
+    // RLS itself calls. BB-8 proves the OLD shape really would have
+    // refused (documents why the fix was needed, not a hypothetical);
+    // BB-9 proves the NEW shape -- what the page calls now -- correctly
+    // allows it, for the SAME assignment-derived child, no grant timing
+    // involved (childAssignedBB's assignment is permanent, unrevoked).
+    {
+      const { data: oldGuardShape } = await snaBB
+        .from("passport_access")
+        .select("is_active")
+        .eq("passport_id", childAssignedBB)
+        .eq("teacher_id", snaBBId)
+        .maybeSingle();
+      record(
+        "BB-8 THE BUG, PROVEN: the OLD guard shape (direct passport_access read) finds NOTHING for an assignment-derived child -- this is what actually produced 'we couldn't find this classroom profile' live (src/app/sna/passport/[passportId]/page.tsx, pre-fix)",
+        oldGuardShape === null,
+        JSON.stringify(oldGuardShape)
+      );
+
+      const { data: newGuardShape } = await snaBB.rpc("has_sna_access", { p_user_id: snaBBId, p_passport_id: childAssignedBB });
+      record(
+        "BB-9 THE FIX ITSELF: has_sna_access() -- what the page's guard calls now -- correctly returns true for the SAME child (src/app/sna/passport/[passportId]/page.tsx)",
+        newGuardShape === true,
+        newGuardShape
+      );
+    }
+
     console.log("BB summary complete.");
 
     // ---- BB teardown ----

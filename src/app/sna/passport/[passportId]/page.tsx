@@ -106,20 +106,26 @@ export default function SnaPassportPage() {
     async function load() {
       const supabase = createClient();
 
-      // Same explicit access guard as the teacher page: an SNA whose
-      // access has been revoked (or was never granted) must see the
-      // clean "no access" state immediately, not fire five more queries
-      // RLS would just filter to empty anyway.
-      const { data: access } = await supabase
-        .from("passport_access")
-        .select("is_active")
-        .eq("passport_id", passportId)
-        .eq("teacher_id", user!.id)
-        .maybeSingle();
+      // PRD 1, Stage 2 + 3 fix: this guard used to check ONLY
+      // passport_access directly, the same narrow shape /sna/passports
+      // itself had before useSnaChildren() -- found live, on the
+      // deployed app, by tapping through from that already-fixed list
+      // into a "Covering today" child and landing on "we couldn't find
+      // this classroom profile." The list surfaced the child; the
+      // detail page it linked to used a different, older access check
+      // that had never heard of child_assignments or temporary_access.
+      // has_sna_access(user_id, passport_id) is the single source of
+      // truth for all three -- the same function RLS itself calls, so
+      // this guard and the actual data queries below can never disagree
+      // about who has access, unlike the old direct-table check.
+      const { data: hasAccess } = await supabase.rpc("has_sna_access", {
+        p_user_id: user!.id,
+        p_passport_id: passportId,
+      });
 
       if (!isMounted) return;
 
-      if (!access?.is_active) {
+      if (!hasAccess) {
         setIsLoading(false);
         return;
       }
