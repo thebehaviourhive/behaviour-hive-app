@@ -21,15 +21,20 @@ function getStaffDashboardDestination(role: string | undefined): string {
   return "/teacher/dashboard";
 }
 
-// The one-principal-per-institution constraint (migration 0068) is
-// enforced at the database, not the UI -- a second principal's self-link
-// fails with a raw Postgres unique-violation, which is not something to
-// put in front of someone mid-onboarding. Matched on the constraint
-// NAME (stable, chosen by the migration itself), not by fragile
-// string-matching against Postgres's own message wording.
+// The one-principal-per-institution constraint (migration 0068,
+// deliberately NOT widened for handover -- see 0102's own migration
+// comment) is enforced at the database, not the UI -- a second
+// principal's self-link fails with a raw Postgres unique-violation,
+// which is not something to put in front of someone mid-onboarding.
+// Matched on the constraint NAME (stable, chosen by the migration
+// itself), not by fragile string-matching against Postgres's own
+// message wording. Points at the real mechanism now that Stage 1c
+// (hand_over_principal()) exists -- ask the current principal, or join
+// as staff instead -- rather than "contact support," which is the
+// abandoned-principal path, not the ordinary one.
 function friendlyJoinError(rawMessage: string): string {
   if (rawMessage.includes("institution_staff_one_principal_per_institution")) {
-    return "This school already has a principal registered. If that should be you, contact Behaviour Hive support.";
+    return "This school already has a principal. Ask them to hand over the role to you, or join as a class teacher instead.";
   }
   return rawMessage;
 }

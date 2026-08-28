@@ -1,11 +1,14 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { createClient } from "@/lib/supabase/client";
+import { getPostAuthRedirect } from "@/lib/roleRedirect";
 import { DeactivateStaffSheet } from "@/components/principal/DeactivateStaffSheet";
 import { ReviewStaffJoinSheet } from "@/components/principal/ReviewStaffJoinSheet";
+import { HandOverPrincipalSheet } from "@/components/principal/HandOverPrincipalSheet";
 
 // Staff Lifecycle Stage 1, Step 3 (+ Stage 1b: pending as a third row-
 // state, approve/reject, rejected history). Minimal by design -- this is
@@ -45,6 +48,7 @@ function formatDate(value: string): string {
 }
 
 export default function PrincipalStaffPage() {
+  const router = useRouter();
   const { user, isReady } = useRequireRole("principal");
   const [institutionId, setInstitutionId] = useState<string | null>(null);
   const [staff, setStaff] = useState<StaffRow[]>([]);
@@ -54,6 +58,7 @@ export default function PrincipalStaffPage() {
   const [error, setError] = useState<string | null>(null);
   const [deactivateTarget, setDeactivateTarget] = useState<StaffRow | null>(null);
   const [reviewTarget, setReviewTarget] = useState<StaffRow | null>(null);
+  const [isHandOverOpen, setIsHandOverOpen] = useState(false);
 
   const load = useCallback(async (instId: string) => {
     const supabase = createClient();
@@ -157,6 +162,7 @@ export default function PrincipalStaffPage() {
                 isSelf={member.user_id === user?.id}
                 onDeactivate={() => setDeactivateTarget(member)}
                 onReview={() => setReviewTarget(member)}
+                onHandOver={() => setIsHandOverOpen(true)}
               />
             ))}
           </div>
@@ -214,6 +220,31 @@ export default function PrincipalStaffPage() {
           }}
         />
       )}
+
+      <HandOverPrincipalSheet
+        isOpen={isHandOverOpen}
+        onClose={() => setIsHandOverOpen(false)}
+        eligibleSuccessors={staff
+          .filter((m) => m.is_active && m.role !== "principal" && m.user_id !== user?.id)
+          .map((m) => ({ userId: m.user_id, fullName: m.full_name }))}
+        onHandedOver={(outcome, stayingRole) => {
+          setIsHandOverOpen(false);
+          // Route on what we KNOW just happened, not on re-derived,
+          // possibly-stale auth-claim state -- 'staying' writes the new
+          // role in the same transaction, so this is exactly as reliable
+          // as the RPC's own success response. 'leaving' deliberately
+          // does NOT touch the outgoing principal's own auth claim (see
+          // 0102's own comment) -- they still read as 'principal' with
+          // no active institution, which /principal/dashboard's own
+          // resolution already sends to join-institution's four-way
+          // status page; going there directly just skips that hop.
+          if (outcome === "staying" && stayingRole) {
+            router.push(getPostAuthRedirect(stayingRole));
+          } else {
+            router.push("/teacher/join-institution");
+          }
+        }}
+      />
     </div>
   );
 }
@@ -223,11 +254,13 @@ function StaffCard({
   isSelf,
   onDeactivate,
   onReview,
+  onHandOver,
 }: {
   member: StaffRow;
   isSelf: boolean;
   onDeactivate: () => void;
   onReview: () => void;
+  onHandOver: () => void;
 }) {
   const statusLabel = member.is_pending ? "Pending" : member.is_active ? "Active" : "Deactivated";
   const statusClass = member.is_pending
@@ -258,6 +291,16 @@ function StaffCard({
           className="mt-3 block w-full rounded-xl bg-brand-prussian-blue py-2 text-center text-xs font-semibold text-white"
         >
           Review Request
+        </button>
+      )}
+
+      {member.is_active && isSelf && member.role === "principal" && (
+        <button
+          type="button"
+          onClick={onHandOver}
+          className="mt-3 block w-full rounded-xl border border-brand-prussian-blue py-2 text-center text-xs font-semibold text-brand-prussian-blue"
+        >
+          Hand Over Principal Role
         </button>
       )}
 

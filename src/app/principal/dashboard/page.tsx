@@ -89,9 +89,40 @@ export default function PrincipalDashboardPage() {
       if (!isMounted) return;
 
       if (staffError || !staffRow) {
-        // Matches teacher/dashboard's own pattern: no active row here
-        // means join-institution's own four-way status resolution is
-        // where this belongs, not a dead-end error on this page.
+        // Before assuming "no institution at all" (join-institution's
+        // job), check for the narrower, genuinely-possible case Stage
+        // 1c introduces: this session's own auth claim still says
+        // 'principal' (that's the only reason useRequireRole let them
+        // reach this page at all) but hand_over_principal() already
+        // moved them to a different active role elsewhere in the same
+        // transaction. auth.users.app_metadata and institution_staff.role
+        // are two separate writes -- getUser() should reflect the fresh
+        // claim immediately (this app already depends on that working,
+        // via role-select's own POST /api/set-role -> router.push flow),
+        // but "should" isn't "always will" for a value this session
+        // cached at mount. A silent bounce to the join form would be
+        // actively wrong here -- they're not joining anything, they
+        // already have a school -- so this is named honestly instead:
+        // ask them to sign in again rather than pretend nothing changed.
+        const { data: anyActiveRow } = await supabase
+          .from("institution_staff")
+          .select("id")
+          .eq("user_id", user!.id)
+          .is("deactivated_at", null)
+          .not("approved_at", "is", null)
+          .maybeSingle();
+
+        if (!isMounted) return;
+
+        if (anyActiveRow) {
+          setError("ROLE_MISMATCH");
+          setIsLoading(false);
+          return;
+        }
+
+        // Genuinely no active row anywhere -- matches teacher/dashboard's
+        // own pattern: join-institution's own four-way status resolution
+        // is where this belongs, not a dead-end error on this page.
         router.replace("/teacher/join-institution");
         return;
       }
@@ -169,6 +200,16 @@ export default function PrincipalDashboardPage() {
           <div className="flex flex-col gap-2">
             <div className="h-16 animate-pulse rounded-2xl bg-white" />
             <div className="h-16 animate-pulse rounded-2xl bg-white" />
+          </div>
+        ) : error === "ROLE_MISMATCH" ? (
+          <div className="rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-center text-sm text-brand-neutral-black/60">
+            <p>Your role at this school has changed. Please sign in again to see your current view.</p>
+            <Link
+              href="/login"
+              className="mt-3 inline-block rounded-2xl bg-brand-prussian-blue px-5 py-2.5 text-sm font-semibold text-white"
+            >
+              Sign in again
+            </Link>
           </div>
         ) : error ? (
           <p className="text-sm text-brand-neutral-black/60">{error}</p>
