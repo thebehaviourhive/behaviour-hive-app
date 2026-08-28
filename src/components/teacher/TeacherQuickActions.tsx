@@ -4,6 +4,11 @@ import { CountBadge } from "@/components/ui/CountBadge";
 
 const ACTIONS = [
   { label: "Students", href: "/teacher/students", Icon: PeopleIcon },
+  // Distinct from "Students" above: that's per-child passport_access
+  // grants; this is class membership -- a different access source
+  // (Stage 2), shown separately rather than merged, since a teacher can
+  // hold one without the other.
+  { label: "My Class", href: "/teacher/class", Icon: PeopleIcon },
   { label: "ABC Log", href: "/teacher/abc-log", Icon: ClipboardIcon },
   // School Incident Log (Phase 3) -- separate from ABC logging above,
   // deliberately not merged into it (different form, different legal

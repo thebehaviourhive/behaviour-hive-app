@@ -4528,6 +4528,106 @@ async function main() {
     }
   }
 
+  console.log(`\n== CHECK Z: Client-behaviour half of Stage 2, Step 3 -- the "removed from a class mid-day" design, proven via the LITERAL client query shape, not a proxy for it (src/app/teacher/class/page.tsx and src/app/principal/classes/[classId]/page.tsx) ==`);
+  {
+    const { data: instZ, error: instZErr } = await admin
+      .from("institutions")
+      .insert({ name: "Stale Class Verify", institution_code: CODE + "Z", status: "verified" })
+      .select()
+      .single();
+    if (instZErr) throw instZErr;
+    const institutionZId = instZ.id;
+
+    const principalZId = await createUser("classz.principal@thebehaviourhive.com", "Class Z Principal", "principal");
+    const teacherZId = await createUser("classz.teacher@thebehaviourhive.com", "Class Z Teacher", "class_teacher");
+
+    const { data: staffZRows, error: staffZErr } = await admin
+      .from("institution_staff")
+      .insert([
+        { institution_id: institutionZId, user_id: principalZId, role: "principal" },
+        { institution_id: institutionZId, user_id: teacherZId, role: "class_teacher" },
+      ])
+      .select();
+    if (staffZErr) throw staffZErr;
+
+    const principalZ = await signedInClient("classz.principal@thebehaviourhive.com");
+    const teacherZStaffId = staffZRows.find((r) => r.user_id === teacherZId).id;
+    const { error: approveZErr } = await principalZ.rpc("approve_staff_join", { p_institution_staff_id: teacherZStaffId });
+    if (approveZErr) throw approveZErr;
+
+    const teacherZ = await signedInClient("classz.teacher@thebehaviourhive.com");
+
+    const { data: classZId } = await principalZ.rpc("create_class", { p_institution_id: institutionZId, p_name: "Room Z" });
+    const { data: teacherZClassRowId } = await principalZ.rpc("add_class_teacher", { p_class_id: classZId, p_user_id: teacherZId });
+
+    // Z-1/Z-2 -- src/app/teacher/class/page.tsx:104-109's EXACT query
+    // shape, reproduced verbatim (not paraphrased): the active-
+    // membership resolution this page runs fresh on every load, never
+    // cached across a visit. Before removal, it must find the class;
+    // after removal via the real remove_class_teacher() RPC, the
+    // IDENTICAL query must find nothing -- that transition, proven at
+    // the query level, IS the "no longer teaching a class" empty state
+    // this page shows, not something inferred from the RPC's own
+    // success response.
+    {
+      const { data: beforeRemoval } = await teacherZ
+        .from("class_teachers")
+        .select("class_id")
+        .eq("user_id", teacherZId)
+        .is("ended_at", null);
+      record(
+        "Z-1: /teacher/class's own resolution query finds the active class BEFORE removal (src/app/teacher/class/page.tsx:104-109)",
+        beforeRemoval?.length === 1 && beforeRemoval[0].class_id === classZId,
+        JSON.stringify(beforeRemoval)
+      );
+
+      const { error: removeErr } = await principalZ.rpc("remove_class_teacher", {
+        p_class_teacher_id: teacherZClassRowId,
+        p_reason: "Z mid-day removal test.",
+      });
+      if (removeErr) throw removeErr;
+
+      const { data: afterRemoval } = await teacherZ
+        .from("class_teachers")
+        .select("class_id")
+        .eq("user_id", teacherZId)
+        .is("ended_at", null);
+      record(
+        "Z-2 THE DESIGNED BEHAVIOUR: the IDENTICAL query finds NOTHING after a real mid-day removal (src/app/teacher/class/page.tsx:104-109) -- this is what actually drives the 'you're not currently teaching a class' empty state, not an assumption that the RPC succeeding is enough",
+        (afterRemoval?.length ?? 0) === 0,
+        JSON.stringify(afterRemoval)
+      );
+    }
+
+    // Z-3 -- the DIFFERENT client shape the principal's own class-detail
+    // page uses (src/app/principal/classes/[classId]/page.tsx:113-118):
+    // fetches ALL class_teachers rows for the class, unfiltered, and
+    // splits active/removed CLIENT-SIDE -- a genuinely different code
+    // path from Z-1/Z-2's server-side .is("ended_at", null) filter, and
+    // one that could independently have its own bug (e.g. mislabelling
+    // an ended row as active). Proven separately, not assumed identical
+    // just because both ultimately read the same table.
+    {
+      const { data: allRows } = await principalZ
+        .from("class_teachers")
+        .select("id, user_id, position, started_at, ended_at, ended_by, end_reason")
+        .eq("class_id", classZId)
+        .order("position");
+      const stillMarkedActive = (allRows ?? []).filter((r) => r.ended_at === null);
+      const nowInHistory = (allRows ?? []).filter((r) => r.ended_at !== null);
+      record(
+        "Z-3: the principal's class-detail page's own query shape (src/app/principal/classes/[classId]/page.tsx:113-118) correctly moves the removed teacher out of the active split and into the removed-history split -- the client-side split, not just the row's own column",
+        stillMarkedActive.length === 0 && nowInHistory.length === 1 && nowInHistory[0].user_id === teacherZId && nowInHistory[0].end_reason === "Z mid-day removal test.",
+        JSON.stringify({ stillMarkedActive, nowInHistory })
+      );
+    }
+
+    await admin.from("institutions").delete().eq("id", institutionZId);
+    for (const id of [principalZId, teacherZId]) {
+      await admin.auth.admin.deleteUser(id);
+    }
+  }
+
   console.log(`\n== Summary ==`);
   const failed = results.filter((r) => !r.pass);
   console.log(`${results.length - failed.length}/${results.length} passed.`);
