@@ -5558,6 +5558,225 @@ async function main() {
     }
   }
 
+  console.log(`\n== CHECK DD: the institution-match join itself, empirically proven -- the one thing CHECK Y's rewrite (above) never isolated, named as unproven in the Stage 4 Step 1 report and closed here. Two institutions, one child, teacherDD genuinely class-derived at institution A only. If get_teacher_activity_feed()/get_message_recipient_candidates()/send_message() ever let institution B's OWN approved link stand in for institution A's, the join was decoration, not a real boundary. Same fixture also answers a second question: does a child linked to two institutions at once (nothing in this schema prevents it before Stage 6's one-active-enrolment constraint) behave sanely on the roster and under a scoped revoke. ==`);
+  {
+    const { data: instDDA, error: instDDAErr } = await admin
+      .from("institutions")
+      .insert({ name: "DD Institution A", institution_code: CODE + "DDA", status: "verified" })
+      .select()
+      .single();
+    if (instDDAErr) throw instDDAErr;
+    const institutionDDAId = instDDA.id;
+
+    const { data: instDDB, error: instDDBErr } = await admin
+      .from("institutions")
+      .insert({ name: "DD Institution B", institution_code: CODE + "DDB", status: "verified" })
+      .select()
+      .single();
+    if (instDDBErr) throw instDDBErr;
+    const institutionDDBId = instDDB.id;
+
+    const principalDDAId = await createUser("dd.principala@thebehaviourhive.com", "DD Principal A", "principal");
+    const principalDDBId = await createUser("dd.principalb@thebehaviourhive.com", "DD Principal B", "principal");
+    const teacherDDId = await createUser("dd.teacher@thebehaviourhive.com", "DD Teacher", "class_teacher");
+    const parentDDId = await createUser("dd.parent@thebehaviourhive.com", "DD Parent", "parent");
+
+    const { data: staffDDRows, error: staffDDErr } = await admin
+      .from("institution_staff")
+      .insert([
+        { institution_id: institutionDDAId, user_id: principalDDAId, role: "principal" },
+        { institution_id: institutionDDBId, user_id: principalDDBId, role: "principal" },
+        { institution_id: institutionDDAId, user_id: teacherDDId, role: "class_teacher" },
+      ])
+      .select();
+    if (staffDDErr) throw staffDDErr;
+
+    const principalDDA = await signedInClient("dd.principala@thebehaviourhive.com");
+    const principalDDB = await signedInClient("dd.principalb@thebehaviourhive.com");
+    const teacherDDStaffRow = staffDDRows.find((r) => r.user_id === teacherDDId);
+    const { error: approveErr } = await principalDDA.rpc("approve_staff_join", { p_institution_staff_id: teacherDDStaffRow.id });
+    if (approveErr) throw approveErr;
+
+    const teacherDD = await signedInClient("dd.teacher@thebehaviourhive.com");
+
+    const { data: childDD, error: childDDErr } = await admin
+      .from("passports")
+      .insert({ user_id: parentDDId, child_name: "DD Two-Institution Child", passport_status: "complete" })
+      .select()
+      .single();
+    if (childDDErr) throw childDDErr;
+
+    // Institution B's OWN approved link -- a real, producible state
+    // (the same shape ShareBottomSheet.tsx's own approve flow creates),
+    // not derived from anything teacherDD did. teacherDD has ZERO
+    // standing at institution B -- no institution_staff row there at
+    // all. This is the row that must NOT leak through.
+    const { data: pilDDB } = await admin
+      .from("passport_institution_links")
+      .insert({ passport_id: childDD.id, institution_id: institutionDDBId, approved_by_parent: true, parent_approved_at: new Date().toISOString() })
+      .select()
+      .single();
+
+    // Institution A's OWN link is deliberately NOT created yet --
+    // add_class_child() has no passport_institution_links requirement
+    // at all (confirmed by reading its body fresh: only checks the
+    // caller is an active principal at the class's own institution), so
+    // the class below can genuinely contain this child while institution
+    // A has no link row of its own yet.
+    const { data: classDDId } = await principalDDA.rpc("create_class", { p_institution_id: institutionDDAId, p_name: "DD Room" });
+    await principalDDA.rpc("add_class_teacher", { p_class_id: classDDId, p_user_id: teacherDDId });
+    await principalDDA.rpc("add_class_child", { p_class_id: classDDId, p_passport_id: childDD.id });
+
+    const { data: alDD } = await admin
+      .from("activity_log")
+      .insert({ passport_id: childDD.id, actor_id: principalDDAId, event_type: "team_linked", event_description: "DD institution-match check" })
+      .select()
+      .single();
+
+    const { data: otherCategoryDD } = await admin.from("message_categories").select("id").eq("label", "Other").maybeSingle();
+
+    // ---- DD1: institution A has NO link row yet. teacherDD is a
+    // genuine class_teacher of a class containing this child -- the
+    // ONLY thing standing between them and access is whether the join
+    // requires THEIR institution's own link, or accepts institution B's
+    // (which exists, is approved, and would satisfy a bare "some
+    // approved link exists for this passport" check). ----
+    {
+      const { data: feedBefore } = await teacherDD.rpc("get_teacher_activity_feed", {});
+      record(
+        "DD-1a INSTITUTION-MATCH BITES: get_teacher_activity_feed() does NOT include the row while ONLY institution B's link exists -- institution B's approved link does not stand in for institution A's",
+        !(feedBefore ?? []).some((r) => r.id === alDD.id),
+        JSON.stringify(feedBefore?.length)
+      );
+
+      const { data: candidatesBefore } = await teacherDD.rpc("get_message_recipient_candidates", { p_passport_id: childDD.id });
+      record(
+        "DD-1b INSTITUTION-MATCH BITES: get_message_recipient_candidates() returns NOTHING for teacherDD while only institution B's link exists",
+        (candidatesBefore ?? []).length === 0,
+        JSON.stringify(candidatesBefore)
+      );
+
+      const { error: sendBeforeErr } = await teacherDD.rpc("send_message", {
+        p_passport_id: childDD.id, p_category_id: otherCategoryDD.id, p_body: "Should be refused -- wrong institution's link", p_response_required: false, p_recipient_ids: [parentDDId],
+      });
+      record(
+        "DD-1c INSTITUTION-MATCH BITES: send_message() refuses teacherDD while only institution B's link exists",
+        Boolean(sendBeforeErr) && /not authorized/i.test(sendBeforeErr.message),
+        sendBeforeErr?.message
+      );
+    }
+
+    // ---- DD2: institution A's OWN link now added -- deliberately
+    // UNAPPROVED, re-confirming 0110's approval-removal one more time in
+    // the same breath as the institution-match proof, not just existence
+    // in isolation. Institution B's link is untouched throughout. ----
+    {
+      const { data: pilDDA } = await admin
+        .from("passport_institution_links")
+        .insert({ passport_id: childDD.id, institution_id: institutionDDAId, approved_by_parent: false })
+        .select()
+        .single();
+
+      const { data: feedAfter } = await teacherDD.rpc("get_teacher_activity_feed", {});
+      record(
+        "DD-2a THE JOIN GENUINELY KEYS OFF THIS INSTITUTION: get_teacher_activity_feed() now includes the row the moment institution A's OWN link exists -- unapproved, existence only, exactly 0110's design -- institution B's link was never what mattered",
+        (feedAfter ?? []).some((r) => r.id === alDD.id),
+        JSON.stringify(feedAfter?.length)
+      );
+
+      const { data: candidatesAfter } = await teacherDD.rpc("get_message_recipient_candidates", { p_passport_id: childDD.id });
+      record(
+        "DD-2b THE JOIN GENUINELY KEYS OFF THIS INSTITUTION: get_message_recipient_candidates() now returns real candidates",
+        (candidatesAfter ?? []).length >= 1,
+        JSON.stringify(candidatesAfter)
+      );
+
+      const { error: sendAfterErr } = await teacherDD.rpc("send_message", {
+        p_passport_id: childDD.id, p_category_id: otherCategoryDD.id, p_body: "Should now succeed", p_response_required: false, p_recipient_ids: [parentDDId],
+      });
+      record(
+        "DD-2c THE JOIN GENUINELY KEYS OFF THIS INSTITUTION: send_message() now succeeds",
+        !sendAfterErr,
+        sendAfterErr?.message
+      );
+
+      const { data: pilDDBUnchanged } = await admin.from("passport_institution_links").select("approved_by_parent").eq("id", pilDDB.id).single();
+      record(
+        "DD-2d institution B's own row is completely untouched throughout -- still approved_by_parent=true, never read from or written to by anything above",
+        pilDDBUnchanged?.approved_by_parent === true,
+        JSON.stringify(pilDDBUnchanged)
+      );
+
+      // ---- DD3: the second question -- does a child linked to two
+      // institutions at once behave sanely elsewhere, given nothing in
+      // this schema prevents it before Stage 6's one-active-enrolment
+      // constraint exists. ----
+      const { data: rosterA } = await principalDDA.rpc("get_institution_child_roster", { p_institution_id: institutionDDAId });
+      record(
+        "DD-3a get_institution_child_roster() at institution A shows the child, independently of institution B's own link existing",
+        (rosterA ?? []).some((c) => c.passport_id === childDD.id),
+        JSON.stringify(rosterA?.length)
+      );
+
+      const { data: rosterB } = await principalDDB.rpc("get_institution_child_roster", { p_institution_id: institutionDDBId });
+      record(
+        "DD-3b get_institution_child_roster() at institution B ALSO shows the SAME child independently -- the roster doesn't crash, dedupe away, or arbitrarily pick one institution when both have a genuine link",
+        (rosterB ?? []).some((c) => c.passport_id === childDD.id),
+        JSON.stringify(rosterB?.length)
+      );
+
+      // handleRevoke()'s own two-part update (passport/dashboard/
+      // page.tsx), reproduced at the data layer rather than driven
+      // through the browser -- scoped by .eq("institution_id", X) on
+      // both statements in the real component. Proving the SAME scoping
+      // here: revoking institution A must not touch institution B's row.
+      await admin
+        .from("passport_institution_links")
+        .update({ approved_by_parent: false })
+        .eq("passport_id", childDD.id)
+        .eq("institution_id", institutionDDAId);
+
+      const { data: pilDDBAfterRevokeA } = await admin.from("passport_institution_links").select("approved_by_parent").eq("id", pilDDB.id).single();
+      record(
+        "DD-3c a parent's revoke, scoped to institution A the same way handleRevoke() scopes it (.eq('institution_id', institutionDDAId)), does NOT touch institution B's own row",
+        pilDDBAfterRevokeA?.approved_by_parent === true,
+        JSON.stringify(pilDDBAfterRevokeA)
+      );
+
+      // institutionPhone.ts's own query shape (fetchApprovedInstitutionPhone)
+      // -- passport_id + approved_by_parent = true, .limit(1), NO
+      // institution_id scoping at all. A named finding, not a pass/fail
+      // claim: this proves it returns exactly one row without erroring
+      // when two institutions both have (or, as here, one has) an
+      // approved link -- but WHICH institution it picks when more than
+      // one is approved is not something this query, or this check,
+      // constrains. Re-approve institution A's link first so both are
+      // simultaneously approved, matching the scenario that actually
+      // exercises the ambiguity.
+      await admin.from("passport_institution_links").update({ approved_by_parent: true }).eq("id", pilDDA.id);
+      const { data: phoneLookup } = await admin
+        .from("passport_institution_links")
+        .select("institution_id")
+        .eq("passport_id", childDD.id)
+        .eq("approved_by_parent", true)
+        .limit(1)
+        .maybeSingle();
+      record(
+        "DD-3d NAMED FINDING, not a bug claim: institutionPhone.ts's own query (no institution_id scoping, .limit(1)) returns exactly one row without erroring when two institutions are simultaneously approved for the same child -- but which one it returns is arbitrary/unspecified, not something this check or that query constrains",
+        Boolean(phoneLookup?.institution_id),
+        JSON.stringify(phoneLookup)
+      );
+    }
+
+    console.log("DD summary complete.");
+
+    await admin.from("activity_log").delete().eq("id", alDD.id);
+    await admin.from("institutions").delete().in("id", [institutionDDAId, institutionDDBId]);
+    for (const id of [principalDDAId, principalDDBId, teacherDDId, parentDDId]) {
+      await admin.auth.admin.deleteUser(id);
+    }
+  }
+
   console.log(`\n== Summary ==`);
   const failed = results.filter((r) => !r.pass);
   console.log(`${results.length - failed.length}/${results.length} passed.`);
