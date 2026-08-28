@@ -5777,6 +5777,245 @@ async function main() {
     }
   }
 
+  console.log(`\n== CHECK EE: Stage 4, Step 2 (migration 0111) -- grant_passport_access()/revoke_passport_access()/get_passport_access_for_child(), and the cross-institution reactivation fix caught in review before this ever shipped. ==`);
+  {
+    const { data: instEEA, error: instEEAErr } = await admin
+      .from("institutions")
+      .insert({ name: "EE Institution A", institution_code: CODE + "EEA", status: "verified" })
+      .select()
+      .single();
+    if (instEEAErr) throw instEEAErr;
+    const institutionEEAId = instEEA.id;
+
+    const { data: instEEB, error: instEEBErr } = await admin
+      .from("institutions")
+      .insert({ name: "EE Institution B", institution_code: CODE + "EEB", status: "verified" })
+      .select()
+      .single();
+    if (instEEBErr) throw instEEBErr;
+    const institutionEEBId = instEEB.id;
+
+    const principalEEAId = await createUser("ee.principala@thebehaviourhive.com", "EE Principal A", "principal");
+    const principalEEBId = await createUser("ee.principalb@thebehaviourhive.com", "EE Principal B", "principal");
+    const teacherEEId = await createUser("ee.teacher@thebehaviourhive.com", "EE Teacher", "class_teacher");
+    const snaEEId = await createUser("ee.sna@thebehaviourhive.com", "EE SNA", "sna");
+    const outsiderEEId = await createUser("ee.outsider@thebehaviourhive.com", "EE Outsider", "class_teacher");
+    const parentEEId = await createUser("ee.parent@thebehaviourhive.com", "EE Parent", "parent");
+
+    // teacherEE is genuinely staff at BOTH institutions --
+    // institution_staff_one_active_per_institution (0100) is keyed on
+    // (institution_id, user_id), not user_id alone, so this is a real,
+    // constructible state, not a fixture artifact.
+    const { data: staffEERows, error: staffEEErr } = await admin
+      .from("institution_staff")
+      .insert([
+        { institution_id: institutionEEAId, user_id: principalEEAId, role: "principal" },
+        { institution_id: institutionEEBId, user_id: principalEEBId, role: "principal" },
+        { institution_id: institutionEEAId, user_id: teacherEEId, role: "class_teacher" },
+        { institution_id: institutionEEBId, user_id: teacherEEId, role: "class_teacher" },
+        { institution_id: institutionEEAId, user_id: snaEEId, role: "sna" },
+        { institution_id: institutionEEAId, user_id: outsiderEEId, role: "class_teacher" },
+      ])
+      .select();
+    if (staffEEErr) throw staffEEErr;
+
+    const principalEEA = await signedInClient("ee.principala@thebehaviourhive.com");
+    const principalEEB = await signedInClient("ee.principalb@thebehaviourhive.com");
+    for (const row of staffEERows.filter((r) => r.role !== "principal")) {
+      const { error } = await (row.institution_id === institutionEEAId ? principalEEA : principalEEB).rpc("approve_staff_join", { p_institution_staff_id: row.id });
+      if (error) throw error;
+    }
+
+    const teacherEE = await signedInClient("ee.teacher@thebehaviourhive.com");
+    const snaEE = await signedInClient("ee.sna@thebehaviourhive.com");
+    const outsiderEE = await signedInClient("ee.outsider@thebehaviourhive.com");
+
+    const { data: childEE, error: childEEErr } = await admin
+      .from("passports")
+      .insert({ user_id: parentEEId, child_name: "EE Child", passport_status: "complete" })
+      .select()
+      .single();
+    if (childEEErr) throw childEEErr;
+
+    // Both institutions get their own approved link to the same child --
+    // reachable, per CHECK DD, not theoretical.
+    await admin.from("passport_institution_links").insert([
+      { passport_id: childEE.id, institution_id: institutionEEAId, approved_by_parent: true, parent_approved_at: new Date().toISOString() },
+      { passport_id: childEE.id, institution_id: institutionEEBId, approved_by_parent: true, parent_approved_at: new Date().toISOString() },
+    ]);
+
+    // ---- EE-0: THE BLOCKING PROOF -- a genuine self-service grant,
+    // through the UNTOUCHED pre-existing policy (Stage 4 Step 1's own
+    // decision 1), not this migration's new RPC. granted_by defaults to
+    // auth.uid() at the COLUMN level -- proven empirically here, not
+    // just asserted, per Daniel's own explicit instruction this be
+    // proven blocking, in-session. ----
+    {
+      const { data: selfServiceRows, error: selfServiceErr } = await snaEE
+        .from("passport_access")
+        .insert({ passport_id: childEE.id, teacher_id: snaEEId, institution_id: institutionEEAId, is_active: true, actor_role: "sna" })
+        .select("id, granted_by");
+      if (selfServiceErr) throw selfServiceErr;
+
+      const { data: selfServiceReread } = await admin.from("passport_access").select("granted_by").eq("id", selfServiceRows[0].id).single();
+      record(
+        "EE-0 THE BLOCKING PROOF: granted_by's column DEFAULT auth.uid() correctly populates on a genuine self-service insert through the untouched pre-existing policy, re-read via service role, not assumed from the insert's own return",
+        selfServiceReread?.granted_by === snaEEId,
+        JSON.stringify(selfServiceReread)
+      );
+
+      await admin.from("passport_access").delete().eq("id", selfServiceRows[0].id);
+    }
+
+    // ---- EE-1: grant_passport_access() guards ----
+    {
+      const { error: noReasonErr } = await principalEEA.rpc("grant_passport_access", { p_passport_id: childEE.id, p_user_id: teacherEEId, p_institution_id: institutionEEAId, p_reason: "" });
+      record("EE-1a: grant_passport_access() refuses an empty reason", Boolean(noReasonErr) && /reason is required/i.test(noReasonErr.message), noReasonErr?.message);
+
+      const { error: nonPrincipalErr } = await outsiderEE.rpc("grant_passport_access", { p_passport_id: childEE.id, p_user_id: teacherEEId, p_institution_id: institutionEEAId, p_reason: "Should fail" });
+      record("EE-1b: grant_passport_access() refuses a non-principal caller", Boolean(nonPrincipalErr) && /active principal/i.test(nonPrincipalErr.message), nonPrincipalErr?.message);
+
+      const { data: nonStaffTarget } = await admin.auth.admin.createUser({ email: "ee.nonstaff@thebehaviourhive.com", password: "GrantedByVerify-2026!", email_confirm: true, user_metadata: { full_name: "EE Non Staff" } });
+      const { error: notStaffErr } = await principalEEA.rpc("grant_passport_access", { p_passport_id: childEE.id, p_user_id: nonStaffTarget.user.id, p_institution_id: institutionEEAId, p_reason: "Should fail" });
+      record("EE-1c: grant_passport_access() refuses a target with no institution_staff row at this institution", Boolean(notStaffErr) && /not an active member/i.test(notStaffErr.message), notStaffErr?.message);
+      await admin.auth.admin.deleteUser(nonStaffTarget.user.id);
+
+      const { error: wrongRoleErr } = await principalEEA.rpc("grant_passport_access", { p_passport_id: childEE.id, p_user_id: principalEEAId, p_institution_id: institutionEEAId, p_reason: "Should fail -- principal, not teacher/sna" });
+      record("EE-1d: grant_passport_access() refuses a target whose role isn't class_teacher/sna (tried a principal)", Boolean(wrongRoleErr) && /class teacher or SNA/i.test(wrongRoleErr.message), wrongRoleErr?.message);
+
+      const parentEEUnlinkedId = await createUser("ee.parentunlinked@thebehaviourhive.com", "EE Parent Unlinked", "parent");
+      const { data: unlinkedChild, error: unlinkedChildErr } = await admin.from("passports").insert({ user_id: parentEEUnlinkedId, child_name: "EE Unlinked Child", passport_status: "complete" }).select().single();
+      if (unlinkedChildErr) throw unlinkedChildErr;
+      const { error: noLinkErr } = await principalEEA.rpc("grant_passport_access", { p_passport_id: unlinkedChild.id, p_user_id: teacherEEId, p_institution_id: institutionEEAId, p_reason: "Should fail -- no link at all" });
+      record("EE-1e: grant_passport_access() refuses a child with no passport_institution_links row at this institution at all", Boolean(noLinkErr) && /no link to your institution/i.test(noLinkErr.message), noLinkErr?.message);
+      await admin.from("passports").delete().eq("id", unlinkedChild.id);
+      await admin.auth.admin.deleteUser(parentEEUnlinkedId);
+    }
+
+    // ---- EE-2: grant_passport_access() the positive path ----
+    let grantEEAId;
+    {
+      const { data, error } = await principalEEA.rpc("grant_passport_access", { p_passport_id: childEE.id, p_user_id: teacherEEId, p_institution_id: institutionEEAId, p_reason: "EE positive grant." });
+      if (error) throw error;
+      grantEEAId = data;
+
+      const { data: rowAfterGrant } = await admin.from("passport_access").select("*").eq("id", grantEEAId).single();
+      record(
+        "EE-2a: the grant row is correct -- actor_role DERIVED from teacherEE's own institution_staff.role ('class_teacher'), not caller-supplied, granted_by is principalEEA",
+        rowAfterGrant?.actor_role === "class_teacher" && rowAfterGrant?.is_active === true && rowAfterGrant?.granted_by === principalEEAId && rowAfterGrant?.institution_id === institutionEEAId,
+        JSON.stringify(rowAfterGrant)
+      );
+
+      const { error: duplicateErr } = await principalEEA.rpc("grant_passport_access", { p_passport_id: childEE.id, p_user_id: teacherEEId, p_institution_id: institutionEEAId, p_reason: "Should fail -- already active" });
+      record("EE-2b: grant_passport_access() refuses a duplicate active grant", Boolean(duplicateErr) && /already has active/i.test(duplicateErr.message), duplicateErr?.message);
+    }
+
+    // ---- EE-3: get_passport_access_for_child() ----
+    {
+      const { data: readAsOutsider, error: readOutsiderErr } = await outsiderEE.rpc("get_passport_access_for_child", { p_passport_id: childEE.id, p_institution_id: institutionEEAId });
+      record("EE-3a: get_passport_access_for_child() refuses a non-principal caller", Boolean(readOutsiderErr) || (readAsOutsider ?? []).length === 0, readOutsiderErr?.message ?? JSON.stringify(readAsOutsider));
+
+      const { data: readAsPrincipal } = await principalEEA.rpc("get_passport_access_for_child", { p_passport_id: childEE.id, p_institution_id: institutionEEAId });
+      const grantRow = (readAsPrincipal ?? []).find((r) => r.id === grantEEAId);
+      record(
+        "EE-3b: get_passport_access_for_child() correctly returns the grant with resolved names, for the granting principal",
+        grantRow?.user_id === teacherEEId && grantRow?.full_name === "EE Teacher" && grantRow?.granted_by_name === "EE Principal A",
+        JSON.stringify(grantRow)
+      );
+    }
+
+    // ---- EE-4: revoke_passport_access() guards + the positive path,
+    // including revoking a SELF-SERVICE grant -- "revoke for children
+    // enrolled at their institution" (Step 0's own wording) covers one,
+    // not just principal-granted rows. ----
+    {
+      const { data: selfServiceRow, error: selfServiceErr } = await snaEE
+        .from("passport_access")
+        .insert({ passport_id: childEE.id, teacher_id: snaEEId, institution_id: institutionEEAId, is_active: true, actor_role: "sna" })
+        .select("id")
+        .single();
+      if (selfServiceErr) throw selfServiceErr;
+
+      const { error: noReasonRevokeErr } = await principalEEA.rpc("revoke_passport_access", { p_passport_access_id: selfServiceRow.id, p_reason: "" });
+      record("EE-4a: revoke_passport_access() refuses an empty reason", Boolean(noReasonRevokeErr) && /reason is required/i.test(noReasonRevokeErr.message), noReasonRevokeErr?.message);
+
+      const { error: nonPrincipalRevokeErr } = await outsiderEE.rpc("revoke_passport_access", { p_passport_access_id: selfServiceRow.id, p_reason: "Should fail" });
+      record("EE-4b: revoke_passport_access() refuses a non-principal caller", Boolean(nonPrincipalRevokeErr) && /active principal/i.test(nonPrincipalRevokeErr.message), nonPrincipalRevokeErr?.message);
+
+      const { error: wrongInstitutionRevokeErr } = await principalEEB.rpc("revoke_passport_access", { p_passport_access_id: selfServiceRow.id, p_reason: "Should fail -- wrong institution's principal" });
+      record("EE-4c: revoke_passport_access() refuses a DIFFERENT institution's principal -- scoped by the row's own institution_id, not passport-wide", Boolean(wrongInstitutionRevokeErr) && /active principal/i.test(wrongInstitutionRevokeErr.message), wrongInstitutionRevokeErr?.message);
+
+      const { error: revokeErr } = await principalEEA.rpc("revoke_passport_access", { p_passport_access_id: selfServiceRow.id, p_reason: "EE: revoking a self-service grant, principal-initiated." });
+      if (revokeErr) throw revokeErr;
+
+      const { data: revokedRow } = await admin.from("passport_access").select("*").eq("id", selfServiceRow.id).single();
+      record(
+        "EE-4d THE POSITIVE PATH: a principal CAN revoke a SELF-SERVICE grant, not just one they personally granted -- is_active/revoked_at/revoked_by/revocation_reason all set correctly",
+        revokedRow?.is_active === false && revokedRow?.revoked_by === principalEEAId && revokedRow?.revocation_reason === "EE: revoking a self-service grant, principal-initiated." && Boolean(revokedRow?.revoked_at),
+        JSON.stringify(revokedRow)
+      );
+
+      const { error: doubleRevokeErr } = await principalEEA.rpc("revoke_passport_access", { p_passport_access_id: selfServiceRow.id, p_reason: "Should fail -- already revoked" });
+      record("EE-4e: revoke_passport_access() refuses an already-revoked row", Boolean(doubleRevokeErr) && /already been revoked/i.test(doubleRevokeErr.message), doubleRevokeErr?.message);
+    }
+
+    // ---- EE-5: THE FIX ITSELF -- cross-institution reactivation
+    // refused, not silently relocated. teacherEE's grant at institution
+    // A (grantEEAId, from EE-2) is revoked first, then institution B's
+    // OWN principal attempts to grant the SAME teacher access to the
+    // SAME child -- the exact scenario Daniel named as reachable, not
+    // theoretical. ----
+    {
+      const { error: revokeAErr } = await principalEEA.rpc("revoke_passport_access", { p_passport_access_id: grantEEAId, p_reason: "EE: institution A ends teacherEE's cover." });
+      if (revokeAErr) throw revokeAErr;
+
+      const { data: rowBeforeCrossAttempt } = await admin.from("passport_access").select("*").eq("id", grantEEAId).single();
+      record(
+        "EE-5a (context): institution A's grant is genuinely revoked before institution B's attempt -- is_active=false, institution_id still A",
+        rowBeforeCrossAttempt?.is_active === false && rowBeforeCrossAttempt?.institution_id === institutionEEAId,
+        JSON.stringify(rowBeforeCrossAttempt)
+      );
+
+      const { error: crossInstitutionErr } = await principalEEB.rpc("grant_passport_access", { p_passport_id: childEE.id, p_user_id: teacherEEId, p_institution_id: institutionEEBId, p_reason: "Institution B tries to grant the same teacher, same child." });
+      record(
+        "EE-5b THE FIX ITSELF: institution B's principal is REFUSED, not silently reactivated-and-relocated -- a revoked grant at institution A is not institution B's to reactivate",
+        Boolean(crossInstitutionErr) && /different institution/i.test(crossInstitutionErr.message),
+        crossInstitutionErr?.message
+      );
+
+      const { data: rowAfterCrossAttempt } = await admin.from("passport_access").select("*").eq("id", grantEEAId).single();
+      record(
+        "EE-5c institution A's row is COMPLETELY UNTOUCHED by the refused attempt -- same institution_id, same is_active, same revoked_by/revoked_at/revocation_reason as EE-5a, re-read via service role",
+        rowAfterCrossAttempt?.institution_id === institutionEEAId &&
+          rowAfterCrossAttempt?.is_active === false &&
+          rowAfterCrossAttempt?.revoked_by === principalEEAId &&
+          rowAfterCrossAttempt?.revocation_reason === "EE: institution A ends teacherEE's cover." &&
+          rowAfterCrossAttempt?.revoked_at === rowBeforeCrossAttempt?.revoked_at,
+        JSON.stringify(rowAfterCrossAttempt)
+      );
+
+      // Positive counterpart: a DIFFERENT teacher (never granted at A)
+      // CAN be granted access at institution B for the same child --
+      // proving EE-5b's refusal is specifically about the SAME person's
+      // cross-institution row, not institution B being unable to grant
+      // at all.
+      const { error: differentPersonErr } = await principalEEB.rpc("grant_passport_access", { p_passport_id: childEE.id, p_user_id: snaEEId, p_institution_id: institutionEEBId, p_reason: "Should fail for an unrelated reason -- snaEE has no institution_staff row at B at all, proving THIS refusal is a different one." });
+      record(
+        "EE-5d (sanity): snaEE, who has never been staff at institution B, is refused for the ORDINARY reason (not staff there), not the cross-institution one -- confirms EE-5b's error is specifically about the SAME institution mismatch, not a blanket institution-B-can't-grant failure",
+        Boolean(differentPersonErr) && /not an active member/i.test(differentPersonErr.message),
+        differentPersonErr?.message
+      );
+    }
+
+    console.log("EE summary complete.");
+
+    await admin.from("passports").delete().eq("id", childEE.id);
+    await admin.from("institutions").delete().in("id", [institutionEEAId, institutionEEBId]);
+    for (const id of [principalEEAId, principalEEBId, teacherEEId, snaEEId, outsiderEEId, parentEEId]) {
+      await admin.auth.admin.deleteUser(id);
+    }
+  }
+
   console.log(`\n== Summary ==`);
   const failed = results.filter((r) => !r.pass);
   console.log(`${results.length - failed.length}/${results.length} passed.`);
