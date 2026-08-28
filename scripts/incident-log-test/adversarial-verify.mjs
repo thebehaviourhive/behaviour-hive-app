@@ -4489,11 +4489,22 @@ async function main() {
 
     // ---- Y7: the FOUR preserved-stricter sites -- activity_log SELECT,
     // get_teacher_activity_feed(), get_message_recipient_candidates(),
-    // send_message(). teacherY1 has GENUINE class-derived standing over
-    // childStricterY (same class as childClassY) -- only the
-    // passport_institution_links.approved_by_parent flag differs. If any
-    // of these four let a class-derived caller through anyway, the
-    // stricter/looser split collapsed during the rewrite. ----
+    // send_message(). REWRITTEN for Stage 4, migration 0110: these four
+    // sites lost approved_by_parent's "= true" requirement, keeping only
+    // the institution-matched join/exists (activity_log SELECT excepted
+    // -- it never had an institution-match to keep, and collapsed to
+    // has_class_teacher_access() outright). teacherY1's class-derived
+    // standing over childStricterY was ALWAYS genuine; only the
+    // approval flag ever differed. Before 0110 these checks proved that
+    // flag still gated all four (correctly, for Stage 2-3). Now it must
+    // NOT gate any of them -- proving the removal actually took effect,
+    // not just that nothing broke. What's still unproven, named
+    // honestly: the institution-matched JOIN condition itself
+    // (pil.institution_id = pa.institution_id / c.institution_id) is
+    // byte-identical to before 0110 and was never independently isolated
+    // by its own check pre- or post-migration -- doing so needs a second
+    // institution with its own approved link to the same child, not
+    // built here. ----
     {
       // Positive control first -- childClassY (approved) must still work,
       // proving these sites are not simply broken outright.
@@ -4503,20 +4514,20 @@ async function main() {
 
       const { data: alStrictRow } = await admin.from("activity_log").insert({ passport_id: childStricterY, actor_id: principalYId, event_type: "team_linked", event_description: "Y stricter negative test" }).select().single();
       const { data: tStrict } = await teacherY1.from("activity_log").select("id").eq("id", alStrictRow.id);
-      record("Y-10b STRICTER SITE: activity_log SELECT -- the SAME class-derived teacher is REFUSED when childStricterY's institution link is NOT approved_by_parent -- the stricter gate survived the rewrite", (tStrict?.length ?? 0) === 0, JSON.stringify(tStrict));
+      record("Y-10b THE REMOVAL ITSELF (0110): activity_log SELECT -- the SAME class-derived teacher now REACHES childStricterY's row even though its institution link was never approved_by_parent -- the gate genuinely came out, not just stopped being asserted", tStrict?.length === 1, JSON.stringify(tStrict));
 
       const { data: feedPositive } = await teacherY1.rpc("get_teacher_activity_feed", {});
       record("Y-19a (positive control): get_teacher_activity_feed() -- includes the approved-link row", (feedPositive ?? []).some((r) => r.id === alRow.id), JSON.stringify(feedPositive?.length));
       const { data: feedStrict } = await teacherY1.rpc("get_teacher_activity_feed", {});
-      record("Y-19b STRICTER SITE: get_teacher_activity_feed() -- does NOT include the unapproved-link row for the same class-derived teacher", !(feedStrict ?? []).some((r) => r.id === alStrictRow.id), JSON.stringify(feedStrict?.length));
+      record("Y-19b THE REMOVAL ITSELF (0110): get_teacher_activity_feed() -- NOW includes the unapproved-link row for the same class-derived teacher, institution-match preserved (both rows are teacherY1's own institution)", (feedStrict ?? []).some((r) => r.id === alStrictRow.id), JSON.stringify(feedStrict?.length));
 
       const { data: candidatesStrict } = await teacherY1.rpc("get_message_recipient_candidates", { p_passport_id: childStricterY });
-      record("Y-22c STRICTER SITE: get_message_recipient_candidates() -- the same class-derived teacher gets NOTHING for the unapproved-link child, even though they get real candidates for the approved one (Y-22a)", (candidatesStrict?.length ?? 0) === 0, JSON.stringify(candidatesStrict?.length));
+      record("Y-22c THE REMOVAL ITSELF (0110): get_message_recipient_candidates() -- the same class-derived teacher now gets a real, non-empty candidate list for the unapproved-link child, same as the approved one (Y-22a)", (candidatesStrict?.length ?? 0) >= 1, JSON.stringify(candidatesStrict?.length));
 
       const { error: sendStrictErr } = await teacherY1.rpc("send_message", {
-        p_passport_id: childStricterY, p_category_id: otherCategory.id, p_body: "Should be refused", p_response_required: false, p_recipient_ids: [parentStricterYId],
+        p_passport_id: childStricterY, p_category_id: otherCategory.id, p_body: "Should now succeed", p_response_required: false, p_recipient_ids: [parentStricterYId],
       });
-      record("Y-23 STRICTER SITE (found while writing 0104, not originally named): send_message() -- the same class-derived teacher is refused for the unapproved-link child, same as the three sites Daniel named explicitly", Boolean(sendStrictErr) && /not authorized/i.test(sendStrictErr.message), sendStrictErr?.message);
+      record("Y-23 THE REMOVAL ITSELF (0110): send_message() -- the same class-derived teacher can now message about the unapproved-link child -- no longer refused for a reason that no longer exists", !sendStrictErr, sendStrictErr?.message);
     }
 
     // ---- Y8: departure cascade + defense-in-depth ----
@@ -5441,6 +5452,108 @@ async function main() {
     // ---- BB teardown ----
     await admin.from("institutions").delete().eq("id", institutionBBId);
     for (const id of [principalBBId, teacherBBId, snaBBId, parentBB1Id, parentBB2Id]) {
+      await admin.auth.admin.deleteUser(id);
+    }
+  }
+
+  console.log(`\n== CHECK CC: Stage 4, Step 1 (migration 0110) -- get_fba_recipient_candidates() folded in: approved_by_parent's "= true" removed (institution-match kept), and the class-derived/assignment-derived branches it never had before -- the sixth "grant access, never test the destination" instance, closed. Neither teacherCC nor snaCC below ever holds a direct passport_access row -- their only standing is class membership / child assignment, exactly the gap this migration closes. ==`);
+  {
+    const { data: instCC, error: instCCErr } = await admin
+      .from("institutions")
+      .insert({ name: "FBA Recipient Candidates Verify", institution_code: CODE + "CC", status: "verified" })
+      .select()
+      .single();
+    if (instCCErr) throw instCCErr;
+    const institutionCCId = instCC.id;
+
+    const principalCCId = await createUser("cc.principal@thebehaviourhive.com", "CC Principal", "principal");
+    const teacherCCId = await createUser("cc.teacher@thebehaviourhive.com", "CC Teacher", "class_teacher");
+    const snaCCId = await createUser("cc.sna@thebehaviourhive.com", "CC SNA", "sna");
+    const noAccessCCId = await createUser("cc.noaccess@thebehaviourhive.com", "CC No Access", "class_teacher");
+    const clinicianCCId = await createUser("cc.clinician@thebehaviourhive.com", "CC Clinician", "clinician");
+    const parentCCId = await createUser("cc.parent@thebehaviourhive.com", "CC Parent", "parent");
+
+    const { data: staffCCRows, error: staffCCErr } = await admin
+      .from("institution_staff")
+      .insert([
+        { institution_id: institutionCCId, user_id: principalCCId, role: "principal" },
+        { institution_id: institutionCCId, user_id: teacherCCId, role: "class_teacher" },
+        { institution_id: institutionCCId, user_id: snaCCId, role: "sna" },
+        { institution_id: institutionCCId, user_id: noAccessCCId, role: "class_teacher" },
+      ])
+      .select();
+    if (staffCCErr) throw staffCCErr;
+
+    const principalCC = await signedInClient("cc.principal@thebehaviourhive.com");
+    for (const row of staffCCRows.filter((r) => r.user_id !== principalCCId)) {
+      const { error } = await principalCC.rpc("approve_staff_join", { p_institution_staff_id: row.id });
+      if (error) throw error;
+    }
+
+    await admin.from("clinicians").insert({ user_id: clinicianCCId, specialty: "behavioural_psychologist", verification_status: "verified" });
+
+    const { data: childCC } = await admin.from("passports").insert({ user_id: parentCCId, child_name: "CC Child", passport_status: "complete" }).select().single();
+    // Deliberately unapproved -- also re-proves the approval removal for
+    // THIS site, the same way Y-10b/Y-19b/Y-22c/Y-23 do for the other
+    // four, not just the class-/assignment-derived branches being new.
+    await admin.from("passport_institution_links").insert({ passport_id: childCC.id, institution_id: institutionCCId, approved_by_parent: false });
+    await admin.from("clinician_access").insert({ passport_id: childCC.id, clinician_id: clinicianCCId, is_active: true });
+
+    const { data: fbaCC } = await admin.from("fba_reports").insert({ passport_id: childCC.id, clinician_id: clinicianCCId, status: "draft" }).select().single();
+
+    const { data: classCCId } = await principalCC.rpc("create_class", { p_institution_id: institutionCCId, p_name: "CC Room" });
+    await principalCC.rpc("add_class_teacher", { p_class_id: classCCId, p_user_id: teacherCCId });
+    await principalCC.rpc("add_class_child", { p_class_id: classCCId, p_passport_id: childCC.id });
+    await principalCC.rpc("assign_sna_to_child", { p_passport_id: childCC.id, p_user_id: snaCCId, p_institution_id: institutionCCId });
+
+    const clinicianCC = await signedInClient("cc.clinician@thebehaviourhive.com");
+    const { data: candidatesCC, error: candidatesCCErr } = await clinicianCC.rpc("get_fba_recipient_candidates", { p_fba_id: fbaCC.id });
+    if (candidatesCCErr) throw candidatesCCErr;
+
+    record(
+      "CC-1 THE FIX ITSELF, class-derived: teacherCC appears as an FBA recipient candidate via class membership alone -- no direct passport_access row exists for them (0110's own gap-close, not the approval removal)",
+      (candidatesCC ?? []).some((c) => c.recipient_id === teacherCCId && c.role === "class_teacher"),
+      JSON.stringify(candidatesCC)
+    );
+    record(
+      "CC-2 THE FIX ITSELF, assignment-derived: snaCC appears as an FBA recipient candidate via child_assignments alone -- no direct passport_access row exists for them either",
+      (candidatesCC ?? []).some((c) => c.recipient_id === snaCCId && c.role === "sna"),
+      JSON.stringify(candidatesCC)
+    );
+    record(
+      "CC-3 (positive control, unaffected by this migration): the child's own parent still appears as a candidate",
+      (candidatesCC ?? []).some((c) => c.recipient_id === parentCCId && c.role === "parent"),
+      JSON.stringify(candidatesCC)
+    );
+    record(
+      "CC-4 (negative control): a same-institution teacher with no class/assignment/grant standing over this child does not appear",
+      !(candidatesCC ?? []).some((c) => c.recipient_id === noAccessCCId),
+      JSON.stringify(candidatesCC)
+    );
+    record(
+      "CC-5 THE APPROVAL REMOVAL, re-proven for this site: teacherCC and snaCC both appear even though childCC's own institution link was never approved_by_parent",
+      (candidatesCC ?? []).filter((c) => c.recipient_id === teacherCCId || c.recipient_id === snaCCId).length === 2,
+      JSON.stringify(candidatesCC)
+    );
+
+    // Dedup check: grant teacherCC a DIRECT passport_access row too (the
+    // shape most teachers actually have) and confirm they still appear
+    // exactly once, not twice, mirroring get_message_recipient_
+    // candidates()'s own established dedup pattern.
+    await admin.from("passport_access").insert({ passport_id: childCC.id, teacher_id: teacherCCId, institution_id: institutionCCId, actor_role: "class_teacher", is_active: true });
+    const { data: candidatesCCAfterGrant } = await clinicianCC.rpc("get_fba_recipient_candidates", { p_fba_id: fbaCC.id });
+    const teacherCCAppearances = (candidatesCCAfterGrant ?? []).filter((c) => c.recipient_id === teacherCCId);
+    record(
+      "CC-6 DEDUP: teacherCC appears EXACTLY ONCE after also holding a direct passport_access grant, not twice (class-derived + direct-grant branches)",
+      teacherCCAppearances.length === 1,
+      JSON.stringify(teacherCCAppearances)
+    );
+
+    console.log("CC summary complete.");
+
+    await admin.from("fba_reports").delete().eq("id", fbaCC.id);
+    await admin.from("institutions").delete().eq("id", institutionCCId);
+    for (const id of [principalCCId, teacherCCId, snaCCId, noAccessCCId, clinicianCCId, parentCCId]) {
       await admin.auth.admin.deleteUser(id);
     }
   }
