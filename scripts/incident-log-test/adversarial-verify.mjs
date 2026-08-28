@@ -5010,6 +5010,23 @@ async function main() {
       const { data: transferRow } = await admin.from("incident_ownership_transfers").select("*").eq("incident_id", incidentOwnedBySupply).single();
       record("AA-8c RECORDED, NOT SILENT: the transfer is a real, queryable row -- from the supply teacher, to the principal, with a reason", transferRow?.from_teacher_id === newSupplyAAId && transferRow?.to_principal_id === principalAAId && Boolean(transferRow?.reason), JSON.stringify(transferRow));
 
+      // THE CHECK AA-8 ITSELF MISSED, generalised rather than patched --
+      // per CLAUDE.md's own new entry: writing the transfer and being
+      // able to act on it are two different claims. AA-8b/8c only ever
+      // proved the RECORD. This proves the RECIPIENT -- the principal
+      // must actually be able to edit, and then sign off, the incident
+      // they just inherited, not merely appear as its owning_teacher_id.
+      // This is exactly what 0107's can_own_incident() principal branch
+      // exists for; asserted directly here, not assumed from that
+      // migration's own commit message.
+      const { data: principalEditAttempt, error: principalEditErr } = await principalAA.from("incidents").update({ category: "one_party_incident" }).eq("id", incidentOwnedBySupply).select();
+      record("AA-8c2 THE RECIPIENT CAN ACT, PART 1: the principal can genuinely EDIT the incident they just inherited, not merely own it on paper", (principalEditAttempt?.length ?? 0) === 1, JSON.stringify({ principalEditAttempt, principalEditErr: principalEditErr?.message }));
+
+      const { error: principalSignOffErr } = await principalAA.rpc("sign_off_incident", { p_incident_id: incidentOwnedBySupply });
+      record("AA-8c3 THE RECIPIENT CAN ACT, PART 2: the principal can genuinely SIGN OFF the incident they inherited -- the actual point of the transfer, not just a data-level correction", !principalSignOffErr, principalSignOffErr?.message);
+      const { data: principalSignOffCheck } = await admin.from("incidents").select("teacher_signed_at, teacher_signed_by").eq("id", incidentOwnedBySupply).single();
+      record("AA-8c4: the sign-off actually persisted, attributed to the principal (re-read via service role, not assumed)", principalSignOffCheck?.teacher_signed_by === principalAAId && principalSignOffCheck?.teacher_signed_at != null, JSON.stringify(principalSignOffCheck));
+
       const { data: secondResolve } = await principalAA.rpc("resolve_lapsed_incident_ownership", { p_institution_id: institutionAAId });
       record("AA-8d: resolving again is a no-op for the same incident -- it's already owned by the principal, nothing left to transfer", true, secondResolve);
 
