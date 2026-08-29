@@ -134,8 +134,6 @@ export default function PassportDashboardPage() {
   const [isShareOpen, setIsShareOpen] = useState(false);
   const [focusClinicianCodeOnOpen, setFocusClinicianCodeOnOpen] = useState(false);
   const [isShareHintDismissed, setIsShareHintDismissed] = useState(false);
-  const [revokeConfirmation, setRevokeConfirmation] = useState<string | null>(null);
-  const [revokeError, setRevokeError] = useState<string | null>(null);
   const [clinicianRevokeConfirmation, setClinicianRevokeConfirmation] = useState<string | null>(null);
   const [clinicianRevokeError, setClinicianRevokeError] = useState<string | null>(null);
   const [clinicianRevokeTarget, setClinicianRevokeTarget] = useState<ConnectedClinician | null>(null);
@@ -559,71 +557,13 @@ export default function PassportDashboardPage() {
     return null;
   }
 
-  // Revokes at the institution level: updates every passport_access row for
-  // this institution, not just one teacher's. Teacher trust is
-  // institution-scoped -- a parent approves a school, not an individual
-  // teacher -- so revoking removes the whole school's access in one action.
-  // This is intentionally asymmetric with handleRevokeClinician below,
-  // where trust is scoped to one named individual instead. No code change
-  // needed here; documenting the asymmetry as designed.
-  async function handleRevoke(institutionId: string, institutionName: string) {
-    if (!summary) return;
-
-    setRevokeError(null);
-    setRevokeConfirmation(null);
-
-    const supabase = createClient();
-    const [
-      { data: linkRows, error: linkError },
-      { data: accessRows, error: accessError },
-    ] = await Promise.all([
-      supabase
-        .from("passport_institution_links")
-        .update({ approved_by_parent: false })
-        .eq("passport_id", summary.passportId)
-        .eq("institution_id", institutionId)
-        .select("id"),
-      supabase
-        .from("passport_access")
-        .update({ is_active: false })
-        .eq("passport_id", summary.passportId)
-        .eq("institution_id", institutionId)
-        .select("id"),
-    ]);
-
-    if (linkError || accessError) {
-      setRevokeError((linkError ?? accessError)?.message ?? "Something went wrong. Please try again.");
-      return;
-    }
-
-    // A matching row in neither table means there was nothing left to
-    // revoke (already revoked, or the link never existed) — a parent must
-    // never see a "removed" confirmation when nothing actually changed.
-    if (!linkRows?.length && !accessRows?.length) {
-      setRevokeError("Nothing was removed — this access may already have been revoked.");
-      return;
-    }
-
-    if (user) {
-      logActivity({
-        passportId: summary.passportId,
-        actorId: user.id,
-        eventType: "access_revoked",
-        eventDescription: "Teacher access removed",
-      });
-    }
-
-    setRevokeConfirmation(
-      `Access for ${institutionName} has been removed. They can no longer see ${summary.childName}'s passport.`
-    );
-    await loadApprovedInstitutions(summary.passportId);
-  }
-
   // Revokes at the individual level: only this clinician's own
   // clinician_access row is touched. Clinicians are connected one at a
   // time by their personal code (no institution grouping), so trust is
-  // scoped to the named individual -- the intentional counterpart to
-  // handleRevoke's institution-wide scope above.
+  // scoped to the named individual -- the parent's own remaining revoke
+  // authority, now that a school's own access is no longer the parent's
+  // to revoke (removed; the school owns the child's file once enrolled,
+  // the same way ending an enrolment is a principal's action).
   //
   // Stage 7: revoke_clinician_access() (0123) is the only write path
   // now -- the old direct .update() this used to do was silently
@@ -822,6 +762,14 @@ export default function PassportDashboardPage() {
                 )}
               </div>
 
+              {/* Deliberately read-only. The parent no longer has a
+                  revoke action for a school's own access here -- see
+                  CLAUDE.md/the PRD 1 completion report: "the school owns
+                  the child's file now" once enrolled, the same way
+                  ending an enrolment is a principal's action, not a
+                  parent's. This list's own future (stay as information,
+                  or go entirely) is an open question, not decided by
+                  this change -- only the revoke ACTION was removed. */}
               {institutionsError ? (
                 <InlineErrorState
                   message={institutionsError}
@@ -837,34 +785,14 @@ export default function PassportDashboardPage() {
                   {approvedInstitutions.map((institution) => (
                     <div
                       key={institution.institutionId}
-                      className="mb-2 flex items-center justify-between rounded-xl bg-brand-off-white/50 p-4"
+                      className="mb-2 rounded-xl bg-brand-off-white/50 p-4"
                     >
                       <p className="font-bold text-brand-neutral-black">
                         {institution.institutionName}
                       </p>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          handleRevoke(institution.institutionId, institution.institutionName)
-                        }
-                        className="text-sm font-bold text-brand-golden-brown"
-                      >
-                        Revoke Access
-                      </button>
                     </div>
                   ))}
                 </div>
-              )}
-
-              {revokeConfirmation && (
-                <p className="mt-3 rounded-xl bg-brand-off-white/50 px-4 py-3 text-sm text-brand-neutral-black">
-                  {revokeConfirmation}
-                </p>
-              )}
-              {revokeError && (
-                <p role="alert" className="mt-3 text-sm font-medium text-brand-golden-brown">
-                  {revokeError}
-                </p>
               )}
             </section>
           </ErrorBoundary>
