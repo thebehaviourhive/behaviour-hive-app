@@ -6143,9 +6143,16 @@ async function main() {
 
     const principalGGId = await createUser("gg.principal@thebehaviourhive.com", "GG Principal", "principal");
     const teacherGGId = await createUser("gg.teacher@thebehaviourhive.com", "GG Teacher", "class_teacher");
+    const snaGGId = await createUser("gg.sna@thebehaviourhive.com", "GG SNA", "sna");
     const clinicianGGId = await createUser("gg.clinician@thebehaviourhive.com", "GG Clinician", "clinician");
     const parentGG1Id = await createUser("gg.parent1@thebehaviourhive.com", "GG Parent One", "parent");
-    const parentGG2Id = await createUser("gg.parent2@thebehaviourhive.com", "GG Parent Two", "parent");
+    // Dedicated to the multi-guardian-via-trigger construction below
+    // (GG-0d/e/f) -- must be users that have NEVER been passports.user_id
+    // anywhere else, since that unique constraint is still live (0113's
+    // own section 5) and would refuse a second passport row reusing
+    // parentGG1Id.
+    const parentGGMulti1Id = await createUser("gg.parentmulti1@thebehaviourhive.com", "GG Parent Multi One", "parent");
+    const parentGGMulti2Id = await createUser("gg.parentmulti2@thebehaviourhive.com", "GG Parent Multi Two", "parent");
     const parentGGReachableId = await createUser("gg.parentreachable@thebehaviourhive.com", "GG Parent Reachable", "parent");
     const parentGGDormantId = await createUser("gg.parentdormant@thebehaviourhive.com", "GG Parent Dormant", "parent");
     const parentGGStrangerId = await createUser("gg.parentstranger@thebehaviourhive.com", "GG Parent Stranger", "parent");
@@ -6155,6 +6162,7 @@ async function main() {
       .insert([
         { institution_id: institutionGGId, user_id: principalGGId, role: "principal" },
         { institution_id: institutionGGId, user_id: teacherGGId, role: "class_teacher" },
+        { institution_id: institutionGGId, user_id: snaGGId, role: "sna" },
       ])
       .select();
     if (staffGGErr) throw staffGGErr;
@@ -6217,6 +6225,79 @@ async function main() {
       );
     }
 
+    // ---- GG-0-BACKFILL: "the backfill covered every pre-existing
+    // passport" is a claim about the WHOLE table at the moment 0113 ran,
+    // not just this fixture's own one row -- checked here as a live gap
+    // query against every passport that currently exists, fixture and
+    // real data alike. If the one-time backfill INSERT missed anything,
+    // or the trigger has ever silently failed to keep pace since, this
+    // finds it: any passport with a non-null user_id that does NOT have
+    // a matching passport_guardians row is a real gap, full stop. ----
+    {
+      const { data: allOwnedPassports, error: allOwnedErr } = await admin.from("passports").select("id, user_id").not("user_id", "is", null);
+      if (allOwnedErr) throw allOwnedErr;
+      const { data: allGuardianPairs, error: allGuardianErr } = await admin.from("passport_guardians").select("passport_id, user_id");
+      if (allGuardianErr) throw allGuardianErr;
+      const guardianKeys = new Set((allGuardianPairs ?? []).map((g) => `${g.passport_id}:${g.user_id}`));
+      const gaps = (allOwnedPassports ?? []).filter((p) => !guardianKeys.has(`${p.id}:${p.user_id}`));
+      record(
+        `GG-0d THE BACKFILL, WHOLE-TABLE: every one of ${allOwnedPassports?.length ?? 0} currently-owned passports (backfilled and freshly created alike) has a matching passport_guardians row -- zero gaps`,
+        gaps.length === 0,
+        JSON.stringify(gaps)
+      );
+    }
+
+    // ---- GG-0-UPDATE: point 1 also requires proving the trigger fires
+    // on UPDATE OF user_id, not just INSERT -- and doing so via the
+    // REAL mechanism (writing passports.user_id, the column the trigger
+    // is actually defined on), never by touching passport_guardians
+    // directly. Built on a school-created (guardian-less) passport so
+    // the first update is a genuine null -> value transition, the shape
+    // closest to what "claiming" will eventually look like. Two
+    // SEQUENTIAL updates, to two DIFFERENT users, doubles as an honest
+    // way to construct a real two-guardian passport for GG-4/GG-9 below
+    // without ever inserting into passport_guardians by hand -- the
+    // trigger only ever INSERTs, never removes an earlier guardian when
+    // the column changes again, which this also confirms. Not a
+    // production user journey (nothing updates user_id twice in
+    // practice, or at all post-Stage-5), but every write here is to a
+    // real column via the real deployed trigger, not a hand-set join
+    // row -- the standing rule is about not faking the STATE, not about
+    // which real path happens to produce it. ----
+    const { data: childGGMultiId } = await principalGG.rpc("create_school_passport", {
+      p_institution_id: institutionGGId,
+      p_child_name: "GG Multi-Guardian Child",
+    });
+    const childGGMulti = { id: childGGMultiId };
+
+    {
+      const { error: firstUpdateErr } = await admin.from("passports").update({ user_id: parentGGMulti1Id }).eq("id", childGGMulti.id);
+      if (firstUpdateErr) throw firstUpdateErr;
+      const { data: guardianAfterFirstUpdate } = await admin
+        .from("passport_guardians")
+        .select("id")
+        .eq("passport_id", childGGMulti.id)
+        .eq("user_id", parentGGMulti1Id)
+        .maybeSingle();
+      record(
+        "GG-0e THE TRIGGER ON UPDATE: writing passports.user_id (null -> a real value) on an existing row fires the trigger too, not just INSERT",
+        Boolean(guardianAfterFirstUpdate),
+        JSON.stringify(guardianAfterFirstUpdate)
+      );
+    }
+    {
+      const { error: secondUpdateErr } = await admin.from("passports").update({ user_id: parentGGMulti2Id }).eq("id", childGGMulti.id);
+      if (secondUpdateErr) throw secondUpdateErr;
+      const { data: bothGuardianRows } = await admin.from("passport_guardians").select("user_id").eq("passport_id", childGGMulti.id);
+      const hasFirst = (bothGuardianRows ?? []).some((g) => g.user_id === parentGGMulti1Id);
+      const hasSecond = (bothGuardianRows ?? []).some((g) => g.user_id === parentGGMulti2Id);
+      record(
+        "GG-0f THE TRIGGER ACCUMULATES, DOESN'T REPLACE: a second update to a DIFFERENT user_id adds a second guardian row without removing the first -- genuinely two real guardians now, produced entirely by real column writes through the real trigger",
+        hasFirst && hasSecond,
+        JSON.stringify(bothGuardianRows)
+      );
+    }
+
     // ---- GG-1/GG-2: create_school_passport() -- the atomic creation
     // RPC. A school-created passport has NO guardian at all
     // (owns_passport() false for everyone), and must be immediately
@@ -6270,17 +6351,73 @@ async function main() {
       );
     }
 
+    // ---- POINT 5, THE ONE THIS STAGE EXISTS FOR: childGGSchoolId has NO
+    // guardian at all -- zero passport_guardians rows (GG-1d already
+    // proved this), nothing hand-set. Every action below is driven
+    // through the real production RPC/policy a member of staff actually
+    // uses, and none of them touch passport_guardians or care whether
+    // one exists. If any of these needed a guardian to work, this stage
+    // would not have done what it was built for. ----
+    const { data: classGGId, error: classGGErr } = await principalGG.rpc("create_class", { p_institution_id: institutionGGId, p_name: "GG School Room" });
+    if (classGGErr) throw classGGErr;
+    {
+      const { error: addTeacherErr } = await principalGG.rpc("add_class_teacher", { p_class_id: classGGId, p_user_id: teacherGGId });
+      const { error: addChildErr } = await principalGG.rpc("add_class_child", { p_class_id: classGGId, p_passport_id: childGGSchoolId });
+      record(
+        "GG-10a a guardian-less, school-created passport can be put in a class -- add_class_child() doesn't need or check for an owner",
+        !addTeacherErr && !addChildErr,
+        JSON.stringify({ addTeacherErr: addTeacherErr?.message, addChildErr: addChildErr?.message })
+      );
+    }
+    {
+      const { error: abcInsertErr } = await teacherGG.from("abc_logs").insert({
+        passport_id: childGGSchoolId,
+        logged_by: teacherGGId,
+        logged_by_role: "class_teacher",
+        intensity: 3,
+        antecedents: ["transition"],
+        behaviours: ["shouting"],
+        consequences: ["removed_from_area"],
+      });
+      record(
+        "GG-10b THE WHOLE POINT: a class teacher can log a real ABC entry on a guardian-less passport, through the ordinary real client insert (has_class_teacher_access() via class membership, no owner anywhere in the chain)",
+        !abcInsertErr,
+        abcInsertErr?.message
+      );
+    }
+    {
+      const { error: assignSnaErr } = await principalGG.rpc("assign_sna_to_child", {
+        p_passport_id: childGGSchoolId,
+        p_user_id: snaGGId,
+        p_institution_id: institutionGGId,
+      });
+      record(
+        "GG-10c an SNA can be assigned to a guardian-less passport -- assign_sna_to_child() doesn't need or check for an owner either",
+        !assignSnaErr,
+        assignSnaErr?.message
+      );
+    }
+    // Logging a real incident on childGGSchoolId is covered further down
+    // (GG-5c/GG-6b's own incidentGGNoGuardian, created via the same real
+    // create_incident_stamp() RPC) -- not duplicated here to avoid a
+    // second incident against the same child; that coverage stands as
+    // part of point 5's own claim just as much as point 2's.
+
     // ---- GG-3: passport_section_b/c/d's new unique(passport_id)
     // constraint (added, not yet the sole key -- see the migration's
     // own section 5). Proven structurally: two rows for the SAME
-    // passport_id, different user_id, the second must be refused. ----
+    // passport_id, different user_id, the second must be refused. This
+    // is a pure constraint-shape test -- the second user_id doesn't need
+    // to be a real guardian of anything, it only needs to be a real
+    // auth.users row (the column's own FK), so reusing parentGGStranger
+    // here is fine. ----
     {
       const { error: sectionBFirstErr } = await admin
         .from("passport_section_b")
         .insert({ passport_id: childGGNormal.id, user_id: parentGG1Id, okay_signals: ["music"] });
       const { error: sectionBSecondErr } = await admin
         .from("passport_section_b")
-        .insert({ passport_id: childGGNormal.id, user_id: parentGG2Id, okay_signals: ["quiet"] });
+        .insert({ passport_id: childGGNormal.id, user_id: parentGGStrangerId, okay_signals: ["quiet"] });
       record(
         "GG-3 passport_section_b's new unique(passport_id) constraint refuses a second row for the same passport even under a different user_id",
         !sectionBFirstErr && Boolean(sectionBSecondErr),
@@ -6289,42 +6426,23 @@ async function main() {
     }
 
     // ---- GG-4: get_fba_instrument_requests()'s recipient_role fix.
-    // childGGMulti has TWO real guardians -- parentGG1 (the original,
-    // backfilled owner) and parentGG2 (added directly to
-    // passport_guardians, the only way to construct a second guardian
-    // before Step 2's own claim RPC exists). An instrument request
-    // addressed to EITHER guardian must resolve to 'parent', and one
-    // addressed to teacherGG (a real class teacher, not a guardian at
-    // all) must still resolve to 'class_teacher' -- the negative control
-    // that proves this isn't just always returning 'parent' now. ----
-    // Built via create_school_passport() (no owner in passports.user_id
-    // at all) rather than an admin insert with user_id set -- parentGG1
-    // already owns childGGNormal, and passports.user_id's unique
-    // constraint is deliberately still live (migration 0113's own
-    // section 5, Step 1b not yet run), so a second admin insert with
-    // user_id: parentGG1Id would violate it. Going via the real
-    // guardian-less creation path sidesteps that AND is the more
-    // representative shape for what multi-guardian actually looks like
-    // going forward: both guardians added directly to
-    // passport_guardians, neither of them ever passports.user_id.
-    const { data: childGGMultiId } = await principalGG.rpc("create_school_passport", {
-      p_institution_id: institutionGGId,
-      p_child_name: "GG Multi-Guardian Child",
-    });
-    const childGGMulti = { id: childGGMultiId };
-    await admin.from("passport_guardians").insert([
-      { passport_id: childGGMulti.id, user_id: parentGG1Id },
-      { passport_id: childGGMulti.id, user_id: parentGG2Id },
-    ]);
+    // childGGMulti (built above, GG-0e/f) now has TWO real guardians --
+    // parentGGMulti1 and parentGGMulti2, neither of them ever
+    // passports.user_id, both produced by the real trigger reacting to
+    // real column writes. An instrument request addressed to EITHER
+    // guardian must resolve to 'parent', and one addressed to teacherGG
+    // (a real class teacher, not a guardian at all) must still resolve
+    // to 'class_teacher' -- the negative control that proves this isn't
+    // just always returning 'parent' now. ----
     await admin.from("clinician_access").insert({ passport_id: childGGMulti.id, clinician_id: clinicianGGId, is_active: true });
     const { data: fbaGGMulti } = await admin.from("fba_reports").insert({ passport_id: childGGMulti.id, clinician_id: clinicianGGId, status: "draft" }).select().single();
 
-    const { data: reqGGParent2, error: reqGGParent2Err } = await admin
+    const { data: reqGGParentMulti2, error: reqGGParentMulti2Err } = await admin
       .from("fba_instrument_requests")
-      .insert({ fba_id: fbaGGMulti.id, passport_id: childGGMulti.id, instrument_type: "qabf", recipient_id: parentGG2Id, status: "sent" })
+      .insert({ fba_id: fbaGGMulti.id, passport_id: childGGMulti.id, instrument_type: "qabf", recipient_id: parentGGMulti2Id, status: "sent" })
       .select()
       .single();
-    if (reqGGParent2Err) throw reqGGParent2Err;
+    if (reqGGParentMulti2Err) throw reqGGParentMulti2Err;
     const { data: reqGGTeacher, error: reqGGTeacherErr } = await admin
       .from("fba_instrument_requests")
       .insert({ fba_id: fbaGGMulti.id, passport_id: childGGMulti.id, instrument_type: "qabf", recipient_id: teacherGGId, status: "sent" })
@@ -6335,12 +6453,12 @@ async function main() {
     {
       const { data: instrumentRows, error: instrumentRowsErr } = await clinicianGG.rpc("get_fba_instrument_requests", { p_fba_id: fbaGGMulti.id });
       if (instrumentRowsErr) throw instrumentRowsErr;
-      const parent2Row = (instrumentRows ?? []).find((r) => r.id === reqGGParent2.id);
+      const parentMulti2Row = (instrumentRows ?? []).find((r) => r.id === reqGGParentMulti2.id);
       const teacherRow = (instrumentRows ?? []).find((r) => r.id === reqGGTeacher.id);
       record(
-        "GG-4a THE FIX ITSELF: parentGG2 -- a second guardian, never passports.user_id -- is correctly labelled recipient_role = 'parent', not the pre-fix's unconditional 'class_teacher'",
-        parent2Row?.recipient_role === "parent",
-        JSON.stringify(parent2Row)
+        "GG-4a THE FIX ITSELF: parentGGMulti2 -- a second guardian, never passports.user_id -- is correctly labelled recipient_role = 'parent', not the pre-fix's unconditional 'class_teacher'",
+        parentMulti2Row?.recipient_role === "parent",
+        JSON.stringify(parentMulti2Row)
       );
       record(
         "GG-4b (negative control): teacherGG, a genuine class teacher and not a guardian at all, is still correctly labelled 'class_teacher'",
@@ -6516,19 +6634,20 @@ async function main() {
     }
 
     // ---- GG-9: multi-guardian fan-out for the message/FBA recipient
-    // candidate RPCs -- childGGMulti's SECOND guardian (parentGG2, never
-    // passports.user_id) must appear as a real 'parent' candidate, not
-    // be silently dropped the way a single passports.user_id join would
-    // drop everyone but whoever happened to be in that column. ----
+    // candidate RPCs -- childGGMulti's SECOND guardian (parentGGMulti2,
+    // never passports.user_id) must appear as a real 'parent' candidate,
+    // not be silently dropped the way a single passports.user_id join
+    // would drop everyone but whoever happened to be in that column. ----
+    const parentGGMulti1 = await signedInClient("gg.parentmulti1@thebehaviourhive.com");
     {
-      const { data: candidatesGG } = await parentGG1.rpc("get_message_recipient_candidates", { p_passport_id: childGGMulti.id });
-      const parent2Candidate = (candidatesGG ?? []).find((c) => c.recipient_id === parentGG2Id);
+      const { data: candidatesGG } = await parentGGMulti1.rpc("get_message_recipient_candidates", { p_passport_id: childGGMulti.id });
+      const multi2Candidate = (candidatesGG ?? []).find((c) => c.recipient_id === parentGGMulti2Id);
       record(
-        "GG-9a THE FIX ITSELF, get_message_recipient_candidates(): parentGG2 -- a second guardian never present in passports.user_id -- appears as a real 'parent' candidate to their co-guardian",
-        parent2Candidate?.role === "parent",
-        JSON.stringify(parent2Candidate)
+        "GG-9a THE FIX ITSELF, get_message_recipient_candidates(): parentGGMulti2 -- a second guardian never present in passports.user_id -- appears as a real 'parent' candidate to their co-guardian",
+        multi2Candidate?.role === "parent",
+        JSON.stringify(multi2Candidate)
       );
-      const selfCandidate = (candidatesGG ?? []).find((c) => c.recipient_id === parentGG1Id);
+      const selfCandidate = (candidatesGG ?? []).find((c) => c.recipient_id === parentGGMulti1Id);
       record(
         "GG-9b the caller themselves is still correctly excluded from their own candidate list",
         selfCandidate === undefined,
@@ -6537,7 +6656,7 @@ async function main() {
     }
     {
       const { data: fbaCandidatesGG } = await clinicianGG.rpc("get_fba_recipient_candidates", { p_fba_id: fbaGGMulti.id });
-      const bothGuardians = [parentGG1Id, parentGG2Id].every((id) =>
+      const bothGuardians = [parentGGMulti1Id, parentGGMulti2Id].every((id) =>
         (fbaCandidatesGG ?? []).some((c) => c.recipient_id === id && c.role === "parent")
       );
       record(
@@ -6550,9 +6669,23 @@ async function main() {
     console.log("GG summary complete.");
 
     await admin.from("clinicians").delete().eq("user_id", clinicianGGId);
-    await admin.from("passports").delete().in("id", [childGGNormal.id, childGGMulti.id, childGGSchoolId, childGGReachable.id, childGGDormant.id]);
+    await admin
+      .from("passports")
+      .delete()
+      .in("id", [childGGNormal.id, childGGMulti.id, childGGSchoolId, childGGReachable.id, childGGDormant.id]);
     await admin.from("institutions").delete().eq("id", institutionGGId);
-    for (const id of [principalGGId, teacherGGId, clinicianGGId, parentGG1Id, parentGG2Id, parentGGReachableId, parentGGDormantId, parentGGStrangerId]) {
+    for (const id of [
+      principalGGId,
+      teacherGGId,
+      snaGGId,
+      clinicianGGId,
+      parentGG1Id,
+      parentGGMulti1Id,
+      parentGGMulti2Id,
+      parentGGReachableId,
+      parentGGDormantId,
+      parentGGStrangerId,
+    ]) {
       await admin.auth.admin.deleteUser(id);
     }
   }
