@@ -7329,6 +7329,288 @@ async function main() {
     }
   }
 
+  console.log(`\n== CHECK JJ: Stage 6, Step 1 (migration 0121) -- enrolments. Two institutions so the cascade's OWN institution_id filter is actually exercised, not assumed -- passport_access at institutionJJOther must survive ending the enrolment at institutionJJ untouched. ==`);
+  if (shouldRun("JJ")) {
+    const { data: instJJ, error: instJJErr } = await admin
+      .from("institutions")
+      .insert({ name: "JJ Institution", institution_code: CODE + "JJ", status: "verified" })
+      .select()
+      .single();
+    if (instJJErr) throw instJJErr;
+    const institutionJJId = instJJ.id;
+
+    const { data: instJJOther, error: instJJOtherErr } = await admin
+      .from("institutions")
+      .insert({ name: "JJ Other Institution", institution_code: CODE + "JJB", status: "verified" })
+      .select()
+      .single();
+    if (instJJOtherErr) throw instJJOtherErr;
+    const institutionJJOtherId = instJJOther.id;
+
+    const principalJJId = await createUser("checkjj.principal@thebehaviourhive.com", "JJ Principal", "principal");
+    const principalJJOtherId = await createUser("checkjj.principalother@thebehaviourhive.com", "JJ Other Principal", "principal");
+    const teacherJJId = await createUser("checkjj.teacher@thebehaviourhive.com", "JJ Teacher", "class_teacher");
+    const snaJJId = await createUser("checkjj.sna@thebehaviourhive.com", "JJ SNA", "sna");
+    const teacherJJOtherId = await createUser("checkjj.teacherother@thebehaviourhive.com", "JJ Other Teacher", "class_teacher");
+
+    const { data: staffJJRows, error: staffJJErr } = await admin.from("institution_staff").insert([
+      { institution_id: institutionJJId, user_id: principalJJId, role: "principal" },
+      { institution_id: institutionJJOtherId, user_id: principalJJOtherId, role: "principal" },
+      { institution_id: institutionJJId, user_id: teacherJJId, role: "class_teacher" },
+      { institution_id: institutionJJId, user_id: snaJJId, role: "sna" },
+      { institution_id: institutionJJOtherId, user_id: teacherJJOtherId, role: "class_teacher" },
+    ]).select();
+    if (staffJJErr) throw staffJJErr;
+
+    const principalJJ = await signedInClient("checkjj.principal@thebehaviourhive.com");
+    const principalJJOther = await signedInClient("checkjj.principalother@thebehaviourhive.com");
+
+    for (const row of staffJJRows.filter((r) => r.user_id === teacherJJId || r.user_id === snaJJId)) {
+      const { error: approveErr } = await principalJJ.rpc("approve_staff_join", { p_institution_staff_id: row.id });
+      if (approveErr) throw approveErr;
+    }
+    for (const row of staffJJRows.filter((r) => r.user_id === teacherJJOtherId)) {
+      const { error: approveErr } = await principalJJOther.rpc("approve_staff_join", { p_institution_staff_id: row.id });
+      if (approveErr) throw approveErr;
+    }
+
+    const teacherJJ = await signedInClient("checkjj.teacher@thebehaviourhive.com");
+
+    const { data: classJJId, error: classJJErr } = await principalJJ.rpc("create_class", { p_institution_id: institutionJJId, p_name: "JJ Room" });
+    if (classJJErr) throw classJJErr;
+
+    // JJ-1a THE ATOMICITY ITSELF, happy path: create_school_passport()
+    // (0121's own extension) creates passports + passport_institution_
+    // links + enrolments together -- extends GG-1b's own precedent
+    // (which only proved the first two) to the third.
+    const { data: childJJId, error: childJJErr } = await principalJJ.rpc("create_school_passport", {
+      p_institution_id: institutionJJId,
+      p_child_name: "JJ Child",
+    });
+    if (childJJErr) throw childJJErr;
+
+    const { data: enrolmentJJRows } = await admin.from("enrolments").select("*").eq("passport_id", childJJId);
+    const enrolmentJJ = enrolmentJJRows?.[0];
+    record(
+      "JJ-1a THE ATOMICITY ITSELF: create_school_passport() creates the passport, the institution link, AND the enrolment together, in one call -- not a follow-up step",
+      enrolmentJJRows?.length === 1 && enrolmentJJ?.institution_id === institutionJJId && enrolmentJJ?.ended_at === null && enrolmentJJ?.started_by === principalJJId,
+      JSON.stringify(enrolmentJJRows)
+    );
+    const enrolmentJJId = enrolmentJJ?.id;
+
+    {
+      const { data: linkRows } = await admin.from("passport_institution_links").select("approved_by_parent").eq("passport_id", childJJId).eq("institution_id", institutionJJId);
+      record(
+        "JJ-1a (continued): the passport_institution_links row exists too, in the same call",
+        linkRows?.length === 1 && linkRows[0].approved_by_parent === true,
+        JSON.stringify(linkRows)
+      );
+    }
+
+    // JJ-1b: the achievable half of "force a failure, prove nothing
+    // persists" -- an early-exit validation refusal (non-principal
+    // caller) leaves zero trace, not even a passports row. NOTE, told
+    // to Daniel directly, not just here: a TRUE mid-function failure
+    // (after the passports+links inserts have already run, before the
+    // enrolments insert) has no reachable trigger from valid,
+    // principal-approved parameters -- every constraint that could fail
+    // on any of the three inserts is already implied by the function's
+    // own upfront validation, and this suite has no raw SQL/DDL access
+    // to install a controlled failure point without modifying the
+    // function under test. The atomicity claim for that stronger case
+    // rests on Postgres's own language guarantee (one plpgsql function
+    // body, no EXCEPTION block -- confirmed by reading 0121's source,
+    // not assumed) rather than an empirical forced-failure test here.
+    {
+      const { error: earlyExitErr } = await teacherJJ.rpc("create_school_passport", {
+        p_institution_id: institutionJJId,
+        p_child_name: "JJ Early Exit Child",
+      });
+      const { data: leakedRows } = await admin.from("passports").select("id").eq("child_name", "JJ Early Exit Child");
+      record(
+        "JJ-1b EARLY-EXIT ATOMICITY: a non-principal caller's refused call leaves zero trace -- no passports row, even though the refusal happens before any insert is attempted",
+        Boolean(earlyExitErr) && (leakedRows?.length ?? 0) === 0,
+        JSON.stringify({ earlyExitErr: earlyExitErr?.message, leakedRows })
+      );
+    }
+
+    // JJ-2 THE INDEX ITSELF: a second ACTIVE enrolment for the same
+    // child is refused outright -- raw insert, direct against the
+    // partial unique index, not a proxy for it.
+    {
+      const { error: dupeErr } = await admin.from("enrolments").insert({
+        passport_id: childJJId,
+        institution_id: institutionJJId,
+        started_by: principalJJId,
+      });
+      record(
+        "JJ-2 THE ONE-ACTIVE-ENROLMENT INDEX ITSELF: a second active enrolment for the same child is refused",
+        Boolean(dupeErr) && /duplicate key|unique/i.test(dupeErr?.message ?? ""),
+        dupeErr?.message
+      );
+    }
+
+    // Cross-institution link, mirroring CHECK DD's own precedent
+    // exactly (a real, producible state -- the same shape a parent's own
+    // approve flow creates -- not derived from anything JJ's principal
+    // did): childJJ genuinely linked to a SECOND institution, so
+    // grant_passport_access() there is reachable, and JJ-5's own
+    // isolation check has a real cross-institution grant to test
+    // against.
+    await admin.from("passport_institution_links").insert({
+      passport_id: childJJId,
+      institution_id: institutionJJOtherId,
+      approved_by_parent: true,
+    });
+
+    const { error: addChildErr } = await principalJJ.rpc("add_class_child", { p_class_id: classJJId, p_passport_id: childJJId });
+    if (addChildErr) throw addChildErr;
+    const { data: classChildJJRows } = await admin.from("class_children").select("id").eq("class_id", classJJId).eq("passport_id", childJJId);
+    const classChildJJId = classChildJJRows?.[0]?.id;
+
+    const { error: assignSnaErr } = await principalJJ.rpc("assign_sna_to_child", { p_passport_id: childJJId, p_user_id: snaJJId, p_institution_id: institutionJJId });
+    if (assignSnaErr) throw assignSnaErr;
+
+    const { data: grantJJId, error: grantJJErr } = await principalJJ.rpc("grant_passport_access", {
+      p_passport_id: childJJId,
+      p_user_id: teacherJJId,
+      p_institution_id: institutionJJId,
+      p_reason: "JJ own-institution grant",
+    });
+    if (grantJJErr) throw grantJJErr;
+
+    const { data: grantJJOtherId, error: grantJJOtherErr } = await principalJJOther.rpc("grant_passport_access", {
+      p_passport_id: childJJId,
+      p_user_id: teacherJJOtherId,
+      p_institution_id: institutionJJOtherId,
+      p_reason: "JJ other-institution grant",
+    });
+    if (grantJJOtherErr) throw grantJJOtherErr;
+
+    const { data: incidentJJId, error: incidentJJErr } = await teacherJJ.rpc("create_incident_stamp", {
+      p_institution_id: institutionJJId,
+      p_occurred_at: new Date().toISOString(),
+      p_location_id: (await admin.from("incident_locations").select("id").is("institution_id", null).limit(1).single()).data.id,
+      p_child_passport_ids: [childJJId],
+      p_staff: [{ user_id: teacherJJId, involvement: "witnessed" }],
+    });
+    if (incidentJJErr) throw incidentJJErr;
+
+    // JJ-4a/b/c: refusals on the STILL-ACTIVE original enrolment.
+    {
+      const { error } = await teacherJJ.rpc("end_enrolment", { p_enrolment_id: enrolmentJJId, p_reason: "left" });
+      record("JJ-4a end_enrolment() refuses a non-principal caller", Boolean(error), error?.message);
+    }
+    {
+      const { error } = await principalJJOther.rpc("end_enrolment", { p_enrolment_id: enrolmentJJId, p_reason: "left" });
+      record("JJ-4b end_enrolment() refuses a principal from a DIFFERENT institution", Boolean(error), error?.message);
+    }
+    {
+      const { error } = await principalJJ.rpc("end_enrolment", { p_enrolment_id: enrolmentJJId, p_reason: "expelled" });
+      record("JJ-4c end_enrolment() refuses a reason outside graduated/left/transferred", Boolean(error), error?.message);
+    }
+    {
+      const { error } = await principalJJ.rpc("end_enrolment", { p_enrolment_id: enrolmentJJId, p_reason: "" });
+      record("JJ-4c (continued) end_enrolment() refuses an empty reason", Boolean(error), error?.message);
+    }
+    {
+      const { data: stillActive } = await admin.from("enrolments").select("ended_at").eq("id", enrolmentJJId).single();
+      record("JJ-4 (control): none of the refused calls above actually ended the enrolment", stillActive?.ended_at === null, JSON.stringify(stillActive));
+    }
+
+    // JJ-4d: the real, correct end.
+    {
+      const { error } = await principalJJ.rpc("end_enrolment", { p_enrolment_id: enrolmentJJId, p_reason: "left" });
+      record("JJ-4d end_enrolment() succeeds for the correct, active, same-institution principal with a valid reason", !error, error?.message);
+    }
+
+    // JJ-5/6/7: the cascade, checked directly against every table it
+    // touches and the two it must not.
+    {
+      const { data: row } = await admin.from("class_children").select("ended_at, end_reason").eq("id", classChildJJId).single();
+      record("JJ-5a the cascade closes class_children for this child at this institution", row?.ended_at !== null, JSON.stringify(row));
+    }
+    {
+      const { data: row } = await admin.from("child_assignments").select("ended_at, end_reason").eq("passport_id", childJJId).eq("institution_id", institutionJJId).single();
+      record("JJ-5b the cascade closes child_assignments for this child at this institution", row?.ended_at !== null, JSON.stringify(row));
+    }
+    {
+      const { data: row } = await admin.from("passport_access").select("is_active").eq("id", grantJJId).single();
+      record("JJ-5c the cascade closes passport_access for this child at this institution", row?.is_active === false, JSON.stringify(row));
+    }
+    {
+      const { data: row } = await admin.from("passport_access").select("is_active").eq("id", grantJJOtherId).single();
+      record(
+        "JJ-5d THE ISOLATION ITSELF: passport_access at the OTHER institution survives untouched -- the cascade's own institution_id filter, proven, not assumed",
+        row?.is_active === true,
+        JSON.stringify(row)
+      );
+    }
+    {
+      const { data: row } = await admin.from("passport_institution_links").select("approved_by_parent").eq("passport_id", childJJId).eq("institution_id", institutionJJId).single();
+      record(
+        "JJ-6 THE DECISION HOLDS: ending the enrolment does NOT touch approved_by_parent -- that's the parent's own consent flag, not a principal's to clear",
+        row?.approved_by_parent === true,
+        JSON.stringify(row)
+      );
+    }
+    {
+      const { data: row } = await admin.from("incidents").select("owning_teacher_id, teacher_signed_at").eq("id", incidentJJId).single();
+      record(
+        "JJ-7a the cascade does NOT touch incidents/owning_teacher_id -- still teacherJJ, still unsigned",
+        row?.owning_teacher_id === teacherJJId && row?.teacher_signed_at === null,
+        JSON.stringify(row)
+      );
+    }
+    {
+      const { error } = await teacherJJ.from("incidents").update({ parent_summary: "Updated after enrolment ended." }).eq("id", incidentJJId);
+      record(
+        "JJ-7b THE DESTINATION ITSELF: the owning teacher can still complete an unsigned incident for a child whose enrolment has since ended -- no new mechanism needed, read the policy, not assumed",
+        !error,
+        error?.message
+      );
+    }
+
+    // JJ-3/JJ-8: re-enrolment is permitted once the old one is closed,
+    // and the old row survives, unmodified, as history -- not deleted,
+    // not reused. The decision that mattered most, per Daniel's own
+    // instruction: read the policy, not reasoned about.
+    let reEnrolmentJJId;
+    {
+      const { data, error } = await admin
+        .from("enrolments")
+        .insert({ passport_id: childJJId, institution_id: institutionJJId, started_by: principalJJId })
+        .select()
+        .single();
+      record("JJ-3 a child whose enrolment ended CAN be enrolled again -- the index permits a new row once the old one is closed", !error, error?.message);
+      reEnrolmentJJId = data?.id;
+    }
+    {
+      const { data: allRows } = await admin.from("enrolments").select("*").eq("passport_id", childJJId).order("started_at");
+      const original = allRows?.find((r) => r.id === enrolmentJJId);
+      const fresh = allRows?.find((r) => r.id === reEnrolmentJJId);
+      record(
+        "JJ-8 THE ONE THAT MATTERS MOST: both enrolment rows exist -- the ended original, untouched (reason still 'left', still attributed to principalJJ), and the new active one -- history intact, re-enrolment is a genuinely new row, not a reused or resurrected one",
+        allRows?.length === 2 &&
+          original?.ended_at !== null &&
+          original?.end_reason === "left" &&
+          original?.ended_by === principalJJId &&
+          fresh?.ended_at === null &&
+          fresh?.id !== original?.id,
+        JSON.stringify(allRows)
+      );
+    }
+
+    console.log("JJ summary complete.");
+
+    await admin.from("incidents").delete().eq("id", incidentJJId);
+    await admin.from("passports").delete().eq("id", childJJId);
+    await admin.from("institutions").delete().in("id", [institutionJJId, institutionJJOtherId]);
+    for (const id of [principalJJId, principalJJOtherId, teacherJJId, snaJJId, teacherJJOtherId]) {
+      await admin.auth.admin.deleteUser(id);
+    }
+  }
+
   console.log(`\n== Summary ==`);
   const failed = results.filter((r) => !r.pass);
   console.log(`${results.length - failed.length}/${results.length} passed.`);
