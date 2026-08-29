@@ -8,6 +8,32 @@
 // asserts every check, then deletes everything it created.
 //
 // Run with: node --env-file=.env.local scripts/incident-log-test/adversarial-verify.mjs
+//
+// DEV-MODE SPLIT: set ONLY_CHECKS to a comma-separated list of block
+// names to run just those blocks instead of the full suite --
+// ONLY_CHECKS=GG,HH node --env-file=.env.local scripts/incident-log-test/adversarial-verify.mjs
+// "CORE" covers the shared top-level fixture and every check from B
+// through U -- that region is one historically-accumulated, tightly
+// interleaved unit (many of those checks build on state earlier ones in
+// the same region left behind) and was never split further; it's also
+// stable, rarely-touched code, not what gets iterated on during new-
+// stage development. Every check from V onward is independently
+// self-contained (own institution, own accounts, own cleanup) and
+// individually selectable: V, W, X, Y, Z, AA, BB, CC, DD, EE, FF, GG,
+// HH. Selecting none of these (ONLY_CHECKS unset) is the full run --
+// the one that gates deploys -- and its behavior is unchanged: same
+// checks, same order, same pass/fail counts. The only observable
+// difference is where the top-level fixture's own cleanup log line
+// appears (moved to right after CHECK U instead of the very end, so a
+// crash in any later check no longer strands it uncleaned) -- not a
+// change to which checks run or what they assert.
+//
+// This exists because a single full run costs ~90 real sign-ins against
+// Supabase's own auth rate limits (Free tier) -- fine once, but
+// debugging one new block by re-running the entire suite repeatedly (as
+// happened live building HH) burns through that budget in a handful of
+// attempts. Iterate with ONLY_CHECKS on whatever block you're building;
+// reserve the full, unscoped run for the actual gate.
 
 import { createClient } from "@supabase/supabase-js";
 import { randomUUID } from "node:crypto";
@@ -23,6 +49,18 @@ if (!URL || !ANON_KEY || !SERVICE_KEY) {
 const admin = createClient(URL, SERVICE_KEY, { auth: { autoRefreshToken: false, persistSession: false } });
 const PASSWORD = "IncidentVerify-2026!";
 const CODE = "INCVERIFY" + Math.floor(Math.random() * 10000);
+
+// null (ONLY_CHECKS unset) means "run everything" -- shouldRun() is
+// then true unconditionally, which is what makes the full run's
+// behavior identical to before this existed: no ONLY_CHECKS, no
+// skipped blocks, same checks in the same order.
+const ONLY_CHECKS = process.env.ONLY_CHECKS ? process.env.ONLY_CHECKS.split(",").map((s) => s.trim().toUpperCase()) : null;
+function shouldRun(name) {
+  return !ONLY_CHECKS || ONLY_CHECKS.includes(name.toUpperCase());
+}
+if (ONLY_CHECKS) {
+  console.log(`ONLY_CHECKS set -- running just: ${ONLY_CHECKS.join(", ")}`);
+}
 
 const results = [];
 function record(name, pass, detail) {
@@ -89,6 +127,12 @@ async function createUser(email, fullName, role) {
 }
 
 async function main() {
+  // CORE: the shared top-level fixture plus every check from B through
+  // U -- see the file header for why this region is one indivisible
+  // unit rather than individually split. Its own cleanup lives at the
+  // end of this block (right after CHECK U), not at the very end of
+  // main() -- see the matching comment there.
+  if (shouldRun("CORE")) {
   console.log(`\n== Setup ==`);
 
   const { data: inst, error: instErr } = await admin
@@ -2873,8 +2917,24 @@ async function main() {
     await admin.from("incidents").delete().eq("id", uIncidentId);
   }
 
+  // CORE's own cleanup -- moved here (end of CORE) from the very end of
+  // main(), where it originally lived, so it still runs whenever CORE
+  // does, and no earlier or later than before relative to CORE's own
+  // checks. The only observable difference from the pre-split file: it
+  // now happens before V-HH run instead of after, which is strictly
+  // safer (nothing V-HH depends on the top-level fixture still
+  // existing, and a crash in any of them no longer strands this
+  // fixture uncleaned).
+  console.log(`\n== Core fixture cleanup ==`);
+  await admin.from("institutions").delete().eq("id", institutionId);
+  for (const id of [principalId, teacherAId, teacherBId, snaId, clinicianId, parent1Id, parent2Id, parent3Id]) {
+    await admin.auth.admin.deleteUser(id);
+  }
+  console.log("Core fixture cleaned up.");
+  }
+
   console.log(`\n== CHECK V: Staff Lifecycle Stage 1 -- deactivation, cascade, guards (migration 0097) ==`);
-  {
+  if (shouldRun("V")) {
     const { data: instV, error: instVErr } = await admin
       .from("institutions")
       .insert({ name: "Staff Lifecycle Verify School", institution_code: CODE + "V", status: "verified" })
@@ -3343,7 +3403,7 @@ async function main() {
   }
 
   console.log(`\n== CHECK W: approve_staff_join()/reject_staff_join()/get_rejected_staff_joins() -- the RPC pair's OWN guards, not just their downstream effects (migration 0100, approval_source via 0101) ==`);
-  {
+  if (shouldRun("W")) {
     // Every fixture across the suite has depended on this RPC pair's happy
     // path since 0100 shipped -- zero checks asserted on the RPC pair
     // itself until now. See CLAUDE.md "COVERAGE GAPS ARE NOT WRONG-REASON
@@ -3616,7 +3676,7 @@ async function main() {
   }
 
   console.log(`\n== CHECK X: Principal handover -- hand_over_principal() (migration 0102) ==`);
-  {
+  if (shouldRun("X")) {
     const { data: instXLeaving, error: instXLeavingErr } = await admin
       .from("institutions")
       .insert({ name: "Handover Verify -- Leaving", institution_code: CODE + "XL", status: "verified" })
@@ -4015,7 +4075,7 @@ async function main() {
   }
 
   console.log(`\n== CHECK Y: Classes and Assignment -- has_child_access() chokepoint, all rewritten call sites, RPC guards, caps, cascade, defense-in-depth (migration 0104) ==`);
-  {
+  if (shouldRun("Y")) {
     const DENIED = /permission|row-level security|policy/i;
 
     // ---- Y0: Setup ----
@@ -4566,7 +4626,7 @@ async function main() {
   }
 
   console.log(`\n== CHECK Z: Client-behaviour half of Stage 2, Step 3 -- the "removed from a class mid-day" design, proven via the LITERAL client query shape, not a proxy for it (src/app/teacher/class/page.tsx and src/app/principal/classes/[classId]/page.tsx) ==`);
-  {
+  if (shouldRun("Z")) {
     const { data: instZ, error: instZErr } = await admin
       .from("institutions")
       .insert({ name: "Stale Class Verify", institution_code: CODE + "Z", status: "verified" })
@@ -4666,7 +4726,7 @@ async function main() {
   }
 
   console.log(`\n== CHECK AA: Temporary day-scoped access (migration 0105) -- grant/revoke authorization, the has_sna_access() fourth branch, can_own_incident()/create_incident_stamp() widening, the ownership/authority edit-policy decoupling, lazy ownership-transfer resolution, and the standing-audit fixes (assign_sna_to_child, get_institution_staff_roster) ==`);
-  {
+  if (shouldRun("AA")) {
     // dublinNowParts()/addMinutesClamped() are module-level (hoisted
     // above main(), CHECK BB reuses them for the same reason).
     // NAMED LIMITATION: the 07:30 activation boundary itself is a fixed
@@ -5137,7 +5197,7 @@ async function main() {
   }
 
   console.log(`\n== CHECK BB: Client-behaviour half of Stage 3, Step 3 -- src/hooks/useSnaChildren.ts's merged access-source query shapes, and the active/past cover-grant split in src/app/teacher/class/page.tsx and src/app/principal/classes/[classId]/page.tsx, proven via the LITERAL client query shape, not a proxy for it. What this check does NOT prove: the RPC-level correctness behind these shapes (grant_temporary_access, has_sna_access, get_institution_staff_roster) is CHECK AA's job, not this one's; this check only proves the CLIENT reproduces the right filter over rows that RLS has already let it see. It also doesn't prove anything renders on screen -- no component is mounted, no DOM is read. ==`);
-  {
+  if (shouldRun("BB")) {
     const { data: instBB, error: instBBErr } = await admin
       .from("institutions")
       .insert({ name: "Temp Access Client Verify", institution_code: CODE + "BB", status: "verified" })
@@ -5457,7 +5517,7 @@ async function main() {
   }
 
   console.log(`\n== CHECK CC: Stage 4, Step 1 (migration 0110) -- get_fba_recipient_candidates() folded in: approved_by_parent's "= true" removed (institution-match kept), and the class-derived/assignment-derived branches it never had before -- the sixth "grant access, never test the destination" instance, closed. Neither teacherCC nor snaCC below ever holds a direct passport_access row -- their only standing is class membership / child assignment, exactly the gap this migration closes. ==`);
-  {
+  if (shouldRun("CC")) {
     const { data: instCC, error: instCCErr } = await admin
       .from("institutions")
       .insert({ name: "FBA Recipient Candidates Verify", institution_code: CODE + "CC", status: "verified" })
@@ -5559,7 +5619,7 @@ async function main() {
   }
 
   console.log(`\n== CHECK DD: the institution-match join itself, empirically proven -- the one thing CHECK Y's rewrite (above) never isolated, named as unproven in the Stage 4 Step 1 report and closed here. Two institutions, one child, teacherDD genuinely class-derived at institution A only. If get_teacher_activity_feed()/get_message_recipient_candidates()/send_message() ever let institution B's OWN approved link stand in for institution A's, the join was decoration, not a real boundary. Same fixture also answers a second question: does a child linked to two institutions at once (nothing in this schema prevents it before Stage 6's one-active-enrolment constraint) behave sanely on the roster and under a scoped revoke. ==`);
-  {
+  if (shouldRun("DD")) {
     const { data: instDDA, error: instDDAErr } = await admin
       .from("institutions")
       .insert({ name: "DD Institution A", institution_code: CODE + "DDA", status: "verified" })
@@ -5778,7 +5838,7 @@ async function main() {
   }
 
   console.log(`\n== CHECK EE: Stage 4, Step 2 (migration 0111) -- grant_passport_access()/revoke_passport_access()/get_passport_access_for_child(), and the cross-institution reactivation fix caught in review before this ever shipped. ==`);
-  {
+  if (shouldRun("EE")) {
     const { data: instEEA, error: instEEAErr } = await admin
       .from("institutions")
       .insert({ name: "EE Institution A", institution_code: CODE + "EEA", status: "verified" })
@@ -6017,7 +6077,7 @@ async function main() {
   }
 
   console.log(`\n== CHECK FF: Client-behaviour half of Stage 4, Step 3 (src/app/principal/passports, src/hooks/useTeacherPassports.ts) -- proven via the LITERAL client query shape, not a proxy for it. FF-1/FF-2 are the seventh "grant access, test the destination" instance, closed: a principal-granted access is only real if the recipient's OWN surfaces actually show it. ==`);
-  {
+  if (shouldRun("FF")) {
     const { data: instFF, error: instFFErr } = await admin
       .from("institutions")
       .insert({ name: "FF Reachability Verify", institution_code: CODE + "FF", status: "verified" })
@@ -6132,7 +6192,7 @@ async function main() {
   }
 
   console.log(`\n== CHECK GG: Stage 5, Step 1 (migration 0113) -- passport_guardians, the dual-write trigger/backfill, owns_passport()'s rewrite, create_school_passport()'s atomicity, and the six "actively wrong" fixes. Per Daniel's own instruction: assert the CORRECTED VALUE specifically, not that something rendered -- a guardian labelled 'parent' rather than "a label exists", 'no_guardian_claimed' rather than "a reason is set". ==`);
-  {
+  if (shouldRun("GG")) {
     const { data: instGG, error: instGGErr } = await admin
       .from("institutions")
       .insert({ name: "GG Stage 5 Step 1 Verify", institution_code: CODE + "GG", status: "verified" })
@@ -6343,12 +6403,28 @@ async function main() {
       record("GG-2b create_school_passport() refuses a blank child name", Boolean(emptyNameErr), emptyNameErr?.message);
     }
     {
-      const { error: wrongInstErr } = await principalGG.rpc("create_school_passport", { p_institution_id: institutionId, p_child_name: "Should Be Refused Too" });
+      // GG's own throwaway "some other institution" -- deliberately NOT
+      // the top-level CORE fixture's institutionId. GG only needed A
+      // real institution principalGG doesn't belong to for this
+      // negative control, never specifically THAT one; borrowing it was
+      // the one real cross-block dependency in this file (it also made
+      // GG unable to run on its own via ONLY_CHECKS=GG). A bare
+      // institution row, no staff, no sign-in cost.
+      const { data: instGGOther, error: instGGOtherErr } = await admin
+        .from("institutions")
+        .insert({ name: "GG Some Other Institution", institution_code: CODE + "GGOTHER", status: "verified" })
+        .select()
+        .single();
+      if (instGGOtherErr) throw instGGOtherErr;
+
+      const { error: wrongInstErr } = await principalGG.rpc("create_school_passport", { p_institution_id: instGGOther.id, p_child_name: "Should Be Refused Too" });
       record(
-        "GG-2c create_school_passport() refuses a principal acting on an institution they don't belong to (institutionGG's principal, targeting the top-level fixture's own institution)",
+        "GG-2c create_school_passport() refuses a principal acting on an institution they don't belong to (institutionGG's principal, targeting an unrelated institution)",
         Boolean(wrongInstErr),
         wrongInstErr?.message
       );
+
+      await admin.from("institutions").delete().eq("id", instGGOther.id);
     }
 
     // ---- POINT 5, THE ONE THIS STAGE EXISTS FOR: childGGSchoolId has NO
@@ -6690,6 +6766,409 @@ async function main() {
     }
   }
 
+  console.log(`\n== CHECK HH: Stage 5, Step 2 (migrations 0114/0115) -- the claim flow. 0115's own fix (the redemption-race check below is what found it, before Step 3 ever built on top of it) means this check exists to prove the atomic claim genuinely works, not just that the RPCs exist. ==`);
+  if (shouldRun("HH")) {
+    const { data: instHHA, error: instHHAErr } = await admin
+      .from("institutions")
+      .insert({ name: "HH Institution A", institution_code: CODE + "HHA", status: "verified" })
+      .select()
+      .single();
+    if (instHHAErr) throw instHHAErr;
+    const institutionHHAId = instHHA.id;
+
+    const { data: instHHB, error: instHHBErr } = await admin
+      .from("institutions")
+      .insert({ name: "HH Institution B", institution_code: CODE + "HHB", status: "verified" })
+      .select()
+      .single();
+    if (instHHBErr) throw instHHBErr;
+    const institutionHHBId = instHHB.id;
+
+    const principalHHAId = await createUser("hh.principala@thebehaviourhive.com", "HH Principal A", "principal");
+    const principalHHBId = await createUser("hh.principalb@thebehaviourhive.com", "HH Principal B", "principal");
+    const teacherHHId = await createUser("hh.teacher@thebehaviourhive.com", "HH Teacher", "class_teacher");
+    const parentHHOldId = await createUser("hh.parentold@thebehaviourhive.com", "HH Parent Old", "parent");
+    const parentHHRaceAId = await createUser("hh.parentracea@thebehaviourhive.com", "HH Parent Race A", "parent");
+    const parentHHRaceBId = await createUser("hh.parentraceb@thebehaviourhive.com", "HH Parent Race B", "parent");
+    // HH-2's two rate-limit identities are deliberately NOT fresh
+    // sign-ins -- reused from elsewhere in this same fixture (the
+    // race's own loser, and teacherHH) to keep this check's total
+    // sign-in count down. redeem_passport_claim_code() doesn't check
+    // role, only auth.uid() is null, so reusing a class_teacher session
+    // for the lockout test is a legitimate real session, not a shortcut
+    // around anything the RPC itself cares about.
+
+    const { data: staffHHRows, error: staffHHErr } = await admin
+      .from("institution_staff")
+      .insert([
+        { institution_id: institutionHHAId, user_id: principalHHAId, role: "principal" },
+        { institution_id: institutionHHAId, user_id: teacherHHId, role: "class_teacher" },
+        { institution_id: institutionHHBId, user_id: principalHHBId, role: "principal" },
+      ])
+      .select();
+    if (staffHHErr) throw staffHHErr;
+
+    const principalHHA = await signedInClient("hh.principala@thebehaviourhive.com");
+    const principalHHB = await signedInClient("hh.principalb@thebehaviourhive.com");
+    for (const row of staffHHRows.filter((r) => r.institution_id === institutionHHAId && r.user_id !== principalHHAId)) {
+      const { error } = await principalHHA.rpc("approve_staff_join", { p_institution_staff_id: row.id });
+      if (error) throw error;
+    }
+    const teacherHH = await signedInClient("hh.teacher@thebehaviourhive.com");
+
+    // ---- HH-0: end to end, THE POINT OF THE STAGE, driven entirely by
+    // real RPCs -- create_school_passport() -> generate_passport_claim_
+    // code() -> redeem_passport_claim_code() -> get_my_passports(). No
+    // hand-inserted rows anywhere in this chain. Also doubles as the
+    // origin-blindness setup below: parentHHOld both OWNS a
+    // conventionally-created passport (childHHOld, admin insert with
+    // user_id set, the dual-write trigger's own path) and CLAIMS this
+    // one -- two different origins, one guardian. ----
+    const { data: childHHOld } = await admin
+      .from("passports")
+      .insert({ user_id: parentHHOldId, child_name: "HH Old Style Child", passport_status: "complete" })
+      .select()
+      .single();
+
+    const { data: childHHClaimedId, error: createClaimedErr } = await principalHHA.rpc("create_school_passport", {
+      p_institution_id: institutionHHAId,
+      p_child_name: "HH Claimed Child Sample",
+    });
+    if (createClaimedErr) throw createClaimedErr;
+
+    const { data: claimedCode, error: generateClaimedErr } = await principalHHA.rpc("generate_passport_claim_code", {
+      p_institution_id: institutionHHAId,
+      p_passport_id: childHHClaimedId,
+    });
+    record(
+      "HH-0a generate_passport_claim_code() succeeds and returns a code in the expected XXX-NNNN shape",
+      !generateClaimedErr && /^[A-Z]{3}-\d{4}$/.test(claimedCode ?? ""),
+      JSON.stringify({ claimedCode, generateClaimedErr: generateClaimedErr?.message })
+    );
+
+    const parentHHOld = await signedInClient("hh.parentold@thebehaviourhive.com");
+    const { data: redeemResult, error: redeemErr } = await parentHHOld.rpc("redeem_passport_claim_code", { p_code: claimedCode });
+    record(
+      "HH-0b THE WHOLE POINT: a real parent redeems the real code and becomes a real guardian -- correct display name (first name + last initial, the same minimal-disclosure shape as lookup_passport_by_code)",
+      !redeemErr && redeemResult?.[0]?.child_name === "HH S." && redeemResult?.[0]?.passport_id === childHHClaimedId,
+      JSON.stringify({ redeemResult, redeemErr: redeemErr?.message })
+    );
+
+    {
+      const { data: myPassports } = await parentHHOld.rpc("get_my_passports");
+      const hasOld = (myPassports ?? []).some((p) => p.passport_id === childHHOld.id);
+      const hasClaimed = (myPassports ?? []).some((p) => p.passport_id === childHHClaimedId);
+      record(
+        "HH-0c THE ORIGIN-BLINDNESS ITSELF: get_my_passports() returns BOTH the conventionally-created passport (dual-write trigger) and the claimed one (redeem_passport_claim_code()) for the same guardian, identically -- exactly two rows, no field distinguishing which came from which mechanism, which is what makes Step 3's fourteen-file migration a swap rather than a branch",
+        hasOld && hasClaimed && (myPassports ?? []).length === 2,
+        JSON.stringify(myPassports)
+      );
+    }
+
+    {
+      const { data: claimCodeRow } = await admin.from("passport_claim_codes").select("claimed_at, claimed_by").eq("code", claimedCode).single();
+      record(
+        "HH-0d the claim code's own row is stamped correctly -- claimed_at set, claimed_by the real redeeming parent",
+        Boolean(claimCodeRow.claimed_at) && claimCodeRow.claimed_by === parentHHOldId,
+        JSON.stringify(claimCodeRow)
+      );
+    }
+
+    // ---- HH-1: the redemption race, THE highest-value check here per
+    // instruction -- the failure mode being tested is two people owning
+    // the same child's record. Two real, different, signed-in parents
+    // firing redeem_passport_claim_code() at the SAME code
+    // concurrently. Exactly one must succeed. ----
+    const { data: childHHRaceId } = await principalHHA.rpc("create_school_passport", {
+      p_institution_id: institutionHHAId,
+      p_child_name: "HH Race Child",
+    });
+    const { data: raceCode } = await principalHHA.rpc("generate_passport_claim_code", {
+      p_institution_id: institutionHHAId,
+      p_passport_id: childHHRaceId,
+    });
+    const parentHHRaceA = await signedInClient("hh.parentracea@thebehaviourhive.com");
+    const parentHHRaceB = await signedInClient("hh.parentraceb@thebehaviourhive.com");
+
+    const [raceResultA, raceResultB] = await Promise.all([
+      parentHHRaceA.rpc("redeem_passport_claim_code", { p_code: raceCode }),
+      parentHHRaceB.rpc("redeem_passport_claim_code", { p_code: raceCode }),
+    ]);
+
+    const raceSuccesses = [raceResultA, raceResultB].filter((r) => !r.error);
+    const raceFailures = [raceResultA, raceResultB].filter((r) => r.error);
+    // The loser -- whichever call actually errored -- is reused for
+    // HH-2's stale-code test below rather than creating a fresh sign-in
+    // for it: a race loss never touches code_lookup_attempts (only a
+    // genuinely wrong code does), so this identity still has zero
+    // recorded failures, same as a brand new one would.
+    const raceLoserClient = raceResultA.error ? parentHHRaceA : parentHHRaceB;
+    const raceLoserId = raceResultA.error ? parentHHRaceAId : parentHHRaceBId;
+    record(
+      "HH-1a EXACTLY ONE of two truly concurrent redemptions of the SAME code succeeds, the other is cleanly refused -- not both, not neither",
+      raceSuccesses.length === 1 && raceFailures.length === 1,
+      JSON.stringify({ raceResultA: { data: raceResultA.data, error: raceResultA.error?.message }, raceResultB: { data: raceResultB.data, error: raceResultB.error?.message } })
+    );
+
+    {
+      const { data: raceGuardianRows } = await admin.from("passport_guardians").select("user_id").eq("passport_id", childHHRaceId);
+      record(
+        "HH-1b THE STAKE: exactly one passport_guardians row exists for the raced passport, not two -- this is what 0115 actually fixed",
+        (raceGuardianRows ?? []).length === 1,
+        JSON.stringify(raceGuardianRows)
+      );
+      const { data: raceCodeRow } = await admin.from("passport_claim_codes").select("claimed_by").eq("code", raceCode).single();
+      record(
+        "HH-1c claimed_by on the code row matches the winning guardian row exactly, not just whoever wrote last",
+        (raceGuardianRows ?? [])[0]?.user_id === raceCodeRow.claimed_by,
+        JSON.stringify({ raceCodeRow, raceGuardianRows })
+      );
+    }
+
+    // ---- HH-2: the rate-limit distinction, both directions. A wrong
+    // code increments the failure counter; a code that's found but
+    // stale (revoked here) does not -- proven by hammering a revoked
+    // code well past the 10-attempt cap and confirming it never locks
+    // out. Separately, ten genuinely wrong codes DO lock out the 11th
+    // attempt -- and once locked out, even the stale code gets the
+    // lockout message instead of its own "revoked" message, since the
+    // rate-limit check runs first. ----
+    const { data: childHHRateId } = await principalHHA.rpc("create_school_passport", {
+      p_institution_id: institutionHHAId,
+      p_child_name: "HH Rate Child",
+    });
+    const { data: rateCode } = await principalHHA.rpc("generate_passport_claim_code", {
+      p_institution_id: institutionHHAId,
+      p_passport_id: childHHRateId,
+    });
+    const { data: rateCodeRow } = await admin.from("passport_claim_codes").select("id").eq("code", rateCode).single();
+    const { error: revokeRateErr } = await principalHHA.rpc("revoke_passport_claim_code", { p_claim_code_id: rateCodeRow.id });
+    if (revokeRateErr) throw revokeRateErr;
+
+    for (let i = 0; i < 12; i++) {
+      await raceLoserClient.rpc("redeem_passport_claim_code", { p_code: rateCode });
+    }
+    {
+      const { data: staleAttemptRows } = await admin
+        .from("code_lookup_attempts")
+        .select("id")
+        .eq("user_id", raceLoserId)
+        .eq("lookup_type", "claim");
+      record(
+        "HH-2a THE RATE-LIMIT DISTINCTION: twelve attempts against a REVOKED (stale, not wrong) code record ZERO failed-attempt rows -- a stale code never counts toward the limiter",
+        (staleAttemptRows ?? []).length === 0,
+        JSON.stringify(staleAttemptRows)
+      );
+      const { error: thirteenthErr } = await raceLoserClient.rpc("redeem_passport_claim_code", { p_code: rateCode });
+      record(
+        "HH-2b and a THIRTEENTH attempt against the same stale code STILL isn't locked out -- confirms the count genuinely never moved, not that it happened to stay under 10 by coincidence",
+        Boolean(thirteenthErr) && /revoked/i.test(thirteenthErr.message),
+        thirteenthErr?.message
+      );
+    }
+
+    // Reuses teacherHH's own already-signed-in session for the lockout
+    // test -- redeem_passport_claim_code() checks only auth.uid(), not
+    // role, so this is a real, ordinary session, not a shortcut around
+    // anything the RPC itself cares about.
+    //
+    // 0116's own fix, asserted directly: a genuinely wrong code must
+    // return a normal, EMPTY result -- not an exception. Migration 0114/
+    // 0115's version raised an exception here, which rolled back the
+    // rate-limit INSERT two lines above it in the same function (an
+    // uncaught exception aborts the whole transaction) -- proved live
+    // by a standalone diagnostic (12 wrong attempts, code_lookup_
+    // attempts stayed at 0 rows every time) before this fix existed.
+    for (let i = 0; i < 10; i++) {
+      const { data, error } = await teacherHH.rpc("redeem_passport_claim_code", { p_code: `WRONG-${i}${i}${i}${i}` });
+      if (i === 0) {
+        record(
+          "HH-2c THE 0116 FIX ITSELF: a genuinely wrong code returns a normal, empty result (zero rows, no error) -- not an exception whose rollback would silently undo the rate-limit insert alongside it",
+          !error && (data ?? []).length === 0,
+          JSON.stringify({ data, error: error?.message })
+        );
+      }
+    }
+    {
+      const { data: wrongAttemptRows } = await admin
+        .from("code_lookup_attempts")
+        .select("id")
+        .eq("user_id", teacherHHId)
+        .eq("lookup_type", "claim");
+      record(
+        "HH-2d THE STAKE: ten genuinely wrong attempts actually recorded ten rows -- the exact bookkeeping 0114/0115 silently failed to do",
+        (wrongAttemptRows ?? []).length === 10,
+        JSON.stringify(wrongAttemptRows)
+      );
+    }
+    {
+      const { error: eleventhErr } = await teacherHH.rpc("redeem_passport_claim_code", { p_code: "WRONG-9999" });
+      record(
+        "HH-2e THE LOCKOUT ITSELF: the eleventh attempt (still a wrong code) gets 'Too many failed attempts', not another empty result",
+        Boolean(eleventhErr) && /too many/i.test(eleventhErr.message),
+        eleventhErr?.message
+      );
+      const { error: lockedOutStaleErr } = await teacherHH.rpc("redeem_passport_claim_code", { p_code: rateCode });
+      record(
+        "HH-2f once locked out, even a VALID-BUT-STALE code gets the lockout message, not its own 'revoked' message -- the rate-limit check runs before the code lookup at all",
+        Boolean(lockedOutStaleErr) && /too many/i.test(lockedOutStaleErr.message),
+        lockedOutStaleErr?.message
+      );
+    }
+
+    // ---- HH-3: expiry actually expiring. Backdated via a direct
+    // expires_at UPDATE (simulating the clock moving forward, the same
+    // established technique CHECK AA's own cutoff-time tests use --
+    // not a hand-set lifecycle column a real RPC governs, just moving
+    // time). ----
+    const { data: childHHExpireId } = await principalHHA.rpc("create_school_passport", {
+      p_institution_id: institutionHHAId,
+      p_child_name: "HH Expire Child",
+    });
+    const { data: expireCode } = await principalHHA.rpc("generate_passport_claim_code", {
+      p_institution_id: institutionHHAId,
+      p_passport_id: childHHExpireId,
+    });
+    await admin.from("passport_claim_codes").update({ expires_at: new Date(Date.now() - 1000).toISOString() }).eq("code", expireCode);
+
+    const parentHHExpire = await signedInClient("hh.parentold@thebehaviourhive.com"); // reuses an already-signed-in identity, fine -- this is a fresh unrelated passport
+    const { error: expireErr } = await parentHHExpire.rpc("redeem_passport_claim_code", { p_code: expireCode });
+    record(
+      "HH-3a a genuinely expired code is refused, distinctly ('expired', not 'not found' or 'revoked')",
+      Boolean(expireErr) && /expired/i.test(expireErr.message),
+      expireErr?.message
+    );
+    {
+      const { data: expireAttemptRows } = await admin
+        .from("code_lookup_attempts")
+        .select("id")
+        .eq("user_id", parentHHOldId)
+        .eq("lookup_type", "claim");
+      record(
+        "HH-3b an expired code, like a revoked one, does NOT count toward the rate limit either",
+        (expireAttemptRows ?? []).length === 0,
+        JSON.stringify(expireAttemptRows)
+      );
+    }
+    {
+      const { data: guardianAfterExpired } = await admin.from("passport_guardians").select("id").eq("passport_id", childHHExpireId);
+      record("HH-3c no guardian was created from the expired-code attempt", (guardianAfterExpired ?? []).length === 0, JSON.stringify(guardianAfterExpired));
+    }
+
+    // ---- HH-4: the ordinary guard surface. ----
+    const { data: childHHGuardId } = await principalHHA.rpc("create_school_passport", {
+      p_institution_id: institutionHHAId,
+      p_child_name: "HH Guard Child",
+    });
+    {
+      const { error: notPrincipalGenErr } = await teacherHH.rpc("generate_passport_claim_code", {
+        p_institution_id: institutionHHAId,
+        p_passport_id: childHHGuardId,
+      });
+      record("HH-4a generate_passport_claim_code() refuses a non-principal caller", Boolean(notPrincipalGenErr), notPrincipalGenErr?.message);
+    }
+    {
+      const { error: alreadyGuardianedErr } = await principalHHA.rpc("generate_passport_claim_code", {
+        p_institution_id: institutionHHAId,
+        p_passport_id: childHHOld.id,
+      });
+      record(
+        "HH-4b generate_passport_claim_code() refuses a passport that already has a guardian -- even a conventionally-created (dual-write-trigger) one, not just a previously-claimed one",
+        Boolean(alreadyGuardianedErr),
+        alreadyGuardianedErr?.message
+      );
+    }
+    {
+      const { data: childHHNoLink } = await admin.from("passports").insert({ child_name: "HH No Link Child", passport_status: "not_started" }).select().single();
+      const { error: noLinkErr } = await principalHHA.rpc("generate_passport_claim_code", {
+        p_institution_id: institutionHHAId,
+        p_passport_id: childHHNoLink.id,
+      });
+      record("HH-4c generate_passport_claim_code() refuses a passport with no link to the caller's institution at all", Boolean(noLinkErr), noLinkErr?.message);
+      await admin.from("passports").delete().eq("id", childHHNoLink.id);
+    }
+    {
+      const { data: firstCode } = await principalHHA.rpc("generate_passport_claim_code", { p_institution_id: institutionHHAId, p_passport_id: childHHGuardId });
+      const { data: secondCode } = await principalHHA.rpc("generate_passport_claim_code", { p_institution_id: institutionHHAId, p_passport_id: childHHGuardId });
+      const { data: firstCodeRow } = await admin.from("passport_claim_codes").select("revoked_at").eq("code", firstCode).single();
+      const { data: statusAfterRegenerate } = await principalHHA.rpc("get_passport_claim_code_status", { p_institution_id: institutionHHAId, p_passport_id: childHHGuardId });
+      record(
+        "HH-4d REGENERATE REPLACES, DOESN'T STACK: the first code is now revoked, and get_passport_claim_code_status() shows only the second as active -- the partial unique index and this procedural revoke agree",
+        firstCode !== secondCode && Boolean(firstCodeRow.revoked_at) && statusAfterRegenerate?.[0]?.code === secondCode,
+        JSON.stringify({ firstCode, secondCode, firstCodeRow, statusAfterRegenerate })
+      );
+
+      const { data: secondCodeRow } = await admin.from("passport_claim_codes").select("id").eq("code", secondCode).single();
+      {
+        const { error: notPrincipalRevoke2Err } = await teacherHH.rpc("revoke_passport_claim_code", { p_claim_code_id: secondCodeRow.id });
+        record("HH-4e revoke_passport_claim_code() refuses a non-principal caller", Boolean(notPrincipalRevoke2Err), notPrincipalRevoke2Err?.message);
+      }
+      {
+        const { error: crossInstRevokeErr } = await principalHHB.rpc("revoke_passport_claim_code", { p_claim_code_id: secondCodeRow.id });
+        record(
+          "HH-4f revoke_passport_claim_code() refuses a principal from a DIFFERENT institution -- scoped to the institution that actually issued it",
+          Boolean(crossInstRevokeErr),
+          crossInstRevokeErr?.message
+        );
+      }
+      {
+        const { error: revokeOkErr } = await principalHHA.rpc("revoke_passport_claim_code", { p_claim_code_id: secondCodeRow.id });
+        record("HH-4g the issuing institution's own principal CAN revoke it", !revokeOkErr, revokeOkErr?.message);
+      }
+      {
+        const { error: revokeAgainErr } = await principalHHA.rpc("revoke_passport_claim_code", { p_claim_code_id: secondCodeRow.id });
+        record("HH-4h revoking an already-revoked code is refused, not silently a no-op", Boolean(revokeAgainErr), revokeAgainErr?.message);
+      }
+    }
+
+    // ---- HH-5: the cross-institution active-code refusal (EE-5b's own
+    // caution, carried forward unprompted). Constructed via a direct
+    // service-role passport_institution_links insert -- there is no
+    // real production path today for a SECOND institution to link to a
+    // still-guardian-less passport (that normally only happens via
+    // parent approval, which requires a guardian that by definition
+    // doesn't exist yet here) -- named honestly as defense-in-depth,
+    // the same posture as the two untouched self-grant policies in
+    // CLAUDE.md's own Stage 4 notes, not claimed as a reachable
+    // real-world flow. ----
+    const { data: childHHCrossId } = await principalHHA.rpc("create_school_passport", {
+      p_institution_id: institutionHHAId,
+      p_child_name: "HH Cross Institution Child",
+    });
+    await admin.from("passport_institution_links").insert({ passport_id: childHHCrossId, institution_id: institutionHHBId, approved_by_parent: true });
+    await principalHHA.rpc("generate_passport_claim_code", { p_institution_id: institutionHHAId, p_passport_id: childHHCrossId });
+    {
+      const { error: crossGenerateErr } = await principalHHB.rpc("generate_passport_claim_code", {
+        p_institution_id: institutionHHBId,
+        p_passport_id: childHHCrossId,
+      });
+      record(
+        "HH-5 THE FIX CARRIED FORWARD: institution B, also genuinely linked to this child, is refused generating its OWN code while institution A's is still outstanding -- not silently revoked-and-replaced",
+        Boolean(crossGenerateErr) && /different school/i.test(crossGenerateErr.message),
+        crossGenerateErr?.message
+      );
+    }
+
+    console.log("HH summary complete.");
+
+    await admin.from("passport_claim_codes").delete().in("passport_id", [childHHClaimedId, childHHRaceId, childHHRateId, childHHExpireId, childHHGuardId, childHHCrossId]);
+    await admin
+      .from("passports")
+      .delete()
+      .in("id", [childHHOld.id, childHHClaimedId, childHHRaceId, childHHRateId, childHHExpireId, childHHGuardId, childHHCrossId]);
+    await admin.from("institutions").delete().in("id", [institutionHHAId, institutionHHBId]);
+    for (const id of [
+      principalHHAId,
+      principalHHBId,
+      teacherHHId,
+      parentHHOldId,
+      parentHHRaceAId,
+      parentHHRaceBId,
+    ]) {
+      await admin.auth.admin.deleteUser(id);
+    }
+  }
+
   console.log(`\n== Summary ==`);
   const failed = results.filter((r) => !r.pass);
   console.log(`${results.length - failed.length}/${results.length} passed.`);
@@ -6697,13 +7176,6 @@ async function main() {
     console.log("FAILURES / FINDINGS:");
     failed.forEach((f) => console.log(`  - ${f.name} :: ${f.detail}`));
   }
-
-  console.log(`\n== Cleanup ==`);
-  await admin.from("institutions").delete().eq("id", institutionId);
-  for (const id of [principalId, teacherAId, teacherBId, snaId, clinicianId, parent1Id, parent2Id, parent3Id]) {
-    await admin.auth.admin.deleteUser(id);
-  }
-  console.log("Cleaned up.");
 
   process.exit(failed.length > 0 ? 1 : 0);
 }
