@@ -155,7 +155,7 @@ this class that is **not yet fixed**.
 | **Principal** | Every child on the institution's roster (`get_institution_child_roster()`) | `passport_access`, class/SNA assignment, temporary cover, claim codes, `clinician_access` (institution side), staff deactivation, handover | Revoke a parent's or another institution's own `clinician_access`; edit a passport's Section A content; act on incidents outside their own institution |
 | **Class teacher** | Their own class roster + any explicit `passport_access` grant | Nothing beyond logging incidents/ABC data for children they can already see | Grant access to anyone; see children outside their own class/grants |
 | **SNA** | Standing-assigned children + temporary-cover children for the current day | Nothing | Grant access; see children outside their assignment |
-| **Parent/guardian** | Their own child(ren) via `passport_guardians` | `passport_institution_links.approved_by_parent` + their own `passport_access` grants (institution-wide, one action); `clinician_access` (parent side) | Revoke a school's *class-derived* access (see §4 — this is a real gap, not a design choice); edit a school-created passport's Section A |
+| **Parent/guardian** | Their own child(ren) via `passport_guardians` | Approving a school by code (`passport_institution_links.approved_by_parent`, one direction only — see §4.1, revoking is no longer offered); `clinician_access` (parent side) | Revoke a school's own access at all — removed deliberately (§4.1), not a gap; edit a school-created passport's Section A |
 | **Clinician** | Every child they are `clinician_access`-engaged for, either authority | Their own engagement, always (self-revoke, either authority) | Anything about staff, classes, or enrolment |
 
 ---
@@ -293,46 +293,36 @@ This section exists because "verified" and "sound" are different
 claims. Everything here is real and code-verified this pass, not a
 hunch.
 
-### 4.1 A parent's "Revoke Access" does not close a school's class-derived access — genuinely wrong, not yet caught
+### 4.1 A parent's "Revoke Access" did not close a school's class-derived access — RESOLVED BY REMOVAL, not a fix
 
-`passport/dashboard/page.tsx`'s `handleRevoke()` (the parent's own
-"Revoke Access" button on an approved institution) does exactly two
-things: sets `passport_institution_links.approved_by_parent = false`,
-and deactivates that institution's `passport_access` rows for this
-child. It does **not** touch `class_children` or `child_assignments`.
+**Update, same session this report was written in:** originally reported
+here as a bug to fix (a parent's "Revoke Access" only touched
+`passport_institution_links.approved_by_parent` and that institution's
+`passport_access` rows, never `class_children`/`child_assignments` —
+`has_class_teacher_access()`/`has_sna_access()`, migration `0104`, never
+checked `approved_by_parent` at all, by Stage 4's own deliberate design).
+Daniel's call, correctly: this was never a bug to fix. **The action
+itself has been removed.** The school owns the child's file once
+enrolled — a parent revoking a school's access to a child who attends
+that school was a leftover from the parent-led model this PRD moved
+past, not a control the product should have kept offering. Ending a
+school's own access to a child is now exclusively `end_enrolment()`, a
+principal's action.
 
-`has_class_teacher_access()`/`has_sna_access()` (migration `0104`, never
-redefined since — confirmed the only definition in the schema) grant
-access via class membership and standing SNA assignment **without ever
-checking `passport_institution_links.approved_by_parent` at all** — Stage
-4 Step 1 deliberately removed that gate from every read-side check
-(`approved_by_parent`'s own `"= true"` requirement was removed, keeping
-only the institution-match join), so a school can see a linked child
-before parental approval. That was the right call for the case it was
-built for. Its side effect, unexamined until now: **the same absence of
-a check means a parent's own revocation doesn't remove it either.**
+Whether class-derived access "should" have survived the old revoke path
+no longer matters — nothing calls it any more. Named here only so the
+history is legible: this was found as a live gap, and closed by removing
+the feature it lived in, not by extending its cascade.
 
-Concretely: if a child is in a class with an assigned teacher and SNA,
-and the parent taps "Revoke Access" on that school, the teacher and SNA
-**keep their access**, unaffected — only a *directly*-granted
-`passport_access` row (if any existed separately) is touched. The only
-mechanism that actually closes class-derived access is `end_enrolment()`
-— a *principal's* action, not a parent's.
-
-This directly contradicts the product's own stated promise, shown on the
-very first consent screen a parent sees: *"You control who sees it — No
-school sees anything without your active consent."* Right now, once a
-child is in a class, that promise is not structurally true for the
-parent's own revoke action. Not caught by the adversarial suite (every
-existing revoke check asserts `passport_access`/`approved_by_parent`
-specifically — correctly, for what it tests — never against a
-class-derived grant). Not caught by CHECK Z/BB/FF/LL's own client-query
-proofs either, since none of them exercise a parent's revoke against a
-class-derived child. Found by reading `has_child_access()`'s actual
-definition against `handleRevoke()`'s actual effect, not by a failing
-check.
-
-**This is the single highest-priority finding in this report.**
+**What goes with this removal — audited, not yet decided, in a separate
+pass the same session:** the approved-institutions list on
+`passport/dashboard` (kept, read-only, for now), `ShareBottomSheet`'s own
+school-approval-by-code flow (kept, unchanged, for now — Daniel's own
+framing: "the old direction entirely," a live open question), and every
+place the product's consent/privacy copy promises a parent controls
+school access (two locations, both flagged for the pending
+consent-copy rewrite, not touched here). See the session notes for the
+full audit; this report is not restated to duplicate it.
 
 ### 4.2 The access-derivation surface is wide, and nothing structurally enforces routing through it
 
@@ -370,13 +360,13 @@ time a new instance is found.
 
 In priority order, and why:
 
-1. **Fix §4.1 first.** It's small — extend `handleRevoke()`'s own
-   cascade to close class-derived access too (mirroring
-   `end_enrolment()`'s own scope, minus the enrolment/`approved_by_parent`
-   parts that are correctly out of scope for a parent's action) — and it
-   directly contradicts a promise made on the product's own first
-   screen. This is a trust issue, not a polish issue, and it's cheap to
-   close.
+1. **§4.1 is done — removed, not fixed.** Follow through on what it
+   implies: rewrite the consent/privacy copy that still promises a
+   parent can revoke a school's access (two locations, listed and
+   handed off separately), and decide the fate of the read-only
+   approved-institutions list and `ShareBottomSheet`'s own
+   approve-by-code flow, both currently kept as-is pending that
+   decision.
 
 2. **Scope `institution_admin` onboarding as PRD 2's own first stage,
    not a someday item.** It's been "the proper fix" for three separate
