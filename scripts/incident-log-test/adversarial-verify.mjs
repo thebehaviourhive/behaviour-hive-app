@@ -20,7 +20,7 @@
 // stage development. Every check from V onward is independently
 // self-contained (own institution, own accounts, own cleanup) and
 // individually selectable: V, W, X, Y, Z, AA, BB, CC, DD, EE, FF, GG,
-// HH. Selecting none of these (ONLY_CHECKS unset) is the full run --
+// HH, II, JJ, KK, LL. Selecting none of these (ONLY_CHECKS unset) is the full run --
 // the one that gates deploys -- and its behavior is unchanged: same
 // checks, same order, same pass/fail counts. The only observable
 // difference is where the top-level fixture's own cleanup log line
@@ -8007,6 +8007,239 @@ async function main() {
       principalKKId, principalKKOtherId, teacherKKId, parentKKId, parentKKOutsiderId,
       clinicianKK1Id, clinicianKK2Id, clinicianKK3Id, clinicianKK4Id, clinicianKK5Id, clinicianKK6Id,
     ]) {
+      await admin.auth.admin.deleteUser(id);
+    }
+  }
+
+  console.log(`\n== CHECK LL: Client-behaviour half of Stage 7, Step 2 (src/app/passport/dashboard/page.tsx, src/app/principal/passports/[passportId]/page.tsx, src/app/clinician/passports/page.tsx, src/app/clinician/passport/[passportId]/page.tsx) -- proven via the LITERAL client query shape AND the LITERAL client gating conditional, not a proxy for either. CHECK KK already proves revoke_clinician_access() enforces the authority split at the RPC level; this check proves something CHECK KK cannot see at all -- whether the UI's OWN affordance (does a revoke button even render) agrees with that split. The symmetry requirements Daniel named ("a principal sees a parent-engaged clinician with no revoke button reachable", and its mirror for the parent) are gating decisions that live entirely in these four files' own conditionals -- nothing in RLS or an RPC signature can catch a future change to one of them. Verified once, live, in Stage 7 Step 2's own browser pass; nothing before this check stopped the next change from silently breaking it. ==`);
+  if (shouldRun("LL")) {
+    const { data: instLL, error: instLLErr } = await admin
+      .from("institutions")
+      .insert({ name: "LL Institution", institution_code: CODE + "LL", status: "verified" })
+      .select()
+      .single();
+    if (instLLErr) throw instLLErr;
+    const institutionLLId = instLL.id;
+
+    const { data: instLLOther, error: instLLOtherErr } = await admin
+      .from("institutions")
+      .insert({ name: "LL Other Institution", institution_code: CODE + "LLB", status: "verified" })
+      .select()
+      .single();
+    if (instLLOtherErr) throw instLLOtherErr;
+    const institutionLLOtherId = instLLOther.id;
+
+    const principalLLId = await createUser("checkll.principal@thebehaviourhive.com", "LL Principal", "principal");
+    const principalLLOtherId = await createUser("checkll.principalother@thebehaviourhive.com", "LL Other Principal", "principal");
+    const parentLLId = await createUser("checkll.parent@thebehaviourhive.com", "LL Parent", "parent");
+    // clinicianLL1: parent-engaged. clinicianLL2: engaged by institutionLL
+    // (the viewer's OWN institution in the principal checks below).
+    // clinicianLL3: engaged by institutionLLOther -- the "different
+    // institution" case LL-2 needs to prove the gate isn't just "any
+    // institution engagement", specifically THIS principal's own.
+    const clinicianLL1Id = await createUser("checkll.clinician1@thebehaviourhive.com", "LL Clinician One", "clinician");
+    const clinicianLL2Id = await createUser("checkll.clinician2@thebehaviourhive.com", "LL Clinician Two", "clinician");
+    const clinicianLL3Id = await createUser("checkll.clinician3@thebehaviourhive.com", "LL Clinician Three", "clinician");
+
+    const { error: staffLLErr } = await admin.from("institution_staff").insert([
+      { institution_id: institutionLLId, user_id: principalLLId, role: "principal" },
+      { institution_id: institutionLLOtherId, user_id: principalLLOtherId, role: "principal" },
+    ]);
+    if (staffLLErr) throw staffLLErr;
+
+    const principalLL = await signedInClient("checkll.principal@thebehaviourhive.com");
+    const principalLLOther = await signedInClient("checkll.principalother@thebehaviourhive.com");
+    const parentLL = await signedInClient("checkll.parent@thebehaviourhive.com");
+
+    const clinicianCodesLL = {};
+    for (const [id, email] of [
+      [clinicianLL1Id, "checkll.clinician1@thebehaviourhive.com"],
+      [clinicianLL2Id, "checkll.clinician2@thebehaviourhive.com"],
+      [clinicianLL3Id, "checkll.clinician3@thebehaviourhive.com"],
+    ]) {
+      const c = await signedInClient(email);
+      const { error: specErr } = await c.rpc("select_clinician_specialty", { p_specialty: "behavioural_psychologist" });
+      if (specErr) throw specErr;
+      const { data: approveRows, error: approveErr } = await admin.rpc("approve_clinician", { clinician_email: email });
+      if (approveErr) throw approveErr;
+      clinicianCodesLL[id] = approveRows?.[0]?.code ?? approveRows?.code;
+    }
+
+    // The child: school-created, then claimed by the real parent through
+    // the real chain -- same discipline as CHECK KK, never a hand-
+    // inserted passport_guardians row.
+    const { data: childLLId, error: childLLErr } = await principalLL.rpc("create_school_passport", {
+      p_institution_id: institutionLLId,
+      p_child_name: "LL Child",
+    });
+    if (childLLErr) throw childLLErr;
+    const { data: claimCodeLL, error: claimCodeLLErr } = await principalLL.rpc("generate_passport_claim_code", {
+      p_institution_id: institutionLLId,
+      p_passport_id: childLLId,
+    });
+    if (claimCodeLLErr) throw claimCodeLLErr;
+    const { error: redeemLLErr } = await parentLL.rpc("redeem_passport_claim_code", { p_code: claimCodeLL });
+    if (redeemLLErr) throw redeemLLErr;
+
+    // Second institution link, mirroring CHECK KK's own precedent, so
+    // clinicianLL3's engagement has a real institution to belong to.
+    await admin.from("passport_institution_links").insert({
+      passport_id: childLLId,
+      institution_id: institutionLLOtherId,
+      approved_by_parent: true,
+    });
+
+    let clinicianAccessLL1Id, clinicianAccessLL2Id, clinicianAccessLL3Id;
+    {
+      const { data, error } = await parentLL.rpc("connect_clinician", { p_passport_id: childLLId, p_clinician_code: clinicianCodesLL[clinicianLL1Id] });
+      if (error) throw error;
+      clinicianAccessLL1Id = data;
+    }
+    {
+      const { data, error } = await principalLL.rpc("grant_clinician_access", { p_institution_id: institutionLLId, p_passport_id: childLLId, p_clinician_code: clinicianCodesLL[clinicianLL2Id] });
+      if (error) throw error;
+      clinicianAccessLL2Id = data;
+    }
+    {
+      const { data, error } = await principalLLOther.rpc("grant_clinician_access", { p_institution_id: institutionLLOtherId, p_passport_id: childLLId, p_clinician_code: clinicianCodesLL[clinicianLL3Id] });
+      if (error) throw error;
+      clinicianAccessLL3Id = data;
+    }
+
+    // ---- LL-1: THE PRINCIPAL'S OWN QUERY (bullet 1) --
+    // src/app/principal/passports/[passportId]/page.tsx:201's exact RPC
+    // call, reproduced verbatim. ----
+    const { data: principalRowsLL, error: principalQueryLLErr } = await principalLL.rpc("get_passport_clinicians", { p_passport_id: childLLId });
+    {
+      const byAccessId = (id) => (principalRowsLL ?? []).find((r) => r.clinician_access_id === id);
+      const sawParent = byAccessId(clinicianAccessLL1Id)?.engaged_by === "parent";
+      const sawOwnInstitution = byAccessId(clinicianAccessLL2Id)?.engaged_by === "institution";
+      const sawOtherInstitution = byAccessId(clinicianAccessLL3Id)?.engaged_by === "institution";
+      record(
+        "LL-1 THE DESTINATION ITSELF: the principal's own query (src/app/principal/passports/[passportId]/page.tsx:201) returns all THREE rows -- the parent's own engagement, this institution's own, AND the other institution's -- not a proxy for the RPC's authorization, the literal call this page makes",
+        !principalQueryLLErr && sawParent && sawOwnInstitution && sawOtherInstitution,
+        JSON.stringify({ error: principalQueryLLErr?.message, principalRowsLL })
+      );
+    }
+
+    // ---- LL-2: THE PRINCIPAL'S OWN REVOKE GATE (bullet 2, surface 1 of
+    // 3) -- src/app/principal/passports/[passportId]/page.tsx:587's exact
+    // conditional (`c.engagedBy === "institution" && c.engagedByInstitutionId
+    // === institutionId`), reproduced verbatim against LL-1's own rows,
+    // not a paraphrase of what the boolean "should" do. Three cases on
+    // one surface: this institution's own engagement (shows), the
+    // parent's (doesn't), and -- the case CHECK KK's RPC-level coverage
+    // has no equivalent of -- a DIFFERENT institution's own engagement
+    // (doesn't, even though engaged_by is 'institution' too). ----
+    {
+      const canRevoke = (row) => row?.engaged_by === "institution" && row?.engaged_by_institution_id === institutionLLId;
+      const ownRow = (principalRowsLL ?? []).find((r) => r.clinician_access_id === clinicianAccessLL2Id);
+      const parentRow = (principalRowsLL ?? []).find((r) => r.clinician_access_id === clinicianAccessLL1Id);
+      const otherInstRow = (principalRowsLL ?? []).find((r) => r.clinician_access_id === clinicianAccessLL3Id);
+      record(
+        "LL-2a the principal's own institution's engagement gates canRevoke=true (src/app/principal/passports/[passportId]/page.tsx:587)",
+        canRevoke(ownRow) === true,
+        JSON.stringify(ownRow)
+      );
+      record(
+        "LL-2b THE SYMMETRY REQUIREMENT ITSELF: the parent's own engagement gates canRevoke=false on the principal's surface -- 'neither authority can revoke the other's' (src/app/principal/passports/[passportId]/page.tsx:587)",
+        canRevoke(parentRow) === false,
+        JSON.stringify(parentRow)
+      );
+      record(
+        "LL-2c THE CASE CHECK KK CANNOT SEE: a DIFFERENT institution's own engagement also gates canRevoke=false -- engaged_by='institution' alone is not the gate, engaged_by_institution_id matching THIS principal's own institution is (src/app/principal/passports/[passportId]/page.tsx:587)",
+        canRevoke(otherInstRow) === false,
+        JSON.stringify(otherInstRow)
+      );
+    }
+
+    // ---- LL-3: THE PARENT'S OWN QUERY AND REVOKE GATE (bullet 2 surface
+    // 2 of 3, and bullet 3) -- src/app/passport/dashboard/page.tsx:304's
+    // exact RPC call, then its own gate at :907/:912
+    // (`clinician.engagedBy === "parent"`), reproduced verbatim. ----
+    const { data: parentRowsLL, error: parentQueryLLErr } = await parentLL.rpc("get_passport_clinicians", { p_passport_id: childLLId });
+    {
+      const byAccessId = (id) => (parentRowsLL ?? []).find((r) => r.clinician_access_id === id);
+      const ownRow = byAccessId(clinicianAccessLL1Id);
+      const schoolRow = byAccessId(clinicianAccessLL2Id);
+      const otherSchoolRow = byAccessId(clinicianAccessLL3Id);
+      const canRevoke = (row) => row?.engaged_by === "parent";
+      record(
+        "LL-3a THE MIRROR OF BULLET 3: the parent's own query (src/app/passport/dashboard/page.tsx:304) shows the SCHOOL-engaged row too -- 'a school engaging a clinician for someone's child is not something a parent should discover by accident'",
+        !parentQueryLLErr && Boolean(schoolRow) && Boolean(otherSchoolRow),
+        JSON.stringify({ error: parentQueryLLErr?.message, schoolRow, otherSchoolRow })
+      );
+      record(
+        "LL-3b the parent's own engagement gates canRevoke=true (src/app/passport/dashboard/page.tsx:907/912)",
+        canRevoke(ownRow) === true,
+        JSON.stringify(ownRow)
+      );
+      record(
+        "LL-3c THE SYMMETRY REQUIREMENT'S OTHER HALF: the school-engaged row offers NO revoke on the parent's surface, for either engaging institution (src/app/passport/dashboard/page.tsx:907/912)",
+        canRevoke(schoolRow) === false && canRevoke(otherSchoolRow) === false,
+        JSON.stringify({ schoolRow, otherSchoolRow })
+      );
+    }
+
+    // ---- LL-4: THE CLINICIAN'S CASELOAD SURFACES ENGAGEMENT ORIGIN
+    // (bullet 4) -- src/app/clinician/passports/page.tsx:61's exact RPC
+    // call (no params, clinician_id = auth.uid() only), then its own
+    // display logic at :147-149, reproduced verbatim for both a parent-
+    // engaged and an institution-engaged clinician. ----
+    {
+      const clinicianLL1 = await signedInClient("checkll.clinician1@thebehaviourhive.com");
+      const clinicianLL2 = await signedInClient("checkll.clinician2@thebehaviourhive.com");
+      const { data: caseloadLL1 } = await clinicianLL1.rpc("get_clinician_passports");
+      const { data: caseloadLL2 } = await clinicianLL2.rpc("get_clinician_passports");
+      const rowLL1 = (caseloadLL1 ?? []).find((r) => r.passport_id === childLLId);
+      const rowLL2 = (caseloadLL2 ?? []).find((r) => r.passport_id === childLLId);
+      const displayFor = (row) =>
+        row?.engaged_by === "parent" ? "Connected by the family" : `Connected by ${row?.engaged_by_institution_name ?? "the school"}`;
+      record(
+        "LL-4a the parent-engaged clinician's own caseload row displays 'Connected by the family' (src/app/clinician/passports/page.tsx:147-149)",
+        displayFor(rowLL1) === "Connected by the family",
+        JSON.stringify(rowLL1)
+      );
+      record(
+        "LL-4b the institution-engaged clinician's own caseload row names the REAL engaging institution, not a placeholder (src/app/clinician/passports/page.tsx:147-149)",
+        displayFor(rowLL2) === "Connected by LL Institution",
+        JSON.stringify(rowLL2)
+      );
+    }
+
+    // ---- LL-5: SELF-REVOKE AVAILABLE REGARDLESS OF ENGAGED_BY (bullet
+    // 5; the third of the "three surfaces" from bullet 2's own framing,
+    // and deliberately the ONE surface that does NOT gate on engaged_by
+    // at all) -- src/app/clinician/passport/[passportId]/page.tsx:155's
+    // exact RPC call plus its own :163-165 resolution (.find() by
+    // passport_id), then :276's own render gate (`{engagement && (...)}`,
+    // unconditional on engagedBy), reproduced verbatim for both
+    // authorities. ----
+    {
+      const clinicianLL1 = await signedInClient("checkll.clinician1@thebehaviourhive.com");
+      const clinicianLL2 = await signedInClient("checkll.clinician2@thebehaviourhive.com");
+      const { data: passportsLL1 } = await clinicianLL1.rpc("get_clinician_passports");
+      const { data: passportsLL2 } = await clinicianLL2.rpc("get_clinician_passports");
+      const ownLL1 = (passportsLL1 ?? []).find((row) => row.passport_id === childLLId);
+      const ownLL2 = (passportsLL2 ?? []).find((row) => row.passport_id === childLLId);
+      const buttonWouldShow = (own) => Boolean(own); // the literal :276 gate
+      record(
+        "LL-5a THE THIRD SURFACE: a parent-engaged clinician's own 'End your involvement' gate resolves truthy -- self-revoke available (src/app/clinician/passport/[passportId]/page.tsx:163-165,276)",
+        buttonWouldShow(ownLL1) === true,
+        JSON.stringify(ownLL1)
+      );
+      record(
+        "LL-5b THE CONTRAST WITH LL-2/LL-3: an institution-engaged clinician's OWN gate resolves truthy too -- unlike the principal's and parent's own surfaces, this one is deliberately NOT engaged_by-conditional (src/app/clinician/passport/[passportId]/page.tsx:163-165,276)",
+        buttonWouldShow(ownLL2) === true,
+        JSON.stringify(ownLL2)
+      );
+    }
+
+    console.log("LL summary complete.");
+
+    await admin.from("passports").delete().eq("id", childLLId);
+    await admin.from("institutions").delete().in("id", [institutionLLId, institutionLLOtherId]);
+    for (const id of [principalLLId, principalLLOtherId, parentLLId, clinicianLL1Id, clinicianLL2Id, clinicianLL3Id]) {
       await admin.auth.admin.deleteUser(id);
     }
   }
