@@ -43,6 +43,17 @@ interface StaffRosterRow {
   is_active: boolean;
 }
 
+interface GuardianRow {
+  userId: string;
+  fullName: string | null;
+  claimedAt: string;
+}
+
+interface ClaimCodeStatus {
+  code: string;
+  expiresAt: string;
+}
+
 const ROLE_LABEL: Record<string, string> = {
   class_teacher: "Class Teacher",
   sna: "SNA",
@@ -65,6 +76,16 @@ export default function PrincipalPassportDetailPage() {
 
   const [isGrantOpen, setIsGrantOpen] = useState(false);
   const [revokeTarget, setRevokeTarget] = useState<AccessRow | null>(null);
+
+  // Stage 5, Step 3, Requirement 2 -- guardians once a claim code is
+  // redeemed REPLACE the claim-code UI here (get_passport_guardians_for_
+  // child()'s own comment: "the section vanishes is not a designed
+  // state"). Exactly one of guardians/claimCode is ever meaningfully
+  // populated for a given passport, never both.
+  const [guardians, setGuardians] = useState<GuardianRow[]>([]);
+  const [claimCode, setClaimCode] = useState<ClaimCodeStatus | null>(null);
+  const [isGeneratingCode, setIsGeneratingCode] = useState(false);
+  const [generateError, setGenerateError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!user) return;
@@ -109,9 +130,11 @@ export default function PrincipalPassportDetailPage() {
     }
     setChildName(rosterMatch.child_name);
 
-    const [accessResult, staffRosterResult] = await Promise.all([
+    const [accessResult, staffRosterResult, guardiansResult, claimCodeResult] = await Promise.all([
       supabase.rpc("get_passport_access_for_child", { p_passport_id: passportId, p_institution_id: staffRow.institution_id }),
       supabase.rpc("get_institution_staff_roster", { p_institution_id: staffRow.institution_id, p_include_inactive: false, p_include_pending: false }),
+      supabase.rpc("get_passport_guardians_for_child", { p_institution_id: staffRow.institution_id, p_passport_id: passportId }),
+      supabase.rpc("get_passport_claim_code_status", { p_institution_id: staffRow.institution_id, p_passport_id: passportId }),
     ]);
 
     if (accessResult.error) {
@@ -119,6 +142,25 @@ export default function PrincipalPassportDetailPage() {
       setIsLoading(false);
       return;
     }
+
+    // Guardian/claim-code load failures don't block the rest of the page
+    // (Current Access is the section this page has always guaranteed) --
+    // logged and left empty, same posture as the other secondary reads
+    // on this page (institutionsError/cliniciansError elsewhere in this
+    // app never block their own page's primary content either).
+    if (guardiansResult.error) {
+      console.error("Failed to load guardians:", guardiansResult.error);
+    }
+    if (claimCodeResult.error) {
+      console.error("Failed to load claim code status:", claimCodeResult.error);
+    }
+    setGuardians(
+      ((guardiansResult.data ?? []) as { user_id: string; full_name: string | null; claimed_at: string }[]).map(
+        (g) => ({ userId: g.user_id, fullName: g.full_name, claimedAt: g.claimed_at })
+      )
+    );
+    const claimCodeRow = ((claimCodeResult.data ?? []) as { code: string; expires_at: string }[])[0];
+    setClaimCode(claimCodeRow ? { code: claimCodeRow.code, expiresAt: claimCodeRow.expires_at } : null);
 
     const activeRows: AccessRow[] = [];
     const pastRows: AccessRow[] = [];
@@ -154,6 +196,37 @@ export default function PrincipalPassportDetailPage() {
     load();
   }, [load]);
 
+  // Calling this again while a code is already outstanding REPLACES it
+  // (generate_passport_claim_code()'s own atomic revoke-then-issue, not
+  // a second live code) -- so "Generate Code" and "Generate a new code"
+  // in the JSX below are the exact same call, just different labels for
+  // the two states a principal can be looking at.
+  async function handleGenerateCode() {
+    if (!institutionId) return;
+    setIsGeneratingCode(true);
+    setGenerateError(null);
+    const supabase = createClient();
+    const { error } = await supabase.rpc("generate_passport_claim_code", {
+      p_institution_id: institutionId,
+      p_passport_id: passportId,
+    });
+    if (error) {
+      setGenerateError(error.message);
+      setIsGeneratingCode(false);
+      return;
+    }
+    const { data: statusRows, error: statusError } = await supabase.rpc("get_passport_claim_code_status", {
+      p_institution_id: institutionId,
+      p_passport_id: passportId,
+    });
+    if (statusError) {
+      console.error("Failed to reload claim code status:", statusError);
+    }
+    const row = ((statusRows ?? []) as { code: string; expires_at: string }[])[0];
+    setClaimCode(row ? { code: row.code, expiresAt: row.expires_at } : null);
+    setIsGeneratingCode(false);
+  }
+
   if (!isReady) {
     return null;
   }
@@ -185,6 +258,72 @@ export default function PrincipalPassportDetailPage() {
           </p>
         ) : (
           <>
+            <section className="mb-6">
+              <h2 className="mb-2 font-heading text-sm font-bold uppercase tracking-wide text-brand-neutral-black/60">
+                Parent / Guardian
+              </h2>
+
+              {guardians.length > 0 ? (
+                <div className="flex flex-col gap-2">
+                  {guardians.map((g) => (
+                    <div key={g.userId} className="rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
+                      <p className="text-sm font-semibold text-brand-neutral-black">
+                        {g.fullName ?? "A parent"}
+                      </p>
+                      <p className="mt-0.5 text-xs text-brand-neutral-black/50">
+                        Claimed access {formatDate(g.claimedAt)}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              ) : claimCode ? (
+                <div className="rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-brand-neutral-black/50">
+                    Outstanding claim code
+                  </p>
+                  <p className="mt-1 font-heading text-2xl font-bold tracking-widest text-brand-prussian-blue">
+                    {claimCode.code}
+                  </p>
+                  <p className="mt-1 text-xs text-brand-neutral-black/50">
+                    Expires {formatDate(claimCode.expiresAt)}. Give this code to {childName}&apos;s
+                    parent or guardian to link their account.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={handleGenerateCode}
+                    disabled={isGeneratingCode}
+                    className="mt-3 block w-full rounded-xl border border-brand-prussian-blue py-2 text-center text-xs font-semibold text-brand-prussian-blue disabled:opacity-50"
+                  >
+                    {isGeneratingCode ? "Generating…" : "Generate a new code"}
+                  </button>
+                  {generateError && (
+                    <p role="alert" className="mt-2 text-xs font-medium text-red-600">
+                      {generateError}
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <div className="rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-center">
+                  <p className="text-sm text-brand-neutral-black/60">
+                    No parent or guardian has claimed {childName}&apos;s passport yet.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={handleGenerateCode}
+                    disabled={isGeneratingCode}
+                    className="mt-3 rounded-full bg-brand-prussian-blue px-5 py-2.5 text-sm font-bold text-white disabled:opacity-50"
+                  >
+                    {isGeneratingCode ? "Generating…" : "Generate Claim Code"}
+                  </button>
+                  {generateError && (
+                    <p role="alert" className="mt-2 text-xs font-medium text-red-600">
+                      {generateError}
+                    </p>
+                  )}
+                </div>
+              )}
+            </section>
+
             <section>
               <div className="mb-2 flex items-center justify-between">
                 <h2 className="font-heading text-sm font-bold uppercase tracking-wide text-brand-neutral-black/60">

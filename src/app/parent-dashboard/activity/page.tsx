@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { format, isToday, isYesterday } from "date-fns";
 import { createClient } from "@/lib/supabase/client";
 import { useRequireRole } from "@/hooks/useRequireRole";
+import { useMyPassport } from "@/hooks/useMyPassport";
 import { ActivityRow, ActivityRowSkeleton } from "@/components/parent/ActivityRow";
 import { InlineErrorState } from "@/components/ui/InlineErrorState";
 import type { ActivityLogEntry } from "@/lib/activityEvents";
@@ -35,67 +36,58 @@ function groupByDate(entries: ActivityLogEntry[]) {
 
 export default function ActivityPage() {
   const { user, isReady } = useRequireRole("parent");
-  const [passportId, setPassportId] = useState<string | null>(null);
+  const {
+    passportId,
+    isLoading: isLoadingPassport,
+    error: passportLoadFailed,
+  } = useMyPassport(user?.id);
   const [entries, setEntries] = useState<ActivityLogEntry[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingActivity, setIsLoadingActivity] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    if (!user) return;
-    setIsLoading(true);
+    if (!passportId) {
+      setIsLoadingActivity(false);
+      return;
+    }
+    setIsLoadingActivity(true);
     setLoadError(null);
 
     const supabase = createClient();
-    const { data: passport, error: passportError } = await supabase
-      .from("passports")
-      .select("id")
-      .eq("user_id", user.id)
-      .maybeSingle();
-
-    if (passportError) {
-      console.error("Failed to load passport for activity page:", passportError);
-      setLoadError("Couldn't load your activity.");
-      setIsLoading(false);
-      return;
-    }
-
-    if (!passport?.id) {
-      setIsLoading(false);
-      return;
-    }
-
-    setPassportId(passport.id);
-
     const { data, error: activityError } = await supabase
       .from("activity_log")
       .select("id, event_type, event_description, created_at")
-      .eq("passport_id", passport.id)
+      .eq("passport_id", passportId)
       .order("created_at", { ascending: false })
       .range(0, PAGE_SIZE - 1);
 
     if (activityError) {
       console.error("Failed to load activity log:", activityError);
       setLoadError("Couldn't load your activity.");
-      setIsLoading(false);
+      setIsLoadingActivity(false);
       return;
     }
 
     const rows = (data ?? []) as ActivityLogEntry[];
     setEntries(rows);
     setHasMore(rows.length === PAGE_SIZE);
-    setIsLoading(false);
-  }, [user]);
+    setIsLoadingActivity(false);
+  }, [passportId]);
 
-  // Fetches on mount and whenever `load`'s identity changes -- a genuine
-  // effect for syncing with the external data source, not a synchronous
-  // state derivation.
+  // Fetches once the passport is resolved, and whenever `load`'s
+  // identity changes -- a genuine effect for syncing with the external
+  // data source, not a synchronous state derivation.
   useEffect(() => {
+    if (isLoadingPassport) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
-  }, [load]);
+  }, [load, isLoadingPassport]);
+
+  const isLoading = isLoadingPassport || isLoadingActivity;
+  const effectiveLoadError = passportLoadFailed ? "Couldn't load your activity." : loadError;
 
   async function loadMore() {
     if (!passportId || isLoadingMore) return;
@@ -151,8 +143,8 @@ export default function ActivityPage() {
             <ActivityRowSkeleton />
             <ActivityRowSkeleton />
           </div>
-        ) : loadError ? (
-          <InlineErrorState message={loadError} onRetry={load} />
+        ) : effectiveLoadError ? (
+          <InlineErrorState message={effectiveLoadError} onRetry={load} />
         ) : entries.length === 0 ? (
           <div className="rounded-xl border-2 border-dashed border-brand-pastel-blue bg-white/60 p-6 text-center">
             <p className="font-sans text-sm text-brand-neutral-black/70">

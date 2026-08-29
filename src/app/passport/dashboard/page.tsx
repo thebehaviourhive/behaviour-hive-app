@@ -16,6 +16,7 @@ import { useStrategyEffectiveness } from "@/hooks/useStrategyEffectiveness";
 import { revalidateParentCalmAccess } from "@/hooks/useParentCalmAccess";
 import { createClient } from "@/lib/supabase/client";
 import { useRequireRole } from "@/hooks/useRequireRole";
+import { useMyPassport } from "@/hooks/useMyPassport";
 import { getPassportResumeHref } from "@/lib/getPassportResumeHref";
 import { logActivity } from "@/lib/logActivity";
 import { clearPendingLogReminder } from "@/lib/calmCards/logReminder";
@@ -116,6 +117,7 @@ export default function PassportDashboardPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { user, isReady: isRoleReady } = useRequireRole("parent");
+  const { passportId, isLoading: isLoadingPassportId } = useMyPassport(user?.id);
   const [summary, setSummary] = useState<PassportSummaryData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -312,12 +314,32 @@ export default function PassportDashboardPage() {
   }
 
   useEffect(() => {
-    if (!user) return;
+    if (!user || isLoadingPassportId) return;
     let isMounted = true;
 
     async function load() {
       try {
+        // No passport at all (get_my_passports() came back empty) --
+        // same destination as the old "no row" case: off to the wizard.
+        if (!passportId) {
+          router.replace("/passport/welcome");
+          return;
+        }
+
         const supabase = createClient();
+        // The extra fields getPassportResumeHref/this page's own summary
+        // need beyond what get_my_passports() returns (id + child_name
+        // only) -- a follow-up .eq("id", ...) read, safe post-migration
+        // 0117 (passports' SELECT policy is owns_passport()-based) for a
+        // claimed guardian too, not just a self-created one.
+        //
+        // sectionB/C/D stay .eq("user_id", user.id): a claimed
+        // guardian's passport can never have rows here yet --
+        // generate_passport_claim_code() refuses a passport that already
+        // has a guardian, and only the self-created wizard (still
+        // user_id-keyed, deliberately out of Stage 5 Step 3's scope)
+        // ever writes them. See CLAUDE.md's "known limitation, not
+        // solved" entry for the real, separate gap this leaves.
         const [
           { data: passport },
           { data: sectionB },
@@ -327,9 +349,9 @@ export default function PassportDashboardPage() {
           supabase
             .from("passports")
             .select(
-              "id, passport_code, child_name, date_of_birth, school, important_people, diagnoses, diagnosis_other, passport_status, section_a_complete"
+              "passport_code, child_name, date_of_birth, school, important_people, diagnoses, diagnosis_other, passport_status, section_a_complete"
             )
-            .eq("user_id", user!.id)
+            .eq("id", passportId)
             .maybeSingle(),
           supabase
             .from("passport_section_b")
@@ -392,7 +414,7 @@ export default function PassportDashboardPage() {
         }
 
         setSummary({
-          passportId: passport!.id,
+          passportId,
           passportCode: (passport?.passport_code as string | null) ?? null,
           childName: (passport?.child_name as string | null) || "Your child",
           age: calculateAge(passport?.date_of_birth),
@@ -425,8 +447,8 @@ export default function PassportDashboardPage() {
         });
         setIsLoading(false);
 
-        await loadApprovedInstitutions(passport!.id);
-        await loadConnectedClinicians(passport!.id);
+        await loadApprovedInstitutions(passportId);
+        await loadConnectedClinicians(passportId);
       } catch (err) {
         if (!isMounted) return;
         console.error("Failed to load passport dashboard:", err);
@@ -444,7 +466,7 @@ export default function PassportDashboardPage() {
     // Re-fetches fresh on every mount — this page is always reached via a
     // real navigation (bottom nav / edit-and-return), never kept alive
     // across visits, so there is no stale-data path to guard against here.
-  }, [user, router]);
+  }, [user, router, passportId, isLoadingPassportId]);
 
   // Lets the dashboard's "ABC Log" quick action jump straight into the
   // logger instead of just landing here and requiring an extra tap on the

@@ -47,14 +47,15 @@ function useUnlockState(isOpen: boolean) {
 
     supabase.auth.getUser().then(async ({ data: { user } }) => {
       if (!user || !isMounted) return;
-      const { data: passport } = await supabase
-        .from("passports")
-        .select("id")
-        .eq("user_id", user.id)
-        .maybeSingle();
+      // get_my_passports() (Stage 5 Step 3) -- sees a claimed passport
+      // correctly, unlike a raw .eq("user_id", ...) lookup. First result
+      // only; no multi-child switcher here yet, matching useMyPassport's
+      // own documented scope boundary.
+      const { data: myPassports } = await supabase.rpc("get_my_passports");
+      const rows = (myPassports ?? []) as { passport_id: string; child_name: string }[];
 
       if (!isMounted) return;
-      const passportId = passport?.id ?? null;
+      const passportId = rows[0]?.passport_id ?? null;
 
       if (!passportId) {
         setState({ kind: "no-clinician", passportId: null });

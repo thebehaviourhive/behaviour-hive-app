@@ -1,9 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
-import { createClient } from "@/lib/supabase/client";
 import { useRequireRole } from "@/hooks/useRequireRole";
+import { useMyPassport } from "@/hooks/useMyPassport";
 import { BottomNav } from "@/components/ui/BottomNav";
 import { InlineErrorState } from "@/components/ui/InlineErrorState";
 import { ProgressSurface } from "@/components/progress/ProgressSurface";
@@ -11,47 +10,15 @@ import { ProgressSurface } from "@/components/progress/ProgressSurface";
 // Parent entry point (A1): reached from the dashboard's quick-actions
 // tile and the More page. Read-only page shell around the shared
 // ProgressSurface engine -- this file's only job is resolving the
-// signed-in parent's own passportId/child_name (via owns_passport's
-// same auth.uid() = user_id rule every other parent-track page uses)
-// and handing it to the surface; all chart/range/threshold logic lives
+// signed-in parent's own passportId/child_name (via get_my_passports(),
+// which sees a claimed passport correctly -- see useMyPassport) and
+// handing it to the surface; all chart/range/threshold logic lives
 // in ProgressSurface + src/lib/progress, shared with the teacher and
 // clinician tracks.
 export default function ParentProgressPage() {
   const { user, isReady: isRoleReady } = useRequireRole("parent");
-  const [passportId, setPassportId] = useState<string | null>(null);
-  const [childName, setChildName] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!user) return;
-    let isMounted = true;
-
-    async function load() {
-      const supabase = createClient();
-      const { data, error } = await supabase
-        .from("passports")
-        .select("id, child_name")
-        .eq("user_id", user!.id)
-        .maybeSingle();
-
-      if (!isMounted) return;
-      if (error) {
-        console.error("Failed to load passport for Progress:", error);
-        setLoadError("Couldn't load your child's Progress page.");
-        setIsLoading(false);
-        return;
-      }
-      setPassportId(data?.id ?? null);
-      setChildName(data?.child_name ?? null);
-      setIsLoading(false);
-    }
-
-    load();
-    return () => {
-      isMounted = false;
-    };
-  }, [user]);
+  const { passportId, childName, isLoading, error } = useMyPassport(user?.id);
+  const loadError = error ? "Couldn't load your child's Progress page." : null;
 
   if (!isRoleReady || isLoading) {
     return null;

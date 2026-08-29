@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useRequireRole } from "@/hooks/useRequireRole";
+import { useMyPassport } from "@/hooks/useMyPassport";
 import { logActivity } from "@/lib/logActivity";
 
 type SleepQuality = "slept_through" | "woke_briefly" | "very_restless" | "barely_slept";
@@ -90,10 +91,12 @@ const ADVANCE_DELAY_MS = 220;
 export default function MorningCheckinPage() {
   const router = useRouter();
   const { user, isReady } = useRequireRole("parent");
-
-  const [childName, setChildName] = useState("your child");
-  const [passportId, setPassportId] = useState<string | null>(null);
-  const [isLoadingPassport, setIsLoadingPassport] = useState(true);
+  const {
+    passportId,
+    childName: resolvedChildName,
+    isLoading: isLoadingPassport,
+  } = useMyPassport(user?.id);
+  const childName = resolvedChildName || "your child";
 
   const [step, setStep] = useState(1);
   const [sleepQuality, setSleepQuality] = useState<SleepQuality | null>(null);
@@ -105,30 +108,6 @@ export default function MorningCheckinPage() {
   const [error, setError] = useState<string | null>(null);
   const [showSuccess, setShowSuccess] = useState(false);
   const [successVisible, setSuccessVisible] = useState(false);
-
-  useEffect(() => {
-    if (!user) return;
-    let isMounted = true;
-
-    async function load() {
-      const supabase = createClient();
-      const { data } = await supabase
-        .from("passports")
-        .select("id, child_name")
-        .eq("user_id", user!.id)
-        .maybeSingle();
-
-      if (!isMounted) return;
-      setPassportId(data?.id ?? null);
-      setChildName(data?.child_name || "your child");
-      setIsLoadingPassport(false);
-    }
-
-    load();
-    return () => {
-      isMounted = false;
-    };
-  }, [user]);
 
   useEffect(() => {
     if (!showSuccess) return;

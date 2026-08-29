@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useRequireRole } from "@/hooks/useRequireRole";
+import { useMyPassport } from "@/hooks/useMyPassport";
 import { InlineErrorState } from "@/components/ui/InlineErrorState";
 
 // Phase 5: the parent's own persistent incident list (the dashboard's
@@ -32,49 +33,48 @@ function formatDateTime(value: string): string {
 
 export default function ParentIncidentsPage() {
   const { user, isReady } = useRequireRole("parent");
+  const {
+    passportId,
+    isLoading: isLoadingPassport,
+    error: passportLoadFailed,
+  } = useMyPassport(user?.id);
   const [rows, setRows] = useState<ParentIncidentRow[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingIncidents, setIsLoadingIncidents] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!user) return;
+    if (isLoadingPassport) return;
+    if (!passportId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setIsLoadingIncidents(false);
+      return;
+    }
     let isMounted = true;
 
     async function load() {
       const supabase = createClient();
-      const { data: passport, error: passportError } = await supabase
-        .from("passports")
-        .select("id")
-        .eq("user_id", user!.id)
-        .maybeSingle();
-
-      if (!isMounted) return;
-
-      if (passportError || !passport) {
-        setLoadError("Couldn't load your incidents.");
-        setIsLoading(false);
-        return;
-      }
-
-      const { data, error } = await supabase.rpc("get_parent_incidents", { p_passport_id: passport.id });
+      const { data, error } = await supabase.rpc("get_parent_incidents", { p_passport_id: passportId });
 
       if (!isMounted) return;
 
       if (error) {
         setLoadError("Couldn't load your incidents.");
-        setIsLoading(false);
+        setIsLoadingIncidents(false);
         return;
       }
 
       setRows((data ?? []) as ParentIncidentRow[]);
-      setIsLoading(false);
+      setIsLoadingIncidents(false);
     }
 
     load();
     return () => {
       isMounted = false;
     };
-  }, [user]);
+  }, [passportId, isLoadingPassport]);
+
+  const isLoading = isLoadingPassport || isLoadingIncidents;
+  const effectiveLoadError = passportLoadFailed ? "Couldn't load your incidents." : loadError;
 
   if (!isReady) {
     return null;
@@ -99,8 +99,8 @@ export default function ParentIncidentsPage() {
             <div className="h-20 animate-pulse rounded-2xl bg-white" />
             <div className="h-20 animate-pulse rounded-2xl bg-white" />
           </div>
-        ) : loadError ? (
-          <InlineErrorState message={loadError} onRetry={() => window.location.reload()} />
+        ) : effectiveLoadError ? (
+          <InlineErrorState message={effectiveLoadError} onRetry={() => window.location.reload()} />
         ) : rows.length === 0 ? (
           <div className="rounded-2xl border-2 border-dashed border-brand-pastel-blue bg-white/60 p-6 text-center">
             <p className="text-sm text-brand-neutral-black/70">Nothing recorded yet.</p>

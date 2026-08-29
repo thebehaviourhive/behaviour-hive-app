@@ -80,11 +80,11 @@ function fetchCalmAccess(): Promise<void> {
       return;
     }
 
-    const { data: passport } = await supabase
-      .from("passports")
-      .select("id, child_name")
-      .eq("user_id", user.id)
-      .maybeSingle();
+    // get_my_passports() (Stage 5 Step 3) -- sees a claimed passport
+    // correctly, unlike a raw .eq("user_id", ...) lookup. First result
+    // only; no multi-child switcher here yet.
+    const { data: myPassports } = await supabase.rpc("get_my_passports");
+    const passport = ((myPassports ?? []) as { passport_id: string; child_name: string }[])[0];
 
     if (!passport) {
       setState({ status: "ready", passportId: null, childName: null, cards: [] });
@@ -92,7 +92,7 @@ function fetchCalmAccess(): Promise<void> {
     }
 
     const { data: cardRows, error } = await supabase.rpc("get_my_child_calm_cards", {
-      p_passport_id: passport.id,
+      p_passport_id: passport.passport_id,
     });
 
     if (error) {
@@ -106,7 +106,7 @@ function fetchCalmAccess(): Promise<void> {
       setState(
         state.status === "ready"
           ? state
-          : { status: "ready", passportId: passport.id, childName: (passport.child_name as string | null) ?? null, cards: [] }
+          : { status: "ready", passportId: passport.passport_id, childName: passport.child_name ?? null, cards: [] }
       );
       return;
     }
@@ -130,7 +130,7 @@ function fetchCalmAccess(): Promise<void> {
         updated_at: "",
       })
     );
-    setState({ status: "ready", passportId: passport.id, childName: (passport.child_name as string | null) ?? null, cards });
+    setState({ status: "ready", passportId: passport.passport_id, childName: passport.child_name ?? null, cards });
   })().finally(() => {
     inFlight = null;
   });

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Plus } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { useRequireRole } from "@/hooks/useRequireRole";
+import { useMyPassport } from "@/hooks/useMyPassport";
 import { useMessageThread } from "@/hooks/useMessageThread";
 import { useMessageCategories } from "@/hooks/useMessageCategories";
 import { fetchApprovedInstitutionPhone } from "@/lib/messages/institutionPhone";
@@ -20,49 +21,27 @@ import { ComposeMessageSheet } from "@/components/messages/ComposeMessageSheet";
 // itself now carry loading skeletons via the shared MessageList.
 export default function MessagesPage() {
   const { user, isReady: isRoleReady } = useRequireRole("parent");
-  const [passportId, setPassportId] = useState<string | null>(null);
-  const [childName, setChildName] = useState<string | null>(null);
+  const {
+    passportId,
+    childName,
+    isLoading: isLoadingPassport,
+    error: passportLoadFailed,
+  } = useMyPassport(user?.id);
   const [institutionPhone, setInstitutionPhone] = useState<string | null>(null);
-  const [isLoadingPassport, setIsLoadingPassport] = useState(true);
-  const [passportLoadError, setPassportLoadError] = useState<string | null>(null);
   const [isComposeOpen, setIsComposeOpen] = useState(false);
+  const passportLoadError = passportLoadFailed ? "Couldn't load Messages." : null;
 
   useEffect(() => {
-    if (!user) return;
+    if (!passportId) return;
     let isMounted = true;
-
-    async function load() {
-      const supabase = createClient();
-      const { data: passport, error } = await supabase
-        .from("passports")
-        .select("id, child_name")
-        .eq("user_id", user!.id)
-        .maybeSingle();
-
-      if (!isMounted) return;
-      if (error) {
-        console.error("Failed to load passport for Messages:", error);
-        setPassportLoadError("Couldn't load Messages.");
-        setIsLoadingPassport(false);
-        return;
-      }
-
-      setPassportId(passport?.id ?? null);
-      setChildName(passport?.child_name ?? null);
-
-      if (passport?.id) {
-        const phone = await fetchApprovedInstitutionPhone(supabase, passport.id);
-        if (isMounted) setInstitutionPhone(phone);
-      }
-
-      setIsLoadingPassport(false);
-    }
-
-    load();
+    const supabase = createClient();
+    fetchApprovedInstitutionPhone(supabase, passportId).then((phone) => {
+      if (isMounted) setInstitutionPhone(phone);
+    });
     return () => {
       isMounted = false;
     };
-  }, [user]);
+  }, [passportId]);
 
   const { messages, candidates, nameById, isLoading, loadError, refresh } = useMessageThread(passportId);
   const { categories } = useMessageCategories("parent");

@@ -6,6 +6,7 @@ import { BottomNav } from "@/components/ui/BottomNav";
 import { ChatBubbleIcon } from "@/components/ui/icons";
 import { createClient } from "@/lib/supabase/client";
 import { useRequireRole } from "@/hooks/useRequireRole";
+import { useMyPassport } from "@/hooks/useMyPassport";
 import { useMessagesAwaitingActionCount } from "@/hooks/useMessagesAwaitingActionCount";
 import { getPassportResumeHref } from "@/lib/getPassportResumeHref";
 import { RecentUpdatesCard } from "@/components/parent/RecentUpdatesCard";
@@ -68,11 +69,15 @@ export default function ParentDashboardPage() {
   const messagesAwaitingCount = useMessagesAwaitingActionCount(user?.id ?? null);
   const parentFullName = user?.user_metadata?.full_name as string | undefined;
   const firstName = parentFullName ? parentFullName.split(" ")[0] : "there";
-  const [childName, setChildName] = useState("your child");
-  const [passportId, setPassportId] = useState<string | null>(null);
+  const {
+    passportId,
+    childName: resolvedChildName,
+    isLoading: isLoadingPassportId,
+  } = useMyPassport(user?.id);
+  const childName = resolvedChildName || "your child";
   const [passportStatus, setPassportStatus] = useState<PassportStatus>("not_started");
   const [resumeHref, setResumeHref] = useState("/passport/welcome");
-  const [isLoadingPassport, setIsLoadingPassport] = useState(true);
+  const [isLoadingDashboardData, setIsLoadingDashboardData] = useState(true);
   const [hasCheckedInToday, setHasCheckedInToday] = useState(false);
   const [checkedInAt, setCheckedInAt] = useState<string | null>(null);
   const [hasTeacherUpdateToday, setHasTeacherUpdateToday] = useState(false);
@@ -91,7 +96,7 @@ export default function ParentDashboardPage() {
   }, [user]);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user || isLoadingPassportId) return;
 
     let isMounted = true;
 
@@ -100,6 +105,30 @@ export default function ParentDashboardPage() {
       const startOfToday = new Date();
       startOfToday.setHours(0, 0, 0, 0);
 
+      if (!passportId) {
+        // No passport yet (genuinely not started, not a load failure) --
+        // same as before, resumeHref stays at its /passport/welcome
+        // default and every passport-scoped section below renders its
+        // own "no passport" state via passportId={null}.
+        setIsLoadingDashboardData(false);
+        return;
+      }
+
+      // passportRow: the fields getPassportResumeHref needs beyond what
+      // get_my_passports() returns (id + child_name only) -- a follow-up
+      // .eq("id", ...) read, safe post-migration 0117 (passports' SELECT
+      // policy is owns_passport()-based) for a claimed guardian too, not
+      // just a self-created one.
+      //
+      // sectionB/C/D and morning_checkins stay .eq("user_id", user.id):
+      // a claimed guardian's passport can never have rows in any of
+      // these (generate_passport_claim_code() refuses to issue a code
+      // for a passport that already has a guardian, and only a guardian
+      // -- self-creating via section-a/b/c/d -- ever writes them), so
+      // these queries are correct unchanged, not a migration gap. See
+      // CLAUDE.md's "known limitation, not solved" entry for the real,
+      // separate gap this leaves (a claimed guardian can't fill these in
+      // yet at all).
       const [
         { data: passportRow },
         { data: sectionB },
@@ -109,8 +138,8 @@ export default function ParentDashboardPage() {
       ] = await Promise.all([
         supabase
           .from("passports")
-          .select("id, child_name, passport_status, section_a_complete")
-          .eq("user_id", user!.id)
+          .select("passport_status, section_a_complete")
+          .eq("id", passportId)
           .maybeSingle(),
         supabase
           .from("passport_section_b")
@@ -142,48 +171,41 @@ export default function ParentDashboardPage() {
       const status =
         (passportRow?.passport_status as PassportStatus | undefined) ?? "not_started";
 
-      setChildName(passportRow?.child_name || "your child");
-      setPassportId(passportRow?.id ?? null);
       setPassportStatus(status);
       setHasCheckedInToday(Boolean(todaysCheckin));
       setCheckedInAt(todaysCheckin?.submitted_at ?? null);
 
-      // Run after the batch above rather than inside it, since it needs
-      // passportRow.id, which that batch is what resolves in the first
-      // place.
-      if (passportRow?.id) {
-        const { data: todaysUpdate } = await supabase
-          .from("teacher_updates")
-          .select("settled_state, energy_level, flags, heads_up, teacher_id")
-          .eq("passport_id", passportRow.id)
-          .gte("submitted_at", startOfToday.toISOString())
-          .order("submitted_at", { ascending: false })
-          .limit(1)
-          .maybeSingle();
+      const { data: todaysUpdate } = await supabase
+        .from("teacher_updates")
+        .select("settled_state, energy_level, flags, heads_up, teacher_id")
+        .eq("passport_id", passportId)
+        .gte("submitted_at", startOfToday.toISOString())
+        .order("submitted_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (!isMounted) return;
+
+      if (todaysUpdate) {
+        const { data: teacherName, error: teacherNameError } = await supabase.rpc(
+          "get_teacher_name",
+          { p_teacher_id: todaysUpdate.teacher_id }
+        );
+
+        if (teacherNameError) {
+          console.error("Failed to load teacher name:", teacherNameError);
+        }
 
         if (!isMounted) return;
 
-        if (todaysUpdate) {
-          const { data: teacherName, error: teacherNameError } = await supabase.rpc(
-            "get_teacher_name",
-            { p_teacher_id: todaysUpdate.teacher_id }
-          );
-
-          if (teacherNameError) {
-            console.error("Failed to load teacher name:", teacherNameError);
-          }
-
-          if (!isMounted) return;
-
-          setHasTeacherUpdateToday(true);
-          setTeacherUpdate({
-            teacherName: teacherName ?? "your child's teacher",
-            settledState: (todaysUpdate.settled_state as SettledState) ?? "settled",
-            energyLevel: todaysUpdate.energy_level ?? 0,
-            flags: todaysUpdate.flags ?? [],
-            headsUp: todaysUpdate.heads_up,
-          });
-        }
+        setHasTeacherUpdateToday(true);
+        setTeacherUpdate({
+          teacherName: teacherName ?? "your child's teacher",
+          settledState: (todaysUpdate.settled_state as SettledState) ?? "settled",
+          energyLevel: todaysUpdate.energy_level ?? 0,
+          flags: todaysUpdate.flags ?? [],
+          headsUp: todaysUpdate.heads_up,
+        });
       }
       setResumeHref(
         getPassportResumeHref({
@@ -208,14 +230,14 @@ export default function ParentDashboardPage() {
             : null,
         })
       );
-      setIsLoadingPassport(false);
+      setIsLoadingDashboardData(false);
     }
 
     loadDashboardData();
     return () => {
       isMounted = false;
     };
-  }, [user]);
+  }, [user, passportId, isLoadingPassportId]);
 
   function dismissPassportCard() {
     if (!user) return;
@@ -223,7 +245,7 @@ export default function ParentDashboardPage() {
     setIsPassportCardDismissed(true);
   }
 
-  if (!isReady || isLoadingPassport) {
+  if (!isReady || isLoadingPassportId || isLoadingDashboardData) {
     return null;
   }
 

@@ -68,7 +68,9 @@ export default function MorePage() {
       } else if (userRole === "parent") {
         // Parent (the only track this More page adds a Progress entry
         // for) -- needed just for the tile label, matching the quick-
-        // actions grid's own "[Child]'s Progress" wording.
+        // actions grid's own "[Child]'s Progress" wording. Resolved via
+        // get_my_passports() (Stage 5 Step 3) so a claimed guardian's
+        // own child name shows here too, not just a self-created one.
         //
         // FIX: this used to be a negative catch-all
         // (`!userRole || (userRole !== "class_teacher" && userRole !==
@@ -76,15 +78,12 @@ export default function MorePage() {
         // check -- harmless while parent was genuinely the only other
         // track, but it silently misclassified SNA (and would
         // misclassify any future role) as parent-like, running a
-        // pointless `passports` query scoped to `user_id = auth.uid()`
-        // that can never match an SNA's own row.
-        const { data: passport } = await supabase
-          .from("passports")
-          .select("child_name")
-          .eq("user_id", user.id)
-          .maybeSingle();
+        // pointless passport lookup that can never match an SNA's own
+        // row.
+        const { data: myPassports } = await supabase.rpc("get_my_passports");
+        const rows = (myPassports ?? []) as { passport_id: string; child_name: string }[];
 
-        if (isMounted) setChildName(passport?.child_name ?? null);
+        if (isMounted) setChildName(rows[0]?.child_name ?? null);
       }
 
       setIsReady(true);
