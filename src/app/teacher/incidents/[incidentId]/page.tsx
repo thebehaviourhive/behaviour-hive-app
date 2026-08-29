@@ -379,9 +379,34 @@ export default function IncidentRecordPage() {
           .eq("incident_id", params.incidentId)
           .order("child_index"),
         supabase.from("incident_staff").select("id, user_id, free_text_name").eq("incident_id", params.incidentId),
-        supabase.rpc("get_institution_staff_roster", { p_institution_id: incident.institution_id }),
+        // p_include_inactive/p_include_pending: true -- this page's own
+        // name resolution is for people ALREADY referenced on the
+        // incident (owning_teacher_id, signers, parent_called_by), not
+        // a picker of who's currently eligible. Without these, a
+        // departed staff member's name silently degraded to a generic
+        // fallback ("a staff member") on an already-signed record --
+        // found live, the day after 0120 fixed this same RPC's caller-
+        // standing check and the sweep that produced it turned attention
+        // to what actually consumes the roster shape. staffNameById
+        // below is only ever read for display, never to populate an
+        // add-new picker (confirmed by reading every use on this page),
+        // so there's no risk of offering a departed person as a new
+        // pick by including them here.
+        supabase.rpc("get_institution_staff_roster", {
+          p_institution_id: incident.institution_id,
+          p_include_inactive: true,
+          p_include_pending: true,
+        }),
         // Roster-scoped resolution, not an embedded passports(...) join
         // -- see this file's header comment and CLAUDE.md.
+        //
+        // NOTE, not fixed here: get_institution_child_roster() has no
+        // p_include_inactive equivalent -- a child whose institution
+        // link has ended isn't a trackable state yet (that's Stage 6's
+        // own enrolments work). So a departed CHILD's name on an old
+        // incident has the identical degradation this migration just
+        // fixed for staff, and nothing here can close it until Stage 6
+        // gives this RPC the same shape. Named, not solved.
         supabase.rpc("get_institution_child_roster", { p_institution_id: incident.institution_id }),
         supabase.from("incident_recovery_types").select("value").or(institutionOrGlobal).eq("is_active", true).order("sort_order"),
         supabase
