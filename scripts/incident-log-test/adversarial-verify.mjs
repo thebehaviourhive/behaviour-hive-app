@@ -7629,6 +7629,388 @@ async function main() {
     }
   }
 
+  console.log(`\n== CHECK KK: Stage 7, Step 1 (migration 0123) -- clinician_access.engaged_by and split revocation authority. Two institutions, six clinicians, one child claimed through the real chain -- every write path, both double-engagement refusals, all three revoke authorities, principal/parent visibility, staff-departure non-cascade, and the enrolment-end cascade's own isolation. ==`);
+  if (shouldRun("KK")) {
+    const { data: instKK, error: instKKErr } = await admin
+      .from("institutions")
+      .insert({ name: "KK Institution", institution_code: CODE + "KK", status: "verified" })
+      .select()
+      .single();
+    if (instKKErr) throw instKKErr;
+    const institutionKKId = instKK.id;
+
+    const { data: instKKOther, error: instKKOtherErr } = await admin
+      .from("institutions")
+      .insert({ name: "KK Other Institution", institution_code: CODE + "KKB", status: "verified" })
+      .select()
+      .single();
+    if (instKKOtherErr) throw instKKOtherErr;
+    const institutionKKOtherId = instKKOther.id;
+
+    const principalKKId = await createUser("checkkk.principal@thebehaviourhive.com", "KK Principal", "principal");
+    const principalKKOtherId = await createUser("checkkk.principalother@thebehaviourhive.com", "KK Other Principal", "principal");
+    const teacherKKId = await createUser("checkkk.teacher@thebehaviourhive.com", "KK Teacher", "class_teacher");
+    const parentKKId = await createUser("checkkk.parent@thebehaviourhive.com", "KK Parent", "parent");
+    const parentKKOutsiderId = await createUser("checkkk.parentoutsider@thebehaviourhive.com", "KK Outsider Parent", "parent");
+    const clinicianKK1Id = await createUser("checkkk.clinician1@thebehaviourhive.com", "KK Clinician One", "clinician");
+    const clinicianKK2Id = await createUser("checkkk.clinician2@thebehaviourhive.com", "KK Clinician Two", "clinician");
+    const clinicianKK3Id = await createUser("checkkk.clinician3@thebehaviourhive.com", "KK Clinician Three", "clinician");
+    const clinicianKK4Id = await createUser("checkkk.clinician4@thebehaviourhive.com", "KK Clinician Four", "clinician");
+    const clinicianKK5Id = await createUser("checkkk.clinician5@thebehaviourhive.com", "KK Clinician Five", "clinician");
+    const clinicianKK6Id = await createUser("checkkk.clinician6@thebehaviourhive.com", "KK Clinician Six", "clinician");
+
+    const { data: staffKKRows, error: staffKKErr } = await admin.from("institution_staff").insert([
+      { institution_id: institutionKKId, user_id: principalKKId, role: "principal" },
+      { institution_id: institutionKKOtherId, user_id: principalKKOtherId, role: "principal" },
+      { institution_id: institutionKKId, user_id: teacherKKId, role: "class_teacher" },
+    ]).select();
+    if (staffKKErr) throw staffKKErr;
+
+    const principalKK = await signedInClient("checkkk.principal@thebehaviourhive.com");
+    const principalKKOther = await signedInClient("checkkk.principalother@thebehaviourhive.com");
+
+    for (const row of staffKKRows.filter((r) => r.user_id === teacherKKId)) {
+      const { error: approveErr } = await principalKK.rpc("approve_staff_join", { p_institution_staff_id: row.id });
+      if (approveErr) throw approveErr;
+    }
+
+    const teacherKK = await signedInClient("checkkk.teacher@thebehaviourhive.com");
+    const parentKK = await signedInClient("checkkk.parent@thebehaviourhive.com");
+    const parentKKOutsider = await signedInClient("checkkk.parentoutsider@thebehaviourhive.com");
+
+    // Each clinician verified through the REAL admin path -- select_
+    // clinician_specialty() as their own session, approve_clinician() as
+    // the service role (the only verification path that exists; there is
+    // no user-facing self-verify RPC to bypass) -- not a hand-set
+    // verification_status. This is what actually produces a real
+    // clinician_code, which every write path below looks up by.
+    const clinicianCodes = {};
+    for (const [id, email] of [
+      [clinicianKK1Id, "checkkk.clinician1@thebehaviourhive.com"],
+      [clinicianKK2Id, "checkkk.clinician2@thebehaviourhive.com"],
+      [clinicianKK3Id, "checkkk.clinician3@thebehaviourhive.com"],
+      [clinicianKK4Id, "checkkk.clinician4@thebehaviourhive.com"],
+      [clinicianKK5Id, "checkkk.clinician5@thebehaviourhive.com"],
+      [clinicianKK6Id, "checkkk.clinician6@thebehaviourhive.com"],
+    ]) {
+      const c = await signedInClient(email);
+      const { error: specErr } = await c.rpc("select_clinician_specialty", { p_specialty: "behavioural_psychologist" });
+      if (specErr) throw specErr;
+      const { data: approveRows, error: approveErr } = await admin.rpc("approve_clinician", { clinician_email: email });
+      if (approveErr) throw approveErr;
+      // approve_clinician()'s live (0030, not 0029) return column is
+      // "code", not "clinician_code" -- 0030's own fix, renamed to avoid
+      // a PL/pgSQL variable/column collision inside the function itself.
+      // Read the live definition, not the first one found -- caught here
+      // by the RPC actually failing (undefined -> the param silently
+      // dropped from the request, misread at first as a schema-cache
+      // miss), not by re-reading the migration proactively.
+      clinicianCodes[id] = approveRows?.[0]?.code ?? approveRows?.code;
+    }
+
+    // The child: created by the school (create_school_passport(), 0113/
+    // 0121 -- atomically opens the enrolment too), then claimed by the
+    // real parent through the real chain (generate_/redeem_passport_
+    // claim_code(), 0114/0115) -- never a hand-inserted passport_
+    // guardians row, matching this suite's own established discipline.
+    const { data: childKKId, error: childKKErr } = await principalKK.rpc("create_school_passport", {
+      p_institution_id: institutionKKId,
+      p_child_name: "KK Child",
+    });
+    if (childKKErr) throw childKKErr;
+
+    const { data: claimCodeKK, error: claimCodeKKErr } = await principalKK.rpc("generate_passport_claim_code", {
+      p_institution_id: institutionKKId,
+      p_passport_id: childKKId,
+    });
+    if (claimCodeKKErr) throw claimCodeKKErr;
+    const { error: redeemKKErr } = await parentKK.rpc("redeem_passport_claim_code", { p_code: claimCodeKK });
+    if (redeemKKErr) throw redeemKKErr;
+
+    // KK-1/KK-2: the two write paths, each stamping the right authority.
+    let clinicianAccessKK1Id;
+    {
+      const { data, error } = await parentKK.rpc("connect_clinician", { p_passport_id: childKKId, p_clinician_code: clinicianCodes[clinicianKK1Id] });
+      clinicianAccessKK1Id = data;
+      const { data: row } = await admin.from("clinician_access").select("*").eq("id", data).single();
+      record(
+        "KK-1 connect_clinician() (parent): stamps engaged_by='parent', granted_by=the parent, no institution reference",
+        !error && row?.engaged_by === "parent" && row?.engaged_by_institution_id === null && row?.granted_by === parentKKId && row?.is_active === true,
+        JSON.stringify({ error: error?.message, row })
+      );
+    }
+
+    let clinicianAccessKK2Id;
+    {
+      const { data, error } = await principalKK.rpc("grant_clinician_access", { p_institution_id: institutionKKId, p_passport_id: childKKId, p_clinician_code: clinicianCodes[clinicianKK2Id] });
+      clinicianAccessKK2Id = data;
+      const { data: row } = await admin.from("clinician_access").select("*").eq("id", data).single();
+      record(
+        "KK-2 grant_clinician_access() (principal): stamps engaged_by='institution', engaged_by_institution_id=their own institution, granted_by=the principal",
+        !error && row?.engaged_by === "institution" && row?.engaged_by_institution_id === institutionKKId && row?.granted_by === principalKKId && row?.is_active === true,
+        JSON.stringify({ error: error?.message, row })
+      );
+    }
+
+    // KK-3: principal-only.
+    {
+      const { error } = await teacherKK.rpc("grant_clinician_access", { p_institution_id: institutionKKId, p_passport_id: childKKId, p_clinician_code: clinicianCodes[clinicianKK3Id] });
+      record("KK-3 grant_clinician_access() refuses a non-principal caller", Boolean(error), error?.message);
+    }
+
+    // KK-4: the child must actually be linked to the granting institution
+    // -- institutionKKOther has no link to childKK yet at this point.
+    {
+      const { error } = await principalKKOther.rpc("grant_clinician_access", { p_institution_id: institutionKKOtherId, p_passport_id: childKKId, p_clinician_code: clinicianCodes[clinicianKK3Id] });
+      record("KK-4 grant_clinician_access() refuses when the child has no link to the granting institution", Boolean(error) && /no link/i.test(error?.message ?? ""), error?.message);
+    }
+
+    // KK-5: connect_clinician() is owner-only.
+    {
+      const { error } = await parentKKOutsider.rpc("connect_clinician", { p_passport_id: childKKId, p_clinician_code: clinicianCodes[clinicianKK3Id] });
+      record("KK-5 connect_clinician() refuses a caller who isn't this child's own guardian", Boolean(error), error?.message);
+    }
+
+    // KK-6/KK-7: THE DOUBLE-ENGAGEMENT REFUSAL, both directions --
+    // explained, never a raw constraint violation.
+    {
+      const { error } = await principalKK.rpc("grant_clinician_access", { p_institution_id: institutionKKId, p_passport_id: childKKId, p_clinician_code: clinicianCodes[clinicianKK1Id] });
+      record(
+        "KK-6 grant_clinician_access() refuses a clinician already parent-engaged for this child, with an explanation, not a bare constraint error",
+        Boolean(error) && /parent or guardian/i.test(error?.message ?? "") && !/duplicate key/i.test(error?.message ?? ""),
+        error?.message
+      );
+    }
+    {
+      const { error } = await parentKK.rpc("connect_clinician", { p_passport_id: childKKId, p_clinician_code: clinicianCodes[clinicianKK2Id] });
+      record(
+        "KK-7 connect_clinician() refuses a clinician already institution-engaged for this child, with an explanation, not a bare constraint error",
+        Boolean(error) && /through their school/i.test(error?.message ?? "") && !/duplicate key/i.test(error?.message ?? ""),
+        error?.message
+      );
+    }
+
+    // Link childKK to the second institution now (mirroring CHECK DD/JJ's
+    // own precedent for constructing real multi-institution state -- the
+    // same shape a parent's own approve flow, or here principalKK's own
+    // school link, would create), so the cross-institution and isolation
+    // checks below have a real second institution to work against.
+    await admin.from("passport_institution_links").insert({
+      passport_id: childKKId,
+      institution_id: institutionKKOtherId,
+      approved_by_parent: true,
+    });
+
+    // KK-8: a clinician already institution-engaged elsewhere can't be
+    // reactivated by a DIFFERENT institution.
+    {
+      const { error } = await principalKKOther.rpc("grant_clinician_access", { p_institution_id: institutionKKOtherId, p_passport_id: childKKId, p_clinician_code: clinicianCodes[clinicianKK2Id] });
+      record("KK-8 grant_clinician_access() refuses a clinician engaged by a DIFFERENT institution", Boolean(error) && /different school/i.test(error?.message ?? ""), error?.message);
+    }
+
+    // KK-9: revoke, parent authority, own row -- audit columns correct.
+    {
+      const { error } = await parentKK.rpc("revoke_clinician_access", { p_clinician_access_id: clinicianAccessKK1Id, p_reason: "No longer needed." });
+      const { data: row } = await admin.from("clinician_access").select("*").eq("id", clinicianAccessKK1Id).single();
+      record(
+        "KK-9 revoke_clinician_access() (parent, own engagement): succeeds, revoked_at/revoked_by/revocation_reason all correctly set",
+        !error && row?.is_active === false && row?.revoked_at !== null && row?.revoked_by === parentKKId && row?.revocation_reason === "No longer needed.",
+        JSON.stringify({ error: error?.message, row })
+      );
+    }
+
+    // KK-10: a reason is required.
+    {
+      const { error } = await principalKK.rpc("revoke_clinician_access", { p_clinician_access_id: clinicianAccessKK2Id, p_reason: "" });
+      record("KK-10 revoke_clinician_access() refuses an empty reason", Boolean(error) && /reason is required/i.test(error?.message ?? ""), error?.message);
+    }
+
+    // KK-11/12/13: the three ways to lack authority over an institution-
+    // engaged row -- wrong authority (parent), not a principal, wrong
+    // institution.
+    {
+      const { error } = await parentKK.rpc("revoke_clinician_access", { p_clinician_access_id: clinicianAccessKK2Id, p_reason: "Trying anyway." });
+      record("KK-11 revoke_clinician_access() refuses a parent trying to revoke an institution-engaged row", Boolean(error) && /authority/i.test(error?.message ?? ""), error?.message);
+    }
+    {
+      const { error } = await teacherKK.rpc("revoke_clinician_access", { p_clinician_access_id: clinicianAccessKK2Id, p_reason: "Trying anyway." });
+      record("KK-12 revoke_clinician_access() refuses a non-principal staff member", Boolean(error) && /authority/i.test(error?.message ?? ""), error?.message);
+    }
+    {
+      const { error } = await principalKKOther.rpc("revoke_clinician_access", { p_clinician_access_id: clinicianAccessKK2Id, p_reason: "Trying anyway." });
+      record("KK-13 revoke_clinician_access() refuses a principal from a DIFFERENT institution", Boolean(error) && /authority/i.test(error?.message ?? ""), error?.message);
+    }
+
+    // KK-14: the correct principal, their own institution's row.
+    {
+      const { error } = await principalKK.rpc("revoke_clinician_access", { p_clinician_access_id: clinicianAccessKK2Id, p_reason: "Engagement ended." });
+      const { data: row } = await admin.from("clinician_access").select("is_active, revoked_by, revocation_reason").eq("id", clinicianAccessKK2Id).single();
+      record(
+        "KK-14 revoke_clinician_access() (principal, own institution's engagement): succeeds",
+        !error && row?.is_active === false && row?.revoked_by === principalKKId && row?.revocation_reason === "Engagement ended.",
+        JSON.stringify({ error: error?.message, row })
+      );
+    }
+
+    // KK-15: idempotency -- already revoked, refuses cleanly.
+    {
+      const { error } = await parentKK.rpc("revoke_clinician_access", { p_clinician_access_id: clinicianAccessKK1Id, p_reason: "Again." });
+      record("KK-15 revoke_clinician_access() refuses a row that's already revoked", Boolean(error) && /already been revoked/i.test(error?.message ?? ""), error?.message);
+    }
+
+    // KK-16/16b: CLINICIAN SELF-REVOKE, the third orthogonal authority --
+    // proven on BOTH an institution-engaged row and a parent-engaged one,
+    // with the clinician's own free-text reason.
+    let clinicianAccessKK3Id;
+    {
+      const { data } = await principalKK.rpc("grant_clinician_access", { p_institution_id: institutionKKId, p_passport_id: childKKId, p_clinician_code: clinicianCodes[clinicianKK3Id] });
+      clinicianAccessKK3Id = data;
+    }
+    {
+      const clinicianKK3 = await signedInClient("checkkk.clinician3@thebehaviourhive.com");
+      const { error } = await clinicianKK3.rpc("revoke_clinician_access", { p_clinician_access_id: clinicianAccessKK3Id, p_reason: "Stepping back due to capacity." });
+      const { data: row } = await admin.from("clinician_access").select("is_active, revoked_by, revocation_reason").eq("id", clinicianAccessKK3Id).single();
+      record(
+        "KK-16 SELF-REVOKE, institution-engaged: the clinician ends their own involvement regardless of who engaged them, own free-text reason",
+        !error && row?.is_active === false && row?.revoked_by === clinicianKK3Id && row?.revocation_reason === "Stepping back due to capacity.",
+        JSON.stringify({ error: error?.message, row })
+      );
+    }
+    let clinicianAccessKK4Id;
+    {
+      const { data } = await parentKK.rpc("connect_clinician", { p_passport_id: childKKId, p_clinician_code: clinicianCodes[clinicianKK4Id] });
+      clinicianAccessKK4Id = data;
+    }
+    {
+      const clinicianKK4 = await signedInClient("checkkk.clinician4@thebehaviourhive.com");
+      const { error } = await clinicianKK4.rpc("revoke_clinician_access", { p_clinician_access_id: clinicianAccessKK4Id, p_reason: "Conflict of interest." });
+      const { data: row } = await admin.from("clinician_access").select("is_active, revoked_by").eq("id", clinicianAccessKK4Id).single();
+      record(
+        "KK-16b SELF-REVOKE, parent-engaged: same third authority, works identically regardless of engaged_by",
+        !error && row?.is_active === false && row?.revoked_by === clinicianKK4Id,
+        JSON.stringify({ error: error?.message, row })
+      );
+    }
+
+    // KK-17: REACTIVATION -- the same authority that revoked can
+    // reconnect, audit columns reset.
+    {
+      const { data, error } = await parentKK.rpc("connect_clinician", { p_passport_id: childKKId, p_clinician_code: clinicianCodes[clinicianKK1Id] });
+      const { data: row } = await admin.from("clinician_access").select("*").eq("id", data).single();
+      record(
+        "KK-17 REACTIVATION: the same authority reconnecting a previously-revoked clinician succeeds, revoked_at/revoked_by/revocation_reason reset to null",
+        !error && data === clinicianAccessKK1Id && row?.is_active === true && row?.revoked_at === null && row?.revoked_by === null && row?.revocation_reason === null,
+        JSON.stringify({ error: error?.message, row })
+      );
+    }
+
+    // KK-5v2: a fresh, active institution engagement for the visibility
+    // and cascade checks below.
+    let clinicianAccessKK5Id;
+    {
+      const { data, error } = await principalKK.rpc("grant_clinician_access", { p_institution_id: institutionKKId, p_passport_id: childKKId, p_clinician_code: clinicianCodes[clinicianKK5Id] });
+      if (error) throw error;
+      clinicianAccessKK5Id = data;
+    }
+
+    // KK-18/19: PRINCIPAL VISIBILITY -- sees both authorities, read-only;
+    // a non-principal staff member sees nothing.
+    {
+      const { data: rows } = await principalKK.from("clinician_access").select("id, engaged_by").eq("passport_id", childKKId).eq("is_active", true);
+      const ids = (rows ?? []).map((r) => r.id);
+      record(
+        "KK-18 THE DESTINATION ITSELF: the principal sees BOTH the parent-engaged and the institution-engaged clinician on this child, care coordination, read-only",
+        ids.includes(clinicianAccessKK1Id) && ids.includes(clinicianAccessKK5Id),
+        JSON.stringify(rows)
+      );
+    }
+    {
+      const { data: rows } = await teacherKK.from("clinician_access").select("id").eq("passport_id", childKKId);
+      record("KK-19 a non-principal staff member sees NOTHING via the new principal-only SELECT policy", (rows ?? []).length === 0, JSON.stringify(rows));
+    }
+
+    // KK-20: PARENT VISIBILITY, unchanged and already correct -- Step 0's
+    // own finding, proven live: the parent sees the institution-engaged
+    // clinician too, with no SQL change needed for this side at all.
+    {
+      const { data: rows } = await parentKK.from("clinician_access").select("id, engaged_by").eq("passport_id", childKKId).eq("is_active", true);
+      const ids = (rows ?? []).map((r) => r.id);
+      record(
+        "KK-20 THE SYMMETRY ITSELF: the parent already sees the school's own clinician engagement, unprompted -- 'Parents can view...' was never engaged_by-scoped",
+        ids.includes(clinicianAccessKK1Id) && ids.includes(clinicianAccessKK5Id),
+        JSON.stringify(rows)
+      );
+    }
+
+    // KK-21: staff departure does NOT cascade to clinician_access -- the
+    // engagement belongs to the institution, not whoever happened to be
+    // staff at the time. teacherKK has no clinician-related role at all;
+    // deactivating them is the cheapest real proof that departure in
+    // general never touches this table (deactivate_institution_staff()
+    // was not modified by 0123 and never referenced clinician_access in
+    // any earlier migration either).
+    {
+      const { data: teacherKKStaffRow } = await admin.from("institution_staff").select("id").eq("institution_id", institutionKKId).eq("user_id", teacherKKId).single();
+      const { error } = await principalKK.rpc("deactivate_institution_staff", { p_institution_staff_id: teacherKKStaffRow.id, p_reason: "KK test departure." });
+      if (error) throw error;
+      const { data: row } = await admin.from("clinician_access").select("is_active").eq("id", clinicianAccessKK5Id).single();
+      record(
+        "KK-21 staff departure does not cascade to clinician_access -- the engagement survives, confirmed live not just by reading the source",
+        row?.is_active === true,
+        JSON.stringify(row)
+      );
+    }
+
+    // KK-22: a genuine cross-institution engagement, for the cascade's
+    // own isolation check below.
+    let clinicianAccessKK6Id;
+    {
+      const { data, error } = await principalKKOther.rpc("grant_clinician_access", { p_institution_id: institutionKKOtherId, p_passport_id: childKKId, p_clinician_code: clinicianCodes[clinicianKK6Id] });
+      if (error) throw error;
+      clinicianAccessKK6Id = data;
+    }
+
+    // KK-23/24: THE ENROLMENT-END CASCADE, extended. Ending childKK's
+    // enrolment at institutionKK must close clinicianKK5's row (engaged
+    // by THAT institution) and touch neither clinicianKK1 (parent-
+    // engaged) nor clinicianKK6 (engaged by the OTHER institution).
+    {
+      const { data: enrolmentKKRow } = await admin.from("enrolments").select("id").eq("passport_id", childKKId).eq("institution_id", institutionKKId).is("ended_at", null).single();
+      const { error } = await principalKK.rpc("end_enrolment", { p_enrolment_id: enrolmentKKRow.id, p_reason: "left" });
+      if (error) throw error;
+    }
+    {
+      const { data: row } = await admin.from("clinician_access").select("is_active, revoked_at, revocation_reason").eq("id", clinicianAccessKK5Id).single();
+      record(
+        "KK-23 THE CASCADE ITSELF: ending the enrolment closes the school-engaged clinician's access, with a revocation reason naming why",
+        row?.is_active === false && row?.revoked_at !== null && /enrolment ended/i.test(row?.revocation_reason ?? ""),
+        JSON.stringify(row)
+      );
+    }
+    {
+      const [{ data: parentRow }, { data: otherInstRow }] = await Promise.all([
+        admin.from("clinician_access").select("is_active").eq("id", clinicianAccessKK1Id).single(),
+        admin.from("clinician_access").select("is_active").eq("id", clinicianAccessKK6Id).single(),
+      ]);
+      record(
+        "KK-24 THE ISOLATION ITSELF: the parent-engaged clinician AND the OTHER institution's own engagement both survive the cascade untouched -- mirrors JJ-5d for clinician_access",
+        parentRow?.is_active === true && otherInstRow?.is_active === true,
+        JSON.stringify({ parentRow, otherInstRow })
+      );
+    }
+
+    console.log("KK summary complete.");
+
+    await admin.from("passports").delete().eq("id", childKKId);
+    await admin.from("institutions").delete().in("id", [institutionKKId, institutionKKOtherId]);
+    for (const id of [
+      principalKKId, principalKKOtherId, teacherKKId, parentKKId, parentKKOutsiderId,
+      clinicianKK1Id, clinicianKK2Id, clinicianKK3Id, clinicianKK4Id, clinicianKK5Id, clinicianKK6Id,
+    ]) {
+      await admin.auth.admin.deleteUser(id);
+    }
+  }
+
   console.log(`\n== Summary ==`);
   const failed = results.filter((r) => !r.pass);
   console.log(`${results.length - failed.length}/${results.length} passed.`);
