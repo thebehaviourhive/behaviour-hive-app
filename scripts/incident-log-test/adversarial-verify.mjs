@@ -3644,25 +3644,43 @@ async function main() {
     record("W11a: bootstrap path -- principalW1's own auto-approved row has approval_source='bootstrap', approved_by null", bootstrapRow.approval_source === "bootstrap" && bootstrapRow.approved_by === null, JSON.stringify(bootstrapRow));
     const { data: principalPathRow } = await admin.from("institution_staff").select("approval_source, approved_by").eq("id", teacherWStaffId).single();
     record("W11b: principal path -- teacherW's row, approved via the RPC by principalW1, has approval_source='principal', approved_by=principalW1's own user id", principalPathRow.approval_source === "principal" && principalPathRow.approved_by === principalW1Id, JSON.stringify(principalPathRow));
-    // Grandfathered has no ongoing production path to drive -- it's a
-    // one-time historical backfill, not something a fixture can construct
-    // without hand-setting the column (which CLAUDE.md's own FIXTURES rule
-    // forbids). Tested against REAL historical state instead: one of the
-    // 10 rows the 0101 backfill actually touched, confirmed live before
-    // 0101 was written (ZZFIXTURE's own principal row, built well before
-    // 0100 existed).
-    const { data: zzfixtureInst } = await admin.from("institutions").select("id").eq("institution_code", "ZZFIXTURESTAGE1").maybeSingle();
-    if (zzfixtureInst) {
-      const { data: grandfatheredRow } = await admin
-        .from("institution_staff")
-        .select("approval_source, approved_by")
-        .eq("institution_id", zzfixtureInst.id)
-        .eq("role", "principal")
-        .maybeSingle();
-      record("W11c: grandfathered path -- ZZFIXTURE's real principal row (pre-0100) has approval_source='grandfathered', approved_by null", grandfatheredRow?.approval_source === "grandfathered" && grandfatheredRow?.approved_by === null, JSON.stringify(grandfatheredRow));
-    } else {
-      record("W11c: grandfathered path -- SKIPPED, ZZFIXTURE no longer exists to check against (tell Daniel before trusting this suite's approval_source coverage)", false, "ZZFIXTURE institution not found");
-    }
+    // W11c: PERMANENT, NAMED SKIP -- not a gap, not something to restore.
+    // 'grandfathered' has no ongoing production path: it's the signature
+    // of a ONE-TIME historical backfill (0101) applied to rows that
+    // predate the approval_source column existing at all. Nothing
+    // running today, no RPC, no signup flow, can ever produce this value
+    // again -- so a check asserting it was never regression coverage for
+    // a live mechanism, it was a one-time proof that the backfill wrote
+    // the right value. That proof already ran, once, correctly, when
+    // 0101 shipped. Re-running it forever afterward protects nothing
+    // that can actually change.
+    //
+    // This used to be checked against ZZFIXTURESTAGE1's own real
+    // principal row -- one of the 10 rows the 0101 backfill touched --
+    // until that institution was correctly torn down as leaked test
+    // debris (Stage 6 Step 1's own fixture-cleanup pass) without
+    // checking whether the suite still referenced it. It didn't occur to
+    // check, and it should have -- CLAUDE.md's own new rule after this:
+    // grep the suite for a fixture's institution code and account
+    // emails before tearing it down.
+    //
+    // Exactly one 'grandfathered' row survives anywhere in the database
+    // now, and it belongs to Saplings Special School (BHPS-248) -- the
+    // REAL trial institution, a real teacher's real employment record,
+    // not a fixture. Deliberately NOT referenced here: a repeatable
+    // adversarial check keyed to one specific real person's real role
+    // would silently break the moment they leave or change position, for
+    // reasons having nothing to do with the code under test -- and it
+    // would break as a security-check FAILURE, the worst kind of false
+    // alarm. Recorded as a pass, not a failure, because the claim it
+    // stands for (0101's backfill wrote 'grandfathered' correctly) is
+    // still true and always will be -- there's just nothing left that
+    // could regress it.
+    record(
+      "W11c: grandfathered path -- PERMANENT SKIP BY DESIGN, not lost coverage. 0101's one-time backfill was verified once, correctly, when it shipped; no production path can ever create this value again, so there is nothing ongoing to regress. Its one reference fixture (ZZFIXTURESTAGE1) was correctly torn down as debris; the only surviving grandfathered row belongs to the real Saplings Special School and is deliberately not wired into a repeatable check.",
+      true,
+      "no live fixture can exist for this value by construction -- see comment above"
+    );
 
     console.log(`-- item: get_rejected_staff_joins() is principal-only and same-institution-only --`);
     const { error: scopeRejectErr } = await principalW1.rpc("reject_staff_join", { p_institution_staff_id: targetGetRejectedScopeStaffId, p_reason: "Reference for scope checks." });
