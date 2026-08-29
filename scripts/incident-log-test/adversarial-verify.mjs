@@ -7222,6 +7222,113 @@ async function main() {
     }
   }
 
+  console.log(`\n== CHECK II: Stage 5, Step 3 -- migrations 0117/0118, the four inline passports.user_id ownership checks that owns_passport()'s own 0113 rewrite never touched (never called it in the first place). A real claimed guardian, never a hand-set passport_guardians row -- driven through create_school_passport() -> generate_passport_claim_code() -> redeem_passport_claim_code(), the same real chain as CHECK HH. ==`);
+  if (shouldRun("II")) {
+    const { data: instII, error: instIIErr } = await admin
+      .from("institutions")
+      .insert({ name: "II Inline Checks Verify", institution_code: CODE + "II", status: "verified" })
+      .select()
+      .single();
+    if (instIIErr) throw instIIErr;
+    const institutionIIId = instII.id;
+
+    const principalIIId = await createUser("ii.principal@thebehaviourhive.com", "II Principal", "principal");
+    const teacherIIId = await createUser("ii.teacher@thebehaviourhive.com", "II Teacher", "class_teacher");
+    const guardianIIId = await createUser("ii.guardian@thebehaviourhive.com", "II Guardian", "parent");
+
+    const { data: staffIIRows, error: staffIIErr } = await admin
+      .from("institution_staff")
+      .insert([
+        { institution_id: institutionIIId, user_id: principalIIId, role: "principal" },
+        { institution_id: institutionIIId, user_id: teacherIIId, role: "class_teacher" },
+      ])
+      .select();
+    if (staffIIErr) throw staffIIErr;
+
+    const principalII = await signedInClient("ii.principal@thebehaviourhive.com");
+    for (const row of staffIIRows.filter((r) => r.user_id !== principalIIId)) {
+      const { error } = await principalII.rpc("approve_staff_join", { p_institution_staff_id: row.id });
+      if (error) throw error;
+    }
+    const teacherII = await signedInClient("ii.teacher@thebehaviourhive.com");
+
+    // Real chain: school creates a guardian-less passport, generates a
+    // code, a real guardian redeems it -- exactly CHECK HH's own chain,
+    // not a hand-set passport_guardians row.
+    const { data: childIIId, error: createIIErr } = await principalII.rpc("create_school_passport", {
+      p_institution_id: institutionIIId,
+      p_child_name: "II Claimed Child",
+    });
+    if (createIIErr) throw createIIErr;
+    const { data: codeII, error: generateIIErr } = await principalII.rpc("generate_passport_claim_code", {
+      p_institution_id: institutionIIId,
+      p_passport_id: childIIId,
+    });
+    if (generateIIErr) throw generateIIErr;
+    const guardianII = await signedInClient("ii.guardian@thebehaviourhive.com");
+    const { error: redeemIIErr } = await guardianII.rpc("redeem_passport_claim_code", { p_code: codeII });
+    if (redeemIIErr) throw redeemIIErr;
+
+    // Class-derived access for teacherII, so the real teacher_updates
+    // INSERT policy (has_class_teacher_access(), untouched by 0117/0118)
+    // is satisfied -- this check is about the SELECT side, not a
+    // shortcut around the write side.
+    const { data: classIIId } = await principalII.rpc("create_class", { p_institution_id: institutionIIId, p_name: "II Room" });
+    await principalII.rpc("add_class_teacher", { p_class_id: classIIId, p_user_id: teacherIIId });
+    await principalII.rpc("add_class_child", { p_class_id: classIIId, p_passport_id: childIIId });
+
+    {
+      const { data: passportRow, error: passportSelectErr } = await guardianII.from("passports").select("child_name, passport_status").eq("id", childIIId).maybeSingle();
+      record(
+        "II-1 THE 0117 FIX ITSELF: a real claimed guardian can SELECT their own passports row directly -- not just resolve its id via get_my_passports(), which was already SECURITY DEFINER and would have masked this gap",
+        !passportSelectErr && passportRow?.child_name === "II Claimed Child",
+        JSON.stringify({ passportRow, passportSelectErr: passportSelectErr?.message })
+      );
+    }
+
+    const { data: updateIIId, error: updateIIErr } = await teacherII
+      .from("teacher_updates")
+      .insert({ passport_id: childIIId, teacher_id: teacherIIId, settled_state: "settled", energy_level: 4 })
+      .select()
+      .single();
+    if (updateIIErr) throw updateIIErr;
+    {
+      const { data: updateRow, error: updateSelectErr } = await guardianII.from("teacher_updates").select("settled_state").eq("passport_id", childIIId).maybeSingle();
+      record(
+        "II-2 THE 0118 FIX ITSELF, teacher_updates: a real claimed guardian can now SELECT the real teacher update on their own child -- this is the exact query parent-dashboard/page.tsx and passport/progress/page.tsx both make",
+        !updateSelectErr && updateRow?.settled_state === "settled",
+        JSON.stringify({ updateRow, updateSelectErr: updateSelectErr?.message })
+      );
+    }
+
+    {
+      const { data: teacherName, error: teacherNameErr } = await guardianII.rpc("get_teacher_name", { p_teacher_id: teacherIIId });
+      record(
+        "II-3 THE 0118 FIX ITSELF, get_teacher_name(): a real claimed guardian resolves the real teacher's name, not null",
+        !teacherNameErr && teacherName === "II Teacher",
+        JSON.stringify({ teacherName, teacherNameErr: teacherNameErr?.message })
+      );
+    }
+
+    await admin.from("strategy_ledger").insert({ passport_id: childIIId, submitted_by: teacherIIId, entry_type: "win", description: "II ledger entry." });
+    {
+      const { data: ledgerRow, error: ledgerSelectErr } = await guardianII.from("strategy_ledger").select("description").eq("passport_id", childIIId).maybeSingle();
+      record(
+        "II-4 THE 0118 FIX ITSELF, strategy_ledger: a real claimed guardian can SELECT their child's ledger entry -- no live client read path exists for this yet, but the RLS gap was real and is now closed regardless",
+        !ledgerSelectErr && ledgerRow?.description === "II ledger entry.",
+        JSON.stringify({ ledgerRow, ledgerSelectErr: ledgerSelectErr?.message })
+      );
+    }
+
+    console.log("II summary complete.");
+
+    await admin.from("passports").delete().eq("id", childIIId);
+    await admin.from("institutions").delete().eq("id", institutionIIId);
+    for (const id of [principalIIId, teacherIIId, guardianIIId]) {
+      await admin.auth.admin.deleteUser(id);
+    }
+  }
+
   console.log(`\n== Summary ==`);
   const failed = results.filter((r) => !r.pass);
   console.log(`${results.length - failed.length}/${results.length} passed.`);
