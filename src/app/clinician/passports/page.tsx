@@ -9,6 +9,7 @@ import { ClinicianBottomNav } from "@/components/clinician/ClinicianBottomNav";
 import { InlineErrorState } from "@/components/ui/InlineErrorState";
 
 interface ClinicianPassportRow {
+  clinician_access_id: string;
   passport_id: string;
   // Full name, shown as-is to clinicians (unlike the redacted teacher-track
   // view) -- clinical records require certainty of identity. Deliberate
@@ -18,6 +19,12 @@ interface ClinicianPassportRow {
   diagnoses: string[] | null;
   diagnosis_other: string | null;
   last_review_date: string;
+  // Stage 7: which authority connected this case -- a parent, or a
+  // school on the family's behalf. Shown per card so a clinician can
+  // tell at a glance who engaged them, symmetric with the parent/
+  // principal's own view of the same relationship.
+  engaged_by: "parent" | "institution";
+  engaged_by_institution_name: string | null;
 }
 
 function calculateAge(dateOfBirth: string | null): number | null {
@@ -135,6 +142,11 @@ export default function ClinicianPassportsPage() {
 
                 <p className="mt-2 text-xs text-brand-neutral-black/50">
                   Last reviewed: {format(new Date(passport.last_review_date), "d MMM yyyy")}
+                </p>
+                <p className="mt-1 text-xs text-brand-neutral-black/40">
+                  {passport.engaged_by === "parent"
+                    ? "Connected by the family"
+                    : `Connected by ${passport.engaged_by_institution_name ?? "the school"}`}
                 </p>
               </Link>
             );

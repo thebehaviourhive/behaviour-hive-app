@@ -255,28 +255,16 @@ export function ShareBottomSheet({
       return;
     }
 
-    const { data: existingAccess } = await supabase
-      .from("clinician_access")
-      .select("id, is_active")
-      .eq("passport_id", passportId)
-      .eq("clinician_id", clinician.user_id)
-      .maybeSingle();
-
-    if (existingAccess?.is_active) {
-      setIsConnectingClinician(false);
-      setClinicianError("This clinician is already connected to this passport.");
-      return;
-    }
-
-    const { error: saveError } = existingAccess
-      ? await supabase
-          .from("clinician_access")
-          .update({ is_active: true, linked_at: new Date().toISOString() })
-          .eq("id", existingAccess.id)
-      : await supabase.from("clinician_access").insert({
-          passport_id: passportId,
-          clinician_id: clinician.user_id,
-        });
+    // connect_clinician() (0123) -- the real write path, converted from
+    // this file's own raw insert/update. Handles the existing-row/
+    // reactivate/already-active branching internally now, stamps
+    // engaged_by='parent', and refuses with a clear explanation (not a
+    // bare constraint error) if this clinician is already engaged
+    // through the child's school instead.
+    const { error: saveError } = await supabase.rpc("connect_clinician", {
+      p_passport_id: passportId,
+      p_clinician_code: clinicianCodeInput.trim(),
+    });
 
     setIsConnectingClinician(false);
 

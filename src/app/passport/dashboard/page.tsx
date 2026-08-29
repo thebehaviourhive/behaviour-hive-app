@@ -7,6 +7,7 @@ import { BottomNav } from "@/components/ui/BottomNav";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { InlineErrorState } from "@/components/ui/InlineErrorState";
 import { ShareBottomSheet } from "@/components/parent/ShareBottomSheet";
+import { ReasonConfirmSheet } from "@/components/shared/ReasonConfirmSheet";
 import { ABCLogger } from "@/components/abc-logger/ABCLogger";
 import { ABCTimeline } from "@/components/abc-logger/ABCTimeline";
 import { PassportAccordion } from "@/components/passport/PassportAccordion";
@@ -38,9 +39,16 @@ interface ApprovedInstitution {
 }
 
 interface ConnectedClinician {
+  clinicianAccessId: string;
   clinicianId: string;
   fullName: string;
   specialty: string;
+  // Stage 7: which authority engaged this clinician -- 'parent' or
+  // 'institution' (with the engaging school's own name) -- symmetry
+  // with the principal's own view: a school connecting a clinician for
+  // this child is not something a parent should discover by accident.
+  engagedBy: "parent" | "institution";
+  engagedByInstitutionName: string | null;
 }
 
 interface PassportSummaryData {
@@ -130,6 +138,7 @@ export default function PassportDashboardPage() {
   const [revokeError, setRevokeError] = useState<string | null>(null);
   const [clinicianRevokeConfirmation, setClinicianRevokeConfirmation] = useState<string | null>(null);
   const [clinicianRevokeError, setClinicianRevokeError] = useState<string | null>(null);
+  const [clinicianRevokeTarget, setClinicianRevokeTarget] = useState<ConnectedClinician | null>(null);
   const [isAbcLoggerOpen, setIsAbcLoggerOpen] = useState(false);
   const [timelineRefreshKey, setTimelineRefreshKey] = useState(0);
   // Calm log-nudge backfill (Stage 3C) -- calmEpisodeId is only ever
@@ -304,10 +313,20 @@ export default function PassportDashboardPage() {
 
     setConnectedClinicians(
       (data ?? []).map(
-        (row: { clinician_id: string; full_name: string | null; specialty: string }) => ({
+        (row: {
+          clinician_access_id: string;
+          clinician_id: string;
+          full_name: string | null;
+          specialty: string;
+          engaged_by: "parent" | "institution";
+          engaged_by_institution_name: string | null;
+        }) => ({
+          clinicianAccessId: row.clinician_access_id,
           clinicianId: row.clinician_id,
           fullName: row.full_name ?? "A clinician",
           specialty: row.specialty,
+          engagedBy: row.engaged_by,
+          engagedByInstitutionName: row.engaged_by_institution_name,
         })
       )
     );
@@ -605,37 +624,29 @@ export default function PassportDashboardPage() {
   // time by their personal code (no institution grouping), so trust is
   // scoped to the named individual -- the intentional counterpart to
   // handleRevoke's institution-wide scope above.
-  async function handleRevokeClinician(
-    clinicianId: string,
-    clinicianName: string,
-    specialty: string
-  ) {
-    if (!summary) return;
-
-    setClinicianRevokeError(null);
-    setClinicianRevokeConfirmation(null);
-
+  //
+  // Stage 7: revoke_clinician_access() (0123) is the only write path
+  // now -- the old direct .update() this used to do was silently
+  // refused by RLS the moment 0123's own migration dropped the bare
+  // policy it depended on. The RPC also enforces the split: a parent
+  // can only revoke their OWN engaged_by='parent' rows, so this handler
+  // is only ever reachable from the UI for a clinician the parent
+  // themselves engaged -- an institution-engaged one shows read-only,
+  // no revoke button at all (see the render below).
+  async function handleRevokeClinician(clinician: ConnectedClinician, reason: string) {
     const supabase = createClient();
-    const { data, error } = await supabase
-      .from("clinician_access")
-      .update({ is_active: false })
-      .eq("passport_id", summary.passportId)
-      .eq("clinician_id", clinicianId)
-      .select("id");
+    const { error } = await supabase.rpc("revoke_clinician_access", {
+      p_clinician_access_id: clinician.clinicianAccessId,
+      p_reason: reason,
+    });
 
     if (error) {
-      setClinicianRevokeError(error.message);
-      return;
+      return { error: error.message };
     }
 
-    if (!data?.length) {
-      setClinicianRevokeError("Nothing was removed — this access may already have been revoked.");
-      return;
-    }
-
-    if (user) {
+    if (user && summary) {
       const specialtyLabel =
-        CLINICIAN_SPECIALTY_LABEL[specialty as ClinicianSpecialty] ?? specialty;
+        CLINICIAN_SPECIALTY_LABEL[clinician.specialty as ClinicianSpecialty] ?? clinician.specialty;
       logActivity({
         passportId: summary.passportId,
         actorId: user.id,
@@ -644,10 +655,7 @@ export default function PassportDashboardPage() {
       });
     }
 
-    setClinicianRevokeConfirmation(
-      `Access for ${clinicianName} has been removed. They can no longer see ${summary.childName}'s passport.`
-    );
-    await loadConnectedClinicians(summary.passportId);
+    return { error: null };
   }
 
   const diagnosisPills = getDiagnosisPills(summary.diagnoses, summary.diagnosisOther);
@@ -890,20 +898,30 @@ export default function PassportDashboardPage() {
                           {CLINICIAN_SPECIALTY_LABEL[clinician.specialty as ClinicianSpecialty] ??
                             clinician.specialty}
                         </p>
+                        {/* Stage 7 symmetry requirement: a school connecting
+                            a clinician for this child is not something a
+                            parent should discover by accident -- shown for
+                            every row, not just the institution-engaged ones,
+                            so "connected by you" is equally explicit. */}
+                        <p className="mt-0.5 text-xs text-brand-neutral-black/40">
+                          {clinician.engagedBy === "parent"
+                            ? "Connected by you"
+                            : `Connected by ${clinician.engagedByInstitutionName ?? "the school"}`}
+                        </p>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          handleRevokeClinician(
-                            clinician.clinicianId,
-                            clinician.fullName,
-                            clinician.specialty
-                          )
-                        }
-                        className="text-sm font-bold text-brand-golden-brown"
-                      >
-                        Revoke Access
-                      </button>
+                      {clinician.engagedBy === "parent" ? (
+                        <button
+                          type="button"
+                          onClick={() => setClinicianRevokeTarget(clinician)}
+                          className="text-sm font-bold text-brand-golden-brown"
+                        >
+                          Revoke Access
+                        </button>
+                      ) : (
+                        <span className="text-xs text-brand-neutral-black/40">
+                          Managed by school
+                        </span>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -1183,6 +1201,34 @@ export default function PassportDashboardPage() {
           // revalidate rather than waiting for the next natural
           // navigation (which would pick it up anyway, just later).
           revalidateParentCalmAccess();
+        }}
+      />
+
+      <ReasonConfirmSheet
+        isOpen={Boolean(clinicianRevokeTarget)}
+        title="Revoke clinician access"
+        description={
+          clinicianRevokeTarget
+            ? `${clinicianRevokeTarget.fullName} will no longer be able to see ${summary.childName}'s passport. Please give a reason.`
+            : ""
+        }
+        confirmLabel="Revoke Access"
+        submittingLabel="Revoking..."
+        onClose={() => setClinicianRevokeTarget(null)}
+        onConfirm={(reason) => {
+          if (!clinicianRevokeTarget) return Promise.resolve({ error: "No clinician selected." });
+          return handleRevokeClinician(clinicianRevokeTarget, reason);
+        }}
+        onConfirmed={() => {
+          const target = clinicianRevokeTarget;
+          setClinicianRevokeTarget(null);
+          setClinicianRevokeError(null);
+          if (target) {
+            setClinicianRevokeConfirmation(
+              `Access for ${target.fullName} has been removed. They can no longer see ${summary.childName}'s passport.`
+            );
+          }
+          loadConnectedClinicians(summary.passportId);
         }}
       />
 

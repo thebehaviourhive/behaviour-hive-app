@@ -8,6 +8,8 @@ import { createClient } from "@/lib/supabase/client";
 import { ReasonConfirmSheet } from "@/components/shared/ReasonConfirmSheet";
 import { GrantPassportAccessSheet } from "@/components/principal/GrantPassportAccessSheet";
 import { EndEnrolmentSheet } from "@/components/principal/EndEnrolmentSheet";
+import { GrantClinicianAccessSheet } from "@/components/principal/GrantClinicianAccessSheet";
+import { CLINICIAN_SPECIALTY_LABEL, type ClinicianSpecialty } from "@/lib/clinicianSpecialties";
 
 // PRD 1, Stage 4, Step 3. Principal's passport-access detail: current
 // access with revoke, a collapsed past-access history, and a grant
@@ -61,6 +63,27 @@ interface EnrolmentRow {
   endReason: string | null;
 }
 
+// Stage 7, Step 2. Same shape as passport/dashboard's own
+// ConnectedClinician -- the principal sees BOTH parent-engaged and
+// institution-engaged clinicians (Daniel's decision 4: "the parent
+// must ALSO see the school's own engagement -- symmetry matters
+// here"), but can only revoke the ones their OWN institution engaged.
+// engagedByInstitutionId is compared against this page's own
+// institutionId to decide that, not just engagedBy === 'institution'
+// alone -- a child linked to two schools could show a clinician
+// engaged by the OTHER one, which this principal must see but not act
+// on, same "neither authority can revoke the other's" rule as parent
+// vs institution.
+interface ClinicianRow {
+  clinicianAccessId: string;
+  clinicianId: string;
+  fullName: string;
+  specialty: string;
+  engagedBy: "parent" | "institution";
+  engagedByInstitutionId: string | null;
+  engagedByInstitutionName: string | null;
+}
+
 const ROLE_LABEL: Record<string, string> = {
   class_teacher: "Class Teacher",
   sna: "SNA",
@@ -111,6 +134,14 @@ export default function PrincipalPassportDetailPage() {
   const [isGeneratingCode, setIsGeneratingCode] = useState(false);
   const [generateError, setGenerateError] = useState<string | null>(null);
 
+  // Stage 7, Step 2 -- Clinical Team.
+  const [clinicians, setClinicians] = useState<ClinicianRow[]>([]);
+  const [cliniciansError, setCliniciansError] = useState<string | null>(null);
+  const [isGrantClinicianOpen, setIsGrantClinicianOpen] = useState(false);
+  const [clinicianGrantedNotice, setClinicianGrantedNotice] = useState<string | null>(null);
+  const [clinicianRevokeTarget, setClinicianRevokeTarget] = useState<ClinicianRow | null>(null);
+  const [clinicianRevokedNotice, setClinicianRevokedNotice] = useState<string | null>(null);
+
   const load = useCallback(async () => {
     if (!user) return;
     setIsLoading(true);
@@ -154,7 +185,7 @@ export default function PrincipalPassportDetailPage() {
     }
     setChildName(rosterMatch.child_name);
 
-    const [accessResult, staffRosterResult, guardiansResult, claimCodeResult, enrolmentResult] = await Promise.all([
+    const [accessResult, staffRosterResult, guardiansResult, claimCodeResult, enrolmentResult, cliniciansResult] = await Promise.all([
       supabase.rpc("get_passport_access_for_child", { p_passport_id: passportId, p_institution_id: staffRow.institution_id }),
       supabase.rpc("get_institution_staff_roster", { p_institution_id: staffRow.institution_id, p_include_inactive: false, p_include_pending: false }),
       supabase.rpc("get_passport_guardians_for_child", { p_institution_id: staffRow.institution_id, p_passport_id: passportId }),
@@ -167,7 +198,36 @@ export default function PrincipalPassportDetailPage() {
         .order("started_at", { ascending: false })
         .limit(1)
         .maybeSingle(),
+      supabase.rpc("get_passport_clinicians", { p_passport_id: passportId }),
     ]);
+
+    if (cliniciansResult.error) {
+      console.error("Failed to load connected clinicians:", cliniciansResult.error);
+      setCliniciansError("Couldn't load this child's clinical team.");
+    } else {
+      setCliniciansError(null);
+      setClinicians(
+        (cliniciansResult.data ?? []).map(
+          (row: {
+            clinician_access_id: string;
+            clinician_id: string;
+            full_name: string | null;
+            specialty: string;
+            engaged_by: "parent" | "institution";
+            engaged_by_institution_id: string | null;
+            engaged_by_institution_name: string | null;
+          }) => ({
+            clinicianAccessId: row.clinician_access_id,
+            clinicianId: row.clinician_id,
+            fullName: row.full_name ?? "A clinician",
+            specialty: row.specialty,
+            engagedBy: row.engaged_by,
+            engagedByInstitutionId: row.engaged_by_institution_id,
+            engagedByInstitutionName: row.engaged_by_institution_name,
+          })
+        )
+      );
+    }
 
     if (enrolmentResult.error) {
       console.error("Failed to load enrolment:", enrolmentResult.error);
@@ -266,6 +326,23 @@ export default function PrincipalPassportDetailPage() {
     const row = ((statusRows ?? []) as { code: string; expires_at: string }[])[0];
     setClaimCode(row ? { code: row.code, expiresAt: row.expires_at } : null);
     setIsGeneratingCode(false);
+  }
+
+  // revoke_clinician_access() (0123) enforces the authority split
+  // server-side (a principal can only revoke their OWN institution's
+  // engaged_by='institution' rows) -- this handler is only ever wired
+  // up from a button the render below already restricts to those rows,
+  // so this is belt-and-braces, not the real gate.
+  async function handleRevokeClinician(clinician: ClinicianRow, reason: string) {
+    const supabase = createClient();
+    const { error } = await supabase.rpc("revoke_clinician_access", {
+      p_clinician_access_id: clinician.clinicianAccessId,
+      p_reason: reason,
+    });
+    if (error) {
+      return { error: error.message };
+    }
+    return { error: null };
   }
 
   if (!isReady) {
@@ -475,6 +552,86 @@ export default function PrincipalPassportDetailPage() {
                 </div>
               )}
             </section>
+
+            <section className="mt-6">
+              <div className="mb-2 flex items-center justify-between">
+                <h2 className="font-heading text-sm font-bold uppercase tracking-wide text-brand-neutral-black/60">
+                  Clinical Team ({clinicians.length})
+                </h2>
+                <button
+                  type="button"
+                  onClick={() => setIsGrantClinicianOpen(true)}
+                  className="text-xs font-semibold text-brand-prussian-blue"
+                >
+                  + Connect Clinician
+                </button>
+              </div>
+
+              {cliniciansError ? (
+                <p className="rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-center text-sm text-brand-neutral-black/60">
+                  {cliniciansError}
+                </p>
+              ) : clinicians.length === 0 ? (
+                <p className="rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-center text-sm text-brand-neutral-black/60">
+                  No clinicians connected to {childName} yet.
+                </p>
+              ) : (
+                <div className="flex flex-col gap-2">
+                  {clinicians.map((c) => {
+                    // Symmetry with the parent's own view: a clinician this
+                    // institution engaged is theirs to revoke; a
+                    // parent-engaged one, or one engaged by a DIFFERENT
+                    // institution (a child linked to two schools), is
+                    // shown but read-only -- "neither authority can revoke
+                    // the other's".
+                    const canRevoke = c.engagedBy === "institution" && c.engagedByInstitutionId === institutionId;
+                    return (
+                      <div key={c.clinicianAccessId} className="rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <p className="text-sm font-semibold text-brand-neutral-black">{c.fullName}</p>
+                            <p className="mt-0.5 text-xs text-brand-neutral-black/50">
+                              {CLINICIAN_SPECIALTY_LABEL[c.specialty as ClinicianSpecialty] ?? c.specialty}
+                            </p>
+                          </div>
+                        </div>
+                        <p className="mt-2 text-xs text-brand-neutral-black/50">
+                          {c.engagedBy === "parent"
+                            ? "Connected by the family"
+                            : canRevoke
+                              ? "Connected by your school"
+                              : `Connected by ${c.engagedByInstitutionName ?? "another school"}`}
+                        </p>
+                        {canRevoke ? (
+                          <button
+                            type="button"
+                            onClick={() => setClinicianRevokeTarget(c)}
+                            className="mt-3 block w-full rounded-xl border border-brand-golden-brown py-2 text-center text-xs font-semibold text-brand-golden-brown"
+                          >
+                            Revoke
+                          </button>
+                        ) : (
+                          <p className="mt-3 text-center text-xs text-brand-neutral-black/40">
+                            Read-only — managed elsewhere
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {clinicianGrantedNotice && (
+                <p className="mt-3 rounded-xl bg-brand-off-white/50 px-4 py-3 text-sm text-brand-neutral-black">
+                  {clinicianGrantedNotice}
+                </p>
+              )}
+              {clinicianRevokedNotice && (
+                <p className="mt-3 rounded-xl bg-brand-off-white/50 px-4 py-3 text-sm text-brand-neutral-black">
+                  {clinicianRevokedNotice}
+                </p>
+              )}
+            </section>
           </>
         )}
       </main>
@@ -525,6 +682,41 @@ export default function PrincipalPassportDetailPage() {
           }}
           onConfirmed={() => {
             setRevokeTarget(null);
+            load();
+          }}
+        />
+      )}
+
+      {institutionId && childName && (
+        <GrantClinicianAccessSheet
+          isOpen={isGrantClinicianOpen}
+          passportId={passportId}
+          institutionId={institutionId}
+          childName={childName}
+          onClose={() => setIsGrantClinicianOpen(false)}
+          onGranted={(clinicianName) => {
+            setIsGrantClinicianOpen(false);
+            setClinicianGrantedNotice(`${clinicianName} has been connected to ${childName}'s passport.`);
+            load();
+          }}
+        />
+      )}
+
+      {clinicianRevokeTarget && (
+        <ReasonConfirmSheet
+          isOpen={Boolean(clinicianRevokeTarget)}
+          title={`Revoke ${clinicianRevokeTarget.fullName}'s access to ${childName ?? "this child"}?`}
+          description="Their access ends immediately. Please give a reason."
+          confirmLabel="Revoke Access"
+          submittingLabel="Revoking…"
+          onClose={() => setClinicianRevokeTarget(null)}
+          onConfirm={(reason) => handleRevokeClinician(clinicianRevokeTarget, reason)}
+          onConfirmed={() => {
+            const target = clinicianRevokeTarget;
+            setClinicianRevokeTarget(null);
+            setClinicianRevokedNotice(
+              target ? `Access for ${target.fullName} has been removed.` : null
+            );
             load();
           }}
         />

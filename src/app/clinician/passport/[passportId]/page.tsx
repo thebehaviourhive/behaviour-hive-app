@@ -15,6 +15,7 @@ import { ClinicalFileFbaTab } from "@/components/clinician/fba/ClinicalFileFbaTa
 import { ClinicalFileMessagesTab } from "@/components/clinician/ClinicalFileMessagesTab";
 import { ClinicalFileIncidentsTab } from "@/components/clinician/ClinicalFileIncidentsTab";
 import { EffectivenessSurface } from "@/components/clinician/passport/EffectivenessSurface";
+import { ReasonConfirmSheet } from "@/components/shared/ReasonConfirmSheet";
 
 type TabKey =
   | "summary"
@@ -84,6 +85,20 @@ export default function ClinicianPassportPage() {
 
   const [profile, setProfile] = useState<ClinicalProfile | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+
+  // Stage 7, Step 2 -- this clinician's own engagement with this
+  // passport, so they can see who connected them and end their own
+  // involvement (self-revoke: "the clinician's own professional
+  // decision, orthogonal to engaged_by -- always available regardless
+  // of who engaged them", 0123). Resolved from get_clinician_passports()
+  // rather than a direct clinician_access read -- one source of truth
+  // for this relationship, same reasoning as the parent/principal pages.
+  const [engagement, setEngagement] = useState<{
+    clinicianAccessId: string;
+    engagedBy: "parent" | "institution";
+    engagedByInstitutionName: string | null;
+  } | null>(null);
+  const [isEndInvolvementOpen, setIsEndInvolvementOpen] = useState(false);
   // Read once at mount, e.g. from Strategy Insights' per-child drill-down
   // linking straight into ?tab=effectiveness -- a deliberate ONE-TIME
   // read (lazy initializer, not synced on every searchParams change), so
@@ -111,7 +126,7 @@ export default function ClinicianPassportPage() {
     async function load() {
       const supabase = createClient();
 
-      const [{ data: passport }, { data: sectionB }, { data: sectionC }, { data: sectionD }] =
+      const [{ data: passport }, { data: sectionB }, { data: sectionC }, { data: sectionD }, { data: clinicianPassports, error: clinicianPassportsError }] =
         await Promise.all([
           supabase
             .from("passports")
@@ -137,9 +152,27 @@ export default function ClinicianPassportPage() {
             )
             .eq("passport_id", passportId)
             .maybeSingle(),
+          supabase.rpc("get_clinician_passports"),
         ]);
 
       if (!isMounted) return;
+
+      if (clinicianPassportsError) {
+        console.error("Failed to load own engagement:", clinicianPassportsError);
+      } else {
+        const own = (clinicianPassports ?? []).find(
+          (row: { passport_id: string }) => row.passport_id === passportId
+        );
+        setEngagement(
+          own
+            ? {
+                clinicianAccessId: own.clinician_access_id,
+                engagedBy: own.engaged_by,
+                engagedByInstitutionName: own.engaged_by_institution_name,
+              }
+            : null
+        );
+      }
 
       if (!passport) {
         setIsLoading(false);
@@ -239,6 +272,22 @@ export default function ClinicianPassportPage() {
           >
             <span aria-hidden>🩹</span> Calm button {isCalmButtonLive ? "live" : "not yet live"}
           </p>
+        )}
+        {engagement && (
+          <div className="mt-2 flex items-center justify-between gap-2">
+            <p className="text-xs text-brand-neutral-black/50">
+              {engagement.engagedBy === "parent"
+                ? "Connected by the family"
+                : `Connected by ${engagement.engagedByInstitutionName ?? "the school"}`}
+            </p>
+            <button
+              type="button"
+              onClick={() => setIsEndInvolvementOpen(true)}
+              className="text-xs font-semibold text-brand-golden-brown"
+            >
+              End your involvement
+            </button>
+          </div>
         )}
       </header>
 
@@ -420,6 +469,29 @@ export default function ClinicianPassportPage() {
             setActiveTab("incidents");
           }}
           onDismiss={() => setIsAbcLoggerOpen(false)}
+        />
+      )}
+
+      {engagement && (
+        <ReasonConfirmSheet
+          isOpen={isEndInvolvementOpen}
+          title={`End your involvement with ${profile.childFullName}?`}
+          description="You'll lose access to this passport immediately. This is your own professional decision -- please give a reason."
+          confirmLabel="End Involvement"
+          submittingLabel="Ending…"
+          onClose={() => setIsEndInvolvementOpen(false)}
+          onConfirm={async (reason) => {
+            const supabase = createClient();
+            const { error } = await supabase.rpc("revoke_clinician_access", {
+              p_clinician_access_id: engagement.clinicianAccessId,
+              p_reason: reason,
+            });
+            return { error: error?.message ?? null };
+          }}
+          onConfirmed={() => {
+            setIsEndInvolvementOpen(false);
+            router.push("/clinician/passports");
+          }}
         />
       )}
     </div>
