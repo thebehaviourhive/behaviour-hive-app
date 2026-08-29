@@ -171,7 +171,9 @@ export default function PrincipalPassportsPage() {
 
             {filteredActive.length === 0 && filteredPast.length > 0 && (
               <p className="px-1 pt-2 text-center text-sm text-brand-neutral-black/60">
-                No currently enrolled children match &quot;{query}&quot;.
+                {query.trim()
+                  ? `No currently enrolled children match "${query}".`
+                  : "No children currently enrolled."}
               </p>
             )}
 
