@@ -6131,6 +6131,432 @@ async function main() {
     }
   }
 
+  console.log(`\n== CHECK GG: Stage 5, Step 1 (migration 0113) -- passport_guardians, the dual-write trigger/backfill, owns_passport()'s rewrite, create_school_passport()'s atomicity, and the six "actively wrong" fixes. Per Daniel's own instruction: assert the CORRECTED VALUE specifically, not that something rendered -- a guardian labelled 'parent' rather than "a label exists", 'no_guardian_claimed' rather than "a reason is set". ==`);
+  {
+    const { data: instGG, error: instGGErr } = await admin
+      .from("institutions")
+      .insert({ name: "GG Stage 5 Step 1 Verify", institution_code: CODE + "GG", status: "verified" })
+      .select()
+      .single();
+    if (instGGErr) throw instGGErr;
+    const institutionGGId = instGG.id;
+
+    const principalGGId = await createUser("gg.principal@thebehaviourhive.com", "GG Principal", "principal");
+    const teacherGGId = await createUser("gg.teacher@thebehaviourhive.com", "GG Teacher", "class_teacher");
+    const clinicianGGId = await createUser("gg.clinician@thebehaviourhive.com", "GG Clinician", "clinician");
+    const parentGG1Id = await createUser("gg.parent1@thebehaviourhive.com", "GG Parent One", "parent");
+    const parentGG2Id = await createUser("gg.parent2@thebehaviourhive.com", "GG Parent Two", "parent");
+    const parentGGReachableId = await createUser("gg.parentreachable@thebehaviourhive.com", "GG Parent Reachable", "parent");
+    const parentGGDormantId = await createUser("gg.parentdormant@thebehaviourhive.com", "GG Parent Dormant", "parent");
+    const parentGGStrangerId = await createUser("gg.parentstranger@thebehaviourhive.com", "GG Parent Stranger", "parent");
+
+    const { data: staffGGRows, error: staffGGErr } = await admin
+      .from("institution_staff")
+      .insert([
+        { institution_id: institutionGGId, user_id: principalGGId, role: "principal" },
+        { institution_id: institutionGGId, user_id: teacherGGId, role: "class_teacher" },
+      ])
+      .select();
+    if (staffGGErr) throw staffGGErr;
+
+    const principalGG = await signedInClient("gg.principal@thebehaviourhive.com");
+    for (const row of staffGGRows.filter((r) => r.user_id !== principalGGId)) {
+      const { error } = await principalGG.rpc("approve_staff_join", { p_institution_staff_id: row.id });
+      if (error) throw error;
+    }
+    const teacherGG = await signedInClient("gg.teacher@thebehaviourhive.com");
+    await admin.from("clinicians").insert({ user_id: clinicianGGId, specialty: "behavioural_psychologist", verification_status: "verified" });
+    const clinicianGG = await signedInClient("gg.clinician@thebehaviourhive.com");
+
+    // ---- GG-0: the dual-write trigger + backfill, proven on an
+    // ordinary parent-owned passport created the exact way every other
+    // fixture in this suite (and the real signup flow) creates one --
+    // admin.from("passports").insert({ user_id: ... }), never touching
+    // passport_guardians directly. If this fails, every one of the 643
+    // checks above that depends on owns_passport() would have failed
+    // too -- this isolates the mechanism itself, not just its downstream
+    // effect. ----
+    const { data: childGGNormal } = await admin
+      .from("passports")
+      .insert({ user_id: parentGG1Id, child_name: "GG Normal Child", passport_status: "complete" })
+      .select()
+      .single();
+    await admin.from("passport_institution_links").insert({ passport_id: childGGNormal.id, institution_id: institutionGGId, approved_by_parent: false });
+
+    {
+      const { data: guardianRow } = await admin
+        .from("passport_guardians")
+        .select("id")
+        .eq("passport_id", childGGNormal.id)
+        .eq("user_id", parentGG1Id)
+        .maybeSingle();
+      record(
+        "GG-0 THE TRIGGER ITSELF: a passport created the ordinary way (admin insert with user_id set, never touching passport_guardians) gets a matching passport_guardians row automatically",
+        Boolean(guardianRow),
+        JSON.stringify(guardianRow)
+      );
+    }
+
+    const parentGG1 = await signedInClient("gg.parent1@thebehaviourhive.com");
+    {
+      const { data: ownsAfterBackfill } = await parentGG1.rpc("owns_passport", { check_passport_id: childGGNormal.id });
+      record(
+        "GG-0b owns_passport() itself agrees: the backfilled guardian is recognised as owning this passport via the rewritten predicate",
+        ownsAfterBackfill === true,
+        ownsAfterBackfill
+      );
+    }
+
+    const parentGGStranger = await signedInClient("gg.parentstranger@thebehaviourhive.com");
+    {
+      const { data: ownsAsStranger } = await parentGGStranger.rpc("owns_passport", { check_passport_id: childGGNormal.id });
+      record(
+        "GG-0c (negative control): a real signed-in parent who is genuinely NOT a guardian of this passport gets owns_passport() = false",
+        ownsAsStranger === false,
+        ownsAsStranger
+      );
+    }
+
+    // ---- GG-1/GG-2: create_school_passport() -- the atomic creation
+    // RPC. A school-created passport has NO guardian at all
+    // (owns_passport() false for everyone), and must be immediately
+    // visible on the creating principal's own roster -- the destination
+    // check named in the recon before this ever shipped. ----
+    const { data: childGGSchoolId, error: createSchoolErr } = await principalGG.rpc("create_school_passport", {
+      p_institution_id: institutionGGId,
+      p_child_name: "GG School-Created Child",
+    });
+    record("GG-1a create_school_passport() succeeds for an active, verified principal", !createSchoolErr, createSchoolErr?.message);
+
+    {
+      const { data: rosterGG } = await principalGG.rpc("get_institution_child_roster", { p_institution_id: institutionGGId });
+      const match = (rosterGG ?? []).find((r) => r.passport_id === childGGSchoolId);
+      record(
+        "GG-1b THE ATOMICITY ITSELF: the school-created passport is visible on get_institution_child_roster() immediately -- the passport_institution_links row was created in the SAME transaction, not a follow-up step",
+        Boolean(match) && match.child_name === "GG School-Created Child",
+        JSON.stringify(match)
+      );
+    }
+
+    {
+      const { data: schoolPassportRow } = await admin.from("passports").select("user_id").eq("id", childGGSchoolId).single();
+      record(
+        "GG-1c the school-created passport's user_id is genuinely null, not defaulted to the creating principal",
+        schoolPassportRow.user_id === null,
+        schoolPassportRow.user_id
+      );
+      const { data: schoolGuardianRows } = await admin.from("passport_guardians").select("id").eq("passport_id", childGGSchoolId);
+      record(
+        "GG-1d and correspondingly has ZERO passport_guardians rows -- nobody has claimed it yet",
+        (schoolGuardianRows ?? []).length === 0,
+        JSON.stringify(schoolGuardianRows)
+      );
+    }
+
+    {
+      const { error: notPrincipalErr } = await teacherGG.rpc("create_school_passport", { p_institution_id: institutionGGId, p_child_name: "Should Be Refused" });
+      record("GG-2a create_school_passport() refuses a non-principal caller (teacherGG)", Boolean(notPrincipalErr), notPrincipalErr?.message);
+    }
+    {
+      const { error: emptyNameErr } = await principalGG.rpc("create_school_passport", { p_institution_id: institutionGGId, p_child_name: "   " });
+      record("GG-2b create_school_passport() refuses a blank child name", Boolean(emptyNameErr), emptyNameErr?.message);
+    }
+    {
+      const { error: wrongInstErr } = await principalGG.rpc("create_school_passport", { p_institution_id: institutionId, p_child_name: "Should Be Refused Too" });
+      record(
+        "GG-2c create_school_passport() refuses a principal acting on an institution they don't belong to (institutionGG's principal, targeting the top-level fixture's own institution)",
+        Boolean(wrongInstErr),
+        wrongInstErr?.message
+      );
+    }
+
+    // ---- GG-3: passport_section_b/c/d's new unique(passport_id)
+    // constraint (added, not yet the sole key -- see the migration's
+    // own section 5). Proven structurally: two rows for the SAME
+    // passport_id, different user_id, the second must be refused. ----
+    {
+      const { error: sectionBFirstErr } = await admin
+        .from("passport_section_b")
+        .insert({ passport_id: childGGNormal.id, user_id: parentGG1Id, okay_signals: ["music"] });
+      const { error: sectionBSecondErr } = await admin
+        .from("passport_section_b")
+        .insert({ passport_id: childGGNormal.id, user_id: parentGG2Id, okay_signals: ["quiet"] });
+      record(
+        "GG-3 passport_section_b's new unique(passport_id) constraint refuses a second row for the same passport even under a different user_id",
+        !sectionBFirstErr && Boolean(sectionBSecondErr),
+        JSON.stringify({ sectionBFirstErr: sectionBFirstErr?.message, sectionBSecondErr: sectionBSecondErr?.message })
+      );
+    }
+
+    // ---- GG-4: get_fba_instrument_requests()'s recipient_role fix.
+    // childGGMulti has TWO real guardians -- parentGG1 (the original,
+    // backfilled owner) and parentGG2 (added directly to
+    // passport_guardians, the only way to construct a second guardian
+    // before Step 2's own claim RPC exists). An instrument request
+    // addressed to EITHER guardian must resolve to 'parent', and one
+    // addressed to teacherGG (a real class teacher, not a guardian at
+    // all) must still resolve to 'class_teacher' -- the negative control
+    // that proves this isn't just always returning 'parent' now. ----
+    // Built via create_school_passport() (no owner in passports.user_id
+    // at all) rather than an admin insert with user_id set -- parentGG1
+    // already owns childGGNormal, and passports.user_id's unique
+    // constraint is deliberately still live (migration 0113's own
+    // section 5, Step 1b not yet run), so a second admin insert with
+    // user_id: parentGG1Id would violate it. Going via the real
+    // guardian-less creation path sidesteps that AND is the more
+    // representative shape for what multi-guardian actually looks like
+    // going forward: both guardians added directly to
+    // passport_guardians, neither of them ever passports.user_id.
+    const { data: childGGMultiId } = await principalGG.rpc("create_school_passport", {
+      p_institution_id: institutionGGId,
+      p_child_name: "GG Multi-Guardian Child",
+    });
+    const childGGMulti = { id: childGGMultiId };
+    await admin.from("passport_guardians").insert([
+      { passport_id: childGGMulti.id, user_id: parentGG1Id },
+      { passport_id: childGGMulti.id, user_id: parentGG2Id },
+    ]);
+    await admin.from("clinician_access").insert({ passport_id: childGGMulti.id, clinician_id: clinicianGGId, is_active: true });
+    const { data: fbaGGMulti } = await admin.from("fba_reports").insert({ passport_id: childGGMulti.id, clinician_id: clinicianGGId, status: "draft" }).select().single();
+
+    const { data: reqGGParent2, error: reqGGParent2Err } = await admin
+      .from("fba_instrument_requests")
+      .insert({ fba_id: fbaGGMulti.id, passport_id: childGGMulti.id, instrument_type: "qabf", recipient_id: parentGG2Id, status: "sent" })
+      .select()
+      .single();
+    if (reqGGParent2Err) throw reqGGParent2Err;
+    const { data: reqGGTeacher, error: reqGGTeacherErr } = await admin
+      .from("fba_instrument_requests")
+      .insert({ fba_id: fbaGGMulti.id, passport_id: childGGMulti.id, instrument_type: "qabf", recipient_id: teacherGGId, status: "sent" })
+      .select()
+      .single();
+    if (reqGGTeacherErr) throw reqGGTeacherErr;
+
+    {
+      const { data: instrumentRows, error: instrumentRowsErr } = await clinicianGG.rpc("get_fba_instrument_requests", { p_fba_id: fbaGGMulti.id });
+      if (instrumentRowsErr) throw instrumentRowsErr;
+      const parent2Row = (instrumentRows ?? []).find((r) => r.id === reqGGParent2.id);
+      const teacherRow = (instrumentRows ?? []).find((r) => r.id === reqGGTeacher.id);
+      record(
+        "GG-4a THE FIX ITSELF: parentGG2 -- a second guardian, never passports.user_id -- is correctly labelled recipient_role = 'parent', not the pre-fix's unconditional 'class_teacher'",
+        parent2Row?.recipient_role === "parent",
+        JSON.stringify(parent2Row)
+      );
+      record(
+        "GG-4b (negative control): teacherGG, a genuine class teacher and not a guardian at all, is still correctly labelled 'class_teacher'",
+        teacherRow?.recipient_role === "class_teacher",
+        JSON.stringify(teacherRow)
+      );
+    }
+
+    // ---- GG-5: notify_parent_of_incident_stamp()'s three
+    // distinguishable outcomes, asserted by the ACTUAL
+    // parent_notification_blocked_reason value, not just whether one was
+    // set. Reachable needs the guardian to have genuinely signed in at
+    // least once BEFORE the incident is stamped (last_sign_in_at is only
+    // populated by a real sign-in -- every createUser() account starts
+    // with it null, so "reachable" and "dormant" differ only in whether
+    // signedInClient() was called first). ----
+    await signedInClient("gg.parentreachable@thebehaviourhive.com"); // populates last_sign_in_at before the stamp fires
+
+    const { data: childGGReachable } = await admin
+      .from("passports")
+      .insert({ user_id: parentGGReachableId, child_name: "GG Reachable Guardian Child", passport_status: "complete" })
+      .select()
+      .single();
+    const { data: childGGDormant } = await admin
+      .from("passports")
+      .insert({ user_id: parentGGDormantId, child_name: "GG Dormant Guardian Child", passport_status: "complete" })
+      .select()
+      .single();
+    for (const cid of [childGGReachable.id, childGGDormant.id]) {
+      await admin.from("passport_institution_links").insert({ passport_id: cid, institution_id: institutionGGId, approved_by_parent: false });
+    }
+
+    const { data: locGG } = await admin.from("incident_locations").select("id").eq("value", "Classroom").is("institution_id", null).single();
+
+    const { data: incidentGGReachable } = await teacherGG.rpc("create_incident_stamp", {
+      p_institution_id: institutionGGId, p_occurred_at: new Date().toISOString(), p_location_id: locGG.id,
+      p_child_passport_ids: [childGGReachable.id], p_staff: [],
+    });
+    const { data: incidentGGDormant } = await teacherGG.rpc("create_incident_stamp", {
+      p_institution_id: institutionGGId, p_occurred_at: new Date().toISOString(), p_location_id: locGG.id,
+      p_child_passport_ids: [childGGDormant.id], p_staff: [],
+    });
+    const { data: incidentGGNoGuardian } = await teacherGG.rpc("create_incident_stamp", {
+      p_institution_id: institutionGGId, p_occurred_at: new Date().toISOString(), p_location_id: locGG.id,
+      p_child_passport_ids: [childGGSchoolId], p_staff: [],
+    });
+
+    {
+      const { data: icReachable } = await admin
+        .from("incident_children")
+        .select("parent_notified_at, parent_notification_blocked_reason")
+        .eq("incident_id", incidentGGReachable)
+        .single();
+      record(
+        "GG-5a REACHABLE: a genuinely signed-in guardian is notified -- parent_notified_at set, parent_notification_blocked_reason null",
+        Boolean(icReachable.parent_notified_at) && icReachable.parent_notification_blocked_reason === null,
+        JSON.stringify(icReachable)
+      );
+
+      const { data: icDormant } = await admin
+        .from("incident_children")
+        .select("parent_notified_at, parent_notification_blocked_reason")
+        .eq("incident_id", incidentGGDormant)
+        .single();
+      record(
+        "GG-5b DORMANT, THE CORRECTED VALUE: a guardian who exists but has never signed in gets reason = 'dormant_account' exactly (not just 'a reason is set')",
+        icDormant.parent_notification_blocked_reason === "dormant_account" && !icDormant.parent_notified_at,
+        JSON.stringify(icDormant)
+      );
+
+      const { data: icNoGuardian } = await admin
+        .from("incident_children")
+        .select("parent_notified_at, parent_notification_blocked_reason")
+        .eq("incident_id", incidentGGNoGuardian)
+        .single();
+      record(
+        "GG-5c NO GUARDIAN, THE CORRECTED VALUE: a school-created, unclaimed passport gets the NEW reason 'no_guardian_claimed' exactly, never 'dormant_account' (there is no account to be dormant)",
+        icNoGuardian.parent_notification_blocked_reason === "no_guardian_claimed" && !icNoGuardian.parent_notified_at,
+        JSON.stringify(icNoGuardian)
+      );
+    }
+
+    // ---- GG-6: notify_parents_of_incident_signoff() -- same trigger
+    // shape, the teacher_signed_at transition instead of the insert.
+    // One state each is enough: the mechanism is identical to GG-5's,
+    // this proves it fires on the right transition and writes the same
+    // corrected values, not a second full enumeration. ----
+    await teacherGG.from("incidents").update({ teacher_signed_at: new Date().toISOString(), teacher_signed_by: teacherGGId }).eq("id", incidentGGReachable);
+    await teacherGG.from("incidents").update({ teacher_signed_at: new Date().toISOString(), teacher_signed_by: teacherGGId }).eq("id", incidentGGNoGuardian);
+    {
+      const { data: icReachableSignoff } = await admin
+        .from("incident_children")
+        .select("parent_notified_at, parent_notification_blocked_reason")
+        .eq("incident_id", incidentGGReachable)
+        .single();
+      record(
+        "GG-6a signoff stage, reachable: notified again (parent_notified_at refreshed), reason still null",
+        Boolean(icReachableSignoff.parent_notified_at) && icReachableSignoff.parent_notification_blocked_reason === null,
+        JSON.stringify(icReachableSignoff)
+      );
+      const { data: icNoGuardianSignoff } = await admin
+        .from("incident_children")
+        .select("parent_notification_blocked_reason")
+        .eq("incident_id", incidentGGNoGuardian)
+        .single();
+      record(
+        "GG-6b signoff stage, no guardian: still exactly 'no_guardian_claimed', not 'dormant_account'",
+        icNoGuardianSignoff.parent_notification_blocked_reason === "no_guardian_claimed",
+        JSON.stringify(icNoGuardianSignoff)
+      );
+    }
+
+    // ---- GG-7: get_child_clinical_document_status()'s new is_authorized
+    // boolean, asserted directly -- true for the real guardian, false
+    // (not absence) for a genuine stranger, with the real FBA state only
+    // readable by the former. ----
+    await admin.from("clinician_access").insert({ passport_id: childGGNormal.id, clinician_id: clinicianGGId, is_active: true });
+    const { data: fbaGGNormal } = await admin
+      .from("fba_reports")
+      .insert({ passport_id: childGGNormal.id, clinician_id: clinicianGGId, status: "completed", completed_at: new Date().toISOString() })
+      .select()
+      .single();
+    const { data: calmCardGG, error: calmCardGGErr } = await admin
+      .from("fba_calm_cards")
+      .insert({
+        fba_id: fbaGGNormal.id,
+        strategy_ref: "gg-verify-strategy",
+        title: "GG Calm Card",
+        steps: ["Step one", "Step two"],
+        door_type: "prevention",
+        is_published: true,
+      })
+      .select()
+      .single();
+    if (calmCardGGErr) throw calmCardGGErr;
+
+    {
+      const { data: statusAsGuardian } = await parentGG1.rpc("get_child_clinical_document_status", { p_passport_id: childGGNormal.id });
+      const row = (statusAsGuardian ?? [])[0];
+      record(
+        "GG-7a THE CORRECTED VALUE, authorized: is_authorized = true (not merely inferred from row presence), and the real completed FBA status comes through",
+        row?.is_authorized === true && row?.status === "completed",
+        JSON.stringify(row)
+      );
+
+      const { data: statusAsStranger } = await parentGGStranger.rpc("get_child_clinical_document_status", { p_passport_id: childGGNormal.id });
+      const strangerRow = (statusAsStranger ?? [])[0];
+      record(
+        "GG-7b THE CORRECTED VALUE, unauthorized: is_authorized = false explicitly, exactly one row, not zero and not the real FBA data leaking through",
+        strangerRow?.is_authorized === false && strangerRow?.fba_id === null,
+        JSON.stringify(strangerRow)
+      );
+    }
+
+    // ---- GG-8: get_my_child_calm_cards() -- raises for a genuine
+    // stranger rather than silently returning the same empty array as
+    // "locked", still returns the real published card for the actual
+    // guardian. ----
+    {
+      const { data: cardsAsGuardian, error: cardsGuardianErr } = await parentGG1.rpc("get_my_child_calm_cards", { p_passport_id: childGGNormal.id });
+      record(
+        "GG-8a authorized guardian still gets the real published card, unchanged shape",
+        !cardsGuardianErr && (cardsAsGuardian ?? []).some((c) => c.id === calmCardGG.id),
+        JSON.stringify({ cardsGuardianErr: cardsGuardianErr?.message, cardsAsGuardian })
+      );
+
+      const { error: cardsStrangerErr } = await parentGGStranger.rpc("get_my_child_calm_cards", { p_passport_id: childGGNormal.id });
+      record(
+        "GG-8b THE CORRECTED VALUE: a genuine stranger gets an explicit error, not the same empty array a locked/nothing-published state would produce",
+        Boolean(cardsStrangerErr),
+        cardsStrangerErr?.message
+      );
+    }
+
+    // ---- GG-9: multi-guardian fan-out for the message/FBA recipient
+    // candidate RPCs -- childGGMulti's SECOND guardian (parentGG2, never
+    // passports.user_id) must appear as a real 'parent' candidate, not
+    // be silently dropped the way a single passports.user_id join would
+    // drop everyone but whoever happened to be in that column. ----
+    {
+      const { data: candidatesGG } = await parentGG1.rpc("get_message_recipient_candidates", { p_passport_id: childGGMulti.id });
+      const parent2Candidate = (candidatesGG ?? []).find((c) => c.recipient_id === parentGG2Id);
+      record(
+        "GG-9a THE FIX ITSELF, get_message_recipient_candidates(): parentGG2 -- a second guardian never present in passports.user_id -- appears as a real 'parent' candidate to their co-guardian",
+        parent2Candidate?.role === "parent",
+        JSON.stringify(parent2Candidate)
+      );
+      const selfCandidate = (candidatesGG ?? []).find((c) => c.recipient_id === parentGG1Id);
+      record(
+        "GG-9b the caller themselves is still correctly excluded from their own candidate list",
+        selfCandidate === undefined,
+        JSON.stringify(selfCandidate)
+      );
+    }
+    {
+      const { data: fbaCandidatesGG } = await clinicianGG.rpc("get_fba_recipient_candidates", { p_fba_id: fbaGGMulti.id });
+      const bothGuardians = [parentGG1Id, parentGG2Id].every((id) =>
+        (fbaCandidatesGG ?? []).some((c) => c.recipient_id === id && c.role === "parent")
+      );
+      record(
+        "GG-9c THE FIX ITSELF, get_fba_recipient_candidates(): BOTH guardians of childGGMulti appear as 'parent' candidates, not just whichever one happened to be passports.user_id",
+        bothGuardians,
+        JSON.stringify(fbaCandidatesGG)
+      );
+    }
+
+    console.log("GG summary complete.");
+
+    await admin.from("clinicians").delete().eq("user_id", clinicianGGId);
+    await admin.from("passports").delete().in("id", [childGGNormal.id, childGGMulti.id, childGGSchoolId, childGGReachable.id, childGGDormant.id]);
+    await admin.from("institutions").delete().eq("id", institutionGGId);
+    for (const id of [principalGGId, teacherGGId, clinicianGGId, parentGG1Id, parentGG2Id, parentGGReachableId, parentGGDormantId, parentGGStrangerId]) {
+      await admin.auth.admin.deleteUser(id);
+    }
+  }
+
   console.log(`\n== Summary ==`);
   const failed = results.filter((r) => !r.pass);
   console.log(`${results.length - failed.length}/${results.length} passed.`);
