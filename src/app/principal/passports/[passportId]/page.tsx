@@ -7,6 +7,7 @@ import { useRequireRole } from "@/hooks/useRequireRole";
 import { createClient } from "@/lib/supabase/client";
 import { ReasonConfirmSheet } from "@/components/shared/ReasonConfirmSheet";
 import { GrantPassportAccessSheet } from "@/components/principal/GrantPassportAccessSheet";
+import { EndEnrolmentSheet } from "@/components/principal/EndEnrolmentSheet";
 
 // PRD 1, Stage 4, Step 3. Principal's passport-access detail: current
 // access with revoke, a collapsed past-access history, and a grant
@@ -54,9 +55,21 @@ interface ClaimCodeStatus {
   expiresAt: string;
 }
 
+interface EnrolmentRow {
+  id: string;
+  endedAt: string | null;
+  endReason: string | null;
+}
+
 const ROLE_LABEL: Record<string, string> = {
   class_teacher: "Class Teacher",
   sna: "SNA",
+};
+
+const END_REASON_LABEL: Record<string, string> = {
+  graduated: "Graduated",
+  left: "Left the school",
+  transferred: "Transferred to another school",
 };
 
 export default function PrincipalPassportDetailPage() {
@@ -76,6 +89,17 @@ export default function PrincipalPassportDetailPage() {
 
   const [isGrantOpen, setIsGrantOpen] = useState(false);
   const [revokeTarget, setRevokeTarget] = useState<AccessRow | null>(null);
+
+  // Stage 6, Step 2 -- the current (most recent) enrolment at THIS
+  // institution, read directly (RLS: "Active institution staff can view
+  // enrolments", 0121) rather than through a new RPC -- a plain read,
+  // no new mechanism needed for it. null id + not-loading means this
+  // passport was linked before Stage 6 existed and has no enrolment row
+  // at all yet (same "treat as active" reasoning as the roster RPC's
+  // own enrolment_ended_at column, 0122) -- shown as enrolled, no end
+  // action offered, since there's no enrolment id to end.
+  const [enrolment, setEnrolment] = useState<EnrolmentRow | null>(null);
+  const [isEndEnrolmentOpen, setIsEndEnrolmentOpen] = useState(false);
 
   // Stage 5, Step 3, Requirement 2 -- guardians once a claim code is
   // redeemed REPLACE the claim-code UI here (get_passport_guardians_for_
@@ -130,12 +154,29 @@ export default function PrincipalPassportDetailPage() {
     }
     setChildName(rosterMatch.child_name);
 
-    const [accessResult, staffRosterResult, guardiansResult, claimCodeResult] = await Promise.all([
+    const [accessResult, staffRosterResult, guardiansResult, claimCodeResult, enrolmentResult] = await Promise.all([
       supabase.rpc("get_passport_access_for_child", { p_passport_id: passportId, p_institution_id: staffRow.institution_id }),
       supabase.rpc("get_institution_staff_roster", { p_institution_id: staffRow.institution_id, p_include_inactive: false, p_include_pending: false }),
       supabase.rpc("get_passport_guardians_for_child", { p_institution_id: staffRow.institution_id, p_passport_id: passportId }),
       supabase.rpc("get_passport_claim_code_status", { p_institution_id: staffRow.institution_id, p_passport_id: passportId }),
+      supabase
+        .from("enrolments")
+        .select("id, ended_at, end_reason")
+        .eq("passport_id", passportId)
+        .eq("institution_id", staffRow.institution_id)
+        .order("started_at", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
     ]);
+
+    if (enrolmentResult.error) {
+      console.error("Failed to load enrolment:", enrolmentResult.error);
+    }
+    setEnrolment(
+      enrolmentResult.data
+        ? { id: enrolmentResult.data.id, endedAt: enrolmentResult.data.ended_at, endReason: enrolmentResult.data.end_reason }
+        : null
+    );
 
     if (accessResult.error) {
       setError("Could not load this child's access history.");
@@ -258,6 +299,37 @@ export default function PrincipalPassportDetailPage() {
           </p>
         ) : (
           <>
+            <section className="mb-6">
+              <h2 className="mb-2 font-heading text-sm font-bold uppercase tracking-wide text-brand-neutral-black/60">
+                Enrolment
+              </h2>
+              {enrolment?.endedAt ? (
+                <div className="rounded-2xl border border-black/5 bg-white/60 p-4">
+                  <span className="inline-flex items-center gap-1.5 rounded-full bg-black/5 px-2.5 py-1 text-xs font-semibold text-brand-neutral-black/60">
+                    Enrolment ended
+                  </span>
+                  <p className="mt-2 text-xs text-brand-neutral-black/50">
+                    {END_REASON_LABEL[enrolment.endReason ?? ""] ?? enrolment.endReason} · {formatDate(enrolment.endedAt)}
+                  </p>
+                </div>
+              ) : (
+                <div className="flex items-center justify-between rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
+                  <span className="inline-flex items-center gap-1.5 rounded-full bg-brand-pastel-blue/20 px-2.5 py-1 text-xs font-semibold text-brand-prussian-blue">
+                    Enrolled
+                  </span>
+                  {enrolment && (
+                    <button
+                      type="button"
+                      onClick={() => setIsEndEnrolmentOpen(true)}
+                      className="text-xs font-semibold text-brand-golden-brown"
+                    >
+                      End Enrolment
+                    </button>
+                  )}
+                </div>
+              )}
+            </section>
+
             <section className="mb-6">
               <h2 className="mb-2 font-heading text-sm font-bold uppercase tracking-wide text-brand-neutral-black/60">
                 Parent / Guardian
@@ -417,6 +489,19 @@ export default function PrincipalPassportDetailPage() {
           onClose={() => setIsGrantOpen(false)}
           onGranted={() => {
             setIsGrantOpen(false);
+            load();
+          }}
+        />
+      )}
+
+      {enrolment && !enrolment.endedAt && childName && (
+        <EndEnrolmentSheet
+          isOpen={isEndEnrolmentOpen}
+          enrolmentId={enrolment.id}
+          childName={childName}
+          onClose={() => setIsEndEnrolmentOpen(false)}
+          onEnded={() => {
+            setIsEndEnrolmentOpen(false);
             load();
           }}
         />

@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { createClient } from "@/lib/supabase/client";
+import { EnrolChildSheet } from "@/components/principal/EnrolChildSheet";
 
 // PRD 1, Stage 4, Step 3. Mirrors /principal/classes' own list idiom
 // exactly (header with a back chevron + title, rounded-2xl white cards)
@@ -18,71 +19,91 @@ import { createClient } from "@/lib/supabase/client";
 // gap is the information, not just the grants. An empty detail page
 // (visited by tapping through) is a legitimate, informative state, not
 // an error.
+//
+// Stage 6, Step 2: the same RPC now also returns enrolment_ended_at
+// (0122) -- null for an actively-enrolled child OR one linked before
+// Stage 6 existed (never given an enrolment row at all; treated the
+// same deliberately, so no pre-Stage-6 child silently vanishes from the
+// active list), non-null for a child whose most recent enrolment at
+// this school has ended. Split into Active + a collapsed Past Pupils
+// section, matching this app's own established convention (Past Cover,
+// Removed teachers, Previously in this class) -- not a new pattern.
 
 interface ChildRosterRow {
   passport_id: string;
   child_name: string;
+  enrolment_ended_at: string | null;
+}
+
+function formatDate(value: string): string {
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return value;
+  return d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 }
 
 export default function PrincipalPassportsPage() {
   const { user, isReady } = useRequireRole("principal");
+  const [institutionId, setInstitutionId] = useState<string | null>(null);
   const [children, setChildren] = useState<ChildRosterRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+  const [showPast, setShowPast] = useState(false);
+  const [isEnrolOpen, setIsEnrolOpen] = useState(false);
 
-  useEffect(() => {
+  const load = useCallback(async () => {
     if (!user) return;
-    let isMounted = true;
+    setIsLoading(true);
+    setError(null);
 
-    async function load() {
-      const supabase = createClient();
-      const { data: staffRow, error: staffError } = await supabase
-        .from("institution_staff")
-        .select("institution_id")
-        .eq("user_id", user!.id)
-        .eq("role", "principal")
-        .is("deactivated_at", null)
-        .not("approved_at", "is", null)
-        .maybeSingle();
+    const supabase = createClient();
+    const { data: staffRow, error: staffError } = await supabase
+      .from("institution_staff")
+      .select("institution_id")
+      .eq("user_id", user.id)
+      .eq("role", "principal")
+      .is("deactivated_at", null)
+      .not("approved_at", "is", null)
+      .maybeSingle();
 
-      if (!isMounted) return;
-
-      if (staffError || !staffRow) {
-        setError("Could not find your institution.");
-        setIsLoading(false);
-        return;
-      }
-
-      const { data: rosterRows, error: rosterError } = await supabase.rpc("get_institution_child_roster", {
-        p_institution_id: staffRow.institution_id,
-      });
-
-      if (!isMounted) return;
-
-      if (rosterError) {
-        setError("Could not load the school roster.");
-        setIsLoading(false);
-        return;
-      }
-
-      setChildren(((rosterRows ?? []) as ChildRosterRow[]).slice().sort((a, b) => a.child_name.localeCompare(b.child_name)));
+    if (staffError || !staffRow) {
+      setError("Could not find your institution.");
       setIsLoading(false);
+      return;
+    }
+    setInstitutionId(staffRow.institution_id);
+
+    const { data: rosterRows, error: rosterError } = await supabase.rpc("get_institution_child_roster", {
+      p_institution_id: staffRow.institution_id,
+    });
+
+    if (rosterError) {
+      setError("Could not load the school roster.");
+      setIsLoading(false);
+      return;
     }
 
-    load();
-    return () => {
-      isMounted = false;
-    };
+    setChildren(((rosterRows ?? []) as ChildRosterRow[]).slice().sort((a, b) => a.child_name.localeCompare(b.child_name)));
+    setIsLoading(false);
   }, [user]);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    load();
+  }, [load]);
 
   if (!isReady) {
     return null;
   }
 
-  const filtered = query.trim()
-    ? children.filter((c) => c.child_name.toLowerCase().includes(query.trim().toLowerCase()))
-    : children;
+  const active = children.filter((c) => !c.enrolment_ended_at);
+  const past = children.filter((c) => c.enrolment_ended_at);
+  const filteredActive = query.trim()
+    ? active.filter((c) => c.child_name.toLowerCase().includes(query.trim().toLowerCase()))
+    : active;
+  const filteredPast = query.trim()
+    ? past.filter((c) => c.child_name.toLowerCase().includes(query.trim().toLowerCase()))
+    : past;
 
   return (
     <div className="flex min-h-full flex-1 flex-col bg-brand-off-white/40 pb-10">
@@ -95,6 +116,15 @@ export default function PrincipalPassportsPage() {
           ‹
         </Link>
         <h1 className="flex-1 font-heading text-xl font-bold text-brand-prussian-blue">Passports</h1>
+        {institutionId && (
+          <button
+            type="button"
+            onClick={() => setIsEnrolOpen(true)}
+            className="rounded-full bg-brand-prussian-blue px-4 py-2 text-sm font-semibold text-white"
+          >
+            + Enrol
+          </button>
+        )}
       </header>
 
       {children.length > 0 && (
@@ -121,22 +151,70 @@ export default function PrincipalPassportsPage() {
           <p className="rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-center text-sm text-brand-neutral-black/60">
             No children linked to this school yet.
           </p>
-        ) : filtered.length === 0 ? (
+        ) : filteredActive.length === 0 && filteredPast.length === 0 ? (
           <p className="px-1 pt-2 text-center text-sm text-brand-neutral-black/60">No children match &quot;{query}&quot;.</p>
         ) : (
-          <div className="flex flex-col gap-2">
-            {filtered.map((c) => (
-              <Link
-                key={c.passport_id}
-                href={`/principal/passports/${c.passport_id}`}
-                className="block rounded-2xl border border-black/5 bg-white p-4 shadow-sm"
-              >
-                <p className="text-sm font-semibold text-brand-neutral-black">{c.child_name}</p>
-              </Link>
-            ))}
-          </div>
+          <>
+            {filteredActive.length > 0 && (
+              <div className="flex flex-col gap-2">
+                {filteredActive.map((c) => (
+                  <Link
+                    key={c.passport_id}
+                    href={`/principal/passports/${c.passport_id}`}
+                    className="block rounded-2xl border border-black/5 bg-white p-4 shadow-sm"
+                  >
+                    <p className="text-sm font-semibold text-brand-neutral-black">{c.child_name}</p>
+                  </Link>
+                ))}
+              </div>
+            )}
+
+            {filteredActive.length === 0 && filteredPast.length > 0 && (
+              <p className="px-1 pt-2 text-center text-sm text-brand-neutral-black/60">
+                No currently enrolled children match &quot;{query}&quot;.
+              </p>
+            )}
+
+            {filteredPast.length > 0 && (
+              <div className="mt-4">
+                <button
+                  type="button"
+                  onClick={() => setShowPast((v) => !v)}
+                  className="flex w-full items-center justify-between rounded-2xl border border-dashed border-black/10 bg-white/60 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-brand-neutral-black/50"
+                >
+                  <span>Past pupils ({filteredPast.length})</span>
+                  <span>{showPast ? "−" : "+"}</span>
+                </button>
+                {showPast && (
+                  <div className="mt-2 flex flex-col gap-2">
+                    {filteredPast.map((c) => (
+                      <Link
+                        key={c.passport_id}
+                        href={`/principal/passports/${c.passport_id}`}
+                        className="block rounded-2xl border border-black/5 bg-white/60 p-4"
+                      >
+                        <p className="text-sm font-semibold text-brand-neutral-black">{c.child_name}</p>
+                        <p className="mt-0.5 text-xs text-brand-neutral-black/50">
+                          Enrolment ended {formatDate(c.enrolment_ended_at!)}
+                        </p>
+                      </Link>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </>
         )}
       </main>
+
+      {institutionId && (
+        <EnrolChildSheet
+          isOpen={isEnrolOpen}
+          institutionId={institutionId}
+          onClose={() => setIsEnrolOpen(false)}
+          onEnrolled={load}
+        />
+      )}
     </div>
   );
 }
