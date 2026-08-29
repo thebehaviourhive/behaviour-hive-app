@@ -8181,11 +8181,15 @@ async function main() {
       );
     }
 
-    // ---- LL-4: THE CLINICIAN'S CASELOAD SURFACES ENGAGEMENT ORIGIN
-    // (bullet 4) -- src/app/clinician/passports/page.tsx:61's exact RPC
-    // call (no params, clinician_id = auth.uid() only), then its own
-    // display logic at :147-149, reproduced verbatim for both a parent-
-    // engaged and an institution-engaged clinician. ----
+    // ---- LL-4/LL-5: THE CLINICIAN'S OWN SURFACES (bullet 4, and bullet
+    // 5's "third surface" from bullet 2's own framing) -- one sign-in
+    // per clinician, reused across both checks (this suite's own auth
+    // rate-limit budget matters -- see the file header). Both checks
+    // call get_clinician_passports() the way BOTH
+    // src/app/clinician/passports/page.tsx:61 (the caseload list) and
+    // src/app/clinician/passport/[passportId]/page.tsx:155 (this child's
+    // own detail page) actually do -- same RPC, same no-params shape,
+    // genuinely the same call from the client's point of view. ----
     {
       const clinicianLL1 = await signedInClient("checkll.clinician1@thebehaviourhive.com");
       const clinicianLL2 = await signedInClient("checkll.clinician2@thebehaviourhive.com");
@@ -8193,6 +8197,9 @@ async function main() {
       const { data: caseloadLL2 } = await clinicianLL2.rpc("get_clinician_passports");
       const rowLL1 = (caseloadLL1 ?? []).find((r) => r.passport_id === childLLId);
       const rowLL2 = (caseloadLL2 ?? []).find((r) => r.passport_id === childLLId);
+
+      // LL-4: src/app/clinician/passports/page.tsx:147-149's own display
+      // logic, reproduced verbatim.
       const displayFor = (row) =>
         row?.engaged_by === "parent" ? "Connected by the family" : `Connected by ${row?.engaged_by_institution_name ?? "the school"}`;
       record(
@@ -8205,33 +8212,22 @@ async function main() {
         displayFor(rowLL2) === "Connected by LL Institution",
         JSON.stringify(rowLL2)
       );
-    }
 
-    // ---- LL-5: SELF-REVOKE AVAILABLE REGARDLESS OF ENGAGED_BY (bullet
-    // 5; the third of the "three surfaces" from bullet 2's own framing,
-    // and deliberately the ONE surface that does NOT gate on engaged_by
-    // at all) -- src/app/clinician/passport/[passportId]/page.tsx:155's
-    // exact RPC call plus its own :163-165 resolution (.find() by
-    // passport_id), then :276's own render gate (`{engagement && (...)}`,
-    // unconditional on engagedBy), reproduced verbatim for both
-    // authorities. ----
-    {
-      const clinicianLL1 = await signedInClient("checkll.clinician1@thebehaviourhive.com");
-      const clinicianLL2 = await signedInClient("checkll.clinician2@thebehaviourhive.com");
-      const { data: passportsLL1 } = await clinicianLL1.rpc("get_clinician_passports");
-      const { data: passportsLL2 } = await clinicianLL2.rpc("get_clinician_passports");
-      const ownLL1 = (passportsLL1 ?? []).find((row) => row.passport_id === childLLId);
-      const ownLL2 = (passportsLL2 ?? []).find((row) => row.passport_id === childLLId);
+      // LL-5: src/app/clinician/passport/[passportId]/page.tsx:163-165's
+      // own .find() resolution plus :276's own render gate
+      // (`{engagement && (...)}`, unconditional on engagedBy),
+      // reproduced verbatim for both authorities -- deliberately the ONE
+      // of the three surfaces that does NOT gate on engaged_by at all.
       const buttonWouldShow = (own) => Boolean(own); // the literal :276 gate
       record(
         "LL-5a THE THIRD SURFACE: a parent-engaged clinician's own 'End your involvement' gate resolves truthy -- self-revoke available (src/app/clinician/passport/[passportId]/page.tsx:163-165,276)",
-        buttonWouldShow(ownLL1) === true,
-        JSON.stringify(ownLL1)
+        buttonWouldShow(rowLL1) === true,
+        JSON.stringify(rowLL1)
       );
       record(
         "LL-5b THE CONTRAST WITH LL-2/LL-3: an institution-engaged clinician's OWN gate resolves truthy too -- unlike the principal's and parent's own surfaces, this one is deliberately NOT engaged_by-conditional (src/app/clinician/passport/[passportId]/page.tsx:163-165,276)",
-        buttonWouldShow(ownLL2) === true,
-        JSON.stringify(ownLL2)
+        buttonWouldShow(rowLL2) === true,
+        JSON.stringify(rowLL2)
       );
     }
 
