@@ -77,6 +77,15 @@ export default function ParentDashboardPage() {
   const childName = resolvedChildName || "your child";
   const [passportStatus, setPassportStatus] = useState<PassportStatus>("not_started");
   const [resumeHref, setResumeHref] = useState("/passport/welcome");
+  // A CLAIMED passport (this parent isn't its passports.user_id) has no
+  // wizard to resume -- section-a/useSectionB/C/D are all user_id-keyed
+  // to whoever originally created it, deliberately out of Stage 5 Step
+  // 3's scope. Found live, driving the exact case end-to-end: without
+  // this, "Build your child's passport" renders for a passport a claimed
+  // guardian structurally cannot build, and its link would otherwise
+  // route through the same /passport/welcome->/passport/dashboard hop
+  // passport/dashboard/page.tsx's own matching fix now short-circuits.
+  const [isSelfCreatedPassport, setIsSelfCreatedPassport] = useState(true);
   const [isLoadingDashboardData, setIsLoadingDashboardData] = useState(true);
   const [hasCheckedInToday, setHasCheckedInToday] = useState(false);
   const [checkedInAt, setCheckedInAt] = useState<string | null>(null);
@@ -138,7 +147,7 @@ export default function ParentDashboardPage() {
       ] = await Promise.all([
         supabase
           .from("passports")
-          .select("passport_status, section_a_complete")
+          .select("user_id, passport_status, section_a_complete")
           .eq("id", passportId)
           .maybeSingle(),
         supabase
@@ -170,8 +179,10 @@ export default function ParentDashboardPage() {
 
       const status =
         (passportRow?.passport_status as PassportStatus | undefined) ?? "not_started";
+      const isSelfCreated = passportRow?.user_id === user!.id;
 
       setPassportStatus(status);
+      setIsSelfCreatedPassport(isSelfCreated);
       setHasCheckedInToday(Boolean(todaysCheckin));
       setCheckedInAt(todaysCheckin?.submitted_at ?? null);
 
@@ -208,27 +219,29 @@ export default function ParentDashboardPage() {
         });
       }
       setResumeHref(
-        getPassportResumeHref({
-          passportStatus: status,
-          sectionAComplete: Boolean(passportRow?.section_a_complete),
-          sectionB: sectionB
-            ? {
-                okaySignals: sectionB.okay_signals,
-                hardSignals: sectionB.hard_signals,
-                hardTriggers: sectionB.hard_triggers,
-                complete: sectionB.section_b_complete,
-              }
-            : null,
-          sectionCComplete: Boolean(sectionC?.section_c_complete),
-          sectionD: sectionD
-            ? {
-                beforeBehaviour: sectionD.before_behaviour,
-                duringDistress: sectionD.during_distress,
-                afterDistress: sectionD.after_distress,
-                complete: sectionD.section_d_complete,
-              }
-            : null,
-        })
+        isSelfCreated
+          ? getPassportResumeHref({
+              passportStatus: status,
+              sectionAComplete: Boolean(passportRow?.section_a_complete),
+              sectionB: sectionB
+                ? {
+                    okaySignals: sectionB.okay_signals,
+                    hardSignals: sectionB.hard_signals,
+                    hardTriggers: sectionB.hard_triggers,
+                    complete: sectionB.section_b_complete,
+                  }
+                : null,
+              sectionCComplete: Boolean(sectionC?.section_c_complete),
+              sectionD: sectionD
+                ? {
+                    beforeBehaviour: sectionD.before_behaviour,
+                    duringDistress: sectionD.during_distress,
+                    afterDistress: sectionD.after_distress,
+                    complete: sectionD.section_d_complete,
+                  }
+                : null,
+            })
+          : "/passport/dashboard"
       );
       setIsLoadingDashboardData(false);
     }
@@ -320,7 +333,7 @@ export default function ParentDashboardPage() {
               </div>
             </section>
           )
-        ) : (
+        ) : isSelfCreatedPassport ? (
           <section>
             <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-black/40">
               Get started
@@ -350,6 +363,17 @@ export default function ParentDashboardPage() {
               </span>
             </Link>
           </section>
+        ) : (
+          // A claimed, still-incomplete passport: neither "Passport
+          // Completed!" (it isn't) nor "Build your child's passport"
+          // (this parent structurally can't -- section-a is user_id-keyed
+          // to whoever originally created it) fits. No card, matching
+          // this section's own existing precedent for "nothing to show
+          // here" (a dismissed completed-card also renders null). The
+          // real fix -- a genuine "complete your child's passport" flow
+          // for a claimed guardian -- is CLAUDE.md's own already-named
+          // known limitation, not attempted here.
+          null
         )}
 
         <ClinicalSupportSection passportId={passportId} childName={childName} />

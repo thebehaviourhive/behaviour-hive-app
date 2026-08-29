@@ -349,7 +349,7 @@ export default function PassportDashboardPage() {
           supabase
             .from("passports")
             .select(
-              "passport_code, child_name, date_of_birth, school, important_people, diagnoses, diagnosis_other, passport_status, section_a_complete"
+              "user_id, passport_code, child_name, date_of_birth, school, important_people, diagnoses, diagnosis_other, passport_status, section_a_complete"
             )
             .eq("id", passportId)
             .maybeSingle(),
@@ -376,29 +376,48 @@ export default function PassportDashboardPage() {
 
         if (!isMounted) return;
 
-        const resumeHref = getPassportResumeHref({
-          passportStatus:
-            (passport?.passport_status as "not_started" | "in_progress" | "complete" | null) ??
-            null,
-          sectionAComplete: Boolean(passport?.section_a_complete),
-          sectionB: sectionB
-            ? {
-                okaySignals: sectionB.okay_signals,
-                hardSignals: sectionB.hard_signals,
-                hardTriggers: sectionB.hard_triggers,
-                complete: sectionB.section_b_complete,
-              }
-            : null,
-          sectionCComplete: Boolean(sectionC?.section_c_complete),
-          sectionD: sectionD
-            ? {
-                beforeBehaviour: sectionD.before_behaviour,
-                duringDistress: sectionD.during_distress,
-                afterDistress: sectionD.after_distress,
-                complete: sectionD.section_d_complete,
-              }
-            : null,
-        });
+        // A CLAIMED passport (this parent isn't its passports.user_id --
+        // that's either a different guardian's self-created row, or null
+        // for a school-created one) has no wizard to resume: section-a
+        // and useSectionB/C/D are all user_id-keyed to whoever originally
+        // created it, deliberately out of Stage 5 Step 3's scope (see
+        // CLAUDE.md's own "known limitation" entry). getPassportResumeHref
+        // doesn't know this distinction -- it would send a not_started
+        // claimed passport to /passport/welcome, which (now that welcome
+        // itself redirects a parent who already has ANY passport straight
+        // back here) is a genuine infinite redirect loop, not just wrong
+        // copy. Found live, driving this exact case end-to-end, not by
+        // inspection. A claimed guardian always lands on this dashboard
+        // itself, however incomplete the underlying data is -- the
+        // section cards below already have their own "nothing added yet"
+        // empty states for exactly this shape.
+        const isSelfCreated = passport?.user_id === user!.id;
+
+        const resumeHref = isSelfCreated
+          ? getPassportResumeHref({
+              passportStatus:
+                (passport?.passport_status as "not_started" | "in_progress" | "complete" | null) ??
+                null,
+              sectionAComplete: Boolean(passport?.section_a_complete),
+              sectionB: sectionB
+                ? {
+                    okaySignals: sectionB.okay_signals,
+                    hardSignals: sectionB.hard_signals,
+                    hardTriggers: sectionB.hard_triggers,
+                    complete: sectionB.section_b_complete,
+                  }
+                : null,
+              sectionCComplete: Boolean(sectionC?.section_c_complete),
+              sectionD: sectionD
+                ? {
+                    beforeBehaviour: sectionD.before_behaviour,
+                    duringDistress: sectionD.during_distress,
+                    afterDistress: sectionD.after_distress,
+                    complete: sectionD.section_d_complete,
+                  }
+                : null,
+            })
+          : "/passport/dashboard";
 
         // Compare against the SAME resume calculation used everywhere else,
         // rather than the raw passport_status flag in isolation. If every
