@@ -1,0 +1,55 @@
+-- Run this in the Supabase Dashboard: SQL Editor -> New query -> paste -> Run.
+--
+-- PRD 1, Stage 5, Step 3 -- found before any client code was written,
+-- while checking exactly what a resolved passport_id would actually let
+-- a guardian read: passports' own SELECT policy has never been touched
+-- since migration 0002 wrote it -- still `using (auth.uid() = user_id)`,
+-- never rewritten to owns_passport() the way Stage 5's own dual-write
+-- trigger and owns_passport() rewrite (0113) implied everything reading
+-- "my own passport" now goes through.
+--
+-- get_my_passports() (0114) still works for a claimed guardian --
+-- it's SECURITY DEFINER, bypasses RLS internally -- so they can
+-- discover their own passport_id and child_name. But the moment a
+-- screen does a direct .from("passports").select(...) for anything
+-- beyond that (passport_status, section_a_complete, date_of_birth,
+-- diagnoses -- everything parent-dashboard/page.tsx and passport/
+-- dashboard/page.tsx need), RLS silently returns nothing for a claimed
+-- passport, because the predicate never matches a null user_id. The
+-- eleventh "grant access, test the destination" instance -- found by
+-- asking exactly that question before any of Step 3's client migration
+-- was written, not after.
+--
+-- INSERT and UPDATE are deliberately left untouched -- both belong to
+-- passport/section-a's own self-created-passport flow (CLAUDE.md's own
+-- entry: "deliberately NOT migrated... both their read AND their write
+-- are keyed on user_id"), which stays exactly as it is.
+--
+-- WHAT THIS MEANS PLAINLY, so it isn't rediscovered later: a guardian
+-- who claimed a school-created passport can now READ it and CANNOT EDIT
+-- it -- not child_name, not date_of_birth, not diagnoses, none of
+-- passports' own columns. That's a real, deliberate asymmetry, correct
+-- for now (section-a is the parent's own passport-CREATION path, and it
+-- stays user_id-keyed per CLAUDE.md), not an oversight.
+--
+-- AND THE GAP IT LEAVES, recorded rather than left to be found in Step
+-- 3: create_school_passport() (0113) only ever sets child_name and
+-- passport_status = 'not_started' -- a school-created passport's own
+-- date_of_birth/school/important_people/diagnoses are never filled in
+-- by anyone. Once claimed, the guardian has NO path to complete these --
+-- section-a/page.tsx is the only UI that writes them, and it's
+-- user_id-keyed, so a claimed guardian landing there (by direct URL;
+-- Step 3's welcome-page branch routes them away from it in the normal
+-- flow) would get a blank "create new" form that, if submitted, creates
+-- an UNRELATED second passport rather than completing the one they
+-- claimed. This migration makes the claimed passport visible; it does
+-- NOT make it completable. Closing that gap needs either extending
+-- section-a's own write path to guardian-based auth (not just
+-- read-side, the way this migration only touches SELECT) or a
+-- dedicated "complete your child's passport" flow for a claimed,
+-- still-incomplete passport -- real, separate work, out of this
+-- migration's and Step 3's scope, not attempted here.
+
+alter policy "Users can view their own passport"
+  on public.passports
+  using (public.owns_passport(id));
