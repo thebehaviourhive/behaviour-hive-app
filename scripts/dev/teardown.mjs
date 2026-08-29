@@ -121,7 +121,7 @@ function printReport(report) {
 // ---------------------------------------------------------------------
 // institution <code>
 // ---------------------------------------------------------------------
-async function teardownInstitution(code, force) {
+async function teardownInstitution(code, force, withOrphanedPassports) {
   console.log(`\n=== INSTITUTION TEARDOWN: ${code} ===`);
 
   if (code.toUpperCase() === "BHPS0000") {
@@ -163,6 +163,20 @@ async function teardownInstitution(code, force) {
   if (injErr) fail(`Failed to resolve injuries: ${injErr.message}`);
   const injuryIds = (injuryRows ?? []).map((r) => r.id);
 
+  // Captured BEFORE passport_institution_links is deleted below --
+  // passports.create_school_passport() (0113) creates a passport with
+  // no institution_id column at all (a passport genuinely isn't
+  // institution-owned), so nothing in this function's own steps ever
+  // reaches it. Without --with-orphaned-passports this stays exactly as
+  // it always has: a fixture-created, guardian-less passport survives
+  // institution teardown by design, same as it does for a real school.
+  // See the orphaned-passport sweep after the report below.
+  const { data: linkedPassportRows } = await admin
+    .from("passport_institution_links")
+    .select("passport_id")
+    .eq("institution_id", inst.id);
+  const linkedPassportIds = [...new Set((linkedPassportRows ?? []).map((r) => r.passport_id))];
+
   const inIncident = (col) => (t) => (incidentIds.length ? t.in(col, incidentIds) : null);
 
   const steps = [
@@ -185,6 +199,12 @@ async function teardownInstitution(code, force) {
     ["cpi_disengagement_types", (t) => t.eq("institution_id", inst.id)],
     ["cpi_result_types", (t) => t.eq("institution_id", inst.id)],
     ["passport_access", (t) => t.eq("institution_id", inst.id)],
+    // enrolments (0121) would cascade automatically once the
+    // institutions row itself is deleted below regardless -- explicit
+    // here anyway, matching this script's own stated philosophy: an
+    // explicit walk reports exactly what was removed from where, rather
+    // than trusting an implicit cascade to also be a visible one.
+    ["enrolments", (t) => t.eq("institution_id", inst.id)],
     ["passport_institution_links", (t) => t.eq("institution_id", inst.id)],
     ["institution_staff", (t) => t.eq("institution_id", inst.id)],
   ];
@@ -207,6 +227,65 @@ async function teardownInstitution(code, force) {
       `incidents=${verifyIncidents?.length ?? 0} -- ${clean ? "CLEAN" : "NOT CLEAN -- investigate before trusting this teardown"}`
   );
   if (!clean) process.exit(1);
+
+  // ---------------------------------------------------------------------
+  // --with-orphaned-passports: NOT a change to institution mode's own
+  // semantics -- a passport genuinely isn't institution-owned, so the
+  // steps above never touch it, on purpose, for a real school exactly
+  // as much as a fixture one. This is a SEPARATE, explicit sweep, opt-in
+  // only, scoped to the exact passport_ids that WERE linked to this one
+  // institution (captured before its own passport_institution_links
+  // rows were deleted above) -- never a blanket scan of the whole
+  // database.
+  //
+  // A passport only deletes here if, right now, it has ZERO institution
+  // links anywhere (not just this one -- a passport genuinely shared
+  // across institutions in a more elaborate fixture keeps existing),
+  // ZERO guardians (never claimed), and no self-created owner
+  // (user_id is null -- create_school_passport()'s own signature). That
+  // combination can only describe a school-created passport whose one
+  // and only relationship was the institution just torn down -- never a
+  // real parent's passport, self-created or claimed, and never one this
+  // fixture run deliberately links elsewhere.
+  //
+  // Safe by construction, not just by this check: incident_children.
+  // passport_id cascades (0068), but restrictive_practices.passport_id,
+  // incident_injuries.passport_id, and school_notices.passport_id do
+  // NOT (deliberately, same "a legal record can't lose its subject"
+  // posture this script's own header already documents for auth.users).
+  // If a passport this orphan check would otherwise delete is still
+  // named on real incident data somehow, the delete fails loudly with a
+  // foreign-key error instead of silently succeeding -- never overridden
+  // here, not even by --force.
+  if (withOrphanedPassports && linkedPassportIds.length > 0) {
+    console.log(`\n=== ORPHANED-PASSPORT SWEEP (${linkedPassportIds.length} passport(s) linked to ${code}) ===`);
+    for (const passportId of linkedPassportIds) {
+      const [{ count: remainingLinks }, { count: guardianCount }, { data: passportRow }] = await Promise.all([
+        admin.from("passport_institution_links").select("id", { count: "exact", head: true }).eq("passport_id", passportId),
+        admin.from("passport_guardians").select("id", { count: "exact", head: true }).eq("passport_id", passportId),
+        admin.from("passports").select("id, child_name, user_id").eq("id", passportId).maybeSingle(),
+      ]);
+
+      if (!passportRow) {
+        console.log(`  ${passportId}  already gone`);
+        continue;
+      }
+      if ((remainingLinks ?? 0) > 0 || (guardianCount ?? 0) > 0 || passportRow.user_id !== null) {
+        console.log(
+          `  ${passportId}  "${passportRow.child_name}"  SKIPPED -- still has ${remainingLinks ?? 0} other link(s), ` +
+            `${guardianCount ?? 0} guardian(s), user_id=${passportRow.user_id ?? "null"}`
+        );
+        continue;
+      }
+
+      const { error: delErr } = await admin.from("passports").delete().eq("id", passportId);
+      if (delErr) {
+        console.log(`  ${passportId}  "${passportRow.child_name}"  FAILED: ${delErr.message} -- left in place, not overridden`);
+        continue;
+      }
+      console.log(`  ${passportId}  "${passportRow.child_name}"  deleted (cascades: passport_section_b/c/d, enrolments, morning_checkins, passport_guardians, activity_log, ...)`);
+    }
+  }
 }
 
 // ---------------------------------------------------------------------
@@ -362,15 +441,27 @@ async function teardownUser(email, force) {
 // ---------------------------------------------------------------------
 const [, , mode, identifier, ...rest] = process.argv;
 const force = rest.includes("--force");
+const withOrphanedPassports = rest.includes("--with-orphaned-passports");
 
 if (mode === "institution" && identifier) {
-  await teardownInstitution(identifier, force);
+  await teardownInstitution(identifier, force, withOrphanedPassports);
 } else if (mode === "user" && identifier) {
   await teardownUser(identifier, force);
 } else {
   console.log(`Usage:
-  node scripts/dev/teardown.mjs institution <institution_code> [--force]
+  node scripts/dev/teardown.mjs institution <institution_code> [--force] [--with-orphaned-passports]
   node scripts/dev/teardown.mjs user <email> [--force]
+
+--with-orphaned-passports: also deletes any passport that was linked to
+this institution and, after teardown, has zero remaining institution
+links, zero guardians, and no self-created owner -- the shape
+create_school_passport() leaves behind, since a passport was never
+institution-owned and institution mode's own steps never reach it.
+Does not touch a passport still linked elsewhere, still claimed, or
+self-created. Fails loudly (never silently, never overridden by
+--force) if the passport is still named on real incident data via a
+non-cascading FK (restrictive_practices/incident_injuries/
+school_notices).
 
 Only tears down fixtures: institution codes must start with ZZFIXTURE,
 user emails must contain "zzfixture". Refuses everything else,
