@@ -199,6 +199,18 @@ async function teardownInstitution(code, force, withOrphanedPassports) {
     ["cpi_disengagement_types", (t) => t.eq("institution_id", inst.id)],
     ["cpi_result_types", (t) => t.eq("institution_id", inst.id)],
     ["passport_access", (t) => t.eq("institution_id", inst.id)],
+    // clinician_access.engaged_by_institution_id (0123) is a NON-
+    // cascading FK to institutions -- deleting the institutions row
+    // below fails loudly against it otherwise, exactly the same
+    // "legal record can't lose its subject" posture this script
+    // already applies elsewhere, just surfaced here for the first
+    // time by a fixture that actually exercised institution-engaged
+    // clinician access. Scoped narrowly to rows THIS institution
+    // engaged -- a clinician's own parent-engaged rows for the same
+    // passport (engaged_by_institution_id is null there) are
+    // untouched, matching passport_access's own institution-only scope
+    // immediately above.
+    ["clinician_access", (t) => t.eq("engaged_by_institution_id", inst.id)],
     // enrolments (0121) would cascade automatically once the
     // institutions row itself is deleted below regardless -- explicit
     // here anyway, matching this script's own stated philosophy: an
@@ -387,6 +399,30 @@ async function teardownUser(email, force) {
     ["incidents", (t) => t.eq("created_by", userId)],
     ["passport_access", (t) => t.eq("teacher_id", userId)],
     ["institution_staff", (t) => t.eq("user_id", userId)],
+    // passport_guardians (0113) -- Stage 5's claim flow can establish a
+    // guardian relationship with passports.user_id left null (a
+    // principal-created, guardian-claimed passport), so the old
+    // user_id-keyed passports step below never reaches it. Without this,
+    // auth.users deletion fails against passport_guardians.user_id's own
+    // FK with an unhelpfully empty error object -- found live tearing
+    // down a Stage 7 browser-verification fixture. Deliberately just the
+    // guardian row, not the passport itself: same conservative posture
+    // as institution mode's own orphaned-passport sweep (opt-in,
+    // explicit) -- a guardian-less claimed passport is a legitimate
+    // state, not something this step silently deletes.
+    ["passport_guardians", (t) => t.eq("user_id", userId)],
+    // clinician_access (0123) -- this account can appear here three
+    // ways: as the clinician themselves (clinician_id), or as the
+    // authority who granted or revoked a PARENT-engaged row
+    // (granted_by/revoked_by; institution-engaged rows this account
+    // acted on as a principal are already scoped and removed by
+    // institution teardown's own engaged_by_institution_id step, but a
+    // parent-engaged row has no institution scope at all, so nothing
+    // else in this script ever reaches it). All three block auth.users
+    // deletion with an unhelpfully empty error object otherwise -- found
+    // live in the same fixture teardown as the passport_guardians gap
+    // just above.
+    ["clinician_access", (t) => t.or(`clinician_id.eq.${userId},granted_by.eq.${userId},revoked_by.eq.${userId}`)],
     ["passports", (t) => t.eq("user_id", userId)],
   ];
 
