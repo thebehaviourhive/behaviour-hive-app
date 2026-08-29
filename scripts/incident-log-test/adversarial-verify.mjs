@@ -151,7 +151,6 @@ async function main() {
   const clinicianId = await createUser("incverify.clinician@thebehaviourhive.com", "Clinician Test", "clinician");
   const parent1Id = await createUser("incverify.parent1@thebehaviourhive.com", "Parent One", "parent");
   const parent2Id = await createUser("incverify.parent2@thebehaviourhive.com", "Parent Two", "parent");
-  const parent3Id = await createUser("incverify.parent3@thebehaviourhive.com", "Parent Three", "parent");
   console.log("Users created.");
 
   const { data: staffRows, error: staffErr } = await admin.from("institution_staff").insert([
@@ -173,10 +172,13 @@ async function main() {
   // as the standing violation elsewhere in this file (the old
   // status: "awaiting_attestation" line) -- a fixture reaching a state
   // no production path produces on its own.
+  // Signed in once here and reused below (as `principal`) rather than a
+  // second signedInClient() call for the same account -- nothing about
+  // approve_staff_join() invalidates the session in between.
+  const principal = await signedInClient("incverify.principal@thebehaviourhive.com");
   {
-    const principalForApproval = await signedInClient("incverify.principal@thebehaviourhive.com");
     for (const row of staffRows.filter((r) => r.role !== "principal")) {
-      const { error: approveErr } = await principalForApproval.rpc("approve_staff_join", { p_institution_staff_id: row.id });
+      const { error: approveErr } = await principal.rpc("approve_staff_join", { p_institution_staff_id: row.id });
       if (approveErr) throw approveErr;
     }
   }
@@ -218,7 +220,6 @@ async function main() {
   const teacherA = await signedInClient("incverify.teacherA@thebehaviourhive.com");
   const teacherB = await signedInClient("incverify.teacherB@thebehaviourhive.com");
   const sna = await signedInClient("incverify.sna@thebehaviourhive.com");
-  const principal = await signedInClient("incverify.principal@thebehaviourhive.com");
   const clinician = await signedInClient("incverify.clinician@thebehaviourhive.com");
   const parent1 = await signedInClient("incverify.parent1@thebehaviourhive.com");
   const parent2 = await signedInClient("incverify.parent2@thebehaviourhive.com");
@@ -975,7 +976,6 @@ async function main() {
     const principalJId = await createUser("permverify.principal@thebehaviourhive.com", "Principal J", "principal");
     const teacherDPId = await createUser("permverify.teacherdp@thebehaviourhive.com", "Teacher DP", "class_teacher");
     const teacherOrdId = await createUser("permverify.teacherord@thebehaviourhive.com", "Teacher Ordinary", "class_teacher");
-    const parentJId = await createUser("permverify.parent@thebehaviourhive.com", "Parent J", "parent");
 
     const { data: jStaffRows, error: jStaffErr } = await admin.from("institution_staff").insert([
       { institution_id: institutionJId, user_id: principalJId, role: "principal" },
@@ -987,24 +987,30 @@ async function main() {
     // 0100: class_teacher rows are never auto-approved -- driven through
     // approve_staff_join() as the principal's real session, never set
     // directly. See the main fixture's own note above for why.
+    // Signed in once here and reused below (as `principalJ`) rather than
+    // a second signedInClient() call for the same account.
+    const principalJ = await signedInClient("permverify.principal@thebehaviourhive.com");
     {
-      const principalJForApproval = await signedInClient("permverify.principal@thebehaviourhive.com");
       for (const row of jStaffRows.filter((r) => r.role !== "principal")) {
-        const { error: approveErr } = await principalJForApproval.rpc("approve_staff_join", { p_institution_staff_id: row.id });
+        const { error: approveErr } = await principalJ.rpc("approve_staff_join", { p_institution_staff_id: row.id });
         if (approveErr) throw approveErr;
       }
     }
 
+    // teacherBId as childJ's owner -- CORE's own account, never itself a
+    // passports.user_id owner until CHECK 10/K (both well after this
+    // point) -- rather than a dedicated parentJ account. childJ is
+    // explicitly deleted in this block's own cleanup below, before
+    // CHECK 10 could ever collide with it.
     const { data: childJ } = await admin
       .from("passports")
-      .insert({ user_id: parentJId, child_name: "Perm Verify Child", passport_status: "complete" })
+      .insert({ user_id: teacherBId, child_name: "Perm Verify Child", passport_status: "complete" })
       .select()
       .single();
     await admin.from("passport_institution_links").insert({ passport_id: childJ.id, institution_id: institutionJId, approved_by_parent: true });
 
     const { data: locJ } = await admin.from("incident_locations").insert({ institution_id: institutionJId, value: "J Test Room" }).select().single();
 
-    const principalJ = await signedInClient("permverify.principal@thebehaviourhive.com");
     const teacherDP = await signedInClient("permverify.teacherdp@thebehaviourhive.com");
     const teacherOrd = await signedInClient("permverify.teacherord@thebehaviourhive.com");
 
@@ -1023,9 +1029,13 @@ async function main() {
 
     // -- (b) grant attempted on a non-staff user (a parent) -- REJECTED --
     // by the grantee-is-staff trigger, unconditionally, database-level.
+    // parent1Id (CORE's own account, genuinely not staff anywhere at
+    // institutionJId) rather than a dedicated parentJ account -- this
+    // insert doesn't touch passports.user_id, so parent1Id already
+    // owning child1 elsewhere is irrelevant here.
     const { error: nonStaffGrantErr } = await principalJ
       .from("institution_permissions")
-      .insert({ institution_id: institutionJId, user_id: parentJId, permission: "countersign_incident", granted_by: principalJId });
+      .insert({ institution_id: institutionJId, user_id: parent1Id, permission: "countersign_incident", granted_by: principalJId });
     record("Grant to a NON-STAFF user (a parent) REJECTED by the database, not just the UI", Boolean(nonStaffGrantErr), nonStaffGrantErr?.message);
 
     // -- (c) principal attempting self-grant (and so, self-revoke) --
@@ -1170,8 +1180,14 @@ async function main() {
     const { data: secondGrantAfter } = await admin.from("institution_permissions").select("revoked_at").eq("id", secondGrant.id).single();
     record("That grant's revoked_at is still null -- the rejected revoke did not partially apply", secondGrantAfter.revoked_at === null, secondGrantAfter.revoked_at);
 
+    // childJ (owned by teacherBId, a CORE account, not a dedicated
+    // parentJ one) needs its own explicit delete here -- deleting
+    // teacherBId isn't this block's to do, CORE's own cleanup owns
+    // that, so nothing else would free this row before CHECK 10 later
+    // wants to reuse teacherBId as another passport's owner.
+    await admin.from("passports").delete().eq("id", childJ.id);
     await admin.from("institutions").delete().eq("id", institutionJId);
-    for (const id of [principalJId, teacherDPId, teacherOrdId, parentJId]) {
+    for (const id of [principalJId, teacherDPId, teacherOrdId]) {
       await admin.auth.admin.deleteUser(id);
     }
   }
@@ -1263,7 +1279,14 @@ async function main() {
 
   console.log(`\n== CHECK 10: two-child cap ==`);
   {
-    const { data: p3 } = await admin.from("passports").insert({ user_id: parent3Id, child_name: "Verify Child Three", passport_status: "complete" }).select().single();
+    // teacherBId as the owner here (never itself a passports.user_id
+    // owner elsewhere in CORE) rather than a dedicated parent3 account
+    // -- this row is a throwaway, deleted at the end of this block, and
+    // no assertion here inspects the owner's identity, only the cap
+    // logic. parent1Id/parent2Id are NOT substitutes -- both already own
+    // a live passport (child1/child2) for the whole of CORE, and
+    // passports.user_id keeps a live unique(user_id) constraint.
+    const { data: p3 } = await admin.from("passports").insert({ user_id: teacherBId, child_name: "Verify Child Three", passport_status: "complete" }).select().single();
     const { error: thirdChildErr } = await admin.from("incident_children").insert({ incident_id: incidentId, passport_id: p3.id, child_index: "A", added_by: teacherAId });
     record("Third child with duplicate child_index 'A' REJECTED", Boolean(thirdChildErr), thirdChildErr?.message);
     const { error: thirdChildErr2 } = await admin.from("incident_children").insert({ incident_id: incidentId, passport_id: p3.id, child_index: "C", added_by: teacherAId });
@@ -1285,7 +1308,11 @@ async function main() {
   console.log(`\n== CHECK K: Part 2 schema (migration 0080) -- party array, body regions, linked people ==`);
   {
     // -- (a) party: non-empty array required, allowed-values set enforced. --
-    const { data: p3 } = await admin.from("passports").insert({ user_id: parent3Id, child_name: "Verify Child K", passport_status: "complete" }).select().single();
+    // Same reuse as CHECK 10 above -- teacherBId, not a dedicated
+    // parent3 account; this row is deleted at the end of CHECK K too
+    // (see below), so it's free again for CHECK 10's own row to have
+    // already used the same owner without a unique(user_id) collision.
+    const { data: p3 } = await admin.from("passports").insert({ user_id: teacherBId, child_name: "Verify Child K", passport_status: "complete" }).select().single();
     const { data: kIncidentId } = await teacherA.rpc("create_incident_stamp", {
       p_institution_id: institutionId, p_occurred_at: new Date().toISOString(), p_location_id: loc.id,
       p_child_passport_ids: [child1], p_staff: [],
@@ -2633,7 +2660,6 @@ async function main() {
     const snaTId = await createUser("checkt.sna@thebehaviourhive.com", "Check T SNA", "sna");
     const parent1TId = await createUser("checkt.parent1@thebehaviourhive.com", "Check T Parent One", "parent");
     const parent2TId = await createUser("checkt.parent2@thebehaviourhive.com", "Check T Parent Two", "parent");
-    const parent3TId = await createUser("checkt.parent3@thebehaviourhive.com", "Check T Parent Unrelated", "parent");
     const clinicianTId = await createUser("checkt.clinician@thebehaviourhive.com", "Check T Clinician", "clinician");
     // 0100: same as CHECK S -- this fixture never needed a principal
     // before, needs one now purely to drive approve_staff_join().
@@ -2666,7 +2692,6 @@ async function main() {
     const snaT = await signedInClient("checkt.sna@thebehaviourhive.com");
     const parent1T = await signedInClient("checkt.parent1@thebehaviourhive.com");
     const parent2T = await signedInClient("checkt.parent2@thebehaviourhive.com");
-    const parent3T = await signedInClient("checkt.parent3@thebehaviourhive.com");
     const clinicianT = await signedInClient("checkt.clinician@thebehaviourhive.com");
 
     const { data: tIncidentId } = await teacherT.rpc("create_incident_stamp", {
@@ -2717,9 +2742,12 @@ async function main() {
     const { data: tSnaAsClinician } = await snaT.rpc("get_clinician_incidents", { p_passport_id: child1T.id });
     record("T4b: SNA calling get_clinician_incidents() gets nothing", (tSnaAsClinician?.length ?? 0) === 0, `rows=${tSnaAsClinician?.length}`);
 
-    // -- T5: an entirely unrelated parent (parent3T, no connection to --
-    // this incident or either child at all) gets nothing.
-    const { data: tParent3 } = await parent3T.rpc("get_parent_incidents", { p_passport_id: child1T.id });
+    // -- T5: an entirely unrelated parent gets nothing. CORE's own --
+    // `parent1` (already signed in, no connection to institutionTId or
+    // either child here) rather than a dedicated parent3T account --
+    // this is a read-only RPC call, nothing about passports.user_id
+    // ownership is at stake.
+    const { data: tParent3 } = await parent1.rpc("get_parent_incidents", { p_passport_id: child1T.id });
     record("T5: entirely unrelated parent gets nothing for someone else's child", (tParent3?.length ?? 0) === 0, `rows=${tParent3?.length}`);
 
     // -- T6: both parents get ZERO rows pre-signoff, despite status --
@@ -2778,7 +2806,7 @@ async function main() {
 
     await admin.from("incidents").delete().eq("id", tIncidentId);
     await admin.from("institutions").delete().eq("id", institutionTId);
-    for (const id of [principalTId, teacherTId, snaTId, parent1TId, parent2TId, parent3TId, clinicianTId]) {
+    for (const id of [principalTId, teacherTId, snaTId, parent1TId, parent2TId, clinicianTId]) {
       await admin.auth.admin.deleteUser(id);
     }
   }
@@ -2927,7 +2955,7 @@ async function main() {
   // fixture uncleaned).
   console.log(`\n== Core fixture cleanup ==`);
   await admin.from("institutions").delete().eq("id", institutionId);
-  for (const id of [principalId, teacherAId, teacherBId, snaId, clinicianId, parent1Id, parent2Id, parent3Id]) {
+  for (const id of [principalId, teacherAId, teacherBId, snaId, clinicianId, parent1Id, parent2Id]) {
     await admin.auth.admin.deleteUser(id);
   }
   console.log("Core fixture cleaned up.");
@@ -3002,10 +3030,12 @@ async function main() {
     // Approve every institutionVId class_teacher/sna row through the
     // real RPC. crossTeacherId needs no separate approval call -- it
     // auto-approved above, per the comment on its insert.
+    // Signed in once here and reused below (as `principalV1`) rather
+    // than a second signedInClient() call for the same account.
+    const principalV1 = await signedInClient("lifecycle.principal1@thebehaviourhive.com");
     {
-      const principalV1ForApproval = await signedInClient("lifecycle.principal1@thebehaviourhive.com");
       for (const row of staffVRows.filter((r) => r.institution_id === institutionVId && r.role !== "principal")) {
-        const { error: approveErr } = await principalV1ForApproval.rpc("approve_staff_join", { p_institution_staff_id: row.id });
+        const { error: approveErr } = await principalV1.rpc("approve_staff_join", { p_institution_staff_id: row.id });
         if (approveErr) throw approveErr;
       }
     }
@@ -3059,7 +3089,6 @@ async function main() {
 
     const { data: globalLoc } = await admin.from("incident_locations").select("id").eq("value", "Classroom").is("institution_id", null).single();
 
-    const principalV1 = await signedInClient("lifecycle.principal1@thebehaviourhive.com");
     const teacherVTarget = await signedInClient("lifecycle.teacherTarget@thebehaviourhive.com");
     const teacherVOther = await signedInClient("lifecycle.teacherOther@thebehaviourhive.com");
     const grantHolder = await signedInClient("lifecycle.grantholder@thebehaviourhive.com");
@@ -3469,7 +3498,6 @@ async function main() {
     const targetCrossInstitutionId = await createUser("joinapproval.targetcross@thebehaviourhive.com", "Target Cross W", "class_teacher");
     const targetGetRejectedScopeId = await createUser("joinapproval.targetscope@thebehaviourhive.com", "Target Scope W", "class_teacher");
     const targetUnverifiedId = await createUser("joinapproval.targetunverified@thebehaviourhive.com", "Target Unverified W", "class_teacher");
-    const freshTeacherId = await createUser("joinapproval.freshteacher@thebehaviourhive.com", "Fresh Teacher W", "class_teacher");
 
     const { data: staffWRows, error: staffWErr } = await admin
       .from("institution_staff")
@@ -3512,9 +3540,14 @@ async function main() {
     record("W0d: every non-principal row inserted above stays PENDING -- class_teacher is never auto-approved", [teacherWId, targetDoubleId, targetRejectThenApproveId, targetApproveThenRejectId, targetReasonRequiredId, targetSpoofId, targetNonPrincipalId, targetCrossInstitutionId, targetGetRejectedScopeId, targetUnverifiedId].every((uid) => byUser(uid).approved_at === null && byUser(uid).rejected_at === null), null);
 
     console.log(`-- the trigger's role-gate: "no active principal exists" is also trivially true for a class_teacher, but the trigger only auto-approves role='principal' --`);
+    // teacherWId (already a class_teacher at the DIFFERENT institutionWId)
+    // rather than a dedicated fresh-teacher account -- W1's claim is about
+    // institutionWFreshId's own history (no principal has ever existed
+    // there), not about this user's own history, and institution_staff
+    // rows are scoped per (institution, user) pair.
     const { data: freshRow, error: freshErr } = await admin
       .from("institution_staff")
-      .insert({ institution_id: institutionWFreshId, user_id: freshTeacherId, role: "class_teacher" })
+      .insert({ institution_id: institutionWFreshId, user_id: teacherWId, role: "class_teacher" })
       .select()
       .single();
     if (freshErr) throw freshErr;
@@ -3670,7 +3703,7 @@ async function main() {
     record("W15: checkExisting() -- an active person resolves to 'active', which is what actually redirects them onward to their dashboard rather than showing the join form again", resolveStatus(activeRows ?? []) === "active", JSON.stringify(activeRows));
 
     await admin.from("institutions").delete().in("id", [institutionWId, institutionWOtherId, institutionWUnverifiedId, institutionWFreshId]);
-    for (const id of [principalW1Id, principalWOtherId, principalWUnverifiedId, teacherWId, targetDoubleId, targetRejectThenApproveId, targetApproveThenRejectId, targetReasonRequiredId, targetSpoofId, targetNonPrincipalId, targetCrossInstitutionId, targetGetRejectedScopeId, targetUnverifiedId, freshTeacherId, noRowId]) {
+    for (const id of [principalW1Id, principalWOtherId, principalWUnverifiedId, teacherWId, targetDoubleId, targetRejectThenApproveId, targetApproveThenRejectId, targetReasonRequiredId, targetSpoofId, targetNonPrincipalId, targetCrossInstitutionId, targetGetRejectedScopeId, targetUnverifiedId, noRowId]) {
       await admin.auth.admin.deleteUser(id);
     }
   }
@@ -3707,8 +3740,14 @@ async function main() {
     const deactivatedCandidateId = await createUser("handoverx.deactivated@thebehaviourhive.com", "Handover Deactivated Candidate", "class_teacher");
     const principalA2Id = await createUser("handoverx.principal2@thebehaviourhive.com", "Handover Principal Two", "principal");
     const successorBId = await createUser("handoverx.successorb@thebehaviourhive.com", "Handover Successor B", "class_teacher");
+    // principalOtherId doubles as X7's "someone not staff at
+    // institutionXLeaving" target below -- no dedicated otherStaff
+    // account needed, since the check only needs "some real, active
+    // person at a different institution", not any particular role, and
+    // principalOtherId (auto-approved as the first-ever principal at
+    // institutionXOtherId) already is that with no separate approval
+    // RPC call required either.
     const principalOtherId = await createUser("handoverx.principalother@thebehaviourhive.com", "Handover Principal Other", "principal");
-    const otherStaffId = await createUser("handoverx.otherstaff@thebehaviourhive.com", "Handover Other Staff", "class_teacher");
     // passports.user_id is unique -- one passport per parent -- so each
     // child needs its own parent, not two children sharing one.
     const parentXL1Id = await createUser("handoverx.parentl1@thebehaviourhive.com", "Handover Parent L1", "parent");
@@ -3726,7 +3765,6 @@ async function main() {
         { institution_id: institutionXStayingId, user_id: principalA2Id, role: "principal" },
         { institution_id: institutionXStayingId, user_id: successorBId, role: "class_teacher" },
         { institution_id: institutionXOtherId, user_id: principalOtherId, role: "principal" },
-        { institution_id: institutionXOtherId, user_id: otherStaffId, role: "class_teacher" },
       ])
       .select();
     if (staffXErr) throw staffXErr;
@@ -3735,7 +3773,6 @@ async function main() {
     const extraTeacherLeavingStaffId = byUserX(extraTeacherLeavingId).id;
     const deactivatedCandidateStaffId = byUserX(deactivatedCandidateId).id;
     const successorBStaffId = byUserX(successorBId).id;
-    const otherStaffStaffId = byUserX(otherStaffId).id;
 
     const principalA1 = await signedInClient("handoverx.principal1@thebehaviourhive.com");
     const principalA2 = await signedInClient("handoverx.principal2@thebehaviourhive.com");
@@ -3747,11 +3784,6 @@ async function main() {
     }
     for (const id of [successorBStaffId]) {
       const { error } = await principalA2.rpc("approve_staff_join", { p_institution_staff_id: id });
-      if (error) throw error;
-    }
-    {
-      const principalOther = await signedInClient("handoverx.principalother@thebehaviourhive.com");
-      const { error } = await principalOther.rpc("approve_staff_join", { p_institution_staff_id: otherStaffStaffId });
       if (error) throw error;
     }
 
@@ -3795,23 +3827,28 @@ async function main() {
     // teacher (extraTeacherLeaving), not principalA1, or sign_off_
     // incident() has no owning row to act on and silently does nothing.
     // Found live, running this check, not assumed from the RPC's name.
-    const extraTeacherLeavingForIncident = await signedInClient("handoverx.extra@thebehaviourhive.com");
-    const { data: xIncidentId } = await extraTeacherLeavingForIncident.rpc("create_incident_stamp", {
+    // Signed in once here and reused below (as `extraTeacherLeaving`)
+    // rather than a second signedInClient() call for the same account --
+    // nothing about signing off an incident invalidates the session.
+    const extraTeacherLeaving = await signedInClient("handoverx.extra@thebehaviourhive.com");
+    const { data: xIncidentId } = await extraTeacherLeaving.rpc("create_incident_stamp", {
       p_institution_id: institutionXLeavingId, p_occurred_at: new Date().toISOString(), p_location_id: globalLocX.id,
       p_child_passport_ids: [cXL1.id], p_staff: [],
     });
-    const { error: xSignOffErr } = await extraTeacherLeavingForIncident.rpc("sign_off_incident", { p_incident_id: xIncidentId });
+    const { error: xSignOffErr } = await extraTeacherLeaving.rpc("sign_off_incident", { p_incident_id: xIncidentId });
     if (xSignOffErr) throw xSignOffErr;
 
     console.log(`-- negative guards, run BEFORE any real handover executes, against principalA1/principalA2 who both remain genuinely active principals throughout this block --`);
 
     console.log(`-- item 5: a non-principal cannot call it --`);
-    const extraTeacherLeaving = await signedInClient("handoverx.extra@thebehaviourhive.com");
     const { error: nonPrincipalHandoverErr } = await extraTeacherLeaving.rpc("hand_over_principal", { p_successor_user_id: successorAId, p_outcome: "leaving", p_staying_role: null, p_reason: "Attempting as a non-principal." });
     record("X5: an active, otherwise-legitimate class_teacher cannot call hand_over_principal()", Boolean(nonPrincipalHandoverErr) && /only an active principal/i.test(nonPrincipalHandoverErr.message), nonPrincipalHandoverErr?.message);
 
     console.log(`-- item 7: cannot hand over to someone who is not staff at that institution --`);
-    const { error: notStaffHereErr } = await principalA1.rpc("hand_over_principal", { p_successor_user_id: otherStaffId, p_outcome: "leaving", p_staying_role: null, p_reason: "Attempting to hand over to a stranger to this school." });
+    // principalOtherId, not a dedicated otherStaff account -- it's a
+    // genuine, active, approved staff member of a DIFFERENT institution,
+    // which is all X7 actually needs.
+    const { error: notStaffHereErr } = await principalA1.rpc("hand_over_principal", { p_successor_user_id: principalOtherId, p_outcome: "leaving", p_staying_role: null, p_reason: "Attempting to hand over to a stranger to this school." });
     record("X7: cannot hand over to someone active at a DIFFERENT institution", Boolean(notStaffHereErr) && /active staff member at this institution/i.test(notStaffHereErr.message), notStaffHereErr?.message);
 
     console.log(`-- item 8 (+ item 11, atomicity): cannot hand over to a deactivated staff member, and nothing persists from the attempt --`);
@@ -4069,7 +4106,7 @@ async function main() {
 
     await admin.from("incidents").delete().in("id", [xIncidentId, xMarkCalledIncidentId]);
     await admin.from("institutions").delete().in("id", [institutionXLeavingId, institutionXStayingId, institutionXOtherId]);
-    for (const id of [principalA1Id, successorAId, extraTeacherLeavingId, deactivatedCandidateId, principalA2Id, successorBId, principalOtherId, otherStaffId, parentXL1Id, parentXL2Id, parentXS1Id, parentXS2Id]) {
+    for (const id of [principalA1Id, successorAId, extraTeacherLeavingId, deactivatedCandidateId, principalA2Id, successorBId, principalOtherId, parentXL1Id, parentXL2Id, parentXS1Id, parentXS2Id]) {
       await admin.auth.admin.deleteUser(id);
     }
   }
@@ -4091,7 +4128,6 @@ async function main() {
     const teacherY1Id = await createUser("classesy.teacher1@thebehaviourhive.com", "Classes Teacher One", "class_teacher");
     const teacherY2Id = await createUser("classesy.teacher2@thebehaviourhive.com", "Classes Teacher Two", "class_teacher");
     const teacherY3Id = await createUser("classesy.teacher3@thebehaviourhive.com", "Classes Teacher Three", "class_teacher");
-    const teacherY4Id = await createUser("classesy.teacher4@thebehaviourhive.com", "Classes Teacher Four", "class_teacher");
     const snaYId = await createUser("classesy.sna@thebehaviourhive.com", "Classes SNA", "sna");
     const noAccessTeacherYId = await createUser("classesy.noaccessteacher@thebehaviourhive.com", "Classes No-Access Teacher", "class_teacher");
     const noAccessSnaYId = await createUser("classesy.noaccesssna@thebehaviourhive.com", "Classes No-Access SNA", "sna");
@@ -4109,7 +4145,6 @@ async function main() {
         { institution_id: institutionYId, user_id: teacherY1Id, role: "class_teacher" },
         { institution_id: institutionYId, user_id: teacherY2Id, role: "class_teacher" },
         { institution_id: institutionYId, user_id: teacherY3Id, role: "class_teacher" },
-        { institution_id: institutionYId, user_id: teacherY4Id, role: "class_teacher" },
         { institution_id: institutionYId, user_id: snaYId, role: "sna" },
         { institution_id: institutionYId, user_id: noAccessTeacherYId, role: "class_teacher" },
         { institution_id: institutionYId, user_id: noAccessSnaYId, role: "sna" },
@@ -4211,7 +4246,13 @@ async function main() {
       const { error: e3 } = await principalY.rpc("add_class_teacher", { p_class_id: classYId, p_user_id: teacherY3Id });
       record("Y-cap-1: a class can hold a second teacher (position 2)", !e2, e2?.message);
       record("Y-cap-2: a class can hold a third teacher (position 3)", !e3, e3?.message);
-      const { error: e4 } = await principalY.rpc("add_class_teacher", { p_class_id: classYId, p_user_id: teacherY4Id });
+      // noAccessTeacherYId (already a real, active class_teacher at
+      // institutionYId, not yet in classY) rather than a dedicated
+      // fourth-teacher account -- this call is expected to be REFUSED
+      // by the cap, leaving zero footprint, so it doesn't touch
+      // noAccessTeacherY's own "no access to classY" status the later
+      // checks in this block depend on.
+      const { error: e4 } = await principalY.rpc("add_class_teacher", { p_class_id: classYId, p_user_id: noAccessTeacherYId });
       record("Y-cap-3: a class refuses a FOURTH teacher -- the position cap (class_teachers_one_active_position_per_class) holds", Boolean(e4) && /already has three teachers/i.test(e4.message), e4?.message);
     }
     {
@@ -4620,7 +4661,7 @@ async function main() {
 
     // ---- Y9: teardown ----
     await admin.from("institutions").delete().eq("id", institutionYId);
-    for (const id of [principalYId, teacherY1Id, teacherY2Id, teacherY3Id, teacherY4Id, snaYId, noAccessTeacherYId, noAccessSnaYId, outsiderTeacherYId, parentClassYId, parentStricterYId, parentAssignYId, parentMoveYId, parentDelegateYId]) {
+    for (const id of [principalYId, teacherY1Id, teacherY2Id, teacherY3Id, snaYId, noAccessTeacherYId, noAccessSnaYId, outsiderTeacherYId, parentClassYId, parentStricterYId, parentAssignYId, parentMoveYId, parentDelegateYId]) {
       await admin.auth.admin.deleteUser(id);
     }
   }
@@ -4967,12 +5008,17 @@ async function main() {
 
     // ---- AA6: can_own_incident()/create_incident_stamp() widening ----
     let incidentOwnedBySupply, incidentOwnedByPermanentTeacher;
+    // Hoisted out here (not declared inside AA6's own block below)
+    // specifically so AA7 and AA8 can reuse the SAME signed-in sessions
+    // instead of a second/third signedInClient() call for the same two
+    // accounts -- nothing in AA6/AA7/AA8 invalidates either session.
+    const newSupplyAA = await signedInClient("aatemp.newsupply@thebehaviourhive.com");
+    const snaAA1 = await signedInClient("aatemp.sna1@thebehaviourhive.com");
     {
       const { data: locAA } = await admin.from("incident_locations").select("id").eq("value", "Classroom").is("institution_id", null).single();
 
       // newSupplyAAId's own grant (classAA2, today, cutoff comfortably
       // ahead per AA5) is currently active.
-      const newSupplyAA = await signedInClient("aatemp.newsupply@thebehaviourhive.com");
       const { data: supplyIncidentId, error: supplyStampErr } = await newSupplyAA.rpc("create_incident_stamp", {
         p_institution_id: institutionAAId, p_occurred_at: new Date().toISOString(), p_location_id: locAA.id, p_child_passport_ids: [childAA2], p_staff: [],
       });
@@ -4985,7 +5031,6 @@ async function main() {
       // all right now -- must NOT auto-own (regression: the widening
       // must not have accidentally handed every SNA auto-ownership).
       await admin.from("temporary_access").update({ revoked_at: new Date().toISOString(), revoked_by: principalAAId, revocation_reason: "AA6 setup: clearing snaAA1's active grant for the regression check." }).eq("granted_to", snaAA1Id).is("revoked_at", null);
-      const snaAA1 = await signedInClient("aatemp.sna1@thebehaviourhive.com");
       const { data: ordinarySnaIncidentId } = await snaAA1.rpc("create_incident_stamp", {
         p_institution_id: institutionAAId, p_occurred_at: new Date().toISOString(), p_location_id: locAA.id, p_child_passport_ids: [childAA1], p_staff: [],
       });
@@ -5010,8 +5055,6 @@ async function main() {
     // incidentOwnedBySupply is currently owned by newSupplyAAId, whose
     // grant is still active (classAA2, today, generous cut-off). ----
     {
-      const newSupplyAA = await signedInClient("aatemp.newsupply@thebehaviourhive.com");
-
       const { error: editWhileActiveErr } = await newSupplyAA.from("incidents").update({ category: "one_party_incident" }).eq("id", incidentOwnedBySupply);
       record("AA-7a (positive control): the owning supply teacher CAN edit their own incident while their grant is still active", !editWhileActiveErr, editWhileActiveErr?.message);
       const { data: editedCheck } = await admin.from("incidents").select("category").eq("id", incidentOwnedBySupply).single();
@@ -5122,9 +5165,10 @@ async function main() {
       // never touched regardless of the former owner's standing
       // afterward, without any service-role shortcut to reach this
       // state.
-      // Re-signed-in here -- AA6's own snaAA1 client was scoped to that
-      // block only.
-      const snaAA1 = await signedInClient("aatemp.sna1@thebehaviourhive.com");
+      // Reuses the SAME snaAA1 session hoisted above AA6 -- the JWT
+      // itself carries no cached authorization state, so a fresh grant
+      // issued just below is reflected correctly on the very next call
+      // regardless of when this client was first signed in.
       // Via the PRINCIPAL, not teacherAA1 -- AA7f removed teacherAA1
       // from classAA1, so they're no longer that class's own current
       // teacher and would fail grant_temporary_access()'s authority-1
@@ -5228,7 +5272,9 @@ async function main() {
       if (error) throw error;
     }
 
-    const teacherBB = await signedInClient("bb.teacher@thebehaviourhive.com");
+    // teacherBBId itself is used throughout (institution_staff, class
+    // membership, as a grant target) but never as a signed-in session --
+    // this client was dead, never called through.
     const snaBB = await signedInClient("bb.sna@thebehaviourhive.com");
 
     const { data: cAssignedBB } = await admin.from("passports").insert({ user_id: parentBB1Id, child_name: "BB Assigned Child", passport_status: "complete" }).select().single();
@@ -5935,21 +5981,26 @@ async function main() {
       const { error: nonPrincipalErr } = await outsiderEE.rpc("grant_passport_access", { p_passport_id: childEE.id, p_user_id: teacherEEId, p_institution_id: institutionEEAId, p_reason: "Should fail" });
       record("EE-1b: grant_passport_access() refuses a non-principal caller", Boolean(nonPrincipalErr) && /active principal/i.test(nonPrincipalErr.message), nonPrincipalErr?.message);
 
-      const { data: nonStaffTarget } = await admin.auth.admin.createUser({ email: "ee.nonstaff@thebehaviourhive.com", password: "GrantedByVerify-2026!", email_confirm: true, user_metadata: { full_name: "EE Non Staff" } });
-      const { error: notStaffErr } = await principalEEA.rpc("grant_passport_access", { p_passport_id: childEE.id, p_user_id: nonStaffTarget.user.id, p_institution_id: institutionEEAId, p_reason: "Should fail" });
+      // parentEEId (already exists, owns childEE, never institution_staff
+      // anywhere) rather than a dedicated raw-created "non staff" account
+      // -- this call is expected to fail, never writes anything, and
+      // institution_permissions/passport_access carry no constraint that
+      // parentEEId already owning a passport would trip.
+      const { error: notStaffErr } = await principalEEA.rpc("grant_passport_access", { p_passport_id: childEE.id, p_user_id: parentEEId, p_institution_id: institutionEEAId, p_reason: "Should fail" });
       record("EE-1c: grant_passport_access() refuses a target with no institution_staff row at this institution", Boolean(notStaffErr) && /not an active member/i.test(notStaffErr.message), notStaffErr?.message);
-      await admin.auth.admin.deleteUser(nonStaffTarget.user.id);
 
       const { error: wrongRoleErr } = await principalEEA.rpc("grant_passport_access", { p_passport_id: childEE.id, p_user_id: principalEEAId, p_institution_id: institutionEEAId, p_reason: "Should fail -- principal, not teacher/sna" });
       record("EE-1d: grant_passport_access() refuses a target whose role isn't class_teacher/sna (tried a principal)", Boolean(wrongRoleErr) && /class teacher or SNA/i.test(wrongRoleErr.message), wrongRoleErr?.message);
 
-      const parentEEUnlinkedId = await createUser("ee.parentunlinked@thebehaviourhive.com", "EE Parent Unlinked", "parent");
-      const { data: unlinkedChild, error: unlinkedChildErr } = await admin.from("passports").insert({ user_id: parentEEUnlinkedId, child_name: "EE Unlinked Child", passport_status: "complete" }).select().single();
+      // snaEEId as the owner here (not yet a passports.user_id owner of
+      // anything at this point) rather than a dedicated parent account --
+      // this row is deleted moments later, and EE-1e's own claim is about
+      // the CHILD having no institution link, never about who owns it.
+      const { data: unlinkedChild, error: unlinkedChildErr } = await admin.from("passports").insert({ user_id: snaEEId, child_name: "EE Unlinked Child", passport_status: "complete" }).select().single();
       if (unlinkedChildErr) throw unlinkedChildErr;
       const { error: noLinkErr } = await principalEEA.rpc("grant_passport_access", { p_passport_id: unlinkedChild.id, p_user_id: teacherEEId, p_institution_id: institutionEEAId, p_reason: "Should fail -- no link at all" });
       record("EE-1e: grant_passport_access() refuses a child with no passport_institution_links row at this institution at all", Boolean(noLinkErr) && /no link to your institution/i.test(noLinkErr.message), noLinkErr?.message);
       await admin.from("passports").delete().eq("id", unlinkedChild.id);
-      await admin.auth.admin.deleteUser(parentEEUnlinkedId);
     }
 
     // ---- EE-2: grant_passport_access() the positive path ----
@@ -6167,8 +6218,11 @@ async function main() {
     // to the "not on your school's roster" state rather than crashing
     // or silently showing "Unknown". ----
     {
-      const parentFFUnlinkedId = await createUser("ff.parentunlinked@thebehaviourhive.com", "FF Parent Unlinked", "parent");
-      const { data: unlinkedChildFF } = await admin.from("passports").insert({ user_id: parentFFUnlinkedId, child_name: "FF Unlinked Child", passport_status: "complete" }).select().single();
+      // teacherFFId as the owner (never itself a passports.user_id owner
+      // anywhere in FF, and FF-1/FF-2/FF-3 are already resolved by this
+      // point) rather than a dedicated parent account -- FF-4's claim is
+      // about the CHILD having no roster link, never about who owns it.
+      const { data: unlinkedChildFF } = await admin.from("passports").insert({ user_id: teacherFFId, child_name: "FF Unlinked Child", passport_status: "complete" }).select().single();
 
       const { data: rosterFF } = await principalFF.rpc("get_institution_child_roster", { p_institution_id: institutionFFId });
       const rosterMatch = (rosterFF ?? []).find((r) => r.passport_id === unlinkedChildFF.id);
@@ -6179,7 +6233,6 @@ async function main() {
       );
 
       await admin.from("passports").delete().eq("id", unlinkedChildFF.id);
-      await admin.auth.admin.deleteUser(parentFFUnlinkedId);
     }
 
     console.log("FF summary complete.");
