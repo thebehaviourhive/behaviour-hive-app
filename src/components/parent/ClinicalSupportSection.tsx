@@ -15,12 +15,13 @@ interface ClinicianRow {
 }
 
 interface DocumentStatusRow {
-  document_type: string;
-  status: "in_progress" | "completed";
-  fba_id: string;
-  started_at: string;
+  is_authorized: boolean;
+  document_type: string | null;
+  status: "in_progress" | "completed" | null;
+  fba_id: string | null;
+  started_at: string | null;
   completed_at: string | null;
-  is_approved: boolean;
+  is_approved: boolean | null;
 }
 
 type FbaState =
@@ -83,10 +84,20 @@ export function ClinicalSupportSection({
         if (!isMounted) return;
 
         const clinician = ((clinicianRows ?? []) as ClinicianRow[])[0] ?? null;
-        // A failed status RPC degrades to "no FBA known" rather than a
-        // broken card -- the clinician-connection signal alone still
-        // resolves a sensible (if less specific) state A/B.
-        const status = statusError ? null : (((statusRows ?? []) as DocumentStatusRow[])[0] ?? null);
+        // get_child_clinical_document_status() (migration 0113) always
+        // returns exactly one row now, authorized or not, FBA or not --
+        // its own is_authorized column is what actually distinguishes
+        // "no FBA yet" from a real document, not the row's mere
+        // presence. Found live (Stage 5 Step 3's own end-to-end
+        // verification, a genuinely fresh passport): with the row always
+        // truthy, this used to always fall through to the "else" branch
+        // below and show "FBA complete" with a broken
+        // /passport/fba/null link, for every passport with no FBA at
+        // all -- self-created or claimed, not specific to Stage 5. A
+        // failed status RPC still degrades to "no FBA known" rather than
+        // a broken card.
+        const statusRow = statusError ? null : (((statusRows ?? []) as DocumentStatusRow[])[0] ?? null);
+        const status = statusRow?.is_authorized && statusRow.document_type ? statusRow : null;
 
         if (!status) {
           setFbaState(
@@ -98,15 +109,23 @@ export function ClinicalSupportSection({
               : { kind: "no-clinician", passportId: pid }
           );
         } else if (status.status === "in_progress") {
+          // Non-null assertions below: the RPC's own SQL sets fba_id/
+          // started_at in the SAME `select into` as document_type --
+          // `status` here is only reachable once document_type is
+          // confirmed non-null, so these are always set together too.
           setFbaState({
             kind: "in-progress",
             clinicianReference: formatClinicianReference(clinician?.full_name, clinician?.specialty),
-            startedAt: status.started_at,
+            startedAt: status.started_at!,
           });
         } else if (status.is_approved) {
-          setFbaState({ kind: "completed-approved", fbaId: status.fba_id, completedAt: status.completed_at ?? status.started_at });
+          setFbaState({
+            kind: "completed-approved",
+            fbaId: status.fba_id!,
+            completedAt: status.completed_at ?? status.started_at!,
+          });
         } else {
-          setFbaState({ kind: "completed-pending", fbaId: status.fba_id });
+          setFbaState({ kind: "completed-pending", fbaId: status.fba_id! });
         }
       } catch {
         // Any unexpected exception (network failure, RPC rejection) also

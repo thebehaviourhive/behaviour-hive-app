@@ -15,9 +15,10 @@ interface ClinicianRow {
 }
 
 interface DocumentStatusRow {
-  document_type: string;
-  status: "in_progress" | "completed";
-  fba_id: string;
+  is_authorized: boolean;
+  document_type: string | null;
+  status: "in_progress" | "completed" | null;
+  fba_id: string | null;
 }
 
 // Same 3 RPC-backed buckets as ClinicalSupportSection's own FbaState
@@ -70,7 +71,17 @@ function useUnlockState(isOpen: boolean) {
 
       if (!isMounted) return;
       const clinician = ((clinicianRows ?? []) as ClinicianRow[])[0] ?? null;
-      const status = statusError ? null : (((statusRows ?? []) as DocumentStatusRow[])[0] ?? null);
+      // get_child_clinical_document_status() (migration 0113) always
+      // returns exactly one row now, authorized or not, FBA or not --
+      // is_authorized + document_type are what actually distinguish "no
+      // FBA yet" from a real document, not the row's mere presence. Same
+      // fix as ClinicalSupportSection.tsx's own (found live, Stage 5
+      // Step 3's end-to-end verification): without this, every passport
+      // with no FBA at all landed on "fba-completed-no-cards" here,
+      // showing "your clinician is preparing Calm Cards" when no
+      // clinician or FBA exists at all.
+      const statusRow = statusError ? null : (((statusRows ?? []) as DocumentStatusRow[])[0] ?? null);
+      const status = statusRow?.is_authorized && statusRow.document_type ? statusRow : null;
       const clinicianReference = formatClinicianReference(clinician?.full_name, clinician?.specialty);
 
       if (!status) {
