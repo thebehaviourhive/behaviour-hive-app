@@ -10,12 +10,12 @@ export function InlineErrorState({
   onRetry: (event: React.MouseEvent<HTMLButtonElement>) => void;
 }) {
   return (
-    <div className="rounded-xl border-2 border-dashed border-red-200 bg-red-50/40 p-4 text-center">
-      <p className="mb-2 font-sans text-sm text-red-700">{message}</p>
+    <div className="rounded-xl border-2 border-dashed border-brand-golden-brown/40 bg-brand-golden-brown/10 p-4 text-center">
+      <p className="mb-2 font-sans text-sm text-brand-golden-brown">{message}</p>
       <button
         type="button"
         onClick={onRetry}
-        className="font-sans text-sm font-bold text-red-700 underline underline-offset-2"
+        className="font-sans text-sm font-bold text-brand-golden-brown underline underline-offset-2"
       >
         Tap to retry
       </button>

@@ -221,7 +221,7 @@ export function GrantTemporaryAccessSheet({
               {isLookingUp ? "Looking up…" : "Find"}
             </Button>
           </div>
-          {lookupError && <p className="mt-2 text-sm text-red-600">{lookupError}</p>}
+          {lookupError && <p className="mt-2 text-sm text-brand-golden-brown">{lookupError}</p>}
           {lookedUpPerson && (
             <p className="mt-2 rounded-xl border border-black/10 bg-brand-pastel-blue/10 p-3 text-sm text-brand-neutral-black">
               Found: <span className="font-semibold">{lookedUpPerson.fullName}</span>
@@ -245,7 +245,7 @@ export function GrantTemporaryAccessSheet({
       </div>
 
       {submitError && (
-        <p role="alert" className="mt-3 text-sm font-medium text-red-600">
+        <p role="alert" className="mt-3 text-sm font-medium text-brand-golden-brown">
           {submitError}
         </p>
       )}
