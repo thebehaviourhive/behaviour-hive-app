@@ -20,7 +20,7 @@
 // stage development. Every check from V onward is independently
 // self-contained (own institution, own accounts, own cleanup) and
 // individually selectable: V, W, X, Y, Z, AA, BB, CC, DD, EE, FF, GG,
-// HH, II, JJ, KK, LL, MM, NN, OO, PP, QQ, RR, SS, TT. Selecting none of these (ONLY_CHECKS unset) is the full run --
+// HH, II, JJ, KK, LL, MM, NN, OO, PP, QQ, RR, SS, TT, UU. Selecting none of these (ONLY_CHECKS unset) is the full run --
 // the one that gates deploys -- and its behavior is unchanged: same
 // checks, same order, same pass/fail counts. The only observable
 // difference is where the top-level fixture's own cleanup log line
@@ -9849,6 +9849,101 @@ async function main() {
     await admin.from("passports").delete().eq("id", childTTId);
     await admin.from("institutions").delete().in("id", [institutionTTId, institutionTTOtherId]);
     for (const id of [principalTTId, principalTTOtherId, teacherTTId, snaCoverTTId]) {
+      await admin.auth.admin.deleteUser(id);
+    }
+  }
+
+  console.log(`\n== CHECK UU: Client-behaviour half of Stage 6 (src/app/principal/temporary-access/page.tsx) -- proven via the LITERAL client bucket derivation, not a proxy for it. CHECK TT already proves get_institution_temporary_access() and is_currently_active are correct at the SQL level; this check proves the page's own three-way split (Active Now / Upcoming / Recent Past) reproduces the right bucket for three grants in three different real states, fetched in ONE call, simultaneously -- not sequentially reasoned about. Upcoming is deliberately included: GrantTemporaryAccessSheet's own date field allows scheduling ahead of today, a real reachable state, not a hypothetical one. ==`);
+  if (shouldRun("UU")) {
+    const { data: instUU, error: instUUErr } = await admin
+      .from("institutions")
+      .insert({ name: "UU Institution", institution_code: CODE + "UU", status: "verified" })
+      .select()
+      .single();
+    if (instUUErr) throw instUUErr;
+    const institutionUUId = instUU.id;
+
+    const principalUUId = await createUser("checkuu.principal@thebehaviourhive.com", "UU Principal", "principal");
+    // Two SNA identities, not one -- the "active" and "past" example
+    // grants both need today's date (the institution's own cut-off
+    // time is shared, not per-grant, so "past" here means revoked, not
+    // cut-off-passed -- see the check's own header comment), and the
+    // unique index is (class_id, granted_to, granted_for_date): the
+    // SAME person can't hold two rows for the same class/date even if
+    // one is about to be revoked, so this needs a second person, not a
+    // workaround.
+    const snaUU1Id = await createUser("checkuu.sna1@thebehaviourhive.com", "UU SNA One", "sna");
+    const snaUU2Id = await createUser("checkuu.sna2@thebehaviourhive.com", "UU SNA Two", "sna");
+
+    const { data: staffUURows, error: staffUUErr } = await admin.from("institution_staff").insert([
+      { institution_id: institutionUUId, user_id: principalUUId, role: "principal" },
+      { institution_id: institutionUUId, user_id: snaUU1Id, role: "sna" },
+      { institution_id: institutionUUId, user_id: snaUU2Id, role: "sna" },
+    ]).select();
+    if (staffUUErr) throw staffUUErr;
+
+    const principalUU = await signedInClient("checkuu.principal@thebehaviourhive.com");
+    for (const row of staffUURows.filter((r) => r.user_id !== principalUUId)) {
+      const { error } = await principalUU.rpc("approve_staff_join", { p_institution_staff_id: row.id });
+      if (error) throw error;
+    }
+
+    const { data: classUUId, error: classUUErr } = await principalUU.rpc("create_class", { p_institution_id: institutionUUId, p_name: "UU Room" });
+    if (classUUErr) throw classUUErr;
+
+    const nowPartsUU = dublinNowParts();
+    const cutoffAheadUU = addMinutesClamped(nowPartsUU.time, 180);
+    const { error: cutoffUUErr } = await principalUU.rpc("set_temporary_access_cutoff", { p_institution_id: institutionUUId, p_cutoff_time: cutoffAheadUU });
+    if (cutoffUUErr) throw cutoffUUErr;
+
+    // Three grants, three real states, coexisting in the SAME fetch.
+    const tomorrowUU = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const { error: grantActiveErr } = await principalUU.rpc("grant_temporary_access", { p_class_id: classUUId, p_user_id: snaUU1Id, p_date: nowPartsUU.date, p_reason: "UU-active fixture grant." });
+    if (grantActiveErr) throw grantActiveErr;
+    const { error: grantUpcomingErr } = await principalUU.rpc("grant_temporary_access", { p_class_id: classUUId, p_user_id: snaUU1Id, p_date: tomorrowUU, p_reason: "UU-upcoming fixture grant." });
+    if (grantUpcomingErr) throw grantUpcomingErr;
+    const { error: grantPastErr } = await principalUU.rpc("grant_temporary_access", { p_class_id: classUUId, p_user_id: snaUU2Id, p_date: nowPartsUU.date, p_reason: "UU-past fixture grant, revoked immediately." });
+    if (grantPastErr) throw grantPastErr;
+
+    const { data: statusBeforeRevokeUU } = await principalUU.rpc("get_institution_temporary_access", { p_institution_id: institutionUUId });
+    const pastGrantIdUU = (statusBeforeRevokeUU ?? []).find((r) => r.granted_to === snaUU2Id)?.grant_id;
+    const { error: revokePastUUErr } = await principalUU.rpc("revoke_temporary_access", { p_temporary_access_id: pastGrantIdUU, p_reason: "UU fixture: making this a past example." });
+    if (revokePastUUErr) throw revokePastUUErr;
+
+    // ---- The literal client derivation, reproduced verbatim from
+    // src/app/principal/temporary-access/page.tsx's own three filters. ----
+    const { data: rowsUU, error: rowsUUErr } = await principalUU.rpc("get_institution_temporary_access", { p_institution_id: institutionUUId });
+    if (rowsUUErr) throw rowsUUErr;
+    const todayUU = nowPartsUU.date;
+    const activeUU = (rowsUU ?? []).filter((g) => g.is_currently_active);
+    const upcomingUU = (rowsUU ?? []).filter((g) => !g.is_currently_active && !g.revoked_at && g.granted_for_date > todayUU);
+    const pastUU = (rowsUU ?? []).filter((g) => !g.is_currently_active && (Boolean(g.revoked_at) || g.granted_for_date <= todayUU));
+
+    record(
+      "UU-1 THE ACTIVE BUCKET: contains exactly the one truly-live grant (snaUU1, today, unrevoked)",
+      activeUU.length === 1 && activeUU[0].granted_to === snaUU1Id && activeUU[0].granted_for_date === todayUU,
+      JSON.stringify(activeUU.map((g) => ({ granted_to: g.granted_to, date: g.granted_for_date })))
+    );
+    record(
+      "UU-2 THE UPCOMING BUCKET: contains exactly the tomorrow-dated, unrevoked grant -- a real reachable state (GrantTemporaryAccessSheet allows scheduling ahead), not lumped into 'past'",
+      upcomingUU.length === 1 && upcomingUU[0].granted_to === snaUU1Id && upcomingUU[0].granted_for_date === tomorrowUU,
+      JSON.stringify(upcomingUU.map((g) => ({ granted_to: g.granted_to, date: g.granted_for_date })))
+    );
+    record(
+      "UU-3 THE RECENT PAST BUCKET: contains exactly the revoked grant (snaUU2), not the active or upcoming ones",
+      pastUU.length === 1 && pastUU[0].granted_to === snaUU2Id && Boolean(pastUU[0].revoked_at),
+      JSON.stringify(pastUU.map((g) => ({ granted_to: g.granted_to, revoked_at: g.revoked_at })))
+    );
+    record(
+      "UU-4 all three buckets are simultaneously non-empty from ONE fetch -- not a vacuous pass from a fixture that only ever produced one state at a time",
+      activeUU.length === 1 && upcomingUU.length === 1 && pastUU.length === 1,
+      JSON.stringify({ active: activeUU.length, upcoming: upcomingUU.length, past: pastUU.length })
+    );
+
+    console.log("UU summary complete.");
+
+    await admin.from("institutions").delete().eq("id", institutionUUId);
+    for (const id of [principalUUId, snaUU1Id, snaUU2Id]) {
       await admin.auth.admin.deleteUser(id);
     }
   }
