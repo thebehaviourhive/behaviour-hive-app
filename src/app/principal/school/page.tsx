@@ -8,7 +8,8 @@ import { getPostAuthRedirect } from "@/lib/roleRedirect";
 import { PrincipalBottomNav } from "@/components/principal/PrincipalBottomNav";
 import { HandOverPrincipalSheet } from "@/components/principal/HandOverPrincipalSheet";
 import { SetCutoffSheet } from "@/components/principal/SetCutoffSheet";
-import { formatCutoffTime } from "@/lib/temporaryAccessTime";
+import { SetStartTimeSheet } from "@/components/principal/SetStartTimeSheet";
+import { formatTimeOfDay } from "@/lib/temporaryAccessTime";
 
 // PRD 2, Stage 1. New top-level tab -- "School" owns settings and
 // account administration, per the design's own instruction: handover
@@ -24,6 +25,11 @@ import { formatCutoffTime } from "@/lib/temporaryAccessTime";
 // (label + value + "Change"), not a new visual pattern -- just its
 // real home now that Temporary Access exists as its own live-status
 // surface under Directory, distinct from this settings control.
+//
+// PRD 2, Stage 6 follow-up (migration 0133): a second bar, start time,
+// added alongside -- activation used to be a fixed 07:30 constant with
+// no control anywhere; it's now a settable sibling of the cut-off, same
+// pattern, same section.
 
 interface StaffRow {
   user_id: string;
@@ -36,11 +42,13 @@ export default function PrincipalSchoolPage() {
   const router = useRouter();
   const { user, isReady } = useRequireRole("principal");
   const [institutionName, setInstitutionName] = useState<string | null>(null);
+  const [startTime, setStartTime] = useState<string>("07:30:00");
   const [cutoffTime, setCutoffTime] = useState<string>("15:00:00");
   const [staff, setStaff] = useState<StaffRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isHandOverOpen, setIsHandOverOpen] = useState(false);
+  const [isStartTimeOpen, setIsStartTimeOpen] = useState(false);
   const [isCutoffOpen, setIsCutoffOpen] = useState(false);
   const [institutionId, setInstitutionId] = useState<string | null>(null);
 
@@ -52,7 +60,7 @@ export default function PrincipalSchoolPage() {
 
     const { data: staffRow, error: staffError } = await supabase
       .from("institution_staff")
-      .select("institution_id, institutions(name, temporary_access_cutoff_time)")
+      .select("institution_id, institutions(name, temporary_access_start_time, temporary_access_cutoff_time)")
       .eq("user_id", user.id)
       .eq("role", "principal")
       .is("deactivated_at", null)
@@ -66,12 +74,15 @@ export default function PrincipalSchoolPage() {
     }
 
     const institutionRecord = staffRow.institutions as unknown as
-      | { name: string; temporary_access_cutoff_time: string | null }
-      | { name: string; temporary_access_cutoff_time: string | null }[]
+      | { name: string; temporary_access_start_time: string | null; temporary_access_cutoff_time: string | null }
+      | { name: string; temporary_access_start_time: string | null; temporary_access_cutoff_time: string | null }[]
       | null;
     const record = Array.isArray(institutionRecord) ? institutionRecord[0] : institutionRecord;
     setInstitutionName(record?.name ?? null);
     setInstitutionId(staffRow.institution_id);
+    if (record?.temporary_access_start_time) {
+      setStartTime(record.temporary_access_start_time);
+    }
     if (record?.temporary_access_cutoff_time) {
       setCutoffTime(record.temporary_access_cutoff_time);
     }
@@ -120,20 +131,38 @@ export default function PrincipalSchoolPage() {
               <h2 className="mb-2 font-heading text-sm font-bold uppercase tracking-wide text-brand-neutral-black/60">
                 Settings
               </h2>
-              <div className="flex items-center justify-between rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
-                <div>
-                  <p className="text-sm font-semibold text-brand-neutral-black">Temporary cover cut-off</p>
-                  <p className="mt-0.5 text-xs text-brand-neutral-black/50">
-                    Starts 7:30am, ends daily at {formatCutoffTime(cutoffTime)}
-                  </p>
+              <div className="flex flex-col gap-2">
+                <div className="flex items-center justify-between rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
+                  <div>
+                    <p className="text-sm font-semibold text-brand-neutral-black">Temporary cover start time</p>
+                    <p className="mt-0.5 text-xs text-brand-neutral-black/50">
+                      Starts daily at {formatTimeOfDay(startTime)}, ends at {formatTimeOfDay(cutoffTime)}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsStartTimeOpen(true)}
+                    className="flex-shrink-0 text-sm font-semibold text-brand-prussian-blue"
+                  >
+                    Change
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setIsCutoffOpen(true)}
-                  className="flex-shrink-0 text-sm font-semibold text-brand-prussian-blue"
-                >
-                  Change
-                </button>
+
+                <div className="flex items-center justify-between rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
+                  <div>
+                    <p className="text-sm font-semibold text-brand-neutral-black">Temporary cover cut-off</p>
+                    <p className="mt-0.5 text-xs text-brand-neutral-black/50">
+                      Starts {formatTimeOfDay(startTime)}, ends daily at {formatTimeOfDay(cutoffTime)}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsCutoffOpen(true)}
+                    className="flex-shrink-0 text-sm font-semibold text-brand-prussian-blue"
+                  >
+                    Change
+                  </button>
+                </div>
               </div>
             </section>
 
@@ -171,6 +200,19 @@ export default function PrincipalSchoolPage() {
           }
         }}
       />
+
+      {institutionId && (
+        <SetStartTimeSheet
+          isOpen={isStartTimeOpen}
+          institutionId={institutionId}
+          currentStartTime={startTime}
+          onClose={() => setIsStartTimeOpen(false)}
+          onSaved={(newStartTime) => {
+            setStartTime(newStartTime);
+            setIsStartTimeOpen(false);
+          }}
+        />
+      )}
 
       {institutionId && (
         <SetCutoffSheet

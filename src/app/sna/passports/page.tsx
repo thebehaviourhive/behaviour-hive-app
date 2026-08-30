@@ -156,6 +156,7 @@ export default function SnaPassportsPage() {
             <TemporaryAccessBanner
               key={coverage.classId}
               coveringClassName={coverage.className}
+              startTime={coverage.startTime}
               cutoffTime={coverage.cutoffTime}
             />
           ))}

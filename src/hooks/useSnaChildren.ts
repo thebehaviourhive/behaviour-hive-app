@@ -34,6 +34,7 @@ export interface SnaChild extends TeacherPassport {
 export interface ActiveCoverage {
   classId: string;
   className: string;
+  startTime: string;
   cutoffTime: string;
 }
 
@@ -92,9 +93,9 @@ export function useSnaChildren(userId: string | null): UseSnaChildrenResult {
           .is("ended_at", null),
         // Mirrors has_sna_access()'s own temporary_access branch
         // exactly: this grant's own class, today, currently within the
-        // 07:30-to-cut-off window -- computed here for DISPLAY only,
-        // never the security boundary (RLS is, regardless of what this
-        // query returns).
+        // institution's own start-to-cut-off window -- computed here for
+        // DISPLAY only, never the security boundary (RLS is, regardless
+        // of what this query returns).
         supabase
           .from("temporary_access")
           .select("class_id, granted_for_date")
@@ -116,11 +117,12 @@ export function useSnaChildren(userId: string | null): UseSnaChildrenResult {
 
       const { data: instRow } = await supabase
         .from("institutions")
-        .select("temporary_access_cutoff_time")
+        .select("temporary_access_start_time, temporary_access_cutoff_time")
         .eq("id", institutionId)
         .single();
+      const startTime = instRow?.temporary_access_start_time ?? "07:30:00";
       const cutoffTime = instRow?.temporary_access_cutoff_time ?? "15:00:00";
-      const windowStatus = getTemporaryAccessWindowStatus(cutoffTime);
+      const windowStatus = getTemporaryAccessWindowStatus(startTime, cutoffTime);
 
       const activeGrantClassIds = windowStatus.isActive
         ? [...new Set((temporaryResult.data ?? []).map((r) => r.class_id))]
@@ -162,6 +164,7 @@ export function useSnaChildren(userId: string | null): UseSnaChildrenResult {
         coverage = (classNameResult.data ?? []).map((c) => ({
           classId: c.id,
           className: c.name,
+          startTime,
           cutoffTime,
         }));
       }

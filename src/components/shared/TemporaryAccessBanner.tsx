@@ -1,6 +1,6 @@
 "use client";
 
-import { formatCutoffTime, getTemporaryAccessWindowStatus } from "@/lib/temporaryAccessTime";
+import { formatTimeOfDay, getTemporaryAccessWindowStatus } from "@/lib/temporaryAccessTime";
 
 // PRD 1, Stage 3. The proactive half of the mid-session design: a
 // persistent, low-key indicator wherever a temporary-access holder
@@ -21,14 +21,15 @@ interface TemporaryAccessBannerProps {
   // codebase's ordinary `className` (Tailwind) convention, which every
   // sibling card component (QuestionnairePromptCard, etc.) actually uses.
   coveringClassName: string;
+  startTime: string;
   cutoffTime: string;
 }
 
-export function TemporaryAccessBanner({ coveringClassName, cutoffTime }: TemporaryAccessBannerProps) {
-  const status = getTemporaryAccessWindowStatus(cutoffTime);
+export function TemporaryAccessBanner({ coveringClassName, startTime, cutoffTime }: TemporaryAccessBannerProps) {
+  const status = getTemporaryAccessWindowStatus(startTime, cutoffTime);
   if (!status.isActive) return null;
 
-  const formattedCutoff = formatCutoffTime(cutoffTime);
+  const formattedCutoff = formatTimeOfDay(cutoffTime);
 
   return (
     <div

@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/Button";
 import { TextField } from "@/components/ui/TextField";
 import { Textarea } from "@/components/ui/Textarea";
 import { BottomSheet } from "@/components/ui/BottomSheet";
-import { formatCutoffTime, todayLocalDateString } from "@/lib/temporaryAccessTime";
+import { formatTimeOfDay, todayLocalDateString } from "@/lib/temporaryAccessTime";
 
 // PRD 1, Stage 3, Step 3. Shared between the principal (any class at
 // their institution, either an existing staff member OR a genuinely new
@@ -36,6 +36,7 @@ interface GrantTemporaryAccessSheetProps {
   classId: string;
   className: string;
   institutionId: string;
+  startTime: string;
   cutoffTime: string;
   eligibleExisting: EligiblePerson[]; // classTeacher mode: active SNAs. principal mode: all active staff.
   onClose: () => void;
@@ -48,6 +49,7 @@ export function GrantTemporaryAccessSheet({
   classId,
   className,
   institutionId,
+  startTime,
   cutoffTime,
   eligibleExisting,
   onClose,
@@ -145,8 +147,8 @@ export function GrantTemporaryAccessSheet({
       )}
 
       <p className="mt-2 text-sm text-brand-neutral-black/70">
-        Access starts at 7:30am and ends at {formatCutoffTime(cutoffTime)}. Anything unfinished cannot be completed
-        afterwards.
+        Access starts at {formatTimeOfDay(startTime)} and ends at {formatTimeOfDay(cutoffTime)}. Anything unfinished
+        cannot be completed afterwards.
       </p>
 
       {mode === "principal" && (

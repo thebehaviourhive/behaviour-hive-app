@@ -5,7 +5,7 @@ import { useRequireRole } from "@/hooks/useRequireRole";
 import { createClient } from "@/lib/supabase/client";
 import { PrincipalBottomNav } from "@/components/principal/PrincipalBottomNav";
 import { ReasonConfirmSheet } from "@/components/shared/ReasonConfirmSheet";
-import { formatCutoffTime, todayLocalDateString } from "@/lib/temporaryAccessTime";
+import { formatTimeOfDay, todayLocalDateString } from "@/lib/temporaryAccessTime";
 
 // PRD 2, Stage 6. Institution-wide view of temporary cover, replacing
 // "open every class in turn" -- get_institution_temporary_access()
@@ -67,6 +67,7 @@ function formatDate(value: string): string {
 
 export default function PrincipalTemporaryAccessPage() {
   const { user, isReady } = useRequireRole("principal");
+  const [startTime, setStartTime] = useState<string>("07:30:00");
   const [cutoffTime, setCutoffTime] = useState<string>("15:00:00");
   const [grants, setGrants] = useState<GrantRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -82,7 +83,7 @@ export default function PrincipalTemporaryAccessPage() {
 
     const { data: staffRow, error: staffError } = await supabase
       .from("institution_staff")
-      .select("institution_id, institutions(temporary_access_cutoff_time)")
+      .select("institution_id, institutions(temporary_access_start_time, temporary_access_cutoff_time)")
       .eq("user_id", user.id)
       .eq("role", "principal")
       .is("deactivated_at", null)
@@ -95,10 +96,13 @@ export default function PrincipalTemporaryAccessPage() {
       return;
     }
     const institutionRecord = staffRow.institutions as unknown as
-      | { temporary_access_cutoff_time: string | null }
-      | { temporary_access_cutoff_time: string | null }[]
+      | { temporary_access_start_time: string | null; temporary_access_cutoff_time: string | null }
+      | { temporary_access_start_time: string | null; temporary_access_cutoff_time: string | null }[]
       | null;
     const record = Array.isArray(institutionRecord) ? institutionRecord[0] : institutionRecord;
+    if (record?.temporary_access_start_time) {
+      setStartTime(record.temporary_access_start_time);
+    }
     if (record?.temporary_access_cutoff_time) {
       setCutoffTime(record.temporary_access_cutoff_time);
     }
@@ -174,8 +178,8 @@ export default function PrincipalTemporaryAccessPage() {
           <ul className="flex flex-col gap-2 text-sm text-brand-neutral-black/80">
             <li>• SNA-level access only, regardless of the role being covered -- a supply teacher never gets more.</li>
             <li>
-              • Starts 7:30am, ends daily at {formatCutoffTime(cutoffTime)}. It cannot be reinstated until the next
-              morning.
+              • Starts daily at {formatTimeOfDay(startTime)}, ends at {formatTimeOfDay(cutoffTime)}. It cannot be
+              reinstated until the next morning.
             </li>
             <li>
               • Anything unfinished at the cut-off cannot be completed afterwards. If a supply teacher started an
@@ -215,7 +219,7 @@ export default function PrincipalTemporaryAccessPage() {
                         </span>
                       </div>
                       <p className="mt-2 text-xs text-brand-neutral-black/50">
-                        Granted by {g.grantedByName} · until {formatCutoffTime(cutoffTime)} today
+                        Granted by {g.grantedByName} · until {formatTimeOfDay(cutoffTime)} today
                       </p>
                       <p className="mt-1 text-sm text-brand-neutral-black/70">&ldquo;{g.reason}&rdquo;</p>
                       <button

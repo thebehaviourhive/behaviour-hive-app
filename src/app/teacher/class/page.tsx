@@ -8,7 +8,7 @@ import { GrantTemporaryAccessSheet } from "@/components/shared/GrantTemporaryAcc
 import { ReasonConfirmSheet } from "@/components/shared/ReasonConfirmSheet";
 import { TeacherBottomNav } from "@/components/teacher/TeacherBottomNav";
 import { PeopleIcon } from "@/components/ui/icons";
-import { formatCutoffTime, todayLocalDateString } from "@/lib/temporaryAccessTime";
+import { formatTimeOfDay, todayLocalDateString } from "@/lib/temporaryAccessTime";
 
 // PRD 1, Stage 2, Step 3. A class teacher's own class(es) -- roster
 // (read-only: adding/removing a CHILD is principal-only, per Step 0's
@@ -84,6 +84,7 @@ export default function TeacherClassPage() {
   const [nameMap, setNameMap] = useState<Map<string, string>>(new Map());
   const [assignmentMap, setAssignmentMap] = useState<Map<string, Assignment>>(new Map());
   const [eligibleSnas, setEligibleSnas] = useState<{ userId: string; fullName: string }[]>([]);
+  const [startTime, setStartTime] = useState<string>("07:30:00");
   const [cutoffTime, setCutoffTime] = useState<string>("15:00:00");
   const [coverGrants, setCoverGrants] = useState<CoverGrant[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -137,10 +138,13 @@ export default function TeacherClassPage() {
       supabase.from("class_children").select("passport_id, class_id").in("class_id", classIds).is("ended_at", null),
       supabase.rpc("get_institution_staff_roster", { p_institution_id: staffRow.institution_id }),
       supabase.rpc("get_institution_child_roster", { p_institution_id: staffRow.institution_id }),
-      supabase.from("institutions").select("temporary_access_cutoff_time").eq("id", staffRow.institution_id).single(),
+      supabase.from("institutions").select("temporary_access_start_time, temporary_access_cutoff_time").eq("id", staffRow.institution_id).single(),
       supabase.from("temporary_access").select("id, class_id, granted_to, granted_for_date, reason, revoked_at").in("class_id", classIds).order("granted_for_date", { ascending: false }),
     ]);
 
+    if (instResult.data?.temporary_access_start_time) {
+      setStartTime(instResult.data.temporary_access_start_time);
+    }
     if (instResult.data?.temporary_access_cutoff_time) {
       setCutoffTime(instResult.data.temporary_access_cutoff_time);
     }
@@ -302,7 +306,7 @@ export default function TeacherClassPage() {
                             {nameMap.get(g.grantedTo) ?? "Unknown"}
                           </p>
                           <p className="mt-0.5 text-xs text-brand-neutral-black/50">
-                            {g.grantedForDate === today ? "Today" : g.grantedForDate} · until {formatCutoffTime(cutoffTime)}
+                            {g.grantedForDate === today ? "Today" : g.grantedForDate} · until {formatTimeOfDay(cutoffTime)}
                           </p>
                           <button
                             type="button"
@@ -388,6 +392,7 @@ export default function TeacherClassPage() {
           classId={grantCoverClass.id}
           className={grantCoverClass.name}
           institutionId={institutionId}
+          startTime={startTime}
           cutoffTime={cutoffTime}
           eligibleExisting={eligibleSnas}
           onClose={() => setGrantCoverClass(null)}

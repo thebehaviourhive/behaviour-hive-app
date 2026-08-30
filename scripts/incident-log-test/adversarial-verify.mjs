@@ -4827,16 +4827,23 @@ async function main() {
     }
   }
 
-  console.log(`\n== CHECK AA: Temporary day-scoped access (migration 0105) -- grant/revoke authorization, the has_sna_access() fourth branch, can_own_incident()/create_incident_stamp() widening, the ownership/authority edit-policy decoupling, lazy ownership-transfer resolution, and the standing-audit fixes (assign_sna_to_child, get_institution_staff_roster) ==`);
+  console.log(`\n== CHECK AA: Temporary day-scoped access (migration 0105) -- grant/revoke authorization, the has_sna_access() fourth branch, can_own_incident()/create_incident_stamp() widening, the ownership/authority edit-policy decoupling, lazy ownership-transfer resolution, the standing-audit fixes (assign_sna_to_child, get_institution_staff_roster), and (0133) the settable activation start time -- its own RPC's guards, proof set_temporary_access_cutoff's guard is genuinely dynamic, and both bounds of the activation window proven live ==`);
   if (shouldRun("AA")) {
     // dublinNowParts()/addMinutesClamped() are module-level (hoisted
     // above main(), CHECK BB reuses them for the same reason).
-    // NAMED LIMITATION: the 07:30 activation boundary itself is a fixed
-    // literal compared directly against now() inside the SQL, not a
-    // stored value -- there is no way to vary it the same way, so this
-    // suite cannot prove the ">= 07:30" half of the window without
-    // literally running before 07:30 local time. Only the cut-off
-    // (">  cut-off" refusal, "< cut-off" success) is exercised here.
+    // FORMER LIMITATION, CLOSED BY 0133: the 07:30 activation boundary
+    // used to be a fixed literal compared directly against now() inside
+    // the SQL, not a stored value -- no way to vary it from a test, so
+    // this suite could only prove the ">  cut-off" refusal / "< cut-off"
+    // success half of the window, never the ">= activation" half without
+    // literally running before 07:30 local time. Activation is now a
+    // per-institution stored value (temporary_access_start_time) --
+    // AA-1e..AA-1k below cover its own RPC and prove BOTH bounds of the
+    // window live, via a genuinely movable start time. Any other check
+    // in this suite whose own comments still describe the lower bound as
+    // permanently unprovable (CHECK TT, CHECK UU) is describing a
+    // limitation that no longer holds; not retrofitted there, since this
+    // check is where that coverage now lives.
     const nowParts = dublinNowParts();
     const cutoffComfortablyAhead = addMinutesClamped(nowParts.time, 180);
     const cutoffAlreadyPassed = addMinutesClamped(nowParts.time, -15);
@@ -4918,13 +4925,89 @@ async function main() {
       const { error: nonPrincipalErr } = await teacherAA1.rpc("set_temporary_access_cutoff", { p_institution_id: institutionAAId, p_cutoff_time: "16:00:00" });
       record("AA-1a: set_temporary_access_cutoff refuses a non-principal caller", Boolean(nonPrincipalErr) && /active principal/i.test(nonPrincipalErr.message), nonPrincipalErr?.message);
 
+      // Re-audited for migration 0133: the refusal condition used to be
+      // a fixed '07:30' literal ("cut-off <= 07:30" hardcoded in SQL);
+      // it is now "cut-off <= the institution's own CURRENT start time"
+      // (07:30 only because that's still the untouched default at this
+      // point in the fixture). Asserting on the literal "07:30" substring
+      // would still coincidentally pass post-0133 without actually
+      // proving the new dynamic rule -- asserting on "start time"
+      // (0133's own updated error message) proves the real thing. AA-1i
+      // below proves the dynamism itself, once start_time has moved.
       const { error: tooEarlyErr } = await principalAA.rpc("set_temporary_access_cutoff", { p_institution_id: institutionAAId, p_cutoff_time: "07:00:00" });
-      record("AA-1b: set_temporary_access_cutoff refuses a cut-off at or before 07:30 activation", Boolean(tooEarlyErr) && /07:30/i.test(tooEarlyErr.message), tooEarlyErr?.message);
+      record("AA-1b: set_temporary_access_cutoff refuses a cut-off at or before the institution's current start time (07:30 default)", Boolean(tooEarlyErr) && /start time/i.test(tooEarlyErr.message), tooEarlyErr?.message);
 
       const { error: setErr } = await principalAA.rpc("set_temporary_access_cutoff", { p_institution_id: institutionAAId, p_cutoff_time: cutoffComfortablyAhead });
       record("AA-1c: an active principal CAN set a valid cut-off", !setErr, setErr?.message);
       const { data: instCheck } = await admin.from("institutions").select("temporary_access_cutoff_time").eq("id", institutionAAId).single();
       record("AA-1d: the cut-off actually persisted to the row", instCheck?.temporary_access_cutoff_time?.startsWith(cutoffComfortablyAhead.slice(0, 5)), instCheck?.temporary_access_cutoff_time);
+
+      // ---- AA-1e..AA-1k: set_temporary_access_start_time() (0133) --
+      // mirrors AA-1a-AA-1d's own coverage of the cutoff RPC, plus
+      // proves set_temporary_access_cutoff()'s guard is genuinely
+      // dynamic (AA-1i), and closes a limitation this check's own
+      // header used to name as permanent: the >=07:30 lower bound of
+      // the activation window used to be a fixed literal compared
+      // directly in SQL, impossible to vary from a test, so only the
+      // upper (cutoff) bound was ever provable live. Activation is now
+      // itself a stored, settable value -- both bounds are provable the
+      // same way (AA-1j/AA-1k).
+      const { error: startNonPrincipalErr } = await teacherAA1.rpc("set_temporary_access_start_time", { p_institution_id: institutionAAId, p_start_time: "09:00:00" });
+      record("AA-1e: set_temporary_access_start_time refuses a non-principal caller", Boolean(startNonPrincipalErr) && /active principal/i.test(startNonPrincipalErr.message), startNonPrincipalErr?.message);
+
+      const { error: startTooLateErr } = await principalAA.rpc("set_temporary_access_start_time", { p_institution_id: institutionAAId, p_start_time: cutoffComfortablyAhead });
+      record("AA-1f: set_temporary_access_start_time refuses a start time at or after the institution's current cut-off", Boolean(startTooLateErr) && /cut-off/i.test(startTooLateErr.message), startTooLateErr?.message);
+
+      const newStartTime = "09:00:00";
+      const { error: startSetErr } = await principalAA.rpc("set_temporary_access_start_time", { p_institution_id: institutionAAId, p_start_time: newStartTime });
+      record("AA-1g: an active principal CAN set a valid start time", !startSetErr, startSetErr?.message);
+      const { data: instStartCheck } = await admin.from("institutions").select("temporary_access_start_time").eq("id", institutionAAId).single();
+      record("AA-1h: the start time actually persisted to the row", instStartCheck?.temporary_access_start_time?.startsWith(newStartTime.slice(0, 5)), instStartCheck?.temporary_access_start_time);
+
+      // AA-1i: the point of this whole addition -- set_temporary_access_
+      // cutoff()'s own guard now reads the institution's CURRENT start
+      // time (09:00, just set above), not the old fixed 07:30 literal.
+      // "08:00" is later than the OLD fixed 07:30 (would have been valid
+      // under the pre-0133 rule) but earlier than the NEW 09:00 start --
+      // refusal here is proof the guard is genuinely dynamic, not proof
+      // by coincidence the way a fixture that never touches start_time
+      // would only ever produce.
+      const { error: dynamicCutoffErr } = await principalAA.rpc("set_temporary_access_cutoff", { p_institution_id: institutionAAId, p_cutoff_time: "08:00:00" });
+      record("AA-1i: set_temporary_access_cutoff's guard is genuinely dynamic -- refuses 08:00 once start_time has moved to 09:00, though 08:00 is later than the OLD fixed 07:30", Boolean(dynamicCutoffErr) && /start time/i.test(dynamicCutoffErr.message), dynamicCutoffErr?.message);
+
+      // AA-1j/AA-1k: closing the named limitation -- both bounds of the
+      // activation window, proven live, via a genuinely movable start
+      // time. A throwaway grant, deleted immediately after use -- not
+      // AA2's own grant (created later in this fixture; the same class/
+      // SNA/date combo would otherwise collide with it under the
+      // one-active-grant-per-person-class-date unique index).
+      await principalAA.rpc("set_temporary_access_cutoff", { p_institution_id: institutionAAId, p_cutoff_time: cutoffComfortablyAhead });
+      const { data: throwawayGrant, error: throwawayGrantErr } = await admin.from("temporary_access").insert({
+        institution_id: institutionAAId, class_id: classAA1Id, granted_to: snaAA1Id,
+        granted_for_date: todayLocal, granted_by: principalAAId, granted_by_role: "principal",
+        reason: "AA-1j/1k throwaway: proving the activation lower bound is now movable.",
+      }).select().single();
+      if (throwawayGrantErr) throw throwawayGrantErr;
+
+      const startBehindNow = addMinutesClamped(nowParts.time, -30);
+      const startAheadOfNow = addMinutesClamped(nowParts.time, 30);
+
+      await principalAA.rpc("set_temporary_access_start_time", { p_institution_id: institutionAAId, p_start_time: startBehindNow });
+      const { data: activeRows1 } = await principalAA.rpc("get_institution_temporary_access", { p_institution_id: institutionAAId, p_days_back: 30 });
+      const grantRowActive = activeRows1?.find((r) => r.grant_id === throwawayGrant.id);
+      record("AA-1j: LOWER BOUND, closed -- is_currently_active reads true once start time has moved behind now (previously unprovable without literally running before 07:30)", grantRowActive?.is_currently_active === true, JSON.stringify(grantRowActive));
+
+      await principalAA.rpc("set_temporary_access_start_time", { p_institution_id: institutionAAId, p_start_time: startAheadOfNow });
+      const { data: activeRows2 } = await principalAA.rpc("get_institution_temporary_access", { p_institution_id: institutionAAId, p_days_back: 30 });
+      const grantRowInactive = activeRows2?.find((r) => r.grant_id === throwawayGrant.id);
+      record("AA-1k: LOWER BOUND, closed -- is_currently_active reads false once start time has moved ahead of now, same grant, same cut-off, nothing else changed", grantRowInactive?.is_currently_active === false, JSON.stringify(grantRowInactive));
+
+      await admin.from("temporary_access").delete().eq("id", throwawayGrant.id);
+
+      // Reset to the standard default before the rest of this check runs
+      // -- every downstream assertion in CHECK AA assumes the ordinary
+      // 07:30 activation floor.
+      await principalAA.rpc("set_temporary_access_start_time", { p_institution_id: institutionAAId, p_start_time: "07:30:00" });
     }
 
     // ---- AA2: grant_temporary_access() -- authority 1 (class teacher) ----
@@ -9398,12 +9481,11 @@ async function main() {
       if (cutoffErr) throw cutoffErr;
       const { error: tempErr } = await principalRR.rpc("grant_temporary_access", { p_class_id: classRR1Id, p_user_id: snaRR4Id, p_date: nowParts.date, p_reason: "RR-8c: temporary branch." });
       if (tempErr) throw tempErr;
-      // Named limitation, same as CHECK AA's own: only the upper
-      // (cutoff) bound of the 07:30-to-cutoff window is provable live
-      // without literally running this suite before 07:30 local time.
-      // set_temporary_access_cutoff above puts the upper bound
-      // comfortably out of the way; the lower bound is trusted, not
-      // re-proven here.
+      // The lower (activation) bound is proven live elsewhere, not
+      // re-proven here -- CHECK AA's own AA-1j/AA-1k (0133) moves
+      // temporary_access_start_time itself to prove both bounds; this
+      // check only needs the upper bound comfortably out of the way, via
+      // set_temporary_access_cutoff above.
       const { data: hasTemp } = await admin.rpc("has_sna_access", { p_user_id: snaRR4Id, p_passport_id: childRR.A });
       record(
         "RR-8c branch 3 (day-scoped temporary cover): has_sna_access()=true for a child in the covered class",
@@ -9681,7 +9763,7 @@ async function main() {
       JSON.stringify(grantRowTT)
     );
     record(
-      "TT-1b is_currently_active=true while the cutoff is comfortably ahead and the grant is unrevoked (known limitation, same as CHECK AA's own: only the upper cutoff bound is provable live, not the >=07:30 lower one)",
+      "TT-1b is_currently_active=true while the cutoff is comfortably ahead and the grant is unrevoked (lower activation bound proven live separately, CHECK AA's AA-1j/AA-1k, 0133 -- not re-proven here)",
       grantRowTT?.is_currently_active === true,
       JSON.stringify(grantRowTT)
     );
@@ -9722,11 +9804,13 @@ async function main() {
 
     // ---- TT-2: the cutoff passes (still NOT revoked) -- the SAME
     // grant now reads is_currently_active=false, live, without ever
-    // touching the row itself. "07:31" is always > 07:30 (the RPC's
-    // own floor) and, for any reasonable time this suite runs, already
-    // in the past -- the one edge this can't rule out (running this
-    // suite between 07:30 and 07:31 local time) is the same class of
-    // limitation CHECK AA's own header already names. ----
+    // touching the row itself. "07:31" is always > institutionTTId's own
+    // start time (still the untouched 07:30 default here) and, for any
+    // reasonable time this suite runs, already in the past -- the one
+    // edge this can't rule out (running this suite between 07:30 and
+    // 07:31 local time) is now provable a different way (move start_time
+    // itself, as CHECK AA's AA-1j/AA-1k do, 0133) but not re-proven here.
+    // ----
     const { error: cutoffPassedErr } = await principalTT.rpc("set_temporary_access_cutoff", { p_institution_id: institutionTTId, p_cutoff_time: "07:31:00" });
     if (cutoffPassedErr) throw cutoffPassedErr;
     {

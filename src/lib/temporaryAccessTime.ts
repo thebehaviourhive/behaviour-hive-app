@@ -3,11 +3,17 @@
 // repeated literal. Used only for DISPLAY and the proactive "access
 // ends at..." indicator -- the actual access window is always enforced
 // server-side (has_sna_access()'s own live comparison against
-// institutions.temporary_access_cutoff_time); nothing here is a
-// security boundary, only a courtesy so cutoff is never a surprise.
+// institutions.temporary_access_start_time/temporary_access_cutoff_time);
+// nothing here is a security boundary, only a courtesy so the window is
+// never a surprise.
+//
+// PRD 2, Stage 6 follow-up (migration 0133): activation was a fixed
+// '07:30' constant everywhere it appeared; it's now a per-institution
+// setting the same shape as the cut-off, so every function here that
+// used to assume it takes the institution's own current value as a
+// parameter instead.
 
 const TIMEZONE = "Europe/Dublin";
-const ACTIVATION_TIME = "07:30";
 // How far ahead of cut-off the indicator switches from informational to
 // "finish up soon" -- Daniel's own instruction: a prompt in the last
 // stretch, not a change of meaning.
@@ -43,8 +49,10 @@ function timeStringToMinutes(hhmmss: string): number {
 // Formats a Postgres `time` value ("15:00:00") as "3:00pm" -- matches
 // this app's own 12-hour, lowercase-am/pm convention used elsewhere
 // (formatDateTime in principal/dashboard, etc.), not re-derived per call
-// site.
-export function formatCutoffTime(cutoffTime: string): string {
+// site. Named generically (not formatCutoffTime) since 0133 made this
+// the shared formatter for BOTH the start time and the cut-off, not the
+// cut-off alone.
+export function formatTimeOfDay(cutoffTime: string): string {
   const minutes = timeStringToMinutes(cutoffTime);
   const hour24 = Math.floor(minutes / 60);
   const minute = minutes % 60;
@@ -60,12 +68,15 @@ export interface TemporaryAccessWindowStatus {
 }
 
 // Purely for DISPLAY -- date matching is the caller's job (this only
-// answers "given today's grant, where are we in the 07:30-to-cut-off
+// answers "given today's grant, where are we in the start-to-cut-off
 // window right now"), matching has_sna_access()'s own real check in
-// spirit but never used to gate anything itself.
-export function getTemporaryAccessWindowStatus(cutoffTime: string): TemporaryAccessWindowStatus {
+// spirit but never used to gate anything itself. startTime/cutoffTime
+// are the institution's OWN current values (0133) -- never a fixed
+// literal, so a caller with only the cut-off in hand must fetch the
+// start time too, the same select it already does for the cut-off.
+export function getTemporaryAccessWindowStatus(startTime: string, cutoffTime: string): TemporaryAccessWindowStatus {
   const now = getDublinNow();
-  const activationMinutes = timeStringToMinutes(ACTIVATION_TIME + ":00");
+  const activationMinutes = timeStringToMinutes(startTime);
   const cutoffMinutes = timeStringToMinutes(cutoffTime);
   const isActive = now.minutesSinceMidnight >= activationMinutes && now.minutesSinceMidnight < cutoffMinutes;
   const minutesRemaining = isActive ? cutoffMinutes - now.minutesSinceMidnight : null;

@@ -11,7 +11,7 @@ import { AssignClassSnaSheet } from "@/components/principal/AssignClassSnaSheet"
 import { AssignSnaSheet } from "@/components/shared/AssignSnaSheet";
 import { GrantTemporaryAccessSheet } from "@/components/shared/GrantTemporaryAccessSheet";
 import { ReasonConfirmSheet } from "@/components/shared/ReasonConfirmSheet";
-import { formatCutoffTime, todayLocalDateString } from "@/lib/temporaryAccessTime";
+import { formatTimeOfDay, todayLocalDateString } from "@/lib/temporaryAccessTime";
 
 // PRD 1, Stage 2, Step 3. Principal's class detail: teachers (add/remove
 // within the 3-slot cap), roster (add/remove a child), and per-child SNA
@@ -135,6 +135,7 @@ export default function PrincipalClassDetailPage() {
   const [eligibleSnas, setEligibleSnas] = useState<{ userId: string; fullName: string }[]>([]);
   const [eligibleChildren, setEligibleChildren] = useState<{ passportId: string; childName: string }[]>([]);
   const [eligibleStaffForCover, setEligibleStaffForCover] = useState<{ userId: string; fullName: string }[]>([]);
+  const [startTime, setStartTime] = useState<string>("07:30:00");
   const [cutoffTime, setCutoffTime] = useState<string>("15:00:00");
   const [coverGrants, setCoverGrants] = useState<{ active: CoverGrant[]; past: CoverGrant[] }>({ active: [], past: [] });
 
@@ -198,7 +199,7 @@ export default function PrincipalClassDetailPage() {
           p_include_pending: false,
         }),
         supabase.rpc("get_institution_child_roster", { p_institution_id: classRow.institution_id }),
-        supabase.from("institutions").select("temporary_access_cutoff_time").eq("id", classRow.institution_id).single(),
+        supabase.from("institutions").select("temporary_access_start_time, temporary_access_cutoff_time").eq("id", classRow.institution_id).single(),
         supabase
           .from("temporary_access")
           .select("id, granted_to, granted_for_date, reason, revoked_at")
@@ -206,6 +207,9 @@ export default function PrincipalClassDetailPage() {
           .order("granted_for_date", { ascending: false }),
       ]);
 
+    if (instResult.data?.temporary_access_start_time) {
+      setStartTime(instResult.data.temporary_access_start_time);
+    }
     if (instResult.data?.temporary_access_cutoff_time) {
       setCutoffTime(instResult.data.temporary_access_cutoff_time);
     }
@@ -709,7 +713,7 @@ export default function PrincipalClassDetailPage() {
                     <div key={g.id} className="rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
                       <p className="text-sm font-semibold text-brand-neutral-black">{nameMap.get(g.grantedTo) ?? "Unknown"}</p>
                       <p className="mt-0.5 text-xs text-brand-neutral-black/50">
-                        {g.grantedForDate === todayLocalDateString() ? "Today" : g.grantedForDate} · until {formatCutoffTime(cutoffTime)}
+                        {g.grantedForDate === todayLocalDateString() ? "Today" : g.grantedForDate} · until {formatTimeOfDay(cutoffTime)}
                       </p>
                       <p className="mt-1 text-sm text-brand-neutral-black/70">&ldquo;{g.reason}&rdquo;</p>
                       <button
@@ -897,6 +901,7 @@ export default function PrincipalClassDetailPage() {
           classId={classId}
           className={className ?? "this class"}
           institutionId={institutionId}
+          startTime={startTime}
           cutoffTime={cutoffTime}
           eligibleExisting={eligibleStaffForCover}
           onClose={() => setIsGrantCoverOpen(false)}

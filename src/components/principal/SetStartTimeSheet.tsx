@@ -5,24 +5,27 @@ import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/Button";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 
-// PRD 1, Stage 3, Step 3. Principal-only, per institution. Activation
-// (start time) used to be a fixed constant, not editable anywhere --
-// PRD 2, Stage 6 follow-up (migration 0133) made it a settable sibling
-// value, SetStartTimeSheet, validated against this one's current value
-// server-side (each RPC checks it stays on the correct side of the
-// institution's OTHER current value). This sheet's own shape is
-// unchanged; only its "fixed constant" framing is now wrong.
+// PRD 2, Stage 6 follow-up (migration 0133). Principal-only, per
+// institution -- mirrors SetCutoffSheet's own shape exactly. Activation
+// used to be a fixed constant not shown as editable anywhere; it's now
+// a per-institution setting the same shape as the cut-off, so this is a
+// deliberate sibling component, not a generalisation of SetCutoffSheet
+// into one sheet with a mode -- the two settings are validated against
+// each other server-side (each RPC checks it stays on the correct side
+// of the institution's OTHER current value), and keeping them as two
+// small, separately-named sheets keeps that relationship legible on the
+// School page rather than folded into one component's internal branching.
 
-interface SetCutoffSheetProps {
+interface SetStartTimeSheetProps {
   isOpen: boolean;
   institutionId: string;
-  currentCutoffTime: string; // "HH:MM:SS"
+  currentStartTime: string; // "HH:MM:SS"
   onClose: () => void;
-  onSaved: (newCutoff: string) => void;
+  onSaved: (newStartTime: string) => void;
 }
 
-export function SetCutoffSheet({ isOpen, institutionId, currentCutoffTime, onClose, onSaved }: SetCutoffSheetProps) {
-  const [value, setValue] = useState(currentCutoffTime.slice(0, 5));
+export function SetStartTimeSheet({ isOpen, institutionId, currentStartTime, onClose, onSaved }: SetStartTimeSheetProps) {
+  const [value, setValue] = useState(currentStartTime.slice(0, 5));
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
@@ -36,9 +39,9 @@ export function SetCutoffSheet({ isOpen, institutionId, currentCutoffTime, onClo
     setIsSubmitting(true);
     setSubmitError(null);
     const supabase = createClient();
-    const { error } = await supabase.rpc("set_temporary_access_cutoff", {
+    const { error } = await supabase.rpc("set_temporary_access_start_time", {
       p_institution_id: institutionId,
-      p_cutoff_time: `${value}:00`,
+      p_start_time: `${value}:00`,
     });
     setIsSubmitting(false);
     if (error) {
@@ -50,18 +53,18 @@ export function SetCutoffSheet({ isOpen, institutionId, currentCutoffTime, onClo
 
   return (
     <BottomSheet isOpen={isOpen} onClose={close}>
-      <h2 className="font-heading text-xl font-semibold text-brand-neutral-black">Temporary Access Cut-off</h2>
+      <h2 className="font-heading text-xl font-semibold text-brand-neutral-black">Temporary Access Start Time</h2>
       <p className="mt-2 text-sm text-brand-neutral-black/70">
-        Temporary cover access (granted SNAs and supply teachers) starts at 7:30am and ends at this time, every day,
-        until changed.
+        Temporary cover access (granted SNAs and supply teachers) starts at this time and ends at the school&apos;s
+        cut-off, every day, until changed.
       </p>
 
       <div className="mt-4">
-        <label htmlFor="cutoff-time" className="mb-1.5 block text-sm font-semibold text-brand-neutral-black">
-          Cut-off time
+        <label htmlFor="start-time" className="mb-1.5 block text-sm font-semibold text-brand-neutral-black">
+          Start time
         </label>
         <input
-          id="cutoff-time"
+          id="start-time"
           type="time"
           value={value}
           onChange={(e) => setValue(e.target.value)}
