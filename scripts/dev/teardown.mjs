@@ -250,15 +250,26 @@ async function teardownInstitution(code, force, withOrphanedPassports) {
   // rows were deleted above) -- never a blanket scan of the whole
   // database.
   //
-  // A passport only deletes here if, right now, it has ZERO institution
+  // A passport deletes here if, right now, it has ZERO institution
   // links anywhere (not just this one -- a passport genuinely shared
-  // across institutions in a more elaborate fixture keeps existing),
-  // ZERO guardians (never claimed), and no self-created owner
-  // (user_id is null -- create_school_passport()'s own signature). That
-  // combination can only describe a school-created passport whose one
-  // and only relationship was the institution just torn down -- never a
-  // real parent's passport, self-created or claimed, and never one this
-  // fixture run deliberately links elsewhere.
+  // across institutions in a more elaborate fixture keeps existing), no
+  // self-created owner (user_id is null -- create_school_passport()'s
+  // own signature), and every guardian on it (zero or more) is ITSELF a
+  // recognised fixture account -- email contains "zzfixture", same
+  // string check user mode already uses to decide what it's allowed to
+  // touch. Originally this required zero guardians outright, which
+  // meant a fixture that exercised the claim flow (generated a code,
+  // had a real fixture parent redeem it -- Stage 3's own verification
+  // pass, and apparently at least one earlier one) left its passport
+  // behind every time, silently, with no failure to notice it by --
+  // caught only by hand, twice. A passport with a genuine non-fixture
+  // guardian is never touched by this, at any count: one recognised
+  // real email among the guardians is enough to skip it outright.
+  //
+  // passport_claim_codes.passport_id and passport_guardians.passport_id
+  // are both ON DELETE CASCADE (0114/0113) -- deleting the passports row
+  // below removes them as a side effect, nothing to delete explicitly
+  // first.
   //
   // Safe by construction, not just by this check: incident_children.
   // passport_id cascades (0068), but restrictive_practices.passport_id,
@@ -271,10 +282,17 @@ async function teardownInstitution(code, force, withOrphanedPassports) {
   // here, not even by --force.
   if (withOrphanedPassports && linkedPassportIds.length > 0) {
     console.log(`\n=== ORPHANED-PASSPORT SWEEP (${linkedPassportIds.length} passport(s) linked to ${code}) ===`);
+
+    // One batched lookup for the whole sweep, not one per guardian --
+    // same listUsers({perPage: 1000}) shape teardownUser() already uses.
+    const { data: allUsers, error: listUsersErr } = await admin.auth.admin.listUsers({ perPage: 1000 });
+    if (listUsersErr) fail(`listUsers failed during orphaned-passport sweep: ${listUsersErr.message}`);
+    const emailById = new Map((allUsers?.users ?? []).map((u) => [u.id, (u.email ?? "").toLowerCase()]));
+
     for (const passportId of linkedPassportIds) {
-      const [{ count: remainingLinks }, { count: guardianCount }, { data: passportRow }] = await Promise.all([
+      const [{ count: remainingLinks }, { data: guardianRows }, { data: passportRow }] = await Promise.all([
         admin.from("passport_institution_links").select("id", { count: "exact", head: true }).eq("passport_id", passportId),
-        admin.from("passport_guardians").select("id", { count: "exact", head: true }).eq("passport_id", passportId),
+        admin.from("passport_guardians").select("user_id").eq("passport_id", passportId),
         admin.from("passports").select("id, child_name, user_id").eq("id", passportId).maybeSingle(),
       ]);
 
@@ -282,10 +300,14 @@ async function teardownInstitution(code, force, withOrphanedPassports) {
         console.log(`  ${passportId}  already gone`);
         continue;
       }
-      if ((remainingLinks ?? 0) > 0 || (guardianCount ?? 0) > 0 || passportRow.user_id !== null) {
+
+      const guardians = guardianRows ?? [];
+      const nonFixtureGuardians = guardians.filter((g) => !(emailById.get(g.user_id) ?? "").includes("zzfixture"));
+
+      if ((remainingLinks ?? 0) > 0 || passportRow.user_id !== null || nonFixtureGuardians.length > 0) {
         console.log(
           `  ${passportId}  "${passportRow.child_name}"  SKIPPED -- still has ${remainingLinks ?? 0} other link(s), ` +
-            `${guardianCount ?? 0} guardian(s), user_id=${passportRow.user_id ?? "null"}`
+            `user_id=${passportRow.user_id ?? "null"}, ${guardians.length} guardian(s) (${nonFixtureGuardians.length} non-fixture)`
         );
         continue;
       }
@@ -295,7 +317,10 @@ async function teardownInstitution(code, force, withOrphanedPassports) {
         console.log(`  ${passportId}  "${passportRow.child_name}"  FAILED: ${delErr.message} -- left in place, not overridden`);
         continue;
       }
-      console.log(`  ${passportId}  "${passportRow.child_name}"  deleted (cascades: passport_section_b/c/d, enrolments, morning_checkins, passport_guardians, activity_log, ...)`);
+      console.log(
+        `  ${passportId}  "${passportRow.child_name}"  deleted (cascades: passport_claim_codes, passport_guardians ` +
+          `[${guardians.length} recognised fixture guardian(s)], passport_section_b/c/d, enrolments, morning_checkins, activity_log, ...)`
+      );
     }
   }
 }
@@ -490,14 +515,17 @@ if (mode === "institution" && identifier) {
 
 --with-orphaned-passports: also deletes any passport that was linked to
 this institution and, after teardown, has zero remaining institution
-links, zero guardians, and no self-created owner -- the shape
-create_school_passport() leaves behind, since a passport was never
-institution-owned and institution mode's own steps never reach it.
-Does not touch a passport still linked elsewhere, still claimed, or
-self-created. Fails loudly (never silently, never overridden by
---force) if the passport is still named on real incident data via a
-non-cascading FK (restrictive_practices/incident_injuries/
-school_notices).
+links, no self-created owner, and no guardian outside this fixture --
+the shape create_school_passport() (optionally claimed via a real
+fixture parent) leaves behind, since a passport was never institution-
+owned and institution mode's own steps never reach it. A guardian
+counts as "this fixture" only if their own account email contains
+"zzfixture" -- the same check user mode uses -- so a passport claimed
+by even one real guardian is never touched, at any guardian count.
+Does not touch a passport still linked elsewhere or self-created.
+Fails loudly (never silently, never overridden by --force) if the
+passport is still named on real incident data via a non-cascading FK
+(restrictive_practices/incident_injuries/school_notices).
 
 Only tears down fixtures: institution codes must start with ZZFIXTURE,
 user emails must contain "zzfixture". Refuses everything else,
