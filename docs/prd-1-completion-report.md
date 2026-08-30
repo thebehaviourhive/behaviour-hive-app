@@ -358,46 +358,75 @@ time a new instance is found.
 
 ## 5. What I would do next
 
-In priority order, and why:
+In priority order, and why — revised after review; §2.4 ranks above
+`institution_admin` and the multi-role decision, and §4.2 is stated as a
+requirement, not a suggestion.
 
-1. **§4.1 is done — removed, not fixed.** Follow through on what it
-   implies: rewrite the consent/privacy copy that still promises a
-   parent can revoke a school's access (two locations, listed and
-   handed off separately), and decide the fate of the read-only
+1. **§2.4 — a claimed, school-created passport can be read but not
+   completed.** This is the claim flow *half* working, not a minor
+   residual gap: a guardian who claims a school-created passport lands on
+   a passport with `child_name` and nothing else, and has no path to fill
+   in `date_of_birth`/`school`/`important_people`/`diagnoses` —
+   `passport/section-a` is the only UI that writes those fields, still
+   `user_id`-keyed, and a claimed guardian landing there directly would
+   silently start an unrelated second passport rather than complete the
+   one they claimed. Currently contained, not solved, by
+   `passport/welcome`'s own redirect. This is the first thing a real
+   parent in the trial hits, not an edge case — ranks above both items
+   below.
+
+2. **§4.2, restated as a requirement, not a suggestion, for PRD 2
+   itself.** Every new screen PRD 2 builds resolves child access through
+   `has_child_access()` or a roster RPC — never by reading
+   `class_children`/`child_assignments`/`passport_access` directly. This
+   bug class has been caught by hand a dozen times across this PRD
+   (`useSnaChildren.ts`, `/sna/passports`, `/sna/passport/[passportId]`,
+   a `.maybeSingle()` assumption in Stage 5, `useTeacherPassports.ts`'s
+   own reachability gap, among others) — every one of those was a real
+   screen shipping wrong before someone happened to click through it.
+   PRD 2 adds roughly a dozen more surfaces to a principal dashboard
+   that's being made coherent specifically because today's four screens
+   already aren't. Catching the thirteenth instance by hand is not a
+   plan. The enforcement mechanism already exists and already works —
+   it's CHECK Z/BB/FF/LL's own pattern: a client-behaviour adversarial
+   check, file:line-matched to the screen's actual query shape, written
+   in the same pass as the screen itself, not after a bug is found in
+   it. State this as a stated constraint in PRD 2's own build prompt,
+   not left implicit.
+
+3. **`institution_admin` onboarding is overdue, but it is not PRD 2's
+   first stage.** PRD 2 is the principal dashboard — reconciling four
+   accreted screens into one coherent world for the principal who
+   already exists. `institution_admin` is a new role with new
+   onboarding; folding it into PRD 2 means designing a surface for
+   someone who doesn't exist yet while the person who does still has an
+   incoherent one. It gets its own scoping *after* PRD 2, unless PRD 2's
+   own design work says otherwise.
+
+4. **Follow through on §4.1's removal.** Rewrite the consent/privacy copy
+   that still promises a parent can revoke a school's access (two
+   locations, listed and handed off separately — see CLAUDE.md's own
+   "Parked work"), and decide the fate of the read-only
    approved-institutions list and `ShareBottomSheet`'s own
    approve-by-code flow, both currently kept as-is pending that
-   decision.
+   decision — alongside `AddChildSheet`'s own teacher/SNA self-link by
+   passport code, the same category, also parked.
 
-2. **Scope `institution_admin` onboarding as PRD 2's own first stage,
-   not a someday item.** It's been "the proper fix" for three separate
-   gaps across this PRD (join-approval delegation, abandoned-principal
-   recovery, and implicitly every "no self-serve path" gap along the
-   way) without ever being scoped as real work. Every time it comes up
-   again, that's a sign it's overdue, not a sign it can keep waiting.
-
-3. **Make a real product decision on multi-role accounts (§4.3)** before
+5. **Make a real product decision on multi-role accounts (§4.3)** before
    the next instance of the single-role constraint forces a rushed
    one-off fix. This is a product question first, an engineering one
    second.
 
-4. **Retire the `passport_guardians` dual-write trigger.** Not urgent,
+6. **Retire the `passport_guardians` dual-write trigger.** Not urgent,
    but it's real debt: every day it stays live is another day new code
    could accidentally write `passports.user_id` instead of
    `passport_guardians` and still appear to work, right up until it
    doesn't. Step 1b (the `onConflict` migration) is mechanical and
    low-risk — there's no reason for it to still be open.
 
-5. **Fix `fetchApprovedInstitutionPhone()` (§2.7).** Small, contained,
+7. **Fix `fetchApprovedInstitutionPhone()` (§2.7).** Small, contained,
    and it's the emergency-contact fallback — the cost of it being wrong
    is higher than its size suggests.
-
-6. **Consider a single, mandatory "why can I see this child"
-   resolution point** for anything client-side that currently guesses
-   at "children I can access" by reading a table directly, rather than
-   continuing to catch each new instance of §4.2's bug class by hand
-   after it ships. Not urgent on its own, but worth deciding whether
-   PRD 2's own new screens should be required to go through it from day
-   one, rather than inheriting the same risk by default.
 
 None of the above blocks PRD 2 from starting. All of it is worth reading
 before PRD 2 decides what it's building on top of.
