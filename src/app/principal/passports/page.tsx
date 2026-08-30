@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { createClient } from "@/lib/supabase/client";
-import { EnrolChildSheet } from "@/components/principal/EnrolChildSheet";
 import { PrincipalBottomNav } from "@/components/principal/PrincipalBottomNav";
 
 // PRD 1, Stage 4, Step 3. Mirrors /principal/classes' own list idiom
@@ -50,7 +49,6 @@ export default function PrincipalPassportsPage() {
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [showPast, setShowPast] = useState(false);
-  const [isEnrolOpen, setIsEnrolOpen] = useState(false);
 
   const load = useCallback(async () => {
     if (!user) return;
@@ -111,13 +109,12 @@ export default function PrincipalPassportsPage() {
       <header className="flex items-center gap-3 px-4 pt-6 pb-4">
         <h1 className="flex-1 font-heading text-xl font-bold text-brand-prussian-blue">Passports</h1>
         {institutionId && (
-          <button
-            type="button"
-            onClick={() => setIsEnrolOpen(true)}
+          <Link
+            href="/principal/passports/enrol"
             className="rounded-full bg-brand-prussian-blue px-4 py-2 text-sm font-semibold text-white"
           >
             + Enrol
-          </button>
+          </Link>
         )}
       </header>
 
@@ -202,15 +199,6 @@ export default function PrincipalPassportsPage() {
           </>
         )}
       </main>
-
-      {institutionId && (
-        <EnrolChildSheet
-          isOpen={isEnrolOpen}
-          institutionId={institutionId}
-          onClose={() => setIsEnrolOpen(false)}
-          onEnrolled={load}
-        />
-      )}
 
       <PrincipalBottomNav />
     </div>

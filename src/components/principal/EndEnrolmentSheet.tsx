@@ -74,8 +74,8 @@ export function EndEnrolmentSheet({ isOpen, enrolmentId, childName, onClose, onE
         Ends their current class, SNA assignment, and staff passport access
         at your school. This is a record, not a delete -- {childName}&apos;s
         history stays intact, and your school keeps read access to
-        everything already written. Their family keeps their own access
-        unless they choose to remove it.
+        everything already written. Their family&apos;s own access to the
+        passport is unaffected.
       </p>
 
       <div className="mt-5 flex flex-col gap-2">
@@ -96,7 +96,7 @@ export function EndEnrolmentSheet({ isOpen, enrolmentId, childName, onClose, onE
       </div>
 
       {error && (
-        <p role="alert" className="mt-3 text-sm font-medium text-red-600">
+        <p role="alert" className="mt-3 text-sm font-medium text-brand-golden-brown">
           {error}
         </p>
       )}

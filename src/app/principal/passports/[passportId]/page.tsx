@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { createClient } from "@/lib/supabase/client";
 import { ReasonConfirmSheet } from "@/components/shared/ReasonConfirmSheet";
@@ -11,10 +11,13 @@ import { EndEnrolmentSheet } from "@/components/principal/EndEnrolmentSheet";
 import { GrantClinicianAccessSheet } from "@/components/principal/GrantClinicianAccessSheet";
 import { CLINICIAN_SPECIALTY_LABEL, type ClinicianSpecialty } from "@/lib/clinicianSpecialties";
 
-// PRD 1, Stage 4, Step 3. Principal's passport-access detail: current
-// access with revoke, a collapsed past-access history, and a grant
-// sheet -- mirroring /principal/classes/[classId]'s own active/past
-// split and sheet-wiring pattern exactly.
+// PRD 1, Stage 4, Step 3. Principal's passport detail. PRD 2, Stage 3:
+// rewritten into three tabs (Enrolment / Access / Clinical), reusing
+// /clinician/passport/[passportId]'s own tab-strip pattern verbatim --
+// the same "read ?tab= once, no URL sync-back" lazy-initializer idiom,
+// the same border-b-2 scrollable strip. No new visual pattern
+// introduced; this page just grew enough content to justify the
+// pattern the way that page already did.
 //
 // Daniel's own instruction 1: HISTORY IS VISIBLE, NOT HIDDEN. Past
 // access shows who granted it, who revoked it, when, and why -- the
@@ -26,6 +29,29 @@ import { CLINICIAN_SPECIALTY_LABEL, type ClinicianSpecialty } from "@/lib/clinic
 // Daniel's own instruction 2: an empty state here (no grants at all,
 // for a child the roster shows) is legitimate and informative -- it IS
 // the gap a principal needs to see, not an error state to explain away.
+//
+// PRD 2, Stage 3's own instruction, verbatim: the claim-code section
+// COEXISTS across three states, because a child can have more than one
+// guardian -- one already claimed while a second code is outstanding
+// for a co-parent. Migration 0126 made this possible for the first
+// time (get_passport_claim_code_status() now returns the code's own
+// id, and revoke_passport_claim_code() takes a required reason) --
+// before 0126 there was nothing in the client's hands to revoke with.
+// The three states below are independently rendered, not branches of
+// one if/else chain:
+//   1. unclaimed empty state -- ONLY when zero guardians AND no
+//      outstanding code.
+//   2. claimed guardians -- rendered whenever any exist, regardless of
+//      whether a code is also outstanding.
+//   3. an outstanding code -- rendered whenever one exists, regardless
+//      of whether any guardian has already claimed. Shows EXPIRES IN
+//      [X] DAYS and a Revoke action requiring a reason (0126), not a
+//      silent "Generate a new code" replace -- revoking is now a
+//      recorded act with its own reason, same discipline as every
+//      other revoke in this app.
+// A "generate a code for another guardian" action appears whenever
+// guardians exist and no code is currently outstanding -- the literal
+// second-guardian case Daniel named.
 
 interface AccessRow {
   id: string;
@@ -53,6 +79,7 @@ interface GuardianRow {
 }
 
 interface ClaimCodeStatus {
+  id: string;
   code: string;
   expiresAt: string;
 }
@@ -84,6 +111,14 @@ interface ClinicianRow {
   engagedByInstitutionName: string | null;
 }
 
+type TabKey = "enrolment" | "access" | "clinical";
+
+const TABS: { key: TabKey; label: string }[] = [
+  { key: "enrolment", label: "Enrolment" },
+  { key: "access", label: "Access" },
+  { key: "clinical", label: "Clinical" },
+];
+
 const ROLE_LABEL: Record<string, string> = {
   class_teacher: "Class Teacher",
   sna: "SNA",
@@ -95,10 +130,29 @@ const END_REASON_LABEL: Record<string, string> = {
   transferred: "Transferred to another school",
 };
 
+function formatDate(value: string): string {
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return value;
+  return d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+}
+
+function daysRemaining(iso: string): number {
+  const diffMs = new Date(iso).getTime() - Date.now();
+  return Math.max(0, Math.ceil(diffMs / 86_400_000));
+}
+
 export default function PrincipalPassportDetailPage() {
   const params = useParams();
   const passportId = params.passportId as string;
+  const searchParams = useSearchParams();
   const { user, isReady } = useRequireRole("principal");
+
+  // Same lazy-initializer idiom as /clinician/passport/[passportId] --
+  // read once on mount, never synced back to the URL on tab change.
+  const [activeTab, setActiveTab] = useState<TabKey>(() => {
+    const requested = searchParams.get("tab");
+    return TABS.some((t) => t.key === requested) ? (requested as TabKey) : "enrolment";
+  });
 
   const [childName, setChildName] = useState<string | null>(null);
   const [institutionId, setInstitutionId] = useState<string | null>(null);
@@ -124,15 +178,12 @@ export default function PrincipalPassportDetailPage() {
   const [enrolment, setEnrolment] = useState<EnrolmentRow | null>(null);
   const [isEndEnrolmentOpen, setIsEndEnrolmentOpen] = useState(false);
 
-  // Stage 5, Step 3, Requirement 2 -- guardians once a claim code is
-  // redeemed REPLACE the claim-code UI here (get_passport_guardians_for_
-  // child()'s own comment: "the section vanishes is not a designed
-  // state"). Exactly one of guardians/claimCode is ever meaningfully
-  // populated for a given passport, never both.
+  // Stage 3 -- coexisting, not exclusive. See the header comment above.
   const [guardians, setGuardians] = useState<GuardianRow[]>([]);
   const [claimCode, setClaimCode] = useState<ClaimCodeStatus | null>(null);
   const [isGeneratingCode, setIsGeneratingCode] = useState(false);
   const [generateError, setGenerateError] = useState<string | null>(null);
+  const [claimCodeRevokeTarget, setClaimCodeRevokeTarget] = useState<ClaimCodeStatus | null>(null);
 
   // Stage 7, Step 2 -- Clinical Team.
   const [clinicians, setClinicians] = useState<ClinicianRow[]>([]);
@@ -260,8 +311,8 @@ export default function PrincipalPassportDetailPage() {
         (g) => ({ userId: g.user_id, fullName: g.full_name, claimedAt: g.claimed_at })
       )
     );
-    const claimCodeRow = ((claimCodeResult.data ?? []) as { code: string; expires_at: string }[])[0];
-    setClaimCode(claimCodeRow ? { code: claimCodeRow.code, expiresAt: claimCodeRow.expires_at } : null);
+    const claimCodeRow = ((claimCodeResult.data ?? []) as { id: string; code: string; expires_at: string }[])[0];
+    setClaimCode(claimCodeRow ? { id: claimCodeRow.id, code: claimCodeRow.code, expiresAt: claimCodeRow.expires_at } : null);
 
     const activeRows: AccessRow[] = [];
     const pastRows: AccessRow[] = [];
@@ -297,11 +348,12 @@ export default function PrincipalPassportDetailPage() {
     load();
   }, [load]);
 
-  // Calling this again while a code is already outstanding REPLACES it
-  // (generate_passport_claim_code()'s own atomic revoke-then-issue, not
-  // a second live code) -- so "Generate Code" and "Generate a new code"
-  // in the JSX below are the exact same call, just different labels for
-  // the two states a principal can be looking at.
+  // Issues a fresh code -- covers both "the first code for this child"
+  // and "a second guardian needs their own code" (the coexistence case
+  // this stage exists for). Only reachable from the UI when no code is
+  // currently outstanding (see the render below), so this never
+  // silently replaces a live one -- revoking a live one is now its own
+  // explicit, reasoned action (revoke_passport_claim_code, 0126).
   async function handleGenerateCode() {
     if (!institutionId) return;
     setIsGeneratingCode(true);
@@ -323,8 +375,8 @@ export default function PrincipalPassportDetailPage() {
     if (statusError) {
       console.error("Failed to reload claim code status:", statusError);
     }
-    const row = ((statusRows ?? []) as { code: string; expires_at: string }[])[0];
-    setClaimCode(row ? { code: row.code, expiresAt: row.expires_at } : null);
+    const row = ((statusRows ?? []) as { id: string; code: string; expires_at: string }[])[0];
+    setClaimCode(row ? { id: row.id, code: row.code, expiresAt: row.expires_at } : null);
     setIsGeneratingCode(false);
   }
 
@@ -362,7 +414,33 @@ export default function PrincipalPassportDetailPage() {
         <h1 className="font-heading text-xl font-bold text-brand-prussian-blue">{childName ?? "Passport"}</h1>
       </header>
 
-      <main className="flex-1 px-4">
+      {!isLoading && !error && !notOnRoster && (
+        <div className="flex gap-1 overflow-x-auto border-b border-black/5 px-4">
+          {TABS.map((tab) => (
+            <button
+              key={tab.key}
+              type="button"
+              onClick={(e) => {
+                setActiveTab(tab.key);
+                e.currentTarget.scrollIntoView({
+                  behavior: "smooth",
+                  inline: "center",
+                  block: "nearest",
+                });
+              }}
+              className={`flex-shrink-0 whitespace-nowrap border-b-2 px-3 py-2.5 text-sm font-semibold transition-colors ${
+                activeTab === tab.key
+                  ? "border-brand-prussian-blue text-brand-prussian-blue"
+                  : "border-transparent text-black/40"
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      <main className="flex-1 px-4 py-4">
         {isLoading ? (
           <div className="flex flex-col gap-2">
             <div className="h-16 animate-pulse rounded-2xl bg-white" />
@@ -376,262 +454,290 @@ export default function PrincipalPassportDetailPage() {
           </p>
         ) : (
           <>
-            <section className="mb-6">
-              <h2 className="mb-2 font-heading text-sm font-bold uppercase tracking-wide text-brand-neutral-black/60">
-                Enrolment
-              </h2>
-              {enrolment?.endedAt ? (
-                <div className="rounded-2xl border border-black/5 bg-white/60 p-4">
-                  <span className="inline-flex items-center gap-1.5 rounded-full bg-black/5 px-2.5 py-1 text-xs font-semibold text-brand-neutral-black/60">
-                    Enrolment ended
-                  </span>
-                  <p className="mt-2 text-xs text-brand-neutral-black/50">
-                    {END_REASON_LABEL[enrolment.endReason ?? ""] ?? enrolment.endReason} · {formatDate(enrolment.endedAt)}
-                  </p>
-                </div>
-              ) : (
-                <div className="flex items-center justify-between rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
-                  <span className="inline-flex items-center gap-1.5 rounded-full bg-brand-pastel-blue/20 px-2.5 py-1 text-xs font-semibold text-brand-prussian-blue">
-                    Enrolled
-                  </span>
-                  {enrolment && (
-                    <button
-                      type="button"
-                      onClick={() => setIsEndEnrolmentOpen(true)}
-                      className="text-xs font-semibold text-brand-golden-brown"
-                    >
-                      End Enrolment
-                    </button>
-                  )}
-                </div>
-              )}
-            </section>
-
-            <section className="mb-6">
-              <h2 className="mb-2 font-heading text-sm font-bold uppercase tracking-wide text-brand-neutral-black/60">
-                Parent / Guardian
-              </h2>
-
-              {guardians.length > 0 ? (
-                <div className="flex flex-col gap-2">
-                  {guardians.map((g) => (
-                    <div key={g.userId} className="rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
-                      <p className="text-sm font-semibold text-brand-neutral-black">
-                        {g.fullName ?? "A parent"}
-                      </p>
-                      <p className="mt-0.5 text-xs text-brand-neutral-black/50">
-                        Claimed access {formatDate(g.claimedAt)}
+            {activeTab === "enrolment" && (
+              <>
+                <section className="mb-6">
+                  <h2 className="mb-2 font-heading text-sm font-bold uppercase tracking-wide text-brand-neutral-black/60">
+                    Enrolment
+                  </h2>
+                  {enrolment?.endedAt ? (
+                    <div className="rounded-2xl border border-black/5 bg-white/60 p-4">
+                      <span className="inline-flex items-center gap-1.5 rounded-full bg-black/5 px-2.5 py-1 text-xs font-semibold text-brand-neutral-black/60">
+                        Enrolment ended
+                      </span>
+                      <p className="mt-2 text-xs text-brand-neutral-black/50">
+                        {END_REASON_LABEL[enrolment.endReason ?? ""] ?? enrolment.endReason} · {formatDate(enrolment.endedAt)}
                       </p>
                     </div>
-                  ))}
-                </div>
-              ) : claimCode ? (
-                <div className="rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-brand-neutral-black/50">
-                    Outstanding claim code
-                  </p>
-                  <p className="mt-1 font-heading text-2xl font-bold tracking-widest text-brand-prussian-blue">
-                    {claimCode.code}
-                  </p>
-                  <p className="mt-1 text-xs text-brand-neutral-black/50">
-                    Expires {formatDate(claimCode.expiresAt)}. Give this code to {childName}&apos;s
-                    parent or guardian to link their account.
-                  </p>
-                  <button
-                    type="button"
-                    onClick={handleGenerateCode}
-                    disabled={isGeneratingCode}
-                    className="mt-3 block w-full rounded-xl border border-brand-prussian-blue py-2 text-center text-xs font-semibold text-brand-prussian-blue disabled:opacity-50"
-                  >
-                    {isGeneratingCode ? "Generating…" : "Generate a new code"}
-                  </button>
-                  {generateError && (
-                    <p role="alert" className="mt-2 text-xs font-medium text-red-600">
-                      {generateError}
-                    </p>
+                  ) : (
+                    <div className="flex items-center justify-between rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
+                      <span className="inline-flex items-center gap-1.5 rounded-full bg-brand-pastel-blue/20 px-2.5 py-1 text-xs font-semibold text-brand-prussian-blue">
+                        Enrolled
+                      </span>
+                      {enrolment && (
+                        <button
+                          type="button"
+                          onClick={() => setIsEndEnrolmentOpen(true)}
+                          className="text-xs font-semibold text-brand-golden-brown"
+                        >
+                          End Enrolment
+                        </button>
+                      )}
+                    </div>
                   )}
-                </div>
-              ) : (
-                <div className="rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-center">
-                  <p className="text-sm text-brand-neutral-black/60">
-                    No parent or guardian has claimed {childName}&apos;s passport yet.
-                  </p>
-                  <button
-                    type="button"
-                    onClick={handleGenerateCode}
-                    disabled={isGeneratingCode}
-                    className="mt-3 rounded-full bg-brand-prussian-blue px-5 py-2.5 text-sm font-bold text-white disabled:opacity-50"
-                  >
-                    {isGeneratingCode ? "Generating…" : "Generate Claim Code"}
-                  </button>
-                  {generateError && (
-                    <p role="alert" className="mt-2 text-xs font-medium text-red-600">
-                      {generateError}
-                    </p>
-                  )}
-                </div>
-              )}
-            </section>
+                </section>
 
-            <section>
-              <div className="mb-2 flex items-center justify-between">
-                <h2 className="font-heading text-sm font-bold uppercase tracking-wide text-brand-neutral-black/60">
-                  Current Access ({access.active.length})
-                </h2>
-                <button type="button" onClick={() => setIsGrantOpen(true)} className="text-xs font-semibold text-brand-prussian-blue">
-                  + Grant Access
-                </button>
-              </div>
+                <section>
+                  <h2 className="mb-2 font-heading text-sm font-bold uppercase tracking-wide text-brand-neutral-black/60">
+                    Parent / Guardian
+                  </h2>
 
-              {access.active.length === 0 ? (
-                <p className="rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-center text-sm text-brand-neutral-black/60">
-                  No one currently has passport access to {childName}.
-                </p>
-              ) : (
-                <div className="flex flex-col gap-2">
-                  {access.active.map((a) => (
-                    <div key={a.id} className="rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
-                      <div className="flex items-start justify-between gap-2">
-                        <div>
-                          <p className="text-sm font-semibold text-brand-neutral-black">{a.fullName}</p>
-                          <p className="mt-0.5 text-xs text-brand-neutral-black/50">{ROLE_LABEL[a.actorRole] ?? a.actorRole}</p>
-                        </div>
-                        <span className="flex-shrink-0 rounded-full bg-brand-pastel-blue/20 px-2.5 py-1 text-xs font-semibold text-brand-prussian-blue">
-                          Active
-                        </span>
-                      </div>
-                      <p className="mt-2 text-xs text-brand-neutral-black/50">
-                        Granted {formatDate(a.linkedAt)}
-                        {a.grantedByName ? ` by ${a.grantedByName}` : ""}
+                  {guardians.length === 0 && !claimCode && (
+                    <div className="rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-center">
+                      <p className="text-sm text-brand-neutral-black/60">Parent claim code required.</p>
+                      <p className="mt-1 text-sm text-brand-neutral-black/60">
+                        No parent or guardian has claimed {childName}&apos;s passport yet.
                       </p>
                       <button
                         type="button"
-                        onClick={() => setRevokeTarget(a)}
+                        onClick={handleGenerateCode}
+                        disabled={isGeneratingCode}
+                        className="mt-3 rounded-full bg-brand-prussian-blue px-5 py-2.5 text-sm font-bold text-white disabled:opacity-50"
+                      >
+                        {isGeneratingCode ? "Generating…" : "Generate Claim Code"}
+                      </button>
+                      {generateError && (
+                        <p role="alert" className="mt-2 text-xs font-medium text-brand-golden-brown">
+                          {generateError}
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  {guardians.length > 0 && (
+                    <div className="flex flex-col gap-2">
+                      {guardians.map((g) => (
+                        <div key={g.userId} className="rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
+                          <div className="flex items-start justify-between gap-2">
+                            <p className="text-sm font-semibold text-brand-neutral-black">{g.fullName ?? "A parent"}</p>
+                            <span className="flex-shrink-0 rounded-full bg-brand-pastel-blue/20 px-2.5 py-1 text-xs font-semibold text-brand-prussian-blue">
+                              CLAIMED {formatDate(g.claimedAt).toUpperCase()}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {claimCode && (
+                    <div className={`rounded-2xl border border-black/5 bg-white p-4 shadow-sm ${guardians.length > 0 ? "mt-2" : ""}`}>
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-brand-neutral-black/50">
+                          Outstanding claim code
+                        </p>
+                        <span className="flex-shrink-0 rounded-full bg-brand-golden-brown/15 px-2.5 py-1 text-xs font-semibold text-brand-golden-brown">
+                          EXPIRES IN {daysRemaining(claimCode.expiresAt)} DAY{daysRemaining(claimCode.expiresAt) === 1 ? "" : "S"}
+                        </span>
+                      </div>
+                      <p className="mt-1 font-heading text-2xl font-bold tracking-widest text-brand-prussian-blue">
+                        {claimCode.code}
+                      </p>
+                      <p className="mt-1 text-xs text-brand-neutral-black/50">
+                        Give this code to {childName}&apos;s parent or guardian to link their account.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setClaimCodeRevokeTarget(claimCode)}
                         className="mt-3 block w-full rounded-xl border border-brand-golden-brown py-2 text-center text-xs font-semibold text-brand-golden-brown"
                       >
                         Revoke
                       </button>
                     </div>
-                  ))}
-                </div>
-              )}
-
-              {access.past.length > 0 && (
-                <div className="mt-3">
-                  <button
-                    type="button"
-                    onClick={() => setShowHistory((v) => !v)}
-                    className="flex w-full items-center justify-between rounded-2xl border border-dashed border-black/10 bg-white/60 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-brand-neutral-black/50"
-                  >
-                    <span>Past access ({access.past.length})</span>
-                    <span>{showHistory ? "−" : "+"}</span>
-                  </button>
-                  {showHistory && (
-                    <div className="mt-2 flex flex-col gap-2">
-                      {access.past.map((a) => (
-                        <div key={a.id} className="rounded-2xl border border-black/5 bg-white/60 p-4">
-                          <p className="text-sm font-semibold text-brand-neutral-black">{a.fullName}</p>
-                          <p className="mt-0.5 text-xs text-brand-neutral-black/50">{ROLE_LABEL[a.actorRole] ?? a.actorRole}</p>
-                          <p className="mt-2 text-xs text-brand-neutral-black/50">
-                            Granted {formatDate(a.linkedAt)}
-                            {a.grantedByName ? ` by ${a.grantedByName}` : ""}
-                          </p>
-                          {a.revokedAt && (
-                            <p className="mt-0.5 text-xs text-brand-neutral-black/50">
-                              Revoked {formatDate(a.revokedAt)}
-                              {a.revokedByName ? ` by ${a.revokedByName}` : ""}
-                            </p>
-                          )}
-                          {a.revocationReason && (
-                            <p className="mt-2 text-sm text-brand-neutral-black/70">&ldquo;{a.revocationReason}&rdquo;</p>
-                          )}
-                        </div>
-                      ))}
-                    </div>
                   )}
+
+                  {guardians.length > 0 && !claimCode && (
+                    <button
+                      type="button"
+                      onClick={handleGenerateCode}
+                      disabled={isGeneratingCode}
+                      className="mt-2 block w-full rounded-xl border border-brand-prussian-blue py-2 text-center text-xs font-semibold text-brand-prussian-blue disabled:opacity-50"
+                    >
+                      {isGeneratingCode ? "Generating…" : "+ Generate a code for another guardian"}
+                    </button>
+                  )}
+
+                  {guardians.length > 0 && generateError && (
+                    <p role="alert" className="mt-2 text-xs font-medium text-brand-golden-brown">
+                      {generateError}
+                    </p>
+                  )}
+                </section>
+              </>
+            )}
+
+            {activeTab === "access" && (
+              <section>
+                <div className="mb-2 flex items-center justify-between">
+                  <h2 className="font-heading text-sm font-bold uppercase tracking-wide text-brand-neutral-black/60">
+                    Current Access ({access.active.length})
+                  </h2>
+                  <button type="button" onClick={() => setIsGrantOpen(true)} className="text-xs font-semibold text-brand-prussian-blue">
+                    + Grant Access
+                  </button>
                 </div>
-              )}
-            </section>
 
-            <section className="mt-6">
-              <div className="mb-2 flex items-center justify-between">
-                <h2 className="font-heading text-sm font-bold uppercase tracking-wide text-brand-neutral-black/60">
-                  Clinical Team ({clinicians.length})
-                </h2>
-                <button
-                  type="button"
-                  onClick={() => setIsGrantClinicianOpen(true)}
-                  className="text-xs font-semibold text-brand-prussian-blue"
-                >
-                  + Connect Clinician
-                </button>
-              </div>
-
-              {cliniciansError ? (
-                <p className="rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-center text-sm text-brand-neutral-black/60">
-                  {cliniciansError}
-                </p>
-              ) : clinicians.length === 0 ? (
-                <p className="rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-center text-sm text-brand-neutral-black/60">
-                  No clinicians connected to {childName} yet.
-                </p>
-              ) : (
-                <div className="flex flex-col gap-2">
-                  {clinicians.map((c) => {
-                    // Symmetry with the parent's own view: a clinician this
-                    // institution engaged is theirs to revoke; a
-                    // parent-engaged one, or one engaged by a DIFFERENT
-                    // institution (a child linked to two schools), is
-                    // shown but read-only -- "neither authority can revoke
-                    // the other's".
-                    const canRevoke = c.engagedBy === "institution" && c.engagedByInstitutionId === institutionId;
-                    return (
-                      <div key={c.clinicianAccessId} className="rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
+                {access.active.length === 0 ? (
+                  <p className="rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-center text-sm text-brand-neutral-black/60">
+                    No one currently has passport access to {childName}.
+                  </p>
+                ) : (
+                  <div className="flex flex-col gap-2">
+                    {access.active.map((a) => (
+                      <div key={a.id} className="rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
                         <div className="flex items-start justify-between gap-2">
                           <div>
-                            <p className="text-sm font-semibold text-brand-neutral-black">{c.fullName}</p>
-                            <p className="mt-0.5 text-xs text-brand-neutral-black/50">
-                              {CLINICIAN_SPECIALTY_LABEL[c.specialty as ClinicianSpecialty] ?? c.specialty}
-                            </p>
+                            <p className="text-sm font-semibold text-brand-neutral-black">{a.fullName}</p>
+                            <p className="mt-0.5 text-xs text-brand-neutral-black/50">{ROLE_LABEL[a.actorRole] ?? a.actorRole}</p>
                           </div>
+                          <span className="flex-shrink-0 rounded-full bg-brand-pastel-blue/20 px-2.5 py-1 text-xs font-semibold text-brand-prussian-blue">
+                            Active
+                          </span>
                         </div>
                         <p className="mt-2 text-xs text-brand-neutral-black/50">
-                          {c.engagedBy === "parent"
-                            ? "Connected by the family"
-                            : canRevoke
-                              ? "Connected by your school"
-                              : `Connected by ${c.engagedByInstitutionName ?? "another school"}`}
+                          Granted {formatDate(a.linkedAt)}
+                          {a.grantedByName ? ` by ${a.grantedByName}` : ""}
                         </p>
-                        {canRevoke ? (
-                          <button
-                            type="button"
-                            onClick={() => setClinicianRevokeTarget(c)}
-                            className="mt-3 block w-full rounded-xl border border-brand-golden-brown py-2 text-center text-xs font-semibold text-brand-golden-brown"
-                          >
-                            Revoke
-                          </button>
-                        ) : (
-                          <p className="mt-3 text-center text-xs text-brand-neutral-black/40">
-                            Read-only — managed elsewhere
-                          </p>
-                        )}
+                        <button
+                          type="button"
+                          onClick={() => setRevokeTarget(a)}
+                          className="mt-3 block w-full rounded-xl border border-brand-golden-brown py-2 text-center text-xs font-semibold text-brand-golden-brown"
+                        >
+                          Revoke
+                        </button>
                       </div>
-                    );
-                  })}
-                </div>
-              )}
+                    ))}
+                  </div>
+                )}
 
-              {clinicianGrantedNotice && (
-                <p className="mt-3 rounded-xl bg-brand-off-white/50 px-4 py-3 text-sm text-brand-neutral-black">
-                  {clinicianGrantedNotice}
-                </p>
-              )}
-              {clinicianRevokedNotice && (
-                <p className="mt-3 rounded-xl bg-brand-off-white/50 px-4 py-3 text-sm text-brand-neutral-black">
-                  {clinicianRevokedNotice}
-                </p>
-              )}
-            </section>
+                {access.past.length > 0 && (
+                  <div className="mt-3">
+                    <button
+                      type="button"
+                      onClick={() => setShowHistory((v) => !v)}
+                      className="flex w-full items-center justify-between rounded-2xl border border-dashed border-black/10 bg-white/60 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-brand-neutral-black/50"
+                    >
+                      <span>Past access ({access.past.length})</span>
+                      <span>{showHistory ? "−" : "+"}</span>
+                    </button>
+                    {showHistory && (
+                      <div className="mt-2 flex flex-col gap-2">
+                        {access.past.map((a) => (
+                          <div key={a.id} className="rounded-2xl border border-black/5 bg-white/60 p-4">
+                            <p className="text-sm font-semibold text-brand-neutral-black">{a.fullName}</p>
+                            <p className="mt-0.5 text-xs text-brand-neutral-black/50">{ROLE_LABEL[a.actorRole] ?? a.actorRole}</p>
+                            <p className="mt-2 text-xs text-brand-neutral-black/50">
+                              Granted {formatDate(a.linkedAt)}
+                              {a.grantedByName ? ` by ${a.grantedByName}` : ""}
+                            </p>
+                            {a.revokedAt && (
+                              <p className="mt-0.5 text-xs text-brand-neutral-black/50">
+                                Revoked {formatDate(a.revokedAt)}
+                                {a.revokedByName ? ` by ${a.revokedByName}` : ""}
+                              </p>
+                            )}
+                            {a.revocationReason && (
+                              <p className="mt-2 text-sm text-brand-neutral-black/70">&ldquo;{a.revocationReason}&rdquo;</p>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </section>
+            )}
+
+            {activeTab === "clinical" && (
+              <section>
+                <div className="mb-2 flex items-center justify-between">
+                  <h2 className="font-heading text-sm font-bold uppercase tracking-wide text-brand-neutral-black/60">
+                    Clinical Team ({clinicians.length})
+                  </h2>
+                  <button
+                    type="button"
+                    onClick={() => setIsGrantClinicianOpen(true)}
+                    className="text-xs font-semibold text-brand-prussian-blue"
+                  >
+                    + Connect Clinician
+                  </button>
+                </div>
+
+                {cliniciansError ? (
+                  <p className="rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-center text-sm text-brand-neutral-black/60">
+                    {cliniciansError}
+                  </p>
+                ) : clinicians.length === 0 ? (
+                  <p className="rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-center text-sm text-brand-neutral-black/60">
+                    No clinicians connected to {childName} yet.
+                  </p>
+                ) : (
+                  <div className="flex flex-col gap-2">
+                    {clinicians.map((c) => {
+                      // Symmetry with the parent's own view: a clinician this
+                      // institution engaged is theirs to revoke; a
+                      // parent-engaged one, or one engaged by a DIFFERENT
+                      // institution (a child linked to two schools), is
+                      // shown but read-only -- "neither authority can revoke
+                      // the other's".
+                      const canRevoke = c.engagedBy === "institution" && c.engagedByInstitutionId === institutionId;
+                      return (
+                        <div key={c.clinicianAccessId} className="rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
+                          <div className="flex items-start justify-between gap-2">
+                            <div>
+                              <p className="text-sm font-semibold text-brand-neutral-black">{c.fullName}</p>
+                              <p className="mt-0.5 text-xs text-brand-neutral-black/50">
+                                {CLINICIAN_SPECIALTY_LABEL[c.specialty as ClinicianSpecialty] ?? c.specialty}
+                              </p>
+                            </div>
+                          </div>
+                          <p className="mt-2 text-xs text-brand-neutral-black/50">
+                            {c.engagedBy === "parent"
+                              ? "Connected by the family"
+                              : canRevoke
+                                ? "Connected by your school"
+                                : `Connected by ${c.engagedByInstitutionName ?? "another school"}`}
+                          </p>
+                          {canRevoke ? (
+                            <button
+                              type="button"
+                              onClick={() => setClinicianRevokeTarget(c)}
+                              className="mt-3 block w-full rounded-xl border border-brand-golden-brown py-2 text-center text-xs font-semibold text-brand-golden-brown"
+                            >
+                              Revoke
+                            </button>
+                          ) : (
+                            <p className="mt-3 text-center text-xs text-brand-neutral-black/40">
+                              Read-only — managed elsewhere
+                            </p>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {clinicianGrantedNotice && (
+                  <p className="mt-3 rounded-xl bg-brand-off-white/50 px-4 py-3 text-sm text-brand-neutral-black">
+                    {clinicianGrantedNotice}
+                  </p>
+                )}
+                {clinicianRevokedNotice && (
+                  <p className="mt-3 rounded-xl bg-brand-off-white/50 px-4 py-3 text-sm text-brand-neutral-black">
+                    {clinicianRevokedNotice}
+                  </p>
+                )}
+              </section>
+            )}
           </>
         )}
       </main>
@@ -687,6 +793,29 @@ export default function PrincipalPassportDetailPage() {
         />
       )}
 
+      {claimCodeRevokeTarget && (
+        <ReasonConfirmSheet
+          isOpen={Boolean(claimCodeRevokeTarget)}
+          title={`Revoke this claim code for ${childName ?? "this child"}?`}
+          description="This code stops working immediately. Nothing about this child's passport or any already-claimed guardian is affected -- you can generate a fresh code at any time."
+          confirmLabel="Revoke Code"
+          submittingLabel="Revoking…"
+          onClose={() => setClaimCodeRevokeTarget(null)}
+          onConfirm={async (reason) => {
+            const supabase = createClient();
+            const { error } = await supabase.rpc("revoke_passport_claim_code", {
+              p_claim_code_id: claimCodeRevokeTarget.id,
+              p_reason: reason,
+            });
+            return { error: error?.message ?? null };
+          }}
+          onConfirmed={() => {
+            setClaimCodeRevokeTarget(null);
+            load();
+          }}
+        />
+      )}
+
       {institutionId && childName && (
         <GrantClinicianAccessSheet
           isOpen={isGrantClinicianOpen}
@@ -723,10 +852,4 @@ export default function PrincipalPassportDetailPage() {
       )}
     </div>
   );
-}
-
-function formatDate(value: string): string {
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return value;
-  return d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 }
