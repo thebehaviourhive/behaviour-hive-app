@@ -125,7 +125,7 @@ export function DeactivateStaffSheet({ member, isOpen, onClose, onDeactivated }:
         {isLoadingPreview ? (
           <div className="h-20 animate-pulse rounded-xl bg-brand-off-white/60" />
         ) : previewError ? (
-          <p className="text-sm text-red-600">{previewError}</p>
+          <p className="text-sm text-brand-golden-brown">{previewError}</p>
         ) : leavesNothingBehind ? (
           <p className="rounded-xl border border-black/10 bg-brand-off-white/40 p-3 text-sm text-brand-neutral-black/60">
             Nothing outstanding for this person.
@@ -165,7 +165,7 @@ export function DeactivateStaffSheet({ member, isOpen, onClose, onDeactivated }:
       </div>
 
       {submitError && (
-        <p role="alert" className="mt-3 text-sm font-medium text-red-600">
+        <p role="alert" className="mt-3 text-sm font-medium text-brand-golden-brown">
           {submitError}
         </p>
       )}

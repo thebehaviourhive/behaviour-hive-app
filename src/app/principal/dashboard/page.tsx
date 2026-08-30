@@ -33,6 +33,14 @@ export default function PrincipalDashboardPage() {
   const [incidents, setIncidents] = useState<InstitutionIncidentRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // PRD 2, Stage 2: the dashboard's own state-aware deep link into
+  // Staff's Pending segment. No dedicated "outstanding items" RPC exists
+  // yet (Stage 7's own job) -- this is the one roster RPC already built
+  // for exactly this, called a second time here, count-only. Genuinely
+  // the honest minimum: this card shows when there's something to act
+  // on and says nothing when there isn't, rather than a placeholder
+  // always-there widget.
+  const [pendingStaffCount, setPendingStaffCount] = useState(0);
 
   useEffect(() => {
     if (!user) return;
@@ -114,9 +122,14 @@ export default function PrincipalDashboardPage() {
         // best-effort; see comment above
       }
 
-      const { data: rows, error: rpcError } = await supabase.rpc("get_institution_incidents", {
-        p_institution_id: staffRow.institution_id,
-      });
+      const [{ data: rows, error: rpcError }, staffRosterResult] = await Promise.all([
+        supabase.rpc("get_institution_incidents", { p_institution_id: staffRow.institution_id }),
+        supabase.rpc("get_institution_staff_roster", {
+          p_institution_id: staffRow.institution_id,
+          p_include_inactive: false,
+          p_include_pending: true,
+        }),
+      ]);
 
       if (!isMounted) return;
 
@@ -124,6 +137,15 @@ export default function PrincipalDashboardPage() {
         setError("Could not load incidents.");
         setIsLoading(false);
         return;
+      }
+
+      // Not fatal on its own -- same posture as every other secondary
+      // read on this page. Left at 0 (card simply doesn't show) rather
+      // than surfacing a second error banner for it.
+      if (!staffRosterResult.error) {
+        setPendingStaffCount(
+          ((staffRosterResult.data ?? []) as { is_pending: boolean }[]).filter((s) => s.is_pending).length
+        );
       }
 
       setIncidents((rows ?? []) as InstitutionIncidentRow[]);
@@ -167,6 +189,19 @@ export default function PrincipalDashboardPage() {
       </header>
 
       <main className="flex-1 px-4">
+        {pendingStaffCount > 0 && (
+          <Link
+            href="/principal/staff?segment=pending"
+            className="mb-4 block rounded-2xl border border-brand-golden-brown/30 bg-brand-golden-brown/10 p-4"
+          >
+            <p className="text-xs font-semibold uppercase tracking-wide text-brand-golden-brown">
+              Join request{pendingStaffCount === 1 ? "" : "s"}
+            </p>
+            <p className="mt-1 text-sm text-brand-neutral-black">
+              {pendingStaffCount} staff member{pendingStaffCount === 1 ? "" : "s"} waiting on your review.
+            </p>
+          </Link>
+        )}
         <AttestationPromptCard className="mb-4" />
         {isLoading ? (
           <div className="flex flex-col gap-2">

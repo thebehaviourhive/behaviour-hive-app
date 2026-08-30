@@ -20,7 +20,7 @@
 // stage development. Every check from V onward is independently
 // self-contained (own institution, own accounts, own cleanup) and
 // individually selectable: V, W, X, Y, Z, AA, BB, CC, DD, EE, FF, GG,
-// HH, II, JJ, KK, LL. Selecting none of these (ONLY_CHECKS unset) is the full run --
+// HH, II, JJ, KK, LL, MM. Selecting none of these (ONLY_CHECKS unset) is the full run --
 // the one that gates deploys -- and its behavior is unchanged: same
 // checks, same order, same pass/fail counts. The only observable
 // difference is where the top-level fixture's own cleanup log line
@@ -8279,6 +8279,137 @@ async function main() {
     await admin.from("passports").delete().eq("id", childLLId);
     await admin.from("institutions").delete().in("id", [institutionLLId, institutionLLOtherId]);
     for (const id of [principalLLId, principalLLOtherId, parentLLId, clinicianLL1Id, clinicianLL2Id, clinicianLL3Id]) {
+      await admin.auth.admin.deleteUser(id);
+    }
+  }
+
+  console.log(`\n== CHECK MM: Client-behaviour half of Stage 2 (src/app/principal/staff/page.tsx, src/app/principal/dashboard/page.tsx) -- proven via the LITERAL client derivation, not a proxy for it. Not a child-access check (Stage 2 touches no child data at all) -- the same discipline applied to the OTHER bug class this pattern exists for: a client-side split/filter over roster rows silently drifting from what the RPC actually returns. One roster fetch (pending + active + deactivated all present, migration 0125's own new columns populated), reproduced against three separate client derivations: the segmented control's own three-way split, the dashboard's own pending-count card, and the DEACTIVATED badge's own gate. ==`);
+  if (shouldRun("MM")) {
+    const { data: instMM, error: instMMErr } = await admin
+      .from("institutions")
+      .insert({ name: "MM Institution", institution_code: CODE + "MM", status: "verified" })
+      .select()
+      .single();
+    if (instMMErr) throw instMMErr;
+    const institutionMMId = instMM.id;
+
+    const principalMMId = await createUser("checkmm.principal@thebehaviourhive.com", "MM Principal", "principal");
+    const activeTeacherMMId = await createUser("checkmm.activeteacher@thebehaviourhive.com", "MM Active Teacher", "class_teacher");
+    const pendingTeacherMMId = await createUser("checkmm.pendingteacher@thebehaviourhive.com", "MM Pending Teacher", "class_teacher");
+    const deactivatedSnaMMId = await createUser("checkmm.deactivatedsna@thebehaviourhive.com", "MM Deactivated SNA", "sna");
+
+    const { data: staffMMRows, error: staffMMErr } = await admin.from("institution_staff").insert([
+      { institution_id: institutionMMId, user_id: principalMMId, role: "principal" },
+      { institution_id: institutionMMId, user_id: activeTeacherMMId, role: "class_teacher" },
+      { institution_id: institutionMMId, user_id: deactivatedSnaMMId, role: "sna" },
+    ]).select();
+    if (staffMMErr) throw staffMMErr;
+
+    const principalMM = await signedInClient("checkmm.principal@thebehaviourhive.com");
+    for (const row of staffMMRows.filter((r) => r.user_id !== principalMMId)) {
+      const { error } = await principalMM.rpc("approve_staff_join", { p_institution_staff_id: row.id });
+      if (error) throw error;
+    }
+
+    // A genuinely pending join, via the real self-link path -- same
+    // discipline as every other fixture in this suite (CHECK AA's own
+    // precedent), never a hand-set approved_at.
+    const pendingTeacherMM = await signedInClient("checkmm.pendingteacher@thebehaviourhive.com");
+    const { error: pendingJoinErr } = await pendingTeacherMM
+      .from("institution_staff")
+      .insert({ institution_id: institutionMMId, user_id: pendingTeacherMMId, role: "class_teacher" });
+    if (pendingJoinErr) throw pendingJoinErr;
+
+    const deactivatedSnaStaffId = staffMMRows.find((r) => r.user_id === deactivatedSnaMMId).id;
+    const { error: deactivateErr } = await principalMM.rpc("deactivate_institution_staff", {
+      p_institution_staff_id: deactivatedSnaStaffId,
+      p_reason: "MM fixture: needs a genuinely deactivated SNA.",
+    });
+    if (deactivateErr) throw deactivateErr;
+
+    // ---- The one query BOTH screens make: src/app/principal/staff/
+    // page.tsx's own load() and src/app/principal/dashboard/page.tsx's
+    // own load(), same RPC, same params (p_include_inactive: true,
+    // p_include_pending: true on staff; p_include_inactive: false,
+    // p_include_pending: true on dashboard -- reproduced separately
+    // below, not assumed identical). ----
+    const { data: rosterMM, error: rosterMMErr } = await principalMM.rpc("get_institution_staff_roster", {
+      p_institution_id: institutionMMId,
+      p_include_inactive: true,
+      p_include_pending: true,
+    });
+
+    // ---- MM-1: THE NEW COLUMNS THEMSELVES (0125) -- present, and
+    // internally consistent with the pre-existing is_active/is_pending
+    // derivation, not just non-null. ----
+    {
+      const deactivatedRow = (rosterMM ?? []).find((r) => r.user_id === deactivatedSnaMMId);
+      const activeRow = (rosterMM ?? []).find((r) => r.user_id === activeTeacherMMId);
+      record(
+        "MM-1a the deactivated row's own deactivated_at/deactivation_reason (0125) are populated, matching is_active=false/is_pending=false",
+        !rosterMMErr &&
+          deactivatedRow?.is_active === false &&
+          deactivatedRow?.is_pending === false &&
+          Boolean(deactivatedRow?.deactivated_at) &&
+          deactivatedRow?.deactivation_reason === "MM fixture: needs a genuinely deactivated SNA.",
+        JSON.stringify({ error: rosterMMErr?.message, deactivatedRow })
+      );
+      record(
+        "MM-1b an active row's own deactivated_at is null -- the new column doesn't leak a stale value onto someone currently active",
+        activeRow?.deactivated_at === null && activeRow?.deactivation_reason === null,
+        JSON.stringify(activeRow)
+      );
+    }
+
+    // ---- MM-2: THE SEGMENTED CONTROL'S OWN THREE-WAY SPLIT
+    // (src/app/principal/staff/page.tsx's own bySegment derivation),
+    // reproduced verbatim against the one real roster fetch above. ----
+    {
+      const pendingSeg = (rosterMM ?? []).filter((s) => s.is_pending);
+      const activeSeg = (rosterMM ?? []).filter((s) => s.is_active);
+      const deactivatedSeg = (rosterMM ?? []).filter((s) => !s.is_pending && !s.is_active);
+      record(
+        "MM-2a THE PENDING SEGMENT: contains exactly the one real pending join, no one else",
+        pendingSeg.length === 1 && pendingSeg[0].user_id === pendingTeacherMMId,
+        JSON.stringify(pendingSeg)
+      );
+      record(
+        "MM-2b THE ACTIVE SEGMENT: contains the principal and the active teacher, not the deactivated SNA or the pending teacher",
+        activeSeg.length === 2 &&
+          activeSeg.some((s) => s.user_id === principalMMId) &&
+          activeSeg.some((s) => s.user_id === activeTeacherMMId),
+        JSON.stringify(activeSeg)
+      );
+      record(
+        "MM-2c THE DEACTIVATED SEGMENT ITSELF: contains the deactivated SNA -- 'deactivated staff are never hidden' proven at the query level, not assumed from the RPC's own p_include_inactive flag alone",
+        deactivatedSeg.length === 1 && deactivatedSeg[0].user_id === deactivatedSnaMMId,
+        JSON.stringify(deactivatedSeg)
+      );
+    }
+
+    // ---- MM-3: THE DASHBOARD'S OWN PENDING-COUNT CARD
+    // (src/app/principal/dashboard/page.tsx's own load()), a SEPARATE
+    // call with different params (p_include_inactive: false) -- proven
+    // independently, not assumed to agree with MM-2's own roster call
+    // just because it's the same underlying table. ----
+    {
+      const { data: dashboardRosterMM, error: dashErr } = await principalMM.rpc("get_institution_staff_roster", {
+        p_institution_id: institutionMMId,
+        p_include_inactive: false,
+        p_include_pending: true,
+      });
+      const pendingCount = (dashboardRosterMM ?? []).filter((s) => s.is_pending).length;
+      record(
+        "MM-3 THE DEEP-LINK SOURCE ITSELF: the dashboard's own pending-count query (p_include_inactive: false) still surfaces the one pending join -- the card that links to /principal/staff?segment=pending would show, with the right count",
+        !dashErr && pendingCount === 1,
+        JSON.stringify({ error: dashErr?.message, pendingCount })
+      );
+    }
+
+    console.log("MM summary complete.");
+
+    await admin.from("institutions").delete().eq("id", institutionMMId);
+    for (const id of [principalMMId, activeTeacherMMId, pendingTeacherMMId, deactivatedSnaMMId]) {
       await admin.auth.admin.deleteUser(id);
     }
   }

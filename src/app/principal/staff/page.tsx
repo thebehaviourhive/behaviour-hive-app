@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { createClient } from "@/lib/supabase/client";
 import { DeactivateStaffSheet } from "@/components/principal/DeactivateStaffSheet";
@@ -15,6 +16,17 @@ import { PrincipalBottomNav } from "@/components/principal/PrincipalBottomNav";
 // "Account Administration" heading -- the design's own instruction,
 // "findable without hunting, never adjacent to routine actions." This
 // page keeps approve/reject/deactivate only.
+//
+// PRD 2, Stage 2: reskin + deep-link, no new plumbing beyond 0125's own
+// roster widening (deactivated_at/deactivation_reason -- the roster RPC
+// itself had nothing to show a deactivation date with before that).
+// Segmented Pending/Active/Deactivated replaces the old flat list, one
+// query, three client-side filters over the same rows -- not three
+// separate fetches. "Deactivated staff are never hidden" is why this is
+// a segment, not a hidden state: the Deactivated segment is one tap
+// away, never a filter someone has to think to apply.
+
+type Segment = "pending" | "active" | "deactivated";
 
 interface StaffRow {
   id: string;
@@ -23,6 +35,8 @@ interface StaffRow {
   role: string;
   is_active: boolean;
   is_pending: boolean;
+  deactivated_at: string | null;
+  deactivation_reason: string | null;
 }
 
 interface RejectedRow {
@@ -42,6 +56,12 @@ const ROLE_LABEL: Record<string, string> = {
   institution_admin: "Institution Admin",
 };
 
+const SEGMENTS: { key: Segment; label: string }[] = [
+  { key: "pending", label: "Pending" },
+  { key: "active", label: "Active" },
+  { key: "deactivated", label: "Deactivated" },
+];
+
 function formatDate(value: string): string {
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return value;
@@ -50,6 +70,16 @@ function formatDate(value: string): string {
 
 export default function PrincipalStaffPage() {
   const { user, isReady } = useRequireRole("principal");
+  const searchParams = useSearchParams();
+  // Deep-link target, read once at mount -- matching this app's own
+  // established pattern (the clinician passport page's own ?tab= read):
+  // an invalid/unknown value falls back to "active" rather than
+  // rendering nothing, and manually switching segments afterwards is
+  // plain local state, not synced back to the URL.
+  const [segment, setSegment] = useState<Segment>(() => {
+    const requested = searchParams.get("segment");
+    return SEGMENTS.some((s) => s.key === requested) ? (requested as Segment) : "active";
+  });
   const [institutionId, setInstitutionId] = useState<string | null>(null);
   const [staff, setStaff] = useState<StaffRow[]>([]);
   const [rejected, setRejected] = useState<RejectedRow[]>([]);
@@ -126,11 +156,36 @@ export default function PrincipalStaffPage() {
     return null;
   }
 
+  const pending = staff.filter((s) => s.is_pending);
+  const active = staff.filter((s) => s.is_active);
+  const deactivated = staff.filter((s) => !s.is_pending && !s.is_active);
+  const bySegment: Record<Segment, StaffRow[]> = { pending, active, deactivated };
+  const visible = bySegment[segment];
+
   return (
     <div className="flex min-h-full flex-1 flex-col bg-brand-off-white/40 pb-24">
       <header className="flex items-center gap-3 px-4 pt-6 pb-4">
         <h1 className="font-heading text-xl font-bold text-brand-prussian-blue">Staff</h1>
       </header>
+
+      {!isLoading && !error && (
+        <div className="mb-4 flex gap-2 px-4">
+          {SEGMENTS.map((s) => (
+            <button
+              key={s.key}
+              type="button"
+              onClick={() => setSegment(s.key)}
+              className={`flex-1 rounded-xl border py-2 text-sm font-semibold ${
+                segment === s.key
+                  ? "border-brand-prussian-blue bg-brand-pastel-blue/10 text-brand-prussian-blue"
+                  : "border-black/10 text-brand-neutral-black/60"
+              }`}
+            >
+              {s.label} ({bySegment[s.key].length})
+            </button>
+          ))}
+        </div>
+      )}
 
       <main className="flex-1 px-4">
         {isLoading ? (
@@ -145,9 +200,17 @@ export default function PrincipalStaffPage() {
           <p className="rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-center text-sm text-brand-neutral-black/60">
             No staff registered at this school yet.
           </p>
+        ) : visible.length === 0 ? (
+          <p className="rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-center text-sm text-brand-neutral-black/60">
+            {segment === "pending"
+              ? "No pending requests."
+              : segment === "active"
+                ? "No active staff."
+                : "No deactivated staff."}
+          </p>
         ) : (
           <div className="flex flex-col gap-2">
-            {staff.map((member) => (
+            {visible.map((member) => (
               <StaffCard
                 key={member.user_id}
                 member={member}
@@ -159,7 +222,22 @@ export default function PrincipalStaffPage() {
           </div>
         )}
 
-        {!isLoading && !error && rejected.length > 0 && (
+        {/* The design spec's own static card, per Daniel's correction:
+            belongs here AND at the point a search fails to find someone
+            (GrantTemporaryAccessSheet's own lookup-failure message
+            already covers that second place -- "No Behaviour Hive
+            account found... they must sign up first"). This is the
+            first of the two, not a duplicate of it. Active-only: a
+            principal reading Pending or Deactivated isn't the one
+            wondering "how do I add someone new". */}
+        {!isLoading && !error && segment === "active" && (
+          <p className="mt-4 rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-center text-xs text-brand-neutral-black/50">
+            A supply teacher must create their own Behaviour Hive account before you can grant them access — there is
+            no way to invite someone by email.
+          </p>
+        )}
+
+        {!isLoading && !error && segment === "pending" && rejected.length > 0 && (
           <div className="mt-6">
             <button
               type="button"
@@ -228,13 +306,6 @@ function StaffCard({
   onDeactivate: () => void;
   onReview: () => void;
 }) {
-  const statusLabel = member.is_pending ? "Pending" : member.is_active ? "Active" : "Deactivated";
-  const statusClass = member.is_pending
-    ? "bg-brand-golden-brown/15 text-brand-golden-brown"
-    : member.is_active
-      ? "bg-brand-pastel-blue/20 text-brand-prussian-blue"
-      : "bg-black/5 text-brand-neutral-black/60";
-
   return (
     <div className="rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
       <div className="flex items-start justify-between gap-2">
@@ -245,10 +316,19 @@ function StaffCard({
           </p>
           <p className="mt-0.5 text-xs text-brand-neutral-black/50">{ROLE_LABEL[member.role] ?? member.role}</p>
         </div>
-        <span className={`flex-shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${statusClass}`}>
-          {statusLabel}
-        </span>
+        {member.deactivated_at && (
+          <span className="flex-shrink-0 rounded-full bg-brand-golden-brown/15 px-2.5 py-1 text-xs font-semibold text-brand-golden-brown">
+            DEACTIVATED {formatDate(member.deactivated_at).toUpperCase()}
+          </span>
+        )}
       </div>
+
+      {/* Everything they wrote stays on the record in their name -- this
+          card is the same discipline: the reason they left is visible
+          here, not just recorded and hidden. */}
+      {member.deactivation_reason && (
+        <p className="mt-2 text-sm text-brand-neutral-black/70">&ldquo;{member.deactivation_reason}&rdquo;</p>
+      )}
 
       {member.is_pending && (
         <button

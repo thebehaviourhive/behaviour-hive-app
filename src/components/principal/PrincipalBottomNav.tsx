@@ -51,5 +51,11 @@ export function PrincipalBottomNav() {
     },
   ];
 
-  return <AppBottomNav tabs={TABS} />;
+  // Widened past AppBottomNav's own max-w-sm default -- measured live at
+  // 1280px (Stage 1's own review): the shared default left the four tabs
+  // clustered in a 384px strip centred inside a full-width white bar,
+  // real dead space either side, on the laptop/iPad width principals
+  // mostly use this on. Opt-in only (maxWidthClassName), the other four
+  // tracks' own nav is untouched.
+  return <AppBottomNav tabs={TABS} maxWidthClassName="max-w-2xl" />;
 }

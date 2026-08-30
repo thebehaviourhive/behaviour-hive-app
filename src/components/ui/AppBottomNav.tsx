@@ -35,12 +35,29 @@ export interface NavTab {
 // its live/locked tap behaviour differs per state -- navigate vs open a
 // sheet), so it doesn't fit NavTab's Link+isActive model and gets its
 // own render slot instead of being shoehorned into the tabs array.
-export function AppBottomNav({ tabs, extraSlot }: { tabs: NavTab[]; extraSlot?: ReactNode }) {
+export function AppBottomNav({
+  tabs,
+  extraSlot,
+  maxWidthClassName = "max-w-sm",
+}: {
+  tabs: NavTab[];
+  extraSlot?: ReactNode;
+  // PRD 2, Stage 2: an optional override, defaulting to the original
+  // max-w-sm every existing caller (BottomNav/TeacherBottomNav/
+  // SnaBottomNav/ClinicianBottomNav) keeps unchanged -- widening the
+  // principal track's own nav on a laptop/iPad (parked as "wrong on a
+  // wide screen" during Stage 1's own review) without touching this
+  // component's default for the other four tracks, which have no reason
+  // to be destabilised by a principal-only layout decision. One
+  // component, one behaviour change gated on an opt-in prop -- not a
+  // fork.
+  maxWidthClassName?: string;
+}) {
   const pathname = usePathname();
 
   return (
     <nav className="fixed inset-x-0 bottom-0 z-10 border-t border-black/5 bg-white pb-[env(safe-area-inset-bottom)]">
-      <div className="mx-auto flex max-w-sm items-center justify-around px-2 py-1.5">
+      <div className={`mx-auto flex ${maxWidthClassName} items-center justify-around px-2 py-1.5`}>
         {tabs.map((tab) => {
           const isActive = tab.isActive(pathname);
           const Icon = tab.icon;
