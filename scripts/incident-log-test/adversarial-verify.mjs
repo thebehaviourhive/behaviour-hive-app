@@ -20,7 +20,7 @@
 // stage development. Every check from V onward is independently
 // self-contained (own institution, own accounts, own cleanup) and
 // individually selectable: V, W, X, Y, Z, AA, BB, CC, DD, EE, FF, GG,
-// HH, II, JJ, KK, LL, MM, NN. Selecting none of these (ONLY_CHECKS unset) is the full run --
+// HH, II, JJ, KK, LL, MM, NN, OO, PP, QQ. Selecting none of these (ONLY_CHECKS unset) is the full run --
 // the one that gates deploys -- and its behavior is unchanged: same
 // checks, same order, same pass/fail counts. The only observable
 // difference is where the top-level fixture's own cleanup log line
@@ -8767,6 +8767,384 @@ async function main() {
 
     await admin.from("institutions").delete().eq("id", institutionOOId);
     for (const id of [principalOOId, parentOOId]) {
+      await admin.auth.admin.deleteUser(id);
+    }
+  }
+
+  console.log(`\n== CHECK PP: SQL half of Stage 4's clinician history (migration 0128) -- get_passport_clinician_history(), a dedicated function never touching get_passport_clinicians()'s own callers. Both authorities (owns_passport() parent, institution-scoped principal), both engagement origins (institution-engaged and parent-engaged) visible symmetrically in history, institution-scoping proven by a principal supplying an institution id they don't belong to, non-principal staff proven to see nothing, and the "does NOT gate on current verification_status" claim proven empirically, not just asserted in a comment. ==`);
+  if (shouldRun("PP")) {
+    const { data: instPP, error: instPPErr } = await admin
+      .from("institutions")
+      .insert({ name: "PP Institution", institution_code: CODE + "PP", status: "verified" })
+      .select()
+      .single();
+    if (instPPErr) throw instPPErr;
+    const institutionPPId = instPP.id;
+
+    const { data: instPPOther, error: instPPOtherErr } = await admin
+      .from("institutions")
+      .insert({ name: "PP Other Institution", institution_code: CODE + "PPB", status: "verified" })
+      .select()
+      .single();
+    if (instPPOtherErr) throw instPPOtherErr;
+    const institutionPPOtherId = instPPOther.id;
+
+    const principalPPId = await createUser("checkpp.principal@thebehaviourhive.com", "PP Principal", "principal");
+    const principalPPOtherId = await createUser("checkpp.principalother@thebehaviourhive.com", "PP Other Principal", "principal");
+    const teacherPPId = await createUser("checkpp.teacher@thebehaviourhive.com", "PP Teacher", "class_teacher");
+    const parentPPId = await createUser("checkpp.parent@thebehaviourhive.com", "PP Parent", "parent");
+    const clinicianPP1Id = await createUser("checkpp.clinician1@thebehaviourhive.com", "PP Clinician One", "clinician");
+    const clinicianPP2Id = await createUser("checkpp.clinician2@thebehaviourhive.com", "PP Clinician Two", "clinician");
+
+    const { data: staffPPRows, error: staffPPErr } = await admin.from("institution_staff").insert([
+      { institution_id: institutionPPId, user_id: principalPPId, role: "principal" },
+      { institution_id: institutionPPOtherId, user_id: principalPPOtherId, role: "principal" },
+      { institution_id: institutionPPId, user_id: teacherPPId, role: "class_teacher" },
+    ]).select();
+    if (staffPPErr) throw staffPPErr;
+
+    const principalPP = await signedInClient("checkpp.principal@thebehaviourhive.com");
+    const principalPPOther = await signedInClient("checkpp.principalother@thebehaviourhive.com");
+    for (const row of staffPPRows.filter((r) => r.user_id === teacherPPId)) {
+      const { error } = await principalPP.rpc("approve_staff_join", { p_institution_staff_id: row.id });
+      if (error) throw error;
+    }
+    const teacherPP = await signedInClient("checkpp.teacher@thebehaviourhive.com");
+    const parentPP = await signedInClient("checkpp.parent@thebehaviourhive.com");
+
+    const clinicianPPCodes = {};
+    for (const [id, email] of [
+      [clinicianPP1Id, "checkpp.clinician1@thebehaviourhive.com"],
+      [clinicianPP2Id, "checkpp.clinician2@thebehaviourhive.com"],
+    ]) {
+      const c = await signedInClient(email);
+      const { error: specErr } = await c.rpc("select_clinician_specialty", { p_specialty: "behavioural_psychologist" });
+      if (specErr) throw specErr;
+      const { data: approveRows, error: approveErr } = await admin.rpc("approve_clinician", { clinician_email: email });
+      if (approveErr) throw approveErr;
+      clinicianPPCodes[id] = approveRows?.[0]?.code ?? approveRows?.code;
+    }
+
+    const { data: childPPId, error: childPPErr } = await principalPP.rpc("create_school_passport", {
+      p_institution_id: institutionPPId,
+      p_child_name: "PP Child",
+    });
+    if (childPPErr) throw childPPErr;
+
+    const { data: claimCodePP, error: claimCodePPErr } = await principalPP.rpc("generate_passport_claim_code", {
+      p_institution_id: institutionPPId,
+      p_passport_id: childPPId,
+    });
+    if (claimCodePPErr) throw claimCodePPErr;
+    const { error: redeemPPErr } = await parentPP.rpc("redeem_passport_claim_code", { p_code: claimCodePP });
+    if (redeemPPErr) throw redeemPPErr;
+
+    // One institution-engaged clinician, one parent-engaged -- both
+    // engaged, then both revoked, so history has one real row of each
+    // origin to prove symmetric visibility.
+    const { data: grantPP1, error: grantPP1Err } = await principalPP.rpc("grant_clinician_access", {
+      p_institution_id: institutionPPId,
+      p_passport_id: childPPId,
+      p_clinician_code: clinicianPPCodes[clinicianPP1Id],
+    });
+    if (grantPP1Err) throw grantPP1Err;
+    // Both grant_clinician_access() and connect_clinician() return the
+    // new row's own uuid directly (returns uuid), not a table row.
+    const clinicianAccessPP1Id = grantPP1;
+
+    const { data: connectPP2, error: connectPP2Err } = await parentPP.rpc("connect_clinician", {
+      p_passport_id: childPPId,
+      p_clinician_code: clinicianPPCodes[clinicianPP2Id],
+    });
+    if (connectPP2Err) throw connectPP2Err;
+    const clinicianAccessPP2Id = connectPP2;
+
+    const { error: revokePP1Err } = await principalPP.rpc("revoke_clinician_access", {
+      p_clinician_access_id: clinicianAccessPP1Id,
+      p_reason: "PP fixture: institution engagement ended.",
+    });
+    if (revokePP1Err) throw revokePP1Err;
+    const { error: revokePP2Err } = await parentPP.rpc("revoke_clinician_access", {
+      p_clinician_access_id: clinicianAccessPP2Id,
+      p_reason: "PP fixture: parent engagement ended.",
+    });
+    if (revokePP2Err) throw revokePP2Err;
+
+    // ---- PP-1: THE ACTIVE LIST IS GENUINELY EMPTY NOW -- both engagements
+    // revoked, get_passport_clinicians() (unchanged, 0124) shows neither. ----
+    {
+      const { data: activeAfter } = await principalPP.rpc("get_passport_clinicians", { p_passport_id: childPPId });
+      record(
+        "PP-1 both clinicians revoked: the ACTIVE list (get_passport_clinicians, untouched) is genuinely empty",
+        (activeAfter ?? []).length === 0,
+        JSON.stringify(activeAfter)
+      );
+    }
+
+    // ---- PP-2: THE PRINCIPAL sees BOTH origins in history, correct
+    // fields for each. ----
+    {
+      const { data: historyPrincipal, error: historyErr } = await principalPP.rpc("get_passport_clinician_history", {
+        p_passport_id: childPPId,
+        p_institution_id: institutionPPId,
+      });
+      const row1 = (historyPrincipal ?? []).find((r) => r.clinician_id === clinicianPP1Id);
+      const row2 = (historyPrincipal ?? []).find((r) => r.clinician_id === clinicianPP2Id);
+      record(
+        "PP-2a the principal's own history call returns exactly 2 rows, one per origin",
+        !historyErr && (historyPrincipal ?? []).length === 2,
+        JSON.stringify({ error: historyErr?.message, historyPrincipal })
+      );
+      record(
+        "PP-2b the institution-engaged row: engaged_by='institution', revoked_at set, revocation_reason matches exactly",
+        row1?.engaged_by === "institution" &&
+          Boolean(row1?.revoked_at) &&
+          row1?.revocation_reason === "PP fixture: institution engagement ended.",
+        JSON.stringify(row1)
+      );
+      record(
+        "PP-2c the parent-engaged row: engaged_by='parent', revoked_at set, revocation_reason matches exactly -- the principal sees the FAMILY'S own history too, symmetric with the live list's own visibility",
+        row2?.engaged_by === "parent" &&
+          Boolean(row2?.revoked_at) &&
+          row2?.revocation_reason === "PP fixture: parent engagement ended.",
+        JSON.stringify(row2)
+      );
+    }
+
+    // ---- PP-3: THE PARENT sees the same history too (owns_passport()
+    // branch). ----
+    {
+      const { data: historyParent, error: historyParentErr } = await parentPP.rpc("get_passport_clinician_history", {
+        p_passport_id: childPPId,
+        p_institution_id: institutionPPId,
+      });
+      record(
+        "PP-3 the parent's own history call (owns_passport() branch) also returns both rows",
+        !historyParentErr && (historyParent ?? []).length === 2,
+        JSON.stringify({ error: historyParentErr?.message, historyParent })
+      );
+    }
+
+    // ---- PP-4: a non-principal staff member at the SAME institution
+    // sees nothing -- silent empty, not an error, same posture as every
+    // other SELECT-shaped RPC in this schema. ----
+    {
+      const { data: historyTeacher, error: historyTeacherErr } = await teacherPP.rpc("get_passport_clinician_history", {
+        p_passport_id: childPPId,
+        p_institution_id: institutionPPId,
+      });
+      record(
+        "PP-4 a non-principal staff member (teacherPP) gets an empty result, not an error and not the real history",
+        !historyTeacherErr && (historyTeacher ?? []).length === 0,
+        JSON.stringify({ error: historyTeacherErr?.message, historyTeacher })
+      );
+    }
+
+    // ---- PP-5: a principal at a DIFFERENT institution, supplying THIS
+    // institution's own id (not their own), gets nothing -- the
+    // explicit p_institution_id scoping can't be faked by passing
+    // someone else's id while being a principal elsewhere. ----
+    {
+      const { data: historyOther, error: historyOtherErr } = await principalPPOther.rpc("get_passport_clinician_history", {
+        p_passport_id: childPPId,
+        p_institution_id: institutionPPId,
+      });
+      record(
+        "PP-5 a principal at a DIFFERENT institution, supplying institutionPP's own id, gets an empty result",
+        !historyOtherErr && (historyOther ?? []).length === 0,
+        JSON.stringify({ error: historyOtherErr?.message, historyOther })
+      );
+    }
+
+    // ---- PP-6: THE COMMENT'S OWN CLAIM, PROVEN -- history does NOT
+    // gate on the clinician's CURRENT verification_status. Reject
+    // clinician 1's verification after the fact; their history row must
+    // still be there. ----
+    {
+      const { error: rejectErr } = await admin
+        .from("clinicians")
+        .update({ verification_status: "rejected" })
+        .eq("user_id", clinicianPP1Id);
+      if (rejectErr) throw rejectErr;
+
+      const { data: historyAfterReject } = await principalPP.rpc("get_passport_clinician_history", {
+        p_passport_id: childPPId,
+        p_institution_id: institutionPPId,
+      });
+      record(
+        "PP-6 a clinician's history row survives their OWN verification being revoked afterward -- history isn't gated on current verification_status",
+        (historyAfterReject ?? []).some((r) => r.clinician_id === clinicianPP1Id),
+        JSON.stringify(historyAfterReject)
+      );
+    }
+
+    console.log("PP summary complete.");
+
+    // clinician_access.engaged_by_institution_id (0123) is a NON-
+    // cascading FK to institutions -- deleting the passport FIRST
+    // cascades clinician_access away via its own passport_id (ON DELETE
+    // CASCADE), same order CHECK KK's own cleanup already established.
+    // Deleting institutions before the passport would fail the FK
+    // silently here (a raw delete with no error check) and leave this
+    // fixture's institutions/users behind for the next run to collide
+    // with -- exactly what happened once before this fix.
+    await admin.from("passports").delete().eq("id", childPPId);
+    await admin.from("institutions").delete().in("id", [institutionPPId, institutionPPOtherId]);
+    for (const id of [principalPPId, principalPPOtherId, teacherPPId, parentPPId, clinicianPP1Id, clinicianPP2Id]) {
+      await admin.auth.admin.deleteUser(id);
+    }
+  }
+
+  console.log(`\n== CHECK QQ: Client-behaviour half of Stage 4 (src/app/principal/passports/[passportId]/page.tsx) -- proven via the LITERAL client gating conditionals, not a proxy for them. The Access tab's empty-state copy, and the Clinical tab's eyebrow derivation (own-institution engagement gets no eyebrow and a Revoke access button; parent engagement gets a "Managed by parent" eyebrow and no button; a DIFFERENT institution's engagement gets a "Managed by [school]" eyebrow and no button) reproduced against one real fixture with all three engagement shapes on the SAME child simultaneously. ==`);
+  if (shouldRun("QQ")) {
+    const { data: instQQ, error: instQQErr } = await admin
+      .from("institutions")
+      .insert({ name: "QQ Institution", institution_code: CODE + "QQ", status: "verified" })
+      .select()
+      .single();
+    if (instQQErr) throw instQQErr;
+    const institutionQQId = instQQ.id;
+
+    const { data: instQQOther, error: instQQOtherErr } = await admin
+      .from("institutions")
+      .insert({ name: "QQ Other Institution", institution_code: CODE + "QQB", status: "verified" })
+      .select()
+      .single();
+    if (instQQOtherErr) throw instQQOtherErr;
+    const institutionQQOtherId = instQQOther.id;
+
+    const principalQQId = await createUser("checkqq.principal@thebehaviourhive.com", "QQ Principal", "principal");
+    const principalQQOtherId = await createUser("checkqq.principalother@thebehaviourhive.com", "QQ Other Principal", "principal");
+    const parentQQId = await createUser("checkqq.parent@thebehaviourhive.com", "QQ Parent", "parent");
+    const clinicianQQ1Id = await createUser("checkqq.clinician1@thebehaviourhive.com", "QQ Clinician Own School", "clinician");
+    const clinicianQQ2Id = await createUser("checkqq.clinician2@thebehaviourhive.com", "QQ Clinician Parent", "clinician");
+    const clinicianQQ3Id = await createUser("checkqq.clinician3@thebehaviourhive.com", "QQ Clinician Other School", "clinician");
+
+    const { error: staffQQErr } = await admin.from("institution_staff").insert([
+      { institution_id: institutionQQId, user_id: principalQQId, role: "principal" },
+      { institution_id: institutionQQOtherId, user_id: principalQQOtherId, role: "principal" },
+    ]);
+    if (staffQQErr) throw staffQQErr;
+
+    const principalQQ = await signedInClient("checkqq.principal@thebehaviourhive.com");
+    const principalQQOther = await signedInClient("checkqq.principalother@thebehaviourhive.com");
+    const parentQQ = await signedInClient("checkqq.parent@thebehaviourhive.com");
+
+    const clinicianQQCodes = {};
+    for (const [id, email] of [
+      [clinicianQQ1Id, "checkqq.clinician1@thebehaviourhive.com"],
+      [clinicianQQ2Id, "checkqq.clinician2@thebehaviourhive.com"],
+      [clinicianQQ3Id, "checkqq.clinician3@thebehaviourhive.com"],
+    ]) {
+      const c = await signedInClient(email);
+      const { error: specErr } = await c.rpc("select_clinician_specialty", { p_specialty: "behavioural_psychologist" });
+      if (specErr) throw specErr;
+      const { data: approveRows, error: approveErr } = await admin.rpc("approve_clinician", { clinician_email: email });
+      if (approveErr) throw approveErr;
+      clinicianQQCodes[id] = approveRows?.[0]?.code ?? approveRows?.code;
+    }
+
+    // ---- QQ-1: THE ACCESS TAB'S OWN EMPTY-STATE GATE, before anything
+    // is granted -- a freshly enrolled child. ----
+    const { data: childQQId, error: childQQErr } = await principalQQ.rpc("create_school_passport", {
+      p_institution_id: institutionQQId,
+      p_child_name: "QQ Child",
+    });
+    if (childQQErr) throw childQQErr;
+    {
+      const { data: accessEmpty } = await principalQQ.rpc("get_passport_access_for_child", {
+        p_passport_id: childQQId,
+        p_institution_id: institutionQQId,
+      });
+      const activeEmpty = (accessEmpty ?? []).filter((r) => r.is_active);
+      record(
+        "QQ-1 the Access tab's own empty-state gate: access.active.length === 0, exactly the case the page's copy (\"No direct access granted. Access is derived from class or 1:1 assignments.\") is written for",
+        activeEmpty.length === 0,
+        JSON.stringify(activeEmpty)
+      );
+    }
+
+    const { data: claimCodeQQ, error: claimCodeQQErr } = await principalQQ.rpc("generate_passport_claim_code", {
+      p_institution_id: institutionQQId,
+      p_passport_id: childQQId,
+    });
+    if (claimCodeQQErr) throw claimCodeQQErr;
+    const { error: redeemQQErr } = await parentQQ.rpc("redeem_passport_claim_code", { p_code: claimCodeQQ });
+    if (redeemQQErr) throw redeemQQErr;
+
+    // Link childQQ to the second institution (same service-role-insert
+    // precedent as CHECK KK/DD/JJ -- no real production path constructs
+    // this shape, but it's the shape a two-school child genuinely has).
+    await admin.from("passport_institution_links").insert({
+      passport_id: childQQId,
+      institution_id: institutionQQOtherId,
+      approved_by_parent: true,
+    });
+
+    // The three simultaneous engagement shapes.
+    const { error: grantQQ1Err } = await principalQQ.rpc("grant_clinician_access", {
+      p_institution_id: institutionQQId,
+      p_passport_id: childQQId,
+      p_clinician_code: clinicianQQCodes[clinicianQQ1Id],
+    });
+    if (grantQQ1Err) throw grantQQ1Err;
+    const { error: connectQQ2Err } = await parentQQ.rpc("connect_clinician", {
+      p_passport_id: childQQId,
+      p_clinician_code: clinicianQQCodes[clinicianQQ2Id],
+    });
+    if (connectQQ2Err) throw connectQQ2Err;
+    const { error: grantQQ3Err } = await principalQQOther.rpc("grant_clinician_access", {
+      p_institution_id: institutionQQOtherId,
+      p_passport_id: childQQId,
+      p_clinician_code: clinicianQQCodes[clinicianQQ3Id],
+    });
+    if (grantQQ3Err) throw grantQQ3Err;
+
+    const { data: cliniciansQQ, error: cliniciansQQErr } = await principalQQ.rpc("get_passport_clinicians", { p_passport_id: childQQId });
+    if (cliniciansQQErr) throw cliniciansQQErr;
+
+    // ---- QQ-2: THE ELIGIBLE-STAFF/EYEBROW DERIVATION, reproduced
+    // verbatim from principal/passports/[passportId]/page.tsx's own
+    // canRevoke/eyebrow logic, against all three rows at once. ----
+    for (const row of cliniciansQQ ?? []) {
+      const canRevoke = row.engaged_by === "institution" && row.engaged_by_institution_id === institutionQQId;
+      const eyebrow =
+        row.engaged_by === "parent" ? "Managed by parent" : canRevoke ? null : `Managed by ${row.engaged_by_institution_name ?? "another school"}`;
+
+      if (row.clinician_id === clinicianQQ1Id) {
+        record(
+          "QQ-2a own-institution engagement: canRevoke=true, no eyebrow -- gets the Revoke access button, not a read-only label",
+          canRevoke === true && eyebrow === null,
+          JSON.stringify({ row, canRevoke, eyebrow })
+        );
+      } else if (row.clinician_id === clinicianQQ2Id) {
+        record(
+          "QQ-2b parent engagement: canRevoke=false, eyebrow='Managed by parent' exactly",
+          canRevoke === false && eyebrow === "Managed by parent",
+          JSON.stringify({ row, canRevoke, eyebrow })
+        );
+      } else if (row.clinician_id === clinicianQQ3Id) {
+        record(
+          "QQ-2c a DIFFERENT institution's own engagement: canRevoke=false, eyebrow names the real other institution, not a placeholder",
+          canRevoke === false && eyebrow === "Managed by QQ Other Institution",
+          JSON.stringify({ row, canRevoke, eyebrow })
+        );
+      }
+    }
+    record(
+      "QQ-2d all three engagement shapes were actually present to test against -- not a vacuous pass from a fixture that silently only produced one or two",
+      (cliniciansQQ ?? []).length === 3,
+      JSON.stringify(cliniciansQQ)
+    );
+
+    console.log("QQ summary complete.");
+
+    // Same passport-before-institutions order as CHECK PP's own cleanup,
+    // for the same reason -- clinician_access.engaged_by_institution_id
+    // doesn't cascade on institutions, only on its own passport_id.
+    await admin.from("passports").delete().eq("id", childQQId);
+    await admin.from("institutions").delete().in("id", [institutionQQId, institutionQQOtherId]);
+    for (const id of [principalQQId, principalQQOtherId, parentQQId, clinicianQQ1Id, clinicianQQ2Id, clinicianQQ3Id]) {
       await admin.auth.admin.deleteUser(id);
     }
   }
