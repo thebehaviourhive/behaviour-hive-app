@@ -94,7 +94,7 @@ export function AddClassChildSheet({ isOpen, classId, className, eligibleChildre
       </div>
 
       {submitError && (
-        <p role="alert" className="mt-3 text-sm font-medium text-red-600">
+        <p role="alert" className="mt-3 text-sm font-medium text-brand-golden-brown">
           {submitError}
         </p>
       )}
