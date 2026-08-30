@@ -121,6 +121,10 @@ export function AssignSnaSheet({
       <h2 className="font-heading text-xl font-semibold text-brand-neutral-black">
         {isReassigning ? `Reassign ${childName}'s SNA` : `Assign an SNA to ${childName}`}
       </h2>
+      <p className="mt-2 text-sm text-brand-neutral-black/70">
+        They&apos;ll see everything for {childName} wherever they are in the school, and roster-level information for
+        other children in the same class.
+      </p>
 
       {currentAssignment && (
         <p className="mt-2 text-sm text-brand-neutral-black/70">

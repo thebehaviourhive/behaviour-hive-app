@@ -19,6 +19,12 @@ import { formatCutoffTime } from "@/lib/temporaryAccessTime";
 // rejected-requests one does. What DOES end -- a teacher's slot, a
 // child's roster spot -- is shown on the class detail page instead,
 // where the ended history actually belongs.
+//
+// PRD 2, Stage 5: get_institution_classes_roster() (0129) replaces the
+// three raw reads (classes, class_teachers counted, class_children
+// counted) this page used to compose client-side. Same query-shape
+// discipline as every other roster screen in this app -- one RPC, not
+// three tables joined in the client.
 
 interface ClassRow {
   id: string;
@@ -43,11 +49,9 @@ export default function PrincipalClassesPage() {
     setError(null);
     const supabase = createClient();
 
-    const { data: classRows, error: classErr } = await supabase
-      .from("classes")
-      .select("id, name, created_at")
-      .eq("institution_id", instId)
-      .order("name");
+    const { data: classRows, error: classErr } = await supabase.rpc("get_institution_classes_roster", {
+      p_institution_id: instId,
+    });
 
     if (classErr) {
       setError("Could not load classes.");
@@ -55,33 +59,16 @@ export default function PrincipalClassesPage() {
       return;
     }
 
-    const classIds = (classRows ?? []).map((c) => c.id);
-    if (classIds.length === 0) {
-      setClasses([]);
-      setIsLoading(false);
-      return;
-    }
-
-    const [teacherRowsResult, childRowsResult] = await Promise.all([
-      supabase.from("class_teachers").select("class_id").in("class_id", classIds).is("ended_at", null),
-      supabase.from("class_children").select("class_id").in("class_id", classIds).is("ended_at", null),
-    ]);
-
-    const teacherCounts = new Map<string, number>();
-    for (const row of teacherRowsResult.data ?? []) {
-      teacherCounts.set(row.class_id, (teacherCounts.get(row.class_id) ?? 0) + 1);
-    }
-    const childCounts = new Map<string, number>();
-    for (const row of childRowsResult.data ?? []) {
-      childCounts.set(row.class_id, (childCounts.get(row.class_id) ?? 0) + 1);
-    }
-
     setClasses(
-      (classRows ?? []).map((c) => ({
-        ...c,
-        teacherCount: teacherCounts.get(c.id) ?? 0,
-        childCount: childCounts.get(c.id) ?? 0,
-      }))
+      ((classRows ?? []) as { class_id: string; name: string; created_at: string; teacher_count: number; child_count: number }[]).map(
+        (c) => ({
+          id: c.class_id,
+          name: c.name,
+          created_at: c.created_at,
+          teacherCount: c.teacher_count,
+          childCount: c.child_count,
+        })
+      )
     );
     setIsLoading(false);
   }, []);

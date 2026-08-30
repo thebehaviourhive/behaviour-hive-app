@@ -7,6 +7,7 @@ import { useRequireRole } from "@/hooks/useRequireRole";
 import { createClient } from "@/lib/supabase/client";
 import { AddClassTeacherSheet } from "@/components/principal/AddClassTeacherSheet";
 import { AddClassChildSheet } from "@/components/principal/AddClassChildSheet";
+import { AssignClassSnaSheet } from "@/components/principal/AssignClassSnaSheet";
 import { AssignSnaSheet } from "@/components/shared/AssignSnaSheet";
 import { GrantTemporaryAccessSheet } from "@/components/shared/GrantTemporaryAccessSheet";
 import { ReasonConfirmSheet } from "@/components/shared/ReasonConfirmSheet";
@@ -17,17 +18,40 @@ import { formatCutoffTime, todayLocalDateString } from "@/lib/temporaryAccessTim
 // assignment (assign/reassign, for ANY child at this school -- the
 // principal branch of assign_sna_to_child() isn't scoped to this class).
 //
-// "Ending a membership is ending, never deleting" (Daniel's own
-// instruction): removed teachers and children move to a collapsed
-// history section, matching /principal/staff's own "Rejected requests"
-// idiom exactly -- never dropped from the page.
+// PRD 2, Stage 5 -- three real changes on top of the PRD 1 shape, plus
+// a fourth genuinely new section:
 //
-// Names are resolved via get_institution_staff_roster() (staff) and
-// get_institution_child_roster() (children) -- the same two RPCs 0074
-// already built for exactly this "who is this person/child" problem,
-// not a new lookup. get_institution_staff_roster() is called with
-// p_include_inactive=true so a removed teacher's name still resolves in
-// history, not just while active.
+// 1. "History is visible, not hidden" now gets the SAME first-class
+//    header treatment Stage 4 established for Access History -- a
+//    plain bold-uppercase section header with a +/- toggle, not the
+//    old muted/dashed accordion-trigger box. Applied here to Previous
+//    teachers, Previous class SNAs, and each child's own Assignment
+//    History -- collapsed by default purely for density, never for
+//    prominence. "Removed teachers"/"Previously in this class" renamed
+//    to match Daniel's own wording ("Previous teachers").
+//
+// 2. Class SNA -- a genuinely new section (class_sna_assignments,
+//    0129/0130), structurally identical to Teachers (add/remove with a
+//    reason/Previous accordion) but with no slot cap -- Daniel's own
+//    spec caps teachers at three and names nothing for SNAs.
+//
+// 3. Each active child's own SNA line now distinguishes CLASS SNA:
+//    [name] from 1:1 SNA: [name] rather than a bare "SNA: [name]" --
+//    1:1 takes display priority when both exist (it's the more
+//    specific relationship); "No SNA assigned" only when neither does.
+//
+// 4. AddClassChildSheet's own eligibleChildren now comes from the
+//    widened get_institution_child_roster()'s own current_class_id
+//    column (0129), filtered to null -- genuinely enrolled-but-
+//    unassigned, not "not already in THIS class" (which used to
+//    silently offer moving a child out of another class as a side
+//    effect of adding them here).
+//
+// Names are resolved via get_institution_staff_roster() (staff --
+// covers every role, not just teachers, so class SNA names resolve
+// from the same one fetch) and get_institution_child_roster()
+// (children) -- the same two RPCs 0074 already built for exactly this
+// "who is this person/child" problem, not a new lookup.
 
 interface TeacherRow {
   id: string;
@@ -47,9 +71,27 @@ interface ChildRow {
   endReason: string | null;
 }
 
+interface ClassSnaRow {
+  id: string;
+  userId: string;
+  startedAt: string;
+  endedAt: string | null;
+  endedByName: string | null;
+  endReason: string | null;
+}
+
 interface Assignment {
   id: string;
   snaUserId: string;
+}
+
+interface AssignmentHistoryRow {
+  id: string;
+  snaUserId: string;
+  startedAt: string;
+  endedAt: string;
+  endedByName: string | null;
+  endReason: string | null;
 }
 
 interface StaffRosterRow {
@@ -62,6 +104,8 @@ interface StaffRosterRow {
 interface ChildRosterRow {
   passport_id: string;
   child_name: string;
+  enrolment_ended_at: string | null;
+  current_class_id: string | null;
 }
 
 interface CoverGrant {
@@ -79,12 +123,15 @@ export default function PrincipalClassDetailPage() {
 
   const [className, setClassName] = useState<string | null>(null);
   const [institutionId, setInstitutionId] = useState<string | null>(null);
-  const [teachers, setTeachers] = useState<{ active: TeacherRow[]; removed: TeacherRow[] }>({ active: [], removed: [] });
-  const [children, setChildren] = useState<{ active: ChildRow[]; removed: ChildRow[] }>({ active: [], removed: [] });
+  const [teachers, setTeachers] = useState<{ active: TeacherRow[]; past: TeacherRow[] }>({ active: [], past: [] });
+  const [classSnas, setClassSnas] = useState<{ active: ClassSnaRow[]; past: ClassSnaRow[] }>({ active: [], past: [] });
+  const [children, setChildren] = useState<{ active: ChildRow[]; past: ChildRow[] }>({ active: [], past: [] });
   const [nameMap, setNameMap] = useState<Map<string, string>>(new Map());
   const [childNameMap, setChildNameMap] = useState<Map<string, string>>(new Map());
   const [assignmentMap, setAssignmentMap] = useState<Map<string, Assignment>>(new Map());
+  const [assignmentHistoryMap, setAssignmentHistoryMap] = useState<Map<string, AssignmentHistoryRow[]>>(new Map());
   const [eligibleTeachers, setEligibleTeachers] = useState<{ userId: string; fullName: string }[]>([]);
+  const [eligibleClassSnas, setEligibleClassSnas] = useState<{ userId: string; fullName: string }[]>([]);
   const [eligibleSnas, setEligibleSnas] = useState<{ userId: string; fullName: string }[]>([]);
   const [eligibleChildren, setEligibleChildren] = useState<{ passportId: string; childName: string }[]>([]);
   const [eligibleStaffForCover, setEligibleStaffForCover] = useState<{ userId: string; fullName: string }[]>([]);
@@ -93,15 +140,19 @@ export default function PrincipalClassDetailPage() {
 
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [showRemovedTeachers, setShowRemovedTeachers] = useState(false);
-  const [showRemovedChildren, setShowRemovedChildren] = useState(false);
+  const [showPastTeachers, setShowPastTeachers] = useState(false);
+  const [showPastClassSnas, setShowPastClassSnas] = useState(false);
+  const [showPastChildren, setShowPastChildren] = useState(false);
   const [showCoverHistory, setShowCoverHistory] = useState(false);
+  const [expandedHistoryFor, setExpandedHistoryFor] = useState<Set<string>>(new Set());
 
   const [isAddTeacherOpen, setIsAddTeacherOpen] = useState(false);
   const [isAddChildOpen, setIsAddChildOpen] = useState(false);
+  const [isAssignClassSnaOpen, setIsAssignClassSnaOpen] = useState(false);
   const [isGrantCoverOpen, setIsGrantCoverOpen] = useState(false);
   const [removeTeacherTarget, setRemoveTeacherTarget] = useState<TeacherRow | null>(null);
   const [removeChildTarget, setRemoveChildTarget] = useState<ChildRow | null>(null);
+  const [removeClassSnaTarget, setRemoveClassSnaTarget] = useState<ClassSnaRow | null>(null);
   const [assignSnaTarget, setAssignSnaTarget] = useState<ChildRow | null>(null);
   const [revokeCoverTarget, setRevokeCoverTarget] = useState<CoverGrant | null>(null);
 
@@ -124,30 +175,36 @@ export default function PrincipalClassDetailPage() {
     setClassName(classRow.name);
     setInstitutionId(classRow.institution_id);
 
-    const [teacherRowsResult, childRowsResult, staffRosterResult, childRosterResult, instResult, coverResult] = await Promise.all([
-      supabase
-        .from("class_teachers")
-        .select("id, user_id, position, started_at, ended_at, ended_by, end_reason")
-        .eq("class_id", classId)
-        .order("position"),
-      supabase
-        .from("class_children")
-        .select("id, passport_id, started_at, ended_at, end_reason")
-        .eq("class_id", classId)
-        .order("started_at"),
-      supabase.rpc("get_institution_staff_roster", {
-        p_institution_id: classRow.institution_id,
-        p_include_inactive: true,
-        p_include_pending: false,
-      }),
-      supabase.rpc("get_institution_child_roster", { p_institution_id: classRow.institution_id }),
-      supabase.from("institutions").select("temporary_access_cutoff_time").eq("id", classRow.institution_id).single(),
-      supabase
-        .from("temporary_access")
-        .select("id, granted_to, granted_for_date, reason, revoked_at")
-        .eq("class_id", classId)
-        .order("granted_for_date", { ascending: false }),
-    ]);
+    const [teacherRowsResult, classSnaRowsResult, childRowsResult, staffRosterResult, childRosterResult, instResult, coverResult] =
+      await Promise.all([
+        supabase
+          .from("class_teachers")
+          .select("id, user_id, position, started_at, ended_at, ended_by, end_reason")
+          .eq("class_id", classId)
+          .order("position"),
+        supabase
+          .from("class_sna_assignments")
+          .select("id, user_id, started_at, ended_at, ended_by, end_reason")
+          .eq("class_id", classId)
+          .order("started_at"),
+        supabase
+          .from("class_children")
+          .select("id, passport_id, started_at, ended_at, end_reason")
+          .eq("class_id", classId)
+          .order("started_at"),
+        supabase.rpc("get_institution_staff_roster", {
+          p_institution_id: classRow.institution_id,
+          p_include_inactive: true,
+          p_include_pending: false,
+        }),
+        supabase.rpc("get_institution_child_roster", { p_institution_id: classRow.institution_id }),
+        supabase.from("institutions").select("temporary_access_cutoff_time").eq("id", classRow.institution_id).single(),
+        supabase
+          .from("temporary_access")
+          .select("id, granted_to, granted_for_date, reason, revoked_at")
+          .eq("class_id", classId)
+          .order("granted_for_date", { ascending: false }),
+      ]);
 
     if (instResult.data?.temporary_access_cutoff_time) {
       setCutoffTime(instResult.data.temporary_access_cutoff_time);
@@ -177,7 +234,7 @@ export default function PrincipalClassDetailPage() {
     setChildNameMap(childNames);
 
     const activeTeachers: TeacherRow[] = [];
-    const removedTeachers: TeacherRow[] = [];
+    const pastTeachers: TeacherRow[] = [];
     for (const t of teacherRowsResult.data ?? []) {
       const row: TeacherRow = {
         id: t.id,
@@ -188,12 +245,27 @@ export default function PrincipalClassDetailPage() {
         endedByName: t.ended_by ? (names.get(t.ended_by) ?? null) : null,
         endReason: t.end_reason,
       };
-      (t.ended_at ? removedTeachers : activeTeachers).push(row);
+      (t.ended_at ? pastTeachers : activeTeachers).push(row);
     }
-    setTeachers({ active: activeTeachers, removed: removedTeachers });
+    setTeachers({ active: activeTeachers, past: pastTeachers });
+
+    const activeClassSnas: ClassSnaRow[] = [];
+    const pastClassSnas: ClassSnaRow[] = [];
+    for (const s of classSnaRowsResult.data ?? []) {
+      const row: ClassSnaRow = {
+        id: s.id,
+        userId: s.user_id,
+        startedAt: s.started_at,
+        endedAt: s.ended_at,
+        endedByName: s.ended_by ? (names.get(s.ended_by) ?? null) : null,
+        endReason: s.end_reason,
+      };
+      (s.ended_at ? pastClassSnas : activeClassSnas).push(row);
+    }
+    setClassSnas({ active: activeClassSnas, past: pastClassSnas });
 
     const activeChildren: ChildRow[] = [];
-    const removedChildren: ChildRow[] = [];
+    const pastChildren: ChildRow[] = [];
     for (const c of childRowsResult.data ?? []) {
       const row: ChildRow = {
         id: c.id,
@@ -202,35 +274,56 @@ export default function PrincipalClassDetailPage() {
         endedAt: c.ended_at,
         endReason: c.end_reason,
       };
-      (c.ended_at ? removedChildren : activeChildren).push(row);
+      (c.ended_at ? pastChildren : activeChildren).push(row);
     }
-    setChildren({ active: activeChildren, removed: removedChildren });
+    setChildren({ active: activeChildren, past: pastChildren });
 
-    // Active SNA assignments for this class's current children -- an
-    // institution-wide table, so this query filters explicitly to this
-    // class's passport ids rather than relying on class membership to
-    // scope it, matching child_assignments' own RLS (institution-wide,
-    // not class-scoped).
+    // Every child_assignments row (active AND past) for this class's
+    // own currently-active children, one query -- an institution-wide
+    // table, so this filters explicitly to this class's passport ids
+    // rather than relying on class membership to scope it, matching
+    // child_assignments' own RLS (institution-wide, not class-scoped).
     const activePassportIds = activeChildren.map((c) => c.passportId);
     if (activePassportIds.length > 0) {
       const { data: assignmentRows } = await supabase
         .from("child_assignments")
-        .select("id, passport_id, user_id")
+        .select("id, passport_id, user_id, started_at, ended_at, ended_by, end_reason")
         .in("passport_id", activePassportIds)
-        .is("ended_at", null);
+        .order("started_at", { ascending: false });
       const assignments = new Map<string, Assignment>();
+      const history = new Map<string, AssignmentHistoryRow[]>();
       for (const a of assignmentRows ?? []) {
-        assignments.set(a.passport_id, { id: a.id, snaUserId: a.user_id });
+        if (!a.ended_at) {
+          assignments.set(a.passport_id, { id: a.id, snaUserId: a.user_id });
+        } else {
+          const row: AssignmentHistoryRow = {
+            id: a.id,
+            snaUserId: a.user_id,
+            startedAt: a.started_at,
+            endedAt: a.ended_at,
+            endedByName: a.ended_by ? (names.get(a.ended_by) ?? null) : null,
+            endReason: a.end_reason,
+          };
+          history.set(a.passport_id, [...(history.get(a.passport_id) ?? []), row]);
+        }
       }
       setAssignmentMap(assignments);
+      setAssignmentHistoryMap(history);
     } else {
       setAssignmentMap(new Map());
+      setAssignmentHistoryMap(new Map());
     }
 
     const activeTeacherUserIds = new Set(activeTeachers.map((t) => t.userId));
     setEligibleTeachers(
       staffRoster
         .filter((s) => s.role === "class_teacher" && s.is_active && !activeTeacherUserIds.has(s.user_id))
+        .map((s) => ({ userId: s.user_id, fullName: s.full_name }))
+    );
+    const activeClassSnaUserIds = new Set(activeClassSnas.map((s) => s.userId));
+    setEligibleClassSnas(
+      staffRoster
+        .filter((s) => s.role === "sna" && s.is_active && !activeClassSnaUserIds.has(s.user_id))
         .map((s) => ({ userId: s.user_id, fullName: s.full_name }))
     );
     setEligibleSnas(
@@ -247,10 +340,15 @@ export default function PrincipalClassDetailPage() {
     setEligibleStaffForCover(
       staffRoster.filter((s) => s.is_active).map((s) => ({ userId: s.user_id, fullName: s.full_name }))
     );
-    const activeChildPassportIds = new Set(activeChildren.map((c) => c.passportId));
+    // Stage 5: genuinely enrolled-but-unassigned only (current_class_id
+    // is null), via the widened roster's own new column -- not "not
+    // already in THIS class", which used to also offer a silent move
+    // out of another class. Departed children excluded too (a real
+    // correctness fix while rewriting this, not something the old
+    // filter checked at all).
     setEligibleChildren(
       childRoster
-        .filter((c) => !activeChildPassportIds.has(c.passport_id))
+        .filter((c) => !c.enrolment_ended_at && c.current_class_id === null)
         .map((c) => ({ passportId: c.passport_id, childName: c.child_name }))
     );
 
@@ -261,6 +359,18 @@ export default function PrincipalClassDetailPage() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
   }, [load]);
+
+  function toggleHistory(passportId: string) {
+    setExpandedHistoryFor((prev) => {
+      const next = new Set(prev);
+      if (next.has(passportId)) {
+        next.delete(passportId);
+      } else {
+        next.add(passportId);
+      }
+      return next;
+    });
+  }
 
   if (!isReady) {
     return null;
@@ -332,19 +442,28 @@ export default function PrincipalClassDetailPage() {
                 </div>
               )}
 
-              {teachers.removed.length > 0 && (
-                <div className="mt-3">
-                  <button
-                    type="button"
-                    onClick={() => setShowRemovedTeachers((v) => !v)}
-                    className="flex w-full items-center justify-between rounded-2xl border border-dashed border-black/10 bg-white/60 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-brand-neutral-black/50"
-                  >
-                    <span>Removed teachers ({teachers.removed.length})</span>
-                    <span>{showRemovedTeachers ? "−" : "+"}</span>
-                  </button>
-                  {showRemovedTeachers && (
-                    <div className="mt-2 flex flex-col gap-2">
-                      {teachers.removed.map((t) => (
+              {/* Stage 4's own correction, applied here too: same
+                  header weight as the section above it, not a muted
+                  footnote. Collapsed by default for density only. */}
+              <div className="mt-4">
+                <button
+                  type="button"
+                  onClick={() => setShowPastTeachers((v) => !v)}
+                  className="mb-2 flex w-full items-center justify-between"
+                >
+                  <h2 className="font-heading text-sm font-bold uppercase tracking-wide text-brand-neutral-black/60">
+                    Previous Teachers ({teachers.past.length})
+                  </h2>
+                  <span className="text-sm font-semibold text-brand-neutral-black/40">{showPastTeachers ? "−" : "+"}</span>
+                </button>
+                {showPastTeachers && (
+                  teachers.past.length === 0 ? (
+                    <p className="rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-center text-sm text-brand-neutral-black/60">
+                      No previous teachers.
+                    </p>
+                  ) : (
+                    <div className="flex flex-col gap-2">
+                      {teachers.past.map((t) => (
                         <div key={t.id} className="rounded-2xl border border-black/5 bg-white/60 p-4">
                           <p className="text-sm font-semibold text-brand-neutral-black">
                             {nameMap.get(t.userId) ?? "Unknown"}
@@ -359,9 +478,89 @@ export default function PrincipalClassDetailPage() {
                         </div>
                       ))}
                     </div>
-                  )}
+                  )
+                )}
+              </div>
+            </section>
+
+            <section className="mb-6">
+              <div className="mb-2 flex items-center justify-between">
+                <h2 className="font-heading text-sm font-bold uppercase tracking-wide text-brand-neutral-black/60">
+                  Class SNA ({classSnas.active.length})
+                </h2>
+                <button
+                  type="button"
+                  onClick={() => setIsAssignClassSnaOpen(true)}
+                  className="text-xs font-semibold text-brand-prussian-blue"
+                >
+                  + Assign
+                </button>
+              </div>
+              {classSnas.active.length === 0 ? (
+                <p className="rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-center text-sm text-brand-neutral-black/60">
+                  No class SNA assigned. A class SNA sees everything for every child here -- for day-scoped cover
+                  instead, use Temporary Cover below.
+                </p>
+              ) : (
+                <div className="flex flex-col gap-2">
+                  {classSnas.active.map((s) => (
+                    <div key={s.id} className="rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="text-sm font-semibold text-brand-neutral-black">
+                          {nameMap.get(s.userId) ?? "Unknown"}
+                        </p>
+                        <span className="flex-shrink-0 rounded-full bg-brand-pastel-blue/20 px-2.5 py-1 text-xs font-semibold text-brand-prussian-blue">
+                          Active
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setRemoveClassSnaTarget(s)}
+                        className="mt-3 block w-full rounded-xl border border-brand-golden-brown py-2 text-center text-xs font-semibold text-brand-golden-brown"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ))}
                 </div>
               )}
+
+              <div className="mt-4">
+                <button
+                  type="button"
+                  onClick={() => setShowPastClassSnas((v) => !v)}
+                  className="mb-2 flex w-full items-center justify-between"
+                >
+                  <h2 className="font-heading text-sm font-bold uppercase tracking-wide text-brand-neutral-black/60">
+                    Previous Class SNAs ({classSnas.past.length})
+                  </h2>
+                  <span className="text-sm font-semibold text-brand-neutral-black/40">{showPastClassSnas ? "−" : "+"}</span>
+                </button>
+                {showPastClassSnas && (
+                  classSnas.past.length === 0 ? (
+                    <p className="rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-center text-sm text-brand-neutral-black/60">
+                      No previous class SNAs.
+                    </p>
+                  ) : (
+                    <div className="flex flex-col gap-2">
+                      {classSnas.past.map((s) => (
+                        <div key={s.id} className="rounded-2xl border border-black/5 bg-white/60 p-4">
+                          <p className="text-sm font-semibold text-brand-neutral-black">
+                            {nameMap.get(s.userId) ?? "Unknown"}
+                          </p>
+                          <p className="mt-0.5 text-xs text-brand-neutral-black/50">
+                            Removed {formatDate(s.endedAt!)}
+                            {s.endedByName ? ` by ${s.endedByName}` : ""}
+                          </p>
+                          {s.endReason && (
+                            <p className="mt-2 text-sm text-brand-neutral-black/70">&ldquo;{s.endReason}&rdquo;</p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )
+                )}
+              </div>
             </section>
 
             <section>
@@ -385,21 +584,27 @@ export default function PrincipalClassDetailPage() {
                 <div className="flex flex-col gap-2">
                   {children.active.map((c) => {
                     const assignment = assignmentMap.get(c.passportId);
+                    const history = assignmentHistoryMap.get(c.passportId) ?? [];
+                    const classSnaNames = classSnas.active.map((s) => nameMap.get(s.userId) ?? "Unknown");
+                    const snaLine = assignment
+                      ? `1:1 SNA: ${nameMap.get(assignment.snaUserId) ?? "Unknown"}`
+                      : classSnaNames.length > 0
+                        ? `Class SNA: ${classSnaNames.join(", ")}`
+                        : "No SNA assigned";
+                    const isHistoryOpen = expandedHistoryFor.has(c.passportId);
                     return (
                       <div key={c.id} className="rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
                         <p className="text-sm font-semibold text-brand-neutral-black">
                           {childNameMap.get(c.passportId) ?? "Unknown"}
                         </p>
-                        <p className="mt-0.5 text-xs text-brand-neutral-black/50">
-                          {assignment ? `SNA: ${nameMap.get(assignment.snaUserId) ?? "Unknown"}` : "No SNA assigned"}
-                        </p>
+                        <p className="mt-0.5 text-xs text-brand-neutral-black/50">{snaLine}</p>
                         <div className="mt-3 flex gap-2">
                           <button
                             type="button"
                             onClick={() => setAssignSnaTarget(c)}
                             className="flex-1 rounded-xl border border-brand-prussian-blue py-2 text-center text-xs font-semibold text-brand-prussian-blue"
                           >
-                            {assignment ? "Reassign SNA" : "Assign SNA"}
+                            {assignment ? "Reassign 1:1 SNA" : "Assign 1:1 SNA"}
                           </button>
                           <button
                             type="button"
@@ -409,25 +614,62 @@ export default function PrincipalClassDetailPage() {
                             Remove
                           </button>
                         </div>
+
+                        {history.length > 0 && (
+                          <div className="mt-3">
+                            <button
+                              type="button"
+                              onClick={() => toggleHistory(c.passportId)}
+                              className="flex w-full items-center justify-between text-xs font-semibold uppercase tracking-wide text-brand-neutral-black/50"
+                            >
+                              <span>Assignment History ({history.length})</span>
+                              <span>{isHistoryOpen ? "−" : "+"}</span>
+                            </button>
+                            {isHistoryOpen && (
+                              <div className="mt-2 flex flex-col gap-2">
+                                {history.map((h) => (
+                                  <div key={h.id} className="rounded-xl border border-black/5 bg-brand-off-white/40 p-3">
+                                    <p className="text-xs font-semibold text-brand-neutral-black">
+                                      {nameMap.get(h.snaUserId) ?? "Unknown"}
+                                    </p>
+                                    <p className="mt-0.5 text-xs text-brand-neutral-black/50">
+                                      {formatDate(h.startedAt)} – {formatDate(h.endedAt)}
+                                      {h.endedByName ? ` · ended by ${h.endedByName}` : ""}
+                                    </p>
+                                    {h.endReason && (
+                                      <p className="mt-1 text-xs text-brand-neutral-black/70">&ldquo;{h.endReason}&rdquo;</p>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
                     );
                   })}
                 </div>
               )}
 
-              {children.removed.length > 0 && (
-                <div className="mt-3">
-                  <button
-                    type="button"
-                    onClick={() => setShowRemovedChildren((v) => !v)}
-                    className="flex w-full items-center justify-between rounded-2xl border border-dashed border-black/10 bg-white/60 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-brand-neutral-black/50"
-                  >
-                    <span>Previously in this class ({children.removed.length})</span>
-                    <span>{showRemovedChildren ? "−" : "+"}</span>
-                  </button>
-                  {showRemovedChildren && (
-                    <div className="mt-2 flex flex-col gap-2">
-                      {children.removed.map((c) => (
+              <div className="mt-4">
+                <button
+                  type="button"
+                  onClick={() => setShowPastChildren((v) => !v)}
+                  className="mb-2 flex w-full items-center justify-between"
+                >
+                  <h2 className="font-heading text-sm font-bold uppercase tracking-wide text-brand-neutral-black/60">
+                    Previously in this Class ({children.past.length})
+                  </h2>
+                  <span className="text-sm font-semibold text-brand-neutral-black/40">{showPastChildren ? "−" : "+"}</span>
+                </button>
+                {showPastChildren && (
+                  children.past.length === 0 ? (
+                    <p className="rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-center text-sm text-brand-neutral-black/60">
+                      No children have left this class.
+                    </p>
+                  ) : (
+                    <div className="flex flex-col gap-2">
+                      {children.past.map((c) => (
                         <div key={c.id} className="rounded-2xl border border-black/5 bg-white/60 p-4">
                           <p className="text-sm font-semibold text-brand-neutral-black">
                             {childNameMap.get(c.passportId) ?? "Unknown"}
@@ -439,9 +681,9 @@ export default function PrincipalClassDetailPage() {
                         </div>
                       ))}
                     </div>
-                  )}
-                </div>
-              )}
+                  )
+                )}
+              </div>
             </section>
 
             <section className="mt-6">
@@ -528,6 +770,20 @@ export default function PrincipalClassDetailPage() {
       )}
 
       {institutionId && (
+        <AssignClassSnaSheet
+          isOpen={isAssignClassSnaOpen}
+          classId={classId}
+          className={className ?? "this class"}
+          eligibleSnas={eligibleClassSnas}
+          onClose={() => setIsAssignClassSnaOpen(false)}
+          onAssigned={() => {
+            setIsAssignClassSnaOpen(false);
+            load();
+          }}
+        />
+      )}
+
+      {institutionId && (
         <AddClassChildSheet
           isOpen={isAddChildOpen}
           classId={classId}
@@ -559,6 +815,29 @@ export default function PrincipalClassDetailPage() {
           }}
           onConfirmed={() => {
             setRemoveTeacherTarget(null);
+            load();
+          }}
+        />
+      )}
+
+      {removeClassSnaTarget && (
+        <ReasonConfirmSheet
+          isOpen={Boolean(removeClassSnaTarget)}
+          title={`Remove ${nameMap.get(removeClassSnaTarget.userId) ?? "this class SNA"}?`}
+          description="They lose class-wide access to this class's children immediately. This is a removal, not a delete -- it stays in this class's history."
+          confirmLabel="Remove Class SNA"
+          submittingLabel="Removing…"
+          onClose={() => setRemoveClassSnaTarget(null)}
+          onConfirm={async (reason) => {
+            const supabase = createClient();
+            const { error } = await supabase.rpc("end_class_sna_assignment", {
+              p_class_sna_assignment_id: removeClassSnaTarget.id,
+              p_reason: reason,
+            });
+            return { error: error?.message ?? null };
+          }}
+          onConfirmed={() => {
+            setRemoveClassSnaTarget(null);
             load();
           }}
         />

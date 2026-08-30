@@ -11,6 +11,15 @@ import { BottomSheet } from "@/components/ui/BottomSheet";
 // than SNA assignment, per the fourth Step 0 answer). Candidates come
 // from get_institution_child_roster() (0074), the SAME roster RPC the
 // incident log already uses -- not a new or parallel roster lookup.
+//
+// PRD 2, Stage 5: the parent page now builds eligibleChildren from that
+// roster's own current_class_id column (0129), filtered to null --
+// genuinely enrolled-but-unassigned only, not "any child not already in
+// THIS class" (which used to silently offer a move from another class).
+// add_class_child() itself still supports moving a child between
+// classes -- that capability isn't removed at the RPC layer -- but this
+// picker no longer offers it as a side effect of adding someone,
+// matching "Assign child to class" as its own deliberate action.
 
 interface EligibleChild {
   passportId: string;
@@ -65,17 +74,16 @@ export function AddClassChildSheet({ isOpen, classId, className, eligibleChildre
 
   return (
     <BottomSheet isOpen={isOpen} onClose={close}>
-      <h2 className="font-heading text-xl font-semibold text-brand-neutral-black">Add a Child to {className}</h2>
+      <h2 className="font-heading text-xl font-semibold text-brand-neutral-black">Assign a Child to {className}</h2>
       <p className="mt-2 text-sm text-brand-neutral-black/70">
-        A child already in another class moves here -- their old class roster closes automatically, never leaving them
-        in two classes at once.
+        Shows children enrolled at your school who aren&apos;t currently in any class.
       </p>
 
       <div className="mt-4">
         <label className="mb-1.5 block text-sm font-semibold text-brand-neutral-black">Child</label>
         {eligibleChildren.length === 0 ? (
           <p className="rounded-xl border border-dashed border-black/10 bg-brand-off-white/40 p-3 text-sm text-brand-neutral-black/60">
-            No children linked to this school yet.
+            No enrolled children are currently unassigned.
           </p>
         ) : (
           <select
@@ -100,7 +108,7 @@ export function AddClassChildSheet({ isOpen, classId, className, eligibleChildre
       )}
 
       <Button type="button" onClick={handleAdd} disabled={isSubmitting || eligibleChildren.length === 0} className="mt-4">
-        {isSubmitting ? "Adding…" : "Add Child"}
+        {isSubmitting ? "Assigning…" : "Assign to Class"}
       </Button>
       <Button type="button" variant="secondary" onClick={close} disabled={isSubmitting} className="mt-2 !border-black/10 !text-black/60">
         Cancel
