@@ -111,6 +111,25 @@ interface ClinicianRow {
   engagedByInstitutionName: string | null;
 }
 
+// PRD 2, Stage 4 -- get_passport_clinician_history() (0128), a
+// dedicated function rather than a widened get_passport_clinicians():
+// every existing caller of that one treats every returned row as
+// currently connected, so adding revoked rows to its own column list
+// would have silently broken four parent-track screens. This shape is
+// deliberately its own thing.
+interface ClinicianHistoryRow {
+  clinicianAccessId: string;
+  clinicianId: string;
+  fullName: string;
+  specialty: string;
+  engagedBy: "parent" | "institution";
+  engagedByInstitutionId: string | null;
+  engagedByInstitutionName: string | null;
+  linkedAt: string;
+  revokedAt: string;
+  revocationReason: string | null;
+}
+
 type TabKey = "enrolment" | "access" | "clinical";
 
 const TABS: { key: TabKey; label: string }[] = [
@@ -162,7 +181,7 @@ export default function PrincipalPassportDetailPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notOnRoster, setNotOnRoster] = useState(false);
-  const [showHistory, setShowHistory] = useState(false);
+  const [showAccessHistory, setShowAccessHistory] = useState(false);
 
   const [isGrantOpen, setIsGrantOpen] = useState(false);
   const [revokeTarget, setRevokeTarget] = useState<AccessRow | null>(null);
@@ -192,6 +211,11 @@ export default function PrincipalPassportDetailPage() {
   const [clinicianGrantedNotice, setClinicianGrantedNotice] = useState<string | null>(null);
   const [clinicianRevokeTarget, setClinicianRevokeTarget] = useState<ClinicianRow | null>(null);
   const [clinicianRevokedNotice, setClinicianRevokedNotice] = useState<string | null>(null);
+
+  // Stage 4 -- Previous Clinicians (get_passport_clinician_history, 0128).
+  const [clinicianHistory, setClinicianHistory] = useState<ClinicianHistoryRow[]>([]);
+  const [clinicianHistoryError, setClinicianHistoryError] = useState<string | null>(null);
+  const [showClinicianHistory, setShowClinicianHistory] = useState(false);
 
   const load = useCallback(async () => {
     if (!user) return;
@@ -236,21 +260,23 @@ export default function PrincipalPassportDetailPage() {
     }
     setChildName(rosterMatch.child_name);
 
-    const [accessResult, staffRosterResult, guardiansResult, claimCodeResult, enrolmentResult, cliniciansResult] = await Promise.all([
-      supabase.rpc("get_passport_access_for_child", { p_passport_id: passportId, p_institution_id: staffRow.institution_id }),
-      supabase.rpc("get_institution_staff_roster", { p_institution_id: staffRow.institution_id, p_include_inactive: false, p_include_pending: false }),
-      supabase.rpc("get_passport_guardians_for_child", { p_institution_id: staffRow.institution_id, p_passport_id: passportId }),
-      supabase.rpc("get_passport_claim_code_status", { p_institution_id: staffRow.institution_id, p_passport_id: passportId }),
-      supabase
-        .from("enrolments")
-        .select("id, ended_at, end_reason")
-        .eq("passport_id", passportId)
-        .eq("institution_id", staffRow.institution_id)
-        .order("started_at", { ascending: false })
-        .limit(1)
-        .maybeSingle(),
-      supabase.rpc("get_passport_clinicians", { p_passport_id: passportId }),
-    ]);
+    const [accessResult, staffRosterResult, guardiansResult, claimCodeResult, enrolmentResult, cliniciansResult, clinicianHistoryResult] =
+      await Promise.all([
+        supabase.rpc("get_passport_access_for_child", { p_passport_id: passportId, p_institution_id: staffRow.institution_id }),
+        supabase.rpc("get_institution_staff_roster", { p_institution_id: staffRow.institution_id, p_include_inactive: false, p_include_pending: false }),
+        supabase.rpc("get_passport_guardians_for_child", { p_institution_id: staffRow.institution_id, p_passport_id: passportId }),
+        supabase.rpc("get_passport_claim_code_status", { p_institution_id: staffRow.institution_id, p_passport_id: passportId }),
+        supabase
+          .from("enrolments")
+          .select("id, ended_at, end_reason")
+          .eq("passport_id", passportId)
+          .eq("institution_id", staffRow.institution_id)
+          .order("started_at", { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+        supabase.rpc("get_passport_clinicians", { p_passport_id: passportId }),
+        supabase.rpc("get_passport_clinician_history", { p_passport_id: passportId, p_institution_id: staffRow.institution_id }),
+      ]);
 
     if (cliniciansResult.error) {
       console.error("Failed to load connected clinicians:", cliniciansResult.error);
@@ -275,6 +301,40 @@ export default function PrincipalPassportDetailPage() {
             engagedBy: row.engaged_by,
             engagedByInstitutionId: row.engaged_by_institution_id,
             engagedByInstitutionName: row.engaged_by_institution_name,
+          })
+        )
+      );
+    }
+
+    if (clinicianHistoryResult.error) {
+      console.error("Failed to load clinician history:", clinicianHistoryResult.error);
+      setClinicianHistoryError("Couldn't load past clinicians.");
+    } else {
+      setClinicianHistoryError(null);
+      setClinicianHistory(
+        (clinicianHistoryResult.data ?? []).map(
+          (row: {
+            clinician_access_id: string;
+            clinician_id: string;
+            full_name: string | null;
+            specialty: string;
+            engaged_by: "parent" | "institution";
+            engaged_by_institution_id: string | null;
+            engaged_by_institution_name: string | null;
+            linked_at: string;
+            revoked_at: string;
+            revocation_reason: string | null;
+          }) => ({
+            clinicianAccessId: row.clinician_access_id,
+            clinicianId: row.clinician_id,
+            fullName: row.full_name ?? "A clinician",
+            specialty: row.specialty,
+            engagedBy: row.engaged_by,
+            engagedByInstitutionId: row.engaged_by_institution_id,
+            engagedByInstitutionName: row.engaged_by_institution_name,
+            linkedAt: row.linked_at,
+            revokedAt: row.revoked_at,
+            revocationReason: row.revocation_reason,
           })
         )
       );
@@ -576,61 +636,76 @@ export default function PrincipalPassportDetailPage() {
             )}
 
             {activeTab === "access" && (
-              <section>
-                <div className="mb-2 flex items-center justify-between">
-                  <h2 className="font-heading text-sm font-bold uppercase tracking-wide text-brand-neutral-black/60">
-                    Current Access ({access.active.length})
-                  </h2>
-                  <button type="button" onClick={() => setIsGrantOpen(true)} className="text-xs font-semibold text-brand-prussian-blue">
-                    + Grant Access
-                  </button>
-                </div>
-
-                {access.active.length === 0 ? (
-                  <p className="rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-center text-sm text-brand-neutral-black/60">
-                    No one currently has passport access to {childName}.
-                  </p>
-                ) : (
-                  <div className="flex flex-col gap-2">
-                    {access.active.map((a) => (
-                      <div key={a.id} className="rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
-                        <div className="flex items-start justify-between gap-2">
-                          <div>
-                            <p className="text-sm font-semibold text-brand-neutral-black">{a.fullName}</p>
-                            <p className="mt-0.5 text-xs text-brand-neutral-black/50">{ROLE_LABEL[a.actorRole] ?? a.actorRole}</p>
-                          </div>
-                          <span className="flex-shrink-0 rounded-full bg-brand-pastel-blue/20 px-2.5 py-1 text-xs font-semibold text-brand-prussian-blue">
-                            Active
-                          </span>
-                        </div>
-                        <p className="mt-2 text-xs text-brand-neutral-black/50">
-                          Granted {formatDate(a.linkedAt)}
-                          {a.grantedByName ? ` by ${a.grantedByName}` : ""}
-                        </p>
-                        <button
-                          type="button"
-                          onClick={() => setRevokeTarget(a)}
-                          className="mt-3 block w-full rounded-xl border border-brand-golden-brown py-2 text-center text-xs font-semibold text-brand-golden-brown"
-                        >
-                          Revoke
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {access.past.length > 0 && (
-                  <div className="mt-3">
-                    <button
-                      type="button"
-                      onClick={() => setShowHistory((v) => !v)}
-                      className="flex w-full items-center justify-between rounded-2xl border border-dashed border-black/10 bg-white/60 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-brand-neutral-black/50"
-                    >
-                      <span>Past access ({access.past.length})</span>
-                      <span>{showHistory ? "−" : "+"}</span>
+              <>
+                <section className="mb-6">
+                  <div className="mb-2 flex items-center justify-between">
+                    <h2 className="font-heading text-sm font-bold uppercase tracking-wide text-brand-neutral-black/60">
+                      Current Access ({access.active.length})
+                    </h2>
+                    <button type="button" onClick={() => setIsGrantOpen(true)} className="text-xs font-semibold text-brand-prussian-blue">
+                      + Grant Access
                     </button>
-                    {showHistory && (
-                      <div className="mt-2 flex flex-col gap-2">
+                  </div>
+
+                  {access.active.length === 0 ? (
+                    <p className="rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-center text-sm text-brand-neutral-black/60">
+                      No direct access granted. Access is derived from class or 1:1 assignments.
+                    </p>
+                  ) : (
+                    <div className="flex flex-col gap-2">
+                      {access.active.map((a) => (
+                        <div key={a.id} className="rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
+                          <div className="flex items-start justify-between gap-2">
+                            <div>
+                              <p className="text-sm font-semibold text-brand-neutral-black">{a.fullName}</p>
+                              <p className="mt-0.5 text-xs text-brand-neutral-black/50">{ROLE_LABEL[a.actorRole] ?? a.actorRole}</p>
+                            </div>
+                            <span className="flex-shrink-0 rounded-full bg-brand-pastel-blue/20 px-2.5 py-1 text-xs font-semibold text-brand-prussian-blue">
+                              Active
+                            </span>
+                          </div>
+                          <p className="mt-2 text-xs text-brand-neutral-black/50">
+                            Granted {formatDate(a.linkedAt)}
+                            {a.grantedByName ? ` by ${a.grantedByName}` : ""}
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() => setRevokeTarget(a)}
+                            className="mt-3 block w-full rounded-xl border border-brand-golden-brown py-2 text-center text-xs font-semibold text-brand-golden-brown"
+                          >
+                            Revoke access
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </section>
+
+                {/* Stage 4: first-class, not a footnote -- "who has had
+                    access to this child, and when" is the exact question
+                    a principal answers from this section to an
+                    inspector. Same header weight as Current Access above
+                    it (not the muted/dashed accordion-trigger treatment
+                    this used to have), collapsed by default purely for
+                    density, never for prominence. */}
+                <section>
+                  <button
+                    type="button"
+                    onClick={() => setShowAccessHistory((v) => !v)}
+                    className="mb-2 flex w-full items-center justify-between"
+                  >
+                    <h2 className="font-heading text-sm font-bold uppercase tracking-wide text-brand-neutral-black/60">
+                      Access History ({access.past.length})
+                    </h2>
+                    <span className="text-sm font-semibold text-brand-neutral-black/40">{showAccessHistory ? "−" : "+"}</span>
+                  </button>
+                  {showAccessHistory && (
+                    access.past.length === 0 ? (
+                      <p className="rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-center text-sm text-brand-neutral-black/60">
+                        No access history yet.
+                      </p>
+                    ) : (
+                      <div className="flex flex-col gap-2">
                         {access.past.map((a) => (
                           <div key={a.id} className="rounded-2xl border border-black/5 bg-white/60 p-4">
                             <p className="text-sm font-semibold text-brand-neutral-black">{a.fullName}</p>
@@ -651,92 +726,140 @@ export default function PrincipalPassportDetailPage() {
                           </div>
                         ))}
                       </div>
-                    )}
-                  </div>
-                )}
-              </section>
+                    )
+                  )}
+                </section>
+              </>
             )}
 
             {activeTab === "clinical" && (
-              <section>
-                <div className="mb-2 flex items-center justify-between">
-                  <h2 className="font-heading text-sm font-bold uppercase tracking-wide text-brand-neutral-black/60">
-                    Clinical Team ({clinicians.length})
-                  </h2>
-                  <button
-                    type="button"
-                    onClick={() => setIsGrantClinicianOpen(true)}
-                    className="text-xs font-semibold text-brand-prussian-blue"
-                  >
-                    + Connect Clinician
-                  </button>
-                </div>
+              <>
+                <section className="mb-6">
+                  <div className="mb-2 flex items-center justify-between">
+                    <h2 className="font-heading text-sm font-bold uppercase tracking-wide text-brand-neutral-black/60">
+                      Clinical Team ({clinicians.length})
+                    </h2>
+                    <button
+                      type="button"
+                      onClick={() => setIsGrantClinicianOpen(true)}
+                      className="text-xs font-semibold text-brand-prussian-blue"
+                    >
+                      + Connect Clinician
+                    </button>
+                  </div>
 
-                {cliniciansError ? (
-                  <p className="rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-center text-sm text-brand-neutral-black/60">
-                    {cliniciansError}
-                  </p>
-                ) : clinicians.length === 0 ? (
-                  <p className="rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-center text-sm text-brand-neutral-black/60">
-                    No clinicians connected to {childName} yet.
-                  </p>
-                ) : (
-                  <div className="flex flex-col gap-2">
-                    {clinicians.map((c) => {
-                      // Symmetry with the parent's own view: a clinician this
-                      // institution engaged is theirs to revoke; a
-                      // parent-engaged one, or one engaged by a DIFFERENT
-                      // institution (a child linked to two schools), is
-                      // shown but read-only -- "neither authority can revoke
-                      // the other's".
-                      const canRevoke = c.engagedBy === "institution" && c.engagedByInstitutionId === institutionId;
-                      return (
-                        <div key={c.clinicianAccessId} className="rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
-                          <div className="flex items-start justify-between gap-2">
+                  {cliniciansError ? (
+                    <p className="rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-center text-sm text-brand-neutral-black/60">
+                      {cliniciansError}
+                    </p>
+                  ) : clinicians.length === 0 ? (
+                    <p className="rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-center text-sm text-brand-neutral-black/60">
+                      No clinicians connected to {childName} yet.
+                    </p>
+                  ) : (
+                    <div className="flex flex-col gap-2">
+                      {clinicians.map((c) => {
+                        // Symmetry with the parent's own view: a clinician
+                        // this institution engaged is theirs to revoke; a
+                        // parent-engaged one, or one engaged by a DIFFERENT
+                        // institution (a child linked to two schools), is
+                        // shown but read-only -- "neither authority can
+                        // revoke the other's". Stage 4: the read-only cases
+                        // get a Golden Brown eyebrow ("Managed by parent" /
+                        // "Managed by [school]") instead of a plain caption
+                        // line -- the revokable case gets an explicit
+                        // "Revoke access" button opening a reason sheet
+                        // directly, never a one-tap menu.
+                        const canRevoke = c.engagedBy === "institution" && c.engagedByInstitutionId === institutionId;
+                        const eyebrow =
+                          c.engagedBy === "parent"
+                            ? "Managed by parent"
+                            : canRevoke
+                              ? null
+                              : `Managed by ${c.engagedByInstitutionName ?? "another school"}`;
+                        return (
+                          <div key={c.clinicianAccessId} className="rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
+                            {eyebrow && (
+                              <p className="mb-1 text-xs font-bold uppercase tracking-wide text-brand-golden-brown">{eyebrow}</p>
+                            )}
                             <div>
                               <p className="text-sm font-semibold text-brand-neutral-black">{c.fullName}</p>
                               <p className="mt-0.5 text-xs text-brand-neutral-black/50">
                                 {CLINICIAN_SPECIALTY_LABEL[c.specialty as ClinicianSpecialty] ?? c.specialty}
                               </p>
                             </div>
+                            {canRevoke && (
+                              <button
+                                type="button"
+                                onClick={() => setClinicianRevokeTarget(c)}
+                                className="mt-3 block w-full rounded-xl border border-brand-golden-brown py-2 text-center text-xs font-semibold text-brand-golden-brown"
+                              >
+                                Revoke access
+                              </button>
+                            )}
                           </div>
-                          <p className="mt-2 text-xs text-brand-neutral-black/50">
-                            {c.engagedBy === "parent"
-                              ? "Connected by the family"
-                              : canRevoke
-                                ? "Connected by your school"
-                                : `Connected by ${c.engagedByInstitutionName ?? "another school"}`}
-                          </p>
-                          {canRevoke ? (
-                            <button
-                              type="button"
-                              onClick={() => setClinicianRevokeTarget(c)}
-                              className="mt-3 block w-full rounded-xl border border-brand-golden-brown py-2 text-center text-xs font-semibold text-brand-golden-brown"
-                            >
-                              Revoke
-                            </button>
-                          ) : (
-                            <p className="mt-3 text-center text-xs text-brand-neutral-black/40">
-                              Read-only — managed elsewhere
-                            </p>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
+                        );
+                      })}
+                    </div>
+                  )}
 
-                {clinicianGrantedNotice && (
-                  <p className="mt-3 rounded-xl bg-brand-off-white/50 px-4 py-3 text-sm text-brand-neutral-black">
-                    {clinicianGrantedNotice}
-                  </p>
-                )}
-                {clinicianRevokedNotice && (
-                  <p className="mt-3 rounded-xl bg-brand-off-white/50 px-4 py-3 text-sm text-brand-neutral-black">
-                    {clinicianRevokedNotice}
-                  </p>
-                )}
-              </section>
+                  {clinicianGrantedNotice && (
+                    <p className="mt-3 rounded-xl bg-brand-off-white/50 px-4 py-3 text-sm text-brand-neutral-black">
+                      {clinicianGrantedNotice}
+                    </p>
+                  )}
+                  {clinicianRevokedNotice && (
+                    <p className="mt-3 rounded-xl bg-brand-off-white/50 px-4 py-3 text-sm text-brand-neutral-black">
+                      {clinicianRevokedNotice}
+                    </p>
+                  )}
+                </section>
+
+                {/* Stage 4: Previous Clinicians -- revoked or stepped-back
+                    engagements, name/role/date ended/reason retained.
+                    get_passport_clinician_history() (0128) -- data that
+                    was always in clinician_access but had no read path
+                    until now. Same first-class-not-footnote header
+                    treatment as Access History. */}
+                <section>
+                  <button
+                    type="button"
+                    onClick={() => setShowClinicianHistory((v) => !v)}
+                    className="mb-2 flex w-full items-center justify-between"
+                  >
+                    <h2 className="font-heading text-sm font-bold uppercase tracking-wide text-brand-neutral-black/60">
+                      Previous Clinicians ({clinicianHistory.length})
+                    </h2>
+                    <span className="text-sm font-semibold text-brand-neutral-black/40">{showClinicianHistory ? "−" : "+"}</span>
+                  </button>
+                  {showClinicianHistory && (
+                    clinicianHistoryError ? (
+                      <p className="rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-center text-sm text-brand-neutral-black/60">
+                        {clinicianHistoryError}
+                      </p>
+                    ) : clinicianHistory.length === 0 ? (
+                      <p className="rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-center text-sm text-brand-neutral-black/60">
+                        No previous clinicians.
+                      </p>
+                    ) : (
+                      <div className="flex flex-col gap-2">
+                        {clinicianHistory.map((h) => (
+                          <div key={h.clinicianAccessId} className="rounded-2xl border border-black/5 bg-white/60 p-4">
+                            <p className="text-sm font-semibold text-brand-neutral-black">{h.fullName}</p>
+                            <p className="mt-0.5 text-xs text-brand-neutral-black/50">
+                              {CLINICIAN_SPECIALTY_LABEL[h.specialty as ClinicianSpecialty] ?? h.specialty}
+                            </p>
+                            <p className="mt-2 text-xs text-brand-neutral-black/50">Ended {formatDate(h.revokedAt)}</p>
+                            {h.revocationReason && (
+                              <p className="mt-2 text-sm text-brand-neutral-black/70">&ldquo;{h.revocationReason}&rdquo;</p>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )
+                  )}
+                </section>
+              </>
             )}
           </>
         )}
