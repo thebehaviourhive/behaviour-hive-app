@@ -1,43 +1,23 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { InlineErrorState } from "@/components/ui/InlineErrorState";
+import { PrincipalBottomNav } from "@/components/principal/PrincipalBottomNav";
+import { IncidentCard, STATUS_LABEL, formatIncidentDate, type InstitutionIncidentRow } from "@/components/principal/IncidentCard";
 
 // Phase 6, Part G. A list, not a dashboard -- the real principal
-// dashboard is a separate, later build. Straight through
-// get_institution_incidents(), which already supports date-range and
-// planning_status/ncse_complete filtering (built in an earlier phase,
-// unused by any client until now) -- no new SQL needed for this piece.
-
-interface InstitutionIncidentRow {
-  incident_id: string;
-  occurred_at: string;
-  location: string;
-  category: string | null;
-  status: string;
-  owning_teacher_name: string | null;
-  child_indices: string[] | null;
-  debrief_required: boolean;
-  teacher_signed_at: string | null;
-  countersigned_at: string | null;
-  has_restrictive_practice: boolean;
-  planning_status: string[] | null;
-  ncse_report_complete: boolean[] | null;
-  created_by_name: string | null;
-  is_inherited: boolean;
-  inherited_from_name: string | null;
-  inherited_transferred_at: string | null;
-}
-
-const STATUS_LABEL: Record<string, string> = {
-  draft: "Draft",
-  awaiting_signoff: "Awaiting sign-off",
-  awaiting_principal: "Awaiting principal sign-off",
-  finalised: "Finalised",
-};
+// dashboard is a separate, later build (PRD 2 Stage 7). Straight
+// through get_institution_incidents(), which already supports
+// date-range and planning_status/ncse_complete filtering.
+//
+// PRD 2, Stage 1: row rendering is now IncidentCard, shared with
+// /principal/dashboard -- see that component's own header comment.
+// resolve_lapsed_incident_ownership() moved to its own effect, firing
+// once on institution resolution rather than on every filter change
+// (confirmed idempotent by reading its live SQL; calling it repeatedly
+// was harmless, just wasteful).
 
 const PLANNING_STATUS_OPTIONS = [
   { value: "", label: "Any" },
@@ -50,12 +30,6 @@ const NCSE_OPTIONS = [
   { value: "true", label: "Complete" },
   { value: "false", label: "Not complete" },
 ];
-
-function formatDate(value: string): string {
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return value;
-  return d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
-}
 
 function csvEscape(value: string): string {
   if (value.includes(",") || value.includes('"') || value.includes("\n")) {
@@ -99,6 +73,30 @@ export default function PrincipalIncidentsListPage() {
     };
   }, [user]);
 
+  // PRD 1, Stage 3 / PRD 2, Stage 1: same lazy-materialization call as
+  // /principal/dashboard -- this is a second, separate principal-facing
+  // incident list, so it needs its own call, not assumed covered by the
+  // dashboard's own. Best-effort, never blocks the load. Its own effect
+  // now, firing once when institutionId resolves -- not re-run on every
+  // filter change the way it used to be (confirmed idempotent, but
+  // there's no reason to re-trigger it on a date-range tweak).
+  useEffect(() => {
+    if (!institutionId) return;
+    let isMounted = true;
+    async function resolveLapsed() {
+      const supabase = createClient();
+      try {
+        await supabase.rpc("resolve_lapsed_incident_ownership", { p_institution_id: institutionId });
+      } catch {
+        // best-effort; see comment above
+      }
+    }
+    if (isMounted) resolveLapsed();
+    return () => {
+      isMounted = false;
+    };
+  }, [institutionId]);
+
   useEffect(() => {
     if (!institutionId) return;
     let isMounted = true;
@@ -106,15 +104,6 @@ export default function PrincipalIncidentsListPage() {
       setIsLoading(true);
       setLoadError(null);
       const supabase = createClient();
-      // PRD 1, Stage 3: same lazy-materialization call as /principal/
-      // dashboard -- this is a second, separate principal-facing
-      // incident list, so it needs the same call, not assumed covered
-      // by the dashboard's own. Best-effort, never blocks the load.
-      try {
-        await supabase.rpc("resolve_lapsed_incident_ownership", { p_institution_id: institutionId });
-      } catch {
-        // best-effort; see comment above
-      }
       const { data, error } = await supabase.rpc("get_institution_incidents", {
         p_institution_id: institutionId,
         p_start: start || null,
@@ -144,15 +133,15 @@ export default function PrincipalIncidentsListPage() {
     ];
     const lines = rows.map((r) =>
       [
-        formatDate(r.occurred_at),
+        formatIncidentDate(r.occurred_at),
         r.location,
         r.category ?? "not recorded",
         STATUS_LABEL[r.status] ?? r.status,
         r.owning_teacher_name ?? "—",
         (r.child_indices ?? []).join("/"),
         r.debrief_required ? "Yes" : "No",
-        r.teacher_signed_at ? formatDate(r.teacher_signed_at) : "not yet",
-        r.countersigned_at ? formatDate(r.countersigned_at) : "not yet",
+        r.teacher_signed_at ? formatIncidentDate(r.teacher_signed_at) : "not yet",
+        r.countersigned_at ? formatIncidentDate(r.countersigned_at) : "not yet",
         r.has_restrictive_practice ? "Yes" : "No",
         (r.planning_status ?? []).join("/") || "—",
         (r.ncse_report_complete ?? []).map((c) => (c ? "Complete" : "Not complete")).join("/") || "—",
@@ -177,15 +166,8 @@ export default function PrincipalIncidentsListPage() {
   }
 
   return (
-    <div className="flex min-h-full flex-1 flex-col bg-brand-off-white/40 pb-10">
+    <div className="flex min-h-full flex-1 flex-col bg-brand-off-white/40 pb-24">
       <header className="flex items-center gap-3 px-4 pt-6 pb-4">
-        <Link
-          href="/principal/dashboard"
-          aria-label="Back"
-          className="flex h-8 w-8 flex-shrink-0 items-center justify-center text-2xl leading-none text-brand-prussian-blue"
-        >
-          ‹
-        </Link>
         <h1 className="font-heading text-xl font-bold text-brand-prussian-blue">Incidents</h1>
       </header>
 
@@ -265,55 +247,13 @@ export default function PrincipalIncidentsListPage() {
         ) : (
           <div className="flex flex-col gap-2">
             {rows.map((r) => (
-              <div key={r.incident_id} className="rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
-                <Link href={`/teacher/incidents/${r.incident_id}`} className="block">
-                  <div className="flex items-start justify-between gap-2">
-                    <p className="text-sm font-semibold text-brand-neutral-black">{formatDate(r.occurred_at)}</p>
-                    <span className="flex-shrink-0 rounded-full bg-brand-pastel-blue/20 px-2.5 py-1 text-xs font-semibold text-brand-prussian-blue">
-                      {STATUS_LABEL[r.status] ?? r.status}
-                    </span>
-                  </div>
-                  <p className="mt-1 text-sm text-brand-neutral-black/80">
-                    {r.location} · {(r.child_indices ?? []).length} child{(r.child_indices ?? []).length === 1 ? "" : "ren"}
-                    {r.owning_teacher_name ? ` · ${r.owning_teacher_name}` : ""}
-                  </p>
-                  {/* Same "visibly inherited" requirement as the
-                      dashboard's own queue -- this is a second, separate
-                      principal-facing incident list, not assumed to
-                      inherit the dashboard's own copy of this badge. */}
-                  {r.is_inherited && (
-                    <p className="mt-1.5 rounded-xl bg-brand-golden-brown/10 px-2.5 py-1.5 text-xs text-brand-golden-brown">
-                      Inherited from {r.inherited_from_name ?? "a departed supply teacher"}
-                      {r.inherited_transferred_at ? ` · transferred ${formatDate(r.inherited_transferred_at)}` : ""}
-                    </p>
-                  )}
-                  {r.has_restrictive_practice && (
-                    <div className="mt-2 flex flex-wrap gap-1.5 text-xs">
-                      {(r.planning_status ?? []).map((s, i) => (
-                        <span key={i} className="rounded-full bg-brand-golden-brown/10 px-2 py-0.5 font-semibold text-brand-golden-brown">
-                          {s === "in_bsp" ? "In BSP" : "Not planned"}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                </Link>
-                {/* Direct route to the document, not just the form -- a --
-                    principal working from this list wants the PDF.
-                    Signed records only, same gate the export page and
-                    the detail page's own export link both use. */}
-                {r.teacher_signed_at && (
-                  <Link
-                    href={`/teacher/incidents/${r.incident_id}/print`}
-                    className="mt-3 block rounded-xl border border-brand-prussian-blue py-2 text-center text-xs font-semibold text-brand-prussian-blue"
-                  >
-                    Export PDF
-                  </Link>
-                )}
-              </div>
+              <IncidentCard key={r.incident_id} incident={r} />
             ))}
           </div>
         )}
       </main>
+
+      <PrincipalBottomNav />
     </div>
   );
 }

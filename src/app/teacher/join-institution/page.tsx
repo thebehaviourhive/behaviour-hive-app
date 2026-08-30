@@ -8,18 +8,20 @@ import { TextField } from "@/components/ui/TextField";
 import { LockIcon } from "@/components/ui/icons";
 import { createClient } from "@/lib/supabase/client";
 import { useRequireRole } from "@/hooks/useRequireRole";
+import { getPostAuthRedirect } from "@/lib/roleRedirect";
 
-// School staff home, by role -- the one place this destination lives,
-// so the "already joined" resume check and the post-join routing below
-// can never drift apart. class_teacher's destination is the
-// pre-existing one, byte-identical; sna's is the Phase 3 Passports home
-// (src/app/sna/passports/page.tsx); principal's is the Incident Log's
-// own minimal surface (src/app/principal/dashboard/page.tsx).
-function getStaffDashboardDestination(role: string | undefined): string {
-  if (role === "sna") return "/sna/passports";
-  if (role === "principal") return "/principal/dashboard";
-  return "/teacher/dashboard";
-}
+// PRD 2, Stage 1: this used to carry its own local, independent copy of
+// "where does this role's dashboard live" (getStaffDashboardDestination)
+// -- a second hardcoding of the exact same mapping getPostAuthRedirect()
+// already owns, with a comment claiming to be "the one place this
+// destination lives" while a second one sat in src/lib/roleRedirect.ts
+// the whole time. Two independent copies of the same routing decision
+// is exactly the shape that drifts silently. Collapsed to call
+// getPostAuthRedirect() directly -- this page's own useRequireRole(["class_teacher", "sna", "principal"])
+// guarantees staffRole is always one of those three whenever these
+// calls actually fire, so the two functions' behavior was already
+// identical for every real case; this just removes the second source
+// of truth, not a behavior change.
 
 // The one-principal-per-institution constraint (migration 0068,
 // deliberately NOT widened for handover -- see 0102's own migration
@@ -129,7 +131,7 @@ export default function TeacherJoinInstitutionPage() {
     checkExisting().then((result) => {
       if (!isMounted) return;
       if (result === "active") {
-        router.replace(getStaffDashboardDestination(staffRole));
+        router.replace(getPostAuthRedirect(staffRole));
       }
     });
 
@@ -143,7 +145,7 @@ export default function TeacherJoinInstitutionPage() {
     const result = await checkExisting();
     setIsCheckingStatus(false);
     if (result === "active") {
-      router.replace(getStaffDashboardDestination(staffRole));
+      router.replace(getPostAuthRedirect(staffRole));
     }
   }
 
@@ -196,7 +198,7 @@ export default function TeacherJoinInstitutionPage() {
       return;
     }
 
-    router.push(getStaffDashboardDestination(staffRole));
+    router.push(getPostAuthRedirect(staffRole));
   }
 
   if (!isReady || status === "checking" || status === "active") {

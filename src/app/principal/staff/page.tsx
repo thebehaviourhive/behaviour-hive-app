@@ -1,19 +1,20 @@
 "use client";
 
-import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { createClient } from "@/lib/supabase/client";
-import { getPostAuthRedirect } from "@/lib/roleRedirect";
 import { DeactivateStaffSheet } from "@/components/principal/DeactivateStaffSheet";
 import { ReviewStaffJoinSheet } from "@/components/principal/ReviewStaffJoinSheet";
-import { HandOverPrincipalSheet } from "@/components/principal/HandOverPrincipalSheet";
+import { PrincipalBottomNav } from "@/components/principal/PrincipalBottomNav";
 
 // Staff Lifecycle Stage 1, Step 3 (+ Stage 1b: pending as a third row-
-// state, approve/reject, rejected history). Minimal by design -- this is
-// not the principal dashboard (that's PRD 2). Tone matches the rest of
+// state, approve/reject, rejected history). Tone matches the rest of
 // this module's principal-facing surfaces: administrative and precise.
+//
+// PRD 2, Stage 1: Hand Over moved to /principal/school, under its own
+// "Account Administration" heading -- the design's own instruction,
+// "findable without hunting, never adjacent to routine actions." This
+// page keeps approve/reject/deactivate only.
 
 interface StaffRow {
   id: string;
@@ -48,7 +49,6 @@ function formatDate(value: string): string {
 }
 
 export default function PrincipalStaffPage() {
-  const router = useRouter();
   const { user, isReady } = useRequireRole("principal");
   const [institutionId, setInstitutionId] = useState<string | null>(null);
   const [staff, setStaff] = useState<StaffRow[]>([]);
@@ -58,7 +58,6 @@ export default function PrincipalStaffPage() {
   const [error, setError] = useState<string | null>(null);
   const [deactivateTarget, setDeactivateTarget] = useState<StaffRow | null>(null);
   const [reviewTarget, setReviewTarget] = useState<StaffRow | null>(null);
-  const [isHandOverOpen, setIsHandOverOpen] = useState(false);
 
   const load = useCallback(async (instId: string) => {
     const supabase = createClient();
@@ -128,15 +127,8 @@ export default function PrincipalStaffPage() {
   }
 
   return (
-    <div className="flex min-h-full flex-1 flex-col bg-brand-off-white/40 pb-10">
+    <div className="flex min-h-full flex-1 flex-col bg-brand-off-white/40 pb-24">
       <header className="flex items-center gap-3 px-4 pt-6 pb-4">
-        <Link
-          href="/principal/dashboard"
-          aria-label="Back"
-          className="flex h-8 w-8 flex-shrink-0 items-center justify-center text-2xl leading-none text-brand-prussian-blue"
-        >
-          ‹
-        </Link>
         <h1 className="font-heading text-xl font-bold text-brand-prussian-blue">Staff</h1>
       </header>
 
@@ -162,7 +154,6 @@ export default function PrincipalStaffPage() {
                 isSelf={member.user_id === user?.id}
                 onDeactivate={() => setDeactivateTarget(member)}
                 onReview={() => setReviewTarget(member)}
-                onHandOver={() => setIsHandOverOpen(true)}
               />
             ))}
           </div>
@@ -221,30 +212,7 @@ export default function PrincipalStaffPage() {
         />
       )}
 
-      <HandOverPrincipalSheet
-        isOpen={isHandOverOpen}
-        onClose={() => setIsHandOverOpen(false)}
-        eligibleSuccessors={staff
-          .filter((m) => m.is_active && m.role !== "principal" && m.user_id !== user?.id)
-          .map((m) => ({ userId: m.user_id, fullName: m.full_name }))}
-        onHandedOver={(outcome, stayingRole) => {
-          setIsHandOverOpen(false);
-          // Route on what we KNOW just happened, not on re-derived,
-          // possibly-stale auth-claim state -- 'staying' writes the new
-          // role in the same transaction, so this is exactly as reliable
-          // as the RPC's own success response. 'leaving' deliberately
-          // does NOT touch the outgoing principal's own auth claim (see
-          // 0102's own comment) -- they still read as 'principal' with
-          // no active institution, which /principal/dashboard's own
-          // resolution already sends to join-institution's four-way
-          // status page; going there directly just skips that hop.
-          if (outcome === "staying" && stayingRole) {
-            router.push(getPostAuthRedirect(stayingRole));
-          } else {
-            router.push("/teacher/join-institution");
-          }
-        }}
-      />
+      <PrincipalBottomNav />
     </div>
   );
 }
@@ -254,13 +222,11 @@ function StaffCard({
   isSelf,
   onDeactivate,
   onReview,
-  onHandOver,
 }: {
   member: StaffRow;
   isSelf: boolean;
   onDeactivate: () => void;
   onReview: () => void;
-  onHandOver: () => void;
 }) {
   const statusLabel = member.is_pending ? "Pending" : member.is_active ? "Active" : "Deactivated";
   const statusClass = member.is_pending
@@ -294,15 +260,9 @@ function StaffCard({
         </button>
       )}
 
-      {member.is_active && isSelf && member.role === "principal" && (
-        <button
-          type="button"
-          onClick={onHandOver}
-          className="mt-3 block w-full rounded-xl border border-brand-prussian-blue py-2 text-center text-xs font-semibold text-brand-prussian-blue"
-        >
-          Hand Over Principal Role
-        </button>
-      )}
+      {/* Hand Over moved to /principal/school -- see this page's own
+          header comment. isSelf's own principal branch no longer needs
+          a card action here. */}
 
       {member.is_active && !isSelf && (
         <button

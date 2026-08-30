@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { createClient } from "@/lib/supabase/client";
 import { EnrolChildSheet } from "@/components/principal/EnrolChildSheet";
+import { PrincipalBottomNav } from "@/components/principal/PrincipalBottomNav";
 
 // PRD 1, Stage 4, Step 3. Mirrors /principal/classes' own list idiom
 // exactly (header with a back chevron + title, rounded-2xl white cards)
@@ -106,15 +107,8 @@ export default function PrincipalPassportsPage() {
     : past;
 
   return (
-    <div className="flex min-h-full flex-1 flex-col bg-brand-off-white/40 pb-10">
+    <div className="flex min-h-full flex-1 flex-col bg-brand-off-white/40 pb-24">
       <header className="flex items-center gap-3 px-4 pt-6 pb-4">
-        <Link
-          href="/principal/dashboard"
-          aria-label="Back"
-          className="flex h-8 w-8 flex-shrink-0 items-center justify-center text-2xl leading-none text-brand-prussian-blue"
-        >
-          ‹
-        </Link>
         <h1 className="flex-1 font-heading text-xl font-bold text-brand-prussian-blue">Passports</h1>
         {institutionId && (
           <button
@@ -217,6 +211,8 @@ export default function PrincipalPassportsPage() {
           onEnrolled={load}
         />
       )}
+
+      <PrincipalBottomNav />
     </div>
   );
 }

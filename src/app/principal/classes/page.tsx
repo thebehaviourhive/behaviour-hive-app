@@ -6,6 +6,7 @@ import { useRequireRole } from "@/hooks/useRequireRole";
 import { createClient } from "@/lib/supabase/client";
 import { CreateClassSheet } from "@/components/principal/CreateClassSheet";
 import { SetCutoffSheet } from "@/components/principal/SetCutoffSheet";
+import { PrincipalBottomNav } from "@/components/principal/PrincipalBottomNav";
 import { formatCutoffTime } from "@/lib/temporaryAccessTime";
 
 // PRD 1, Stage 2, Step 3. Reuses /principal/staff's own list idiom
@@ -133,15 +134,8 @@ export default function PrincipalClassesPage() {
   }
 
   return (
-    <div className="flex min-h-full flex-1 flex-col bg-brand-off-white/40 pb-10">
+    <div className="flex min-h-full flex-1 flex-col bg-brand-off-white/40 pb-24">
       <header className="flex items-center gap-3 px-4 pt-6 pb-4">
-        <Link
-          href="/principal/dashboard"
-          aria-label="Back"
-          className="flex h-8 w-8 flex-shrink-0 items-center justify-center text-2xl leading-none text-brand-prussian-blue"
-        >
-          ‹
-        </Link>
         <h1 className="flex-1 font-heading text-xl font-bold text-brand-prussian-blue">Classes</h1>
         {institutionId && (
           <button
@@ -221,6 +215,8 @@ export default function PrincipalClassesPage() {
           }}
         />
       )}
+
+      <PrincipalBottomNav />
     </div>
   );
 }
