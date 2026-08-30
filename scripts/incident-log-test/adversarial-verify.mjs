@@ -20,7 +20,7 @@
 // stage development. Every check from V onward is independently
 // self-contained (own institution, own accounts, own cleanup) and
 // individually selectable: V, W, X, Y, Z, AA, BB, CC, DD, EE, FF, GG,
-// HH, II, JJ, KK, LL, MM, NN, OO, PP, QQ, RR, SS. Selecting none of these (ONLY_CHECKS unset) is the full run --
+// HH, II, JJ, KK, LL, MM, NN, OO, PP, QQ, RR, SS, TT. Selecting none of these (ONLY_CHECKS unset) is the full run --
 // the one that gates deploys -- and its behavior is unchanged: same
 // checks, same order, same pass/fail counts. The only observable
 // difference is where the top-level fixture's own cleanup log line
@@ -9604,6 +9604,251 @@ async function main() {
     await admin.from("passports").delete().in("id", Object.values(childSS));
     await admin.from("institutions").delete().eq("id", institutionSSId);
     for (const id of [principalSSId, snaSS1Id, snaSS2Id, snaSS3Id]) {
+      await admin.auth.admin.deleteUser(id);
+    }
+  }
+
+  console.log(`\n== CHECK TT: SQL for Stage 6 (migrations 0131/0132) -- get_institution_temporary_access() shape (names/class_name resolved inline, institution-scoping, any active staff not just principal), is_currently_active computed live against the SAME grant across its own lifecycle (comfortably-ahead cutoff -> true, cutoff already passed but not revoked -> false, then actually revoked -> false for a second reason), the recent-past window (p_days_back excludes/includes an old resolved grant on request), revoking from the new surface via the institution's principal (not the class's own teacher), and resolve_lapsed_incident_ownership()'s own new temporary_access_id link -- correctly populated when a covering SNA's lapsed grant caused the transfer, correctly NULL when a genuine class_teacher's own deactivation caused it (no grant to link to at all). ==`);
+  if (shouldRun("TT")) {
+    const { data: instTT, error: instTTErr } = await admin
+      .from("institutions")
+      .insert({ name: "TT Institution", institution_code: CODE + "TT", status: "verified" })
+      .select()
+      .single();
+    if (instTTErr) throw instTTErr;
+    const institutionTTId = instTT.id;
+
+    const { data: instTTOther, error: instTTOtherErr } = await admin
+      .from("institutions")
+      .insert({ name: "TT Other Institution", institution_code: CODE + "TTB", status: "verified" })
+      .select()
+      .single();
+    if (instTTOtherErr) throw instTTOtherErr;
+    const institutionTTOtherId = instTTOther.id;
+
+    const principalTTId = await createUser("checktt.principal@thebehaviourhive.com", "TT Principal", "principal");
+    const principalTTOtherId = await createUser("checktt.principalother@thebehaviourhive.com", "TT Other Principal", "principal");
+    const teacherTTId = await createUser("checktt.teacher@thebehaviourhive.com", "TT Teacher", "class_teacher");
+    const snaCoverTTId = await createUser("checktt.snacover@thebehaviourhive.com", "TT SNA Cover", "sna");
+
+    const { data: staffTTRows, error: staffTTErr } = await admin.from("institution_staff").insert([
+      { institution_id: institutionTTId, user_id: principalTTId, role: "principal" },
+      { institution_id: institutionTTOtherId, user_id: principalTTOtherId, role: "principal" },
+      { institution_id: institutionTTId, user_id: teacherTTId, role: "class_teacher" },
+      { institution_id: institutionTTId, user_id: snaCoverTTId, role: "sna" },
+    ]).select();
+    if (staffTTErr) throw staffTTErr;
+
+    const principalTT = await signedInClient("checktt.principal@thebehaviourhive.com");
+    const principalTTOther = await signedInClient("checktt.principalother@thebehaviourhive.com");
+    for (const row of staffTTRows.filter((r) => r.institution_id === institutionTTId && r.user_id !== principalTTId)) {
+      const { error } = await principalTT.rpc("approve_staff_join", { p_institution_staff_id: row.id });
+      if (error) throw error;
+    }
+    const teacherTT = await signedInClient("checktt.teacher@thebehaviourhive.com");
+    const snaCoverTT = await signedInClient("checktt.snacover@thebehaviourhive.com");
+
+    const { data: classTT1Id, error: classTT1Err } = await principalTT.rpc("create_class", { p_institution_id: institutionTTId, p_name: "TT Room 1" });
+    if (classTT1Err) throw classTT1Err;
+
+    const { data: childTTId, error: childTTErr } = await principalTT.rpc("create_school_passport", { p_institution_id: institutionTTId, p_child_name: "TT Child" });
+    if (childTTErr) throw childTTErr;
+
+    const { data: locTT } = await admin.from("incident_locations").select("id").eq("value", "Classroom").is("institution_id", null).single();
+
+    // ---- Set-up: cutoff comfortably ahead, grant temp access to
+    // snaCoverTT for Room 1, today. Authority 2 (principal, any class),
+    // not Authority 1 -- exercising the SAME path the new institution-
+    // wide view's own principal-driven grant would use. ----
+    const nowPartsTT = dublinNowParts();
+    const cutoffAheadTT = addMinutesClamped(nowPartsTT.time, 180);
+    const { error: cutoffAheadErr } = await principalTT.rpc("set_temporary_access_cutoff", { p_institution_id: institutionTTId, p_cutoff_time: cutoffAheadTT });
+    if (cutoffAheadErr) throw cutoffAheadErr;
+    const { error: grantTTErr } = await principalTT.rpc("grant_temporary_access", { p_class_id: classTT1Id, p_user_id: snaCoverTTId, p_date: nowPartsTT.date, p_reason: "TT fixture: covering Room 1." });
+    if (grantTTErr) throw grantTTErr;
+
+    const { data: statusAfterGrant } = await principalTT.rpc("get_institution_temporary_access", { p_institution_id: institutionTTId });
+    const grantRowTT = (statusAfterGrant ?? []).find((r) => r.granted_to === snaCoverTTId);
+    const grantIdTT = grantRowTT?.grant_id;
+
+    // ---- TT-1: shape -- names/class_name resolved inline, live and
+    // active. ----
+    record(
+      "TT-1a the grant row resolves granted_to_name, granted_by_name, class_name inline -- no second roster call needed",
+      grantRowTT?.granted_to_name === "TT SNA Cover" &&
+        grantRowTT?.granted_by_name === "TT Principal" &&
+        grantRowTT?.class_name === "TT Room 1",
+      JSON.stringify(grantRowTT)
+    );
+    record(
+      "TT-1b is_currently_active=true while the cutoff is comfortably ahead and the grant is unrevoked (known limitation, same as CHECK AA's own: only the upper cutoff bound is provable live, not the >=07:30 lower one)",
+      grantRowTT?.is_currently_active === true,
+      JSON.stringify(grantRowTT)
+    );
+
+    // ---- TT-6: any active staff, not just the principal, can call
+    // this -- matches temporary_access's own SELECT policy breadth. ----
+    {
+      const { data: statusAsSna, error: statusAsSnaErr } = await snaCoverTT.rpc("get_institution_temporary_access", { p_institution_id: institutionTTId });
+      record(
+        "TT-6 a non-principal active staff member (the covering SNA themselves) can call get_institution_temporary_access() and sees the grant",
+        !statusAsSnaErr && (statusAsSna ?? []).some((r) => r.grant_id === grantIdTT),
+        JSON.stringify({ error: statusAsSnaErr?.message, count: statusAsSna?.length })
+      );
+    }
+
+    // ---- The incident this grant makes possible -- created while the
+    // grant is live, owning_teacher_id auto-assigned to the covering
+    // SNA via can_own_incident()'s own temporary-grant branch. ----
+    const { data: incidentTTAId, error: incidentTTAErr } = await snaCoverTT.rpc("create_incident_stamp", {
+      p_institution_id: institutionTTId, p_occurred_at: new Date().toISOString(), p_location_id: locTT.id,
+      p_child_passport_ids: [childTTId], p_staff: [],
+    });
+    if (incidentTTAErr) throw incidentTTAErr;
+    const { data: owningCheckTTA } = await admin.from("incidents").select("owning_teacher_id").eq("id", incidentTTAId).single();
+    record(
+      "the covering SNA IS auto-assigned owning_teacher_id while their grant is live -- can_own_incident()'s temporary-grant branch, not the role check",
+      owningCheckTTA?.owning_teacher_id === snaCoverTTId,
+      owningCheckTTA?.owning_teacher_id
+    );
+
+    // A genuinely separate incident, owned by a REAL class_teacher --
+    // no temporary_access row involved at all. Case B's own setup.
+    const { data: incidentTTBId, error: incidentTTBErr } = await teacherTT.rpc("create_incident_stamp", {
+      p_institution_id: institutionTTId, p_occurred_at: new Date().toISOString(), p_location_id: locTT.id,
+      p_child_passport_ids: [childTTId], p_staff: [],
+    });
+    if (incidentTTBErr) throw incidentTTBErr;
+
+    // ---- TT-2: the cutoff passes (still NOT revoked) -- the SAME
+    // grant now reads is_currently_active=false, live, without ever
+    // touching the row itself. "07:31" is always > 07:30 (the RPC's
+    // own floor) and, for any reasonable time this suite runs, already
+    // in the past -- the one edge this can't rule out (running this
+    // suite between 07:30 and 07:31 local time) is the same class of
+    // limitation CHECK AA's own header already names. ----
+    const { error: cutoffPassedErr } = await principalTT.rpc("set_temporary_access_cutoff", { p_institution_id: institutionTTId, p_cutoff_time: "07:31:00" });
+    if (cutoffPassedErr) throw cutoffPassedErr;
+    {
+      const { data: statusAfterCutoff } = await principalTT.rpc("get_institution_temporary_access", { p_institution_id: institutionTTId });
+      const rowAfterCutoff = (statusAfterCutoff ?? []).find((r) => r.grant_id === grantIdTT);
+      record(
+        "TT-2 THE DISTINCTION ITSELF: is_currently_active=false once the cut-off passes, even though revoked_at is STILL null -- 'ended at the cut-off' and 'revoked' are different facts, proven as two separate transitions on the one row",
+        rowAfterCutoff?.is_currently_active === false && rowAfterCutoff?.revoked_at === null,
+        JSON.stringify(rowAfterCutoff)
+      );
+    }
+
+    // ---- TT-7: revoke from the new institution-wide surface's own
+    // target RPC -- the PRINCIPAL revoking, not the class's own
+    // teacher (there isn't one on Room 1 in this fixture at all),
+    // proving the "institution's principal can revoke ANY grant"
+    // authority this view depends on. ----
+    const { error: revokeTTErr } = await principalTT.rpc("revoke_temporary_access", { p_temporary_access_id: grantIdTT, p_reason: "TT-7: revoking early from the institution-wide view." });
+    if (revokeTTErr) throw revokeTTErr;
+
+    // ---- TT-3: revoked_at/revoked_by_name/revocation_reason all
+    // resolve correctly, is_currently_active now false for a SECOND,
+    // independent reason. ----
+    {
+      const { data: statusAfterRevoke } = await principalTT.rpc("get_institution_temporary_access", { p_institution_id: institutionTTId });
+      const rowAfterRevoke = (statusAfterRevoke ?? []).find((r) => r.grant_id === grantIdTT);
+      record(
+        "TT-3 revoked_at set, revoked_by_name resolves to the real revoking principal, revocation_reason matches exactly, is_currently_active still false",
+        Boolean(rowAfterRevoke?.revoked_at) &&
+          rowAfterRevoke?.revoked_by_name === "TT Principal" &&
+          rowAfterRevoke?.revocation_reason === "TT-7: revoking early from the institution-wide view." &&
+          rowAfterRevoke?.is_currently_active === false,
+        JSON.stringify(rowAfterRevoke)
+      );
+    }
+
+    // ---- Case B setup: a genuine class_teacher, deactivated. ----
+    const teacherTTStaffId = staffTTRows.find((r) => r.user_id === teacherTTId).id;
+    const { error: deactivateTTErr } = await principalTT.rpc("deactivate_institution_staff", { p_institution_staff_id: teacherTTStaffId, p_reason: "TT fixture: needs a genuinely deactivated class teacher." });
+    if (deactivateTTErr) throw deactivateTTErr;
+
+    // ---- resolve_lapsed_incident_ownership() -- both incidents lapse
+    // in the same call, for two structurally different reasons. ----
+    const { data: resolvedCountTT, error: resolveTTErr } = await principalTT.rpc("resolve_lapsed_incident_ownership", { p_institution_id: institutionTTId });
+    if (resolveTTErr) throw resolveTTErr;
+    record("both incidents resolved in one call", resolvedCountTT === 2, resolvedCountTT);
+
+    {
+      const { data: transferRows } = await admin
+        .from("incident_ownership_transfers")
+        .select("incident_id, from_teacher_id, to_principal_id, temporary_access_id")
+        .in("incident_id", [incidentTTAId, incidentTTBId]);
+      const transferA = (transferRows ?? []).find((r) => r.incident_id === incidentTTAId);
+      const transferB = (transferRows ?? []).find((r) => r.incident_id === incidentTTBId);
+      record(
+        "TT-8a THE LINK ITSELF (0132): the covering SNA's own incident transfer correctly points temporary_access_id at the exact grant that lapsed",
+        transferA?.from_teacher_id === snaCoverTTId &&
+          transferA?.to_principal_id === principalTTId &&
+          transferA?.temporary_access_id === grantIdTT,
+        JSON.stringify(transferA)
+      );
+      record(
+        "TT-8b the deactivated class_teacher's own transfer correctly has temporary_access_id = NULL -- no grant caused this, and none is invented",
+        transferB?.from_teacher_id === teacherTTId &&
+          transferB?.to_principal_id === principalTTId &&
+          transferB?.temporary_access_id === null,
+        JSON.stringify(transferB)
+      );
+    }
+
+    // ---- TT-4: the recent-past window. A raw, service-role-inserted
+    // grant dated 45 days ago, already revoked -- no real write path
+    // can produce a genuinely old grant (grant_temporary_access()
+    // refuses any date that's already passed), same "construct the
+    // state directly, the real RPCs can't produce it" precedent this
+    // suite already uses elsewhere (CHECK HH's own cross-institution
+    // link, CHECK V's own grandfathered row). ----
+    const oldDateTT = new Date(Date.now() - 45 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const { data: oldGrantTT, error: oldGrantTTErr } = await admin
+      .from("temporary_access")
+      .insert({
+        institution_id: institutionTTId, class_id: classTT1Id, granted_to: snaCoverTTId,
+        granted_for_date: oldDateTT, granted_by: principalTTId, granted_by_role: "principal",
+        reason: "TT-4 fixture: an old, already-resolved grant.",
+        revoked_at: new Date().toISOString(), revoked_by: principalTTId, revocation_reason: "TT-4 fixture cleanup.",
+      })
+      .select()
+      .single();
+    if (oldGrantTTErr) throw oldGrantTTErr;
+    {
+      const { data: defaultWindow } = await principalTT.rpc("get_institution_temporary_access", { p_institution_id: institutionTTId });
+      record(
+        "TT-4a the 45-day-old resolved grant is EXCLUDED under the default 30-day window",
+        !(defaultWindow ?? []).some((r) => r.grant_id === oldGrantTT.id),
+        JSON.stringify((defaultWindow ?? []).map((r) => r.grant_id))
+      );
+      const { data: widerWindow } = await principalTT.rpc("get_institution_temporary_access", { p_institution_id: institutionTTId, p_days_back: 60 });
+      record(
+        "TT-4b the SAME grant is INCLUDED once p_days_back is widened past its own age -- the parameter genuinely changes the window, not just sometimes-empty",
+        (widerWindow ?? []).some((r) => r.grant_id === oldGrantTT.id),
+        JSON.stringify((widerWindow ?? []).map((r) => r.grant_id))
+      );
+    }
+
+    // ---- TT-5: institution-scoping. ----
+    {
+      const { data: crossInstStatus } = await principalTTOther.rpc("get_institution_temporary_access", { p_institution_id: institutionTTId });
+      record(
+        "TT-5 a principal at a DIFFERENT institution, supplying institutionTT's own id, gets nothing",
+        (crossInstStatus ?? []).length === 0,
+        JSON.stringify(crossInstStatus)
+      );
+    }
+
+    console.log("TT summary complete.");
+
+    await admin.from("incident_children").delete().in("incident_id", [incidentTTAId, incidentTTBId]);
+    await admin.from("incident_ownership_transfers").delete().in("incident_id", [incidentTTAId, incidentTTBId]);
+    await admin.from("incidents").delete().in("id", [incidentTTAId, incidentTTBId]);
+    await admin.from("passports").delete().eq("id", childTTId);
+    await admin.from("institutions").delete().in("id", [institutionTTId, institutionTTOtherId]);
+    for (const id of [principalTTId, principalTTOtherId, teacherTTId, snaCoverTTId]) {
       await admin.auth.admin.deleteUser(id);
     }
   }
