@@ -20,7 +20,7 @@
 // stage development. Every check from V onward is independently
 // self-contained (own institution, own accounts, own cleanup) and
 // individually selectable: V, W, X, Y, Z, AA, BB, CC, DD, EE, FF, GG,
-// HH, II, JJ, KK, LL, MM. Selecting none of these (ONLY_CHECKS unset) is the full run --
+// HH, II, JJ, KK, LL, MM, NN. Selecting none of these (ONLY_CHECKS unset) is the full run --
 // the one that gates deploys -- and its behavior is unchanged: same
 // checks, same order, same pass/fail counts. The only observable
 // difference is where the top-level fixture's own cleanup log line
@@ -7056,7 +7056,10 @@ async function main() {
       p_passport_id: childHHRateId,
     });
     const { data: rateCodeRow } = await admin.from("passport_claim_codes").select("id").eq("code", rateCode).single();
-    const { error: revokeRateErr } = await principalHHA.rpc("revoke_passport_claim_code", { p_claim_code_id: rateCodeRow.id });
+    const { error: revokeRateErr } = await principalHHA.rpc("revoke_passport_claim_code", {
+      p_claim_code_id: rateCodeRow.id,
+      p_reason: "HH-2 fixture: needs a stale, revoked code.",
+    });
     if (revokeRateErr) throw revokeRateErr;
 
     for (let i = 0; i < 12; i++) {
@@ -7182,14 +7185,25 @@ async function main() {
       record("HH-4a generate_passport_claim_code() refuses a non-principal caller", Boolean(notPrincipalGenErr), notPrincipalGenErr?.message);
     }
     {
-      const { error: alreadyGuardianedErr } = await principalHHA.rpc("generate_passport_claim_code", {
+      // PRD 2, Stage 3 (migration 0127): generate_passport_claim_code()
+      // used to refuse ANY passport that already had a guardian --
+      // childHHOld (no institution link at all) could never have
+      // isolated that guard anyway, since the institution-link check
+      // fires first; this reuses childHHClaimedId instead, which
+      // genuinely has BOTH a real institution link (create_school_
+      // passport, above) AND a real claimed guardian (HH-0's own
+      // redeem), so it actually exercises the guard that used to be
+      // here. 0127 removed it deliberately -- a second, different
+      // guardian must be able to get their own code -- so the correct
+      // assertion now is that this SUCCEEDS, not that it's refused.
+      const { data: secondGuardianCode, error: secondGuardianErr } = await principalHHA.rpc("generate_passport_claim_code", {
         p_institution_id: institutionHHAId,
-        p_passport_id: childHHOld.id,
+        p_passport_id: childHHClaimedId,
       });
       record(
-        "HH-4b generate_passport_claim_code() refuses a passport that already has a guardian -- even a conventionally-created (dual-write-trigger) one, not just a previously-claimed one",
-        Boolean(alreadyGuardianedErr),
-        alreadyGuardianedErr?.message
+        "HH-4b THE 0127 FIX ITSELF: generate_passport_claim_code() now SUCCEEDS for a passport that already has a claimed guardian -- a second guardian must be able to get their own code",
+        !secondGuardianErr && /^[A-Z]{3}-\d{4}$/.test(secondGuardianCode ?? ""),
+        JSON.stringify({ secondGuardianCode, secondGuardianErr: secondGuardianErr?.message })
       );
     }
     {
@@ -7214,11 +7228,17 @@ async function main() {
 
       const { data: secondCodeRow } = await admin.from("passport_claim_codes").select("id").eq("code", secondCode).single();
       {
-        const { error: notPrincipalRevoke2Err } = await teacherHH.rpc("revoke_passport_claim_code", { p_claim_code_id: secondCodeRow.id });
+        const { error: notPrincipalRevoke2Err } = await teacherHH.rpc("revoke_passport_claim_code", {
+          p_claim_code_id: secondCodeRow.id,
+          p_reason: "HH-4e: a teacher trying anyway.",
+        });
         record("HH-4e revoke_passport_claim_code() refuses a non-principal caller", Boolean(notPrincipalRevoke2Err), notPrincipalRevoke2Err?.message);
       }
       {
-        const { error: crossInstRevokeErr } = await principalHHB.rpc("revoke_passport_claim_code", { p_claim_code_id: secondCodeRow.id });
+        const { error: crossInstRevokeErr } = await principalHHB.rpc("revoke_passport_claim_code", {
+          p_claim_code_id: secondCodeRow.id,
+          p_reason: "HH-4f: a principal from another school trying anyway.",
+        });
         record(
           "HH-4f revoke_passport_claim_code() refuses a principal from a DIFFERENT institution -- scoped to the institution that actually issued it",
           Boolean(crossInstRevokeErr),
@@ -7226,11 +7246,17 @@ async function main() {
         );
       }
       {
-        const { error: revokeOkErr } = await principalHHA.rpc("revoke_passport_claim_code", { p_claim_code_id: secondCodeRow.id });
+        const { error: revokeOkErr } = await principalHHA.rpc("revoke_passport_claim_code", {
+          p_claim_code_id: secondCodeRow.id,
+          p_reason: "HH-4g: revoked for real, by the right principal.",
+        });
         record("HH-4g the issuing institution's own principal CAN revoke it", !revokeOkErr, revokeOkErr?.message);
       }
       {
-        const { error: revokeAgainErr } = await principalHHA.rpc("revoke_passport_claim_code", { p_claim_code_id: secondCodeRow.id });
+        const { error: revokeAgainErr } = await principalHHA.rpc("revoke_passport_claim_code", {
+          p_claim_code_id: secondCodeRow.id,
+          p_reason: "HH-4h: trying to revoke it again.",
+        });
         record("HH-4h revoking an already-revoked code is refused, not silently a no-op", Boolean(revokeAgainErr), revokeAgainErr?.message);
       }
     }
@@ -8410,6 +8436,337 @@ async function main() {
 
     await admin.from("institutions").delete().eq("id", institutionMMId);
     for (const id of [principalMMId, activeTeacherMMId, pendingTeacherMMId, deactivatedSnaMMId]) {
+      await admin.auth.admin.deleteUser(id);
+    }
+  }
+
+  console.log(`\n== CHECK NN: SQL half of Stage 3's claim-code work (migration 0126) -- revoke_passport_claim_code()'s own refusals, none of which existed before this migration since the function had no reason parameter and hand-wrote its own standing check inline. Per CLAUDE.md's own rule ("when a new RPC is added, ask what asserts its REFUSALS"): a non-principal caller, a principal at the WRONG institution, an empty reason, an already-revoked code, and an already-claimed code are each refused independently -- plus get_passport_claim_code_status()'s own institution-scoping, proven by a principal supplying an institution id that isn't their own. ==`);
+  if (shouldRun("NN")) {
+    const { data: instNN, error: instNNErr } = await admin
+      .from("institutions")
+      .insert({ name: "NN Institution", institution_code: CODE + "NN", status: "verified" })
+      .select()
+      .single();
+    if (instNNErr) throw instNNErr;
+    const institutionNNId = instNN.id;
+
+    const { data: instNNOther, error: instNNOtherErr } = await admin
+      .from("institutions")
+      .insert({ name: "NN Institution Other", institution_code: CODE + "NNB", status: "verified" })
+      .select()
+      .single();
+    if (instNNOtherErr) throw instNNOtherErr;
+    const institutionNNOtherId = instNNOther.id;
+
+    const principalNNId = await createUser("checknn.principal@thebehaviourhive.com", "NN Principal", "principal");
+    const teacherNNId = await createUser("checknn.teacher@thebehaviourhive.com", "NN Teacher", "class_teacher");
+    const principalNNOtherId = await createUser("checknn.principalother@thebehaviourhive.com", "NN Principal Other", "principal");
+    const parentNNId = await createUser("checknn.parent@thebehaviourhive.com", "NN Parent", "parent");
+
+    const { data: staffNNRows, error: staffNNErr } = await admin
+      .from("institution_staff")
+      .insert([
+        { institution_id: institutionNNId, user_id: principalNNId, role: "principal" },
+        { institution_id: institutionNNId, user_id: teacherNNId, role: "class_teacher" },
+        { institution_id: institutionNNOtherId, user_id: principalNNOtherId, role: "principal" },
+      ])
+      .select();
+    if (staffNNErr) throw staffNNErr;
+
+    const principalNN = await signedInClient("checknn.principal@thebehaviourhive.com");
+    const teacherNN = await signedInClient("checknn.teacher@thebehaviourhive.com");
+    const principalNNOther = await signedInClient("checknn.principalother@thebehaviourhive.com");
+    for (const row of staffNNRows.filter((r) => r.institution_id === institutionNNId && r.user_id !== principalNNId)) {
+      const { error } = await principalNN.rpc("approve_staff_join", { p_institution_staff_id: row.id });
+      if (error) throw error;
+    }
+
+    const { data: passportNNId, error: createNNErr } = await principalNN.rpc("create_school_passport", {
+      p_institution_id: institutionNNId,
+      p_child_name: "NN Child",
+    });
+    if (createNNErr) throw createNNErr;
+
+    const { error: generateNN1Err } = await principalNN.rpc("generate_passport_claim_code", {
+      p_institution_id: institutionNNId,
+      p_passport_id: passportNNId,
+    });
+    if (generateNN1Err) throw generateNN1Err;
+    const { data: statusNN1 } = await principalNN.rpc("get_passport_claim_code_status", {
+      p_institution_id: institutionNNId,
+      p_passport_id: passportNNId,
+    });
+    const claimCodeNN1Id = statusNN1?.[0]?.id;
+
+    // ---- NN-1: a non-principal at the SAME institution is refused. ----
+    {
+      const { error } = await teacherNN.rpc("revoke_passport_claim_code", {
+        p_claim_code_id: claimCodeNN1Id,
+        p_reason: "NN-1: a teacher trying anyway.",
+      });
+      record("NN-1 revoke_passport_claim_code() refuses a non-principal caller (teacherNN)", Boolean(error), error?.message);
+    }
+
+    // ---- NN-2: a principal at a DIFFERENT institution is refused --
+    // the exact case institution_staff_has_current_standing() (0105)
+    // plus the separate role='principal' EXISTS check exist to catch. ----
+    {
+      const { error } = await principalNNOther.rpc("revoke_passport_claim_code", {
+        p_claim_code_id: claimCodeNN1Id,
+        p_reason: "NN-2: a principal from another school trying anyway.",
+      });
+      record(
+        "NN-2 revoke_passport_claim_code() refuses a principal at a DIFFERENT institution (principalNNOther)",
+        Boolean(error),
+        error?.message
+      );
+    }
+
+    // ---- NN-3: an empty/whitespace reason is refused, same pattern as
+    // revoke_clinician_access()/revoke_passport_access(). ----
+    {
+      const { error } = await principalNN.rpc("revoke_passport_claim_code", {
+        p_claim_code_id: claimCodeNN1Id,
+        p_reason: "   ",
+      });
+      record("NN-3 revoke_passport_claim_code() refuses a blank/whitespace-only reason", Boolean(error), error?.message);
+    }
+
+    // ---- NN-4: THE HAPPY PATH -- the actual principal, real reason,
+    // succeeds. Re-read via a privileged service-role query afterward,
+    // not just the absence of a client error (CLAUDE.md's own rule). ----
+    {
+      const { error } = await principalNN.rpc("revoke_passport_claim_code", {
+        p_claim_code_id: claimCodeNN1Id,
+        p_reason: "NN-4: revoked for real, by the right principal.",
+      });
+      const { data: persistedRow } = await admin
+        .from("passport_claim_codes")
+        .select("revoked_at, revoked_by, revocation_reason")
+        .eq("id", claimCodeNN1Id)
+        .single();
+      record(
+        "NN-4 revoke_passport_claim_code() succeeds for the right principal, and the persisted row actually reflects it -- revoked_at/revoked_by/revocation_reason all set",
+        !error &&
+          Boolean(persistedRow?.revoked_at) &&
+          persistedRow?.revoked_by === principalNNId &&
+          persistedRow?.revocation_reason === "NN-4: revoked for real, by the right principal.",
+        JSON.stringify({ error: error?.message, persistedRow })
+      );
+    }
+
+    // ---- NN-5: revoking an already-revoked code a second time is
+    // refused, not silently a no-op. ----
+    {
+      const { error } = await principalNN.rpc("revoke_passport_claim_code", {
+        p_claim_code_id: claimCodeNN1Id,
+        p_reason: "NN-5: trying to revoke it again.",
+      });
+      record("NN-5 revoke_passport_claim_code() refuses a code that's already been revoked", Boolean(error), error?.message);
+    }
+
+    // ---- NN-6: revoking an already-CLAIMED code is refused -- a
+    // second, fresh code, actually redeemed by a real parent first. ----
+    {
+      const { data: code2, error: generateNN2Err } = await principalNN.rpc("generate_passport_claim_code", {
+        p_institution_id: institutionNNId,
+        p_passport_id: passportNNId,
+      });
+      if (generateNN2Err) throw generateNN2Err;
+      const { data: statusNN2 } = await principalNN.rpc("get_passport_claim_code_status", {
+        p_institution_id: institutionNNId,
+        p_passport_id: passportNNId,
+      });
+      const claimCodeNN2Id = statusNN2?.[0]?.id;
+
+      const parentNN = await signedInClient("checknn.parent@thebehaviourhive.com");
+      const { error: redeemErr } = await parentNN.rpc("redeem_passport_claim_code", { p_code: code2 });
+      if (redeemErr) throw redeemErr;
+
+      const { error: revokeClaimedErr } = await principalNN.rpc("revoke_passport_claim_code", {
+        p_claim_code_id: claimCodeNN2Id,
+        p_reason: "NN-6: trying to revoke a code that's already been claimed.",
+      });
+      record(
+        "NN-6 revoke_passport_claim_code() refuses a code that's already been claimed",
+        Boolean(revokeClaimedErr),
+        revokeClaimedErr?.message
+      );
+    }
+
+    // ---- NN-7: get_passport_claim_code_status()'s own institution-
+    // scoping -- a principal can't read another institution's claim
+    // code by passing an institution id they don't actually belong to.
+    // A brand-new, still-outstanding code exists at this point (NN-1
+    // through NN-3's target was revoked in NN-4; this proves the READ
+    // side independently of the revoke side). ----
+    {
+      const { error: generateNN3Err } = await principalNN.rpc("generate_passport_claim_code", {
+        p_institution_id: institutionNNId,
+        p_passport_id: passportNNId,
+      });
+      if (generateNN3Err) throw generateNN3Err;
+
+      const { data: wrongInstStatus, error: wrongInstErr } = await principalNNOther.rpc("get_passport_claim_code_status", {
+        p_institution_id: institutionNNId,
+        p_passport_id: passportNNId,
+      });
+      record(
+        "NN-7 get_passport_claim_code_status() returns EMPTY, not the real outstanding code, for a principal who isn't actually staff at the institution id they supplied",
+        !wrongInstErr && (wrongInstStatus ?? []).length === 0,
+        JSON.stringify({ error: wrongInstErr?.message, wrongInstStatus })
+      );
+    }
+
+    console.log("NN summary complete.");
+
+    await admin.from("institutions").delete().in("id", [institutionNNId, institutionNNOtherId]);
+    for (const id of [principalNNId, teacherNNId, principalNNOtherId, parentNNId]) {
+      await admin.auth.admin.deleteUser(id);
+    }
+  }
+
+  console.log(`\n== CHECK OO: Client-behaviour half of Stage 3's claim-code work (src/app/principal/passports/[passportId]/page.tsx) -- proven via the LITERAL client gating conditionals, not a proxy for them. Daniel's own instruction, verbatim: "the three claim-code states... can COEXIST because a child may have several guardians... Today it toggles between two. Three states, coexisting, is the change." Reproduces the page's own three gates against one real fixture with one claimed guardian AND a separate fresh outstanding code on the SAME child: the unclaimed empty state (guardians.length === 0 && !claimCode), the claimed-guardian card (guardians.length > 0), and the outstanding-code card (claimCode truthy) -- proving the middle two render simultaneously rather than one replacing the other, and that revoking the outstanding code leaves the claimed guardian untouched. ==`);
+  if (shouldRun("OO")) {
+    const { data: instOO, error: instOOErr } = await admin
+      .from("institutions")
+      .insert({ name: "OO Institution", institution_code: CODE + "OO", status: "verified" })
+      .select()
+      .single();
+    if (instOOErr) throw instOOErr;
+    const institutionOOId = instOO.id;
+
+    const principalOOId = await createUser("checkoo.principal@thebehaviourhive.com", "OO Principal", "principal");
+    const parentOOId = await createUser("checkoo.parent@thebehaviourhive.com", "OO Parent", "parent");
+
+    const { error: staffOOErr } = await admin
+      .from("institution_staff")
+      .insert({ institution_id: institutionOOId, user_id: principalOOId, role: "principal" });
+    if (staffOOErr) throw staffOOErr;
+
+    const principalOO = await signedInClient("checkoo.principal@thebehaviourhive.com");
+
+    // ---- OO-1: THE UNCLAIMED EMPTY STATE'S OWN GATE -- a freshly
+    // enrolled child with zero guardians and no code generated yet.
+    // Both queries must agree it's genuinely empty, simultaneously,
+    // for the client's (guardians.length === 0 && !claimCode) gate to
+    // be reachable at all. ----
+    const { data: childOOEmptyId, error: createOOEmptyErr } = await principalOO.rpc("create_school_passport", {
+      p_institution_id: institutionOOId,
+      p_child_name: "OO Empty Child",
+    });
+    if (createOOEmptyErr) throw createOOEmptyErr;
+    {
+      const { data: guardiansEmpty } = await principalOO.rpc("get_passport_guardians_for_child", {
+        p_institution_id: institutionOOId,
+        p_passport_id: childOOEmptyId,
+      });
+      const { data: codeEmpty } = await principalOO.rpc("get_passport_claim_code_status", {
+        p_institution_id: institutionOOId,
+        p_passport_id: childOOEmptyId,
+      });
+      record(
+        "OO-1 the unclaimed empty-state's own gate: zero guardians AND zero outstanding code, both true at once",
+        (guardiansEmpty ?? []).length === 0 && (codeEmpty ?? []).length === 0,
+        JSON.stringify({ guardiansEmpty, codeEmpty })
+      );
+    }
+
+    // ---- OO-2: THE COEXISTENCE ITSELF -- one guardian already claimed,
+    // then a SECOND, separate code generated and left outstanding for a
+    // second guardian. ----
+    const { data: childOOId, error: createOOErr } = await principalOO.rpc("create_school_passport", {
+      p_institution_id: institutionOOId,
+      p_child_name: "OO Coexist Child",
+    });
+    if (createOOErr) throw createOOErr;
+
+    const { data: firstCode, error: generateOO1Err } = await principalOO.rpc("generate_passport_claim_code", {
+      p_institution_id: institutionOOId,
+      p_passport_id: childOOId,
+    });
+    if (generateOO1Err) throw generateOO1Err;
+    const parentOO = await signedInClient("checkoo.parent@thebehaviourhive.com");
+    const { error: redeemOOErr } = await parentOO.rpc("redeem_passport_claim_code", { p_code: firstCode });
+    if (redeemOOErr) throw redeemOOErr;
+
+    const { error: generateOO2Err } = await principalOO.rpc("generate_passport_claim_code", {
+      p_institution_id: institutionOOId,
+      p_passport_id: childOOId,
+    });
+    if (generateOO2Err) throw generateOO2Err;
+
+    const { data: guardiansOO } = await principalOO.rpc("get_passport_guardians_for_child", {
+      p_institution_id: institutionOOId,
+      p_passport_id: childOOId,
+    });
+    const { data: codeStatusOO } = await principalOO.rpc("get_passport_claim_code_status", {
+      p_institution_id: institutionOOId,
+      p_passport_id: childOOId,
+    });
+
+    record(
+      "OO-2a exactly one claimed guardian shows -- the first code's own row correctly drops out of get_passport_claim_code_status() once claimed (claimed_at is not null), it doesn't linger as a second 'outstanding' entry",
+      (guardiansOO ?? []).length === 1 && guardiansOO[0].user_id === parentOOId,
+      JSON.stringify(guardiansOO)
+    );
+    record(
+      "OO-2b exactly one outstanding code shows, and it's the SECOND one, not the already-claimed first one",
+      (codeStatusOO ?? []).length === 1 && codeStatusOO[0].code !== firstCode,
+      JSON.stringify({ codeStatusOO, firstCode })
+    );
+
+    const guardiansCountOO = (guardiansOO ?? []).length;
+    const claimCodeOO = (codeStatusOO ?? [])[0] ?? null;
+    record(
+      "OO-2c THE UNCLAIMED EMPTY STATE'S OWN GATE, reproduced against this fixture: (guardians.length === 0 && !claimCode) is FALSE here -- it must NOT render while a guardian has already claimed, even though a second code is separately outstanding",
+      !(guardiansCountOO === 0 && !claimCodeOO),
+      JSON.stringify({ guardiansCountOO, claimCodeOO })
+    );
+    record(
+      "OO-2d THE 'GENERATE ANOTHER CODE' BUTTON'S OWN GATE: (guardians.length > 0 && !claimCode) is FALSE while a code is already outstanding -- the button correctly stays hidden rather than letting a principal issue two live codes for the same child at once",
+      !(guardiansCountOO > 0 && !claimCodeOO),
+      JSON.stringify({ guardiansCountOO, claimCodeOO })
+    );
+
+    // ---- OO-3: revoke the outstanding second code, then re-check both
+    // gates -- the claimed guardian must survive, untouched, and the
+    // "generate another" button's gate must flip back to visible. ----
+    const { error: revokeOOErr } = await principalOO.rpc("revoke_passport_claim_code", {
+      p_claim_code_id: claimCodeOO.id,
+      p_reason: "OO-3: revoking the second guardian's outstanding code.",
+    });
+    if (revokeOOErr) throw revokeOOErr;
+
+    const { data: guardiansAfterOO } = await principalOO.rpc("get_passport_guardians_for_child", {
+      p_institution_id: institutionOOId,
+      p_passport_id: childOOId,
+    });
+    const { data: codeStatusAfterOO } = await principalOO.rpc("get_passport_claim_code_status", {
+      p_institution_id: institutionOOId,
+      p_passport_id: childOOId,
+    });
+
+    record(
+      "OO-3a after revoking the outstanding code, the claimed guardian is untouched -- still exactly one, unaffected by the code's own revoke",
+      (guardiansAfterOO ?? []).length === 1 && guardiansAfterOO[0].user_id === parentOOId,
+      JSON.stringify(guardiansAfterOO)
+    );
+    record(
+      "OO-3b after revoking, get_passport_claim_code_status() is genuinely empty again",
+      (codeStatusAfterOO ?? []).length === 0,
+      JSON.stringify(codeStatusAfterOO)
+    );
+    record(
+      "OO-3c THE 'GENERATE ANOTHER CODE' BUTTON'S GATE flips back to visible now that no code is outstanding: (guardians.length > 0 && !claimCode) is TRUE",
+      (guardiansAfterOO ?? []).length > 0 && (codeStatusAfterOO ?? []).length === 0,
+      JSON.stringify({ guardiansAfterOO, codeStatusAfterOO })
+    );
+
+    console.log("OO summary complete.");
+
+    await admin.from("institutions").delete().eq("id", institutionOOId);
+    for (const id of [principalOOId, parentOOId]) {
       await admin.auth.admin.deleteUser(id);
     }
   }
