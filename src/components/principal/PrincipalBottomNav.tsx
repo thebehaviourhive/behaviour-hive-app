@@ -10,9 +10,10 @@ import { AppBottomNav, type NavTab } from "@/components/ui/AppBottomNav";
 // tab on this track), so unlike the other three, this one needs no own
 // userId fetch at all -- genuinely simpler, not a shortcut.
 //
-// "Directory" owns Staff, Classes and Passports -- three still-separate
-// routes today (Stages 2/3/5 reconcile their content; this stage only
-// gives them a shared destination and a shared active-tab state).
+// "Directory" owns Staff, Classes, Passports, and (Stage 6) Temporary
+// Access -- still-separate routes (Stages 2/3/5/6 reconcile their own
+// content; this stage only gives them a shared destination and a
+// shared active-tab state).
 // "School" owns the new /principal/school landing (account
 // administration, settings) that this same stage introduces.
 export function PrincipalBottomNav() {
@@ -40,7 +41,8 @@ export function PrincipalBottomNav() {
         pathname.startsWith("/principal/directory") ||
         pathname.startsWith("/principal/staff") ||
         pathname.startsWith("/principal/classes") ||
-        pathname.startsWith("/principal/passports"),
+        pathname.startsWith("/principal/passports") ||
+        pathname.startsWith("/principal/temporary-access"),
     },
     {
       key: "school",

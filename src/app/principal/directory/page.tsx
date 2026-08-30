@@ -10,6 +10,13 @@ import { PrincipalBottomNav } from "@/components/principal/PrincipalBottomNav";
 // entry point and a shared active-tab state via
 // PrincipalBottomNav's own isActive matcher -- deliberately not a
 // redesign of what's inside any of the three.
+//
+// PRD 2, Stage 6: Temporary Access joins as a fourth card. It's the
+// same shape of thing as the other three -- a live roster of who
+// currently has standing over what, revocable from the view itself --
+// not a setting (School's own charter) and not an overview metric
+// (Dashboard's). The cut-off-time control itself lives on School
+// instead; this card is the live view only.
 
 const CARDS = [
   {
@@ -26,6 +33,11 @@ const CARDS = [
     href: "/principal/passports",
     title: "Passports",
     description: "Enrol children, manage access and each child's clinical team.",
+  },
+  {
+    href: "/principal/temporary-access",
+    title: "Temporary Access",
+    description: "See every active and recent cover grant across the school, and revoke early.",
   },
 ] as const;
 

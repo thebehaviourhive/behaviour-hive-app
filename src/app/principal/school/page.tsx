@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { useRequireRole } from "@/hooks/useRequireRole";
@@ -8,6 +7,7 @@ import { createClient } from "@/lib/supabase/client";
 import { getPostAuthRedirect } from "@/lib/roleRedirect";
 import { PrincipalBottomNav } from "@/components/principal/PrincipalBottomNav";
 import { HandOverPrincipalSheet } from "@/components/principal/HandOverPrincipalSheet";
+import { SetCutoffSheet } from "@/components/principal/SetCutoffSheet";
 import { formatCutoffTime } from "@/lib/temporaryAccessTime";
 
 // PRD 2, Stage 1. New top-level tab -- "School" owns settings and
@@ -16,13 +16,14 @@ import { formatCutoffTime } from "@/lib/temporaryAccessTime";
 // adjacent to routine actions" -- moved off /principal/staff, where it
 // previously sat alongside ordinary deactivate actions.
 //
-// Deliberately minimal this stage. The cut-off-time CONTROL itself
-// stays on /principal/classes for now (unmoved, still working exactly
-// as before) -- extracting it is Stage 5/6's own job (Classes, then
-// Temporary access, are where that setting actually belongs once this
-// area gets its real design), not a Stage-1 "navigation and incident
-// merge" concern. This page links through to it rather than duplicating
-// the control.
+// PRD 2, Stage 6: the cut-off-time control itself moves in from
+// /principal/classes -- this page's own Stage 1 comment named this
+// exact move as deferred ("Temporary access[.] is where that setting
+// actually belongs once this area gets its real design"), and Stage 6
+// is that design. Same inline bar pattern Classes used to show it in
+// (label + value + "Change"), not a new visual pattern -- just its
+// real home now that Temporary Access exists as its own live-status
+// surface under Directory, distinct from this settings control.
 
 interface StaffRow {
   user_id: string;
@@ -40,6 +41,8 @@ export default function PrincipalSchoolPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isHandOverOpen, setIsHandOverOpen] = useState(false);
+  const [isCutoffOpen, setIsCutoffOpen] = useState(false);
+  const [institutionId, setInstitutionId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!user) return;
@@ -68,6 +71,7 @@ export default function PrincipalSchoolPage() {
       | null;
     const record = Array.isArray(institutionRecord) ? institutionRecord[0] : institutionRecord;
     setInstitutionName(record?.name ?? null);
+    setInstitutionId(staffRow.institution_id);
     if (record?.temporary_access_cutoff_time) {
       setCutoffTime(record.temporary_access_cutoff_time);
     }
@@ -116,15 +120,21 @@ export default function PrincipalSchoolPage() {
               <h2 className="mb-2 font-heading text-sm font-bold uppercase tracking-wide text-brand-neutral-black/60">
                 Settings
               </h2>
-              <Link
-                href="/principal/classes"
-                className="block rounded-2xl border border-black/5 bg-white p-4 shadow-sm"
-              >
-                <p className="text-sm font-semibold text-brand-neutral-black">Temporary cover cut-off</p>
-                <p className="mt-0.5 text-xs text-brand-neutral-black/50">
-                  Ends daily at {formatCutoffTime(cutoffTime)} · change from Classes
-                </p>
-              </Link>
+              <div className="flex items-center justify-between rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
+                <div>
+                  <p className="text-sm font-semibold text-brand-neutral-black">Temporary cover cut-off</p>
+                  <p className="mt-0.5 text-xs text-brand-neutral-black/50">
+                    Starts 7:30am, ends daily at {formatCutoffTime(cutoffTime)}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsCutoffOpen(true)}
+                  className="flex-shrink-0 text-sm font-semibold text-brand-prussian-blue"
+                >
+                  Change
+                </button>
+              </div>
             </section>
 
             <section>
@@ -161,6 +171,19 @@ export default function PrincipalSchoolPage() {
           }
         }}
       />
+
+      {institutionId && (
+        <SetCutoffSheet
+          isOpen={isCutoffOpen}
+          institutionId={institutionId}
+          currentCutoffTime={cutoffTime}
+          onClose={() => setIsCutoffOpen(false)}
+          onSaved={(newCutoff) => {
+            setCutoffTime(newCutoff);
+            setIsCutoffOpen(false);
+          }}
+        />
+      )}
 
       <PrincipalBottomNav />
     </div>
