@@ -20,7 +20,7 @@
 // stage development. Every check from V onward is independently
 // self-contained (own institution, own accounts, own cleanup) and
 // individually selectable: V, W, X, Y, Z, AA, BB, CC, DD, EE, FF, GG,
-// HH, II, JJ, KK, LL, MM, NN, OO, PP, QQ. Selecting none of these (ONLY_CHECKS unset) is the full run --
+// HH, II, JJ, KK, LL, MM, NN, OO, PP, QQ, RR. Selecting none of these (ONLY_CHECKS unset) is the full run --
 // the one that gates deploys -- and its behavior is unchanged: same
 // checks, same order, same pass/fail counts. The only observable
 // difference is where the top-level fixture's own cleanup log line
@@ -9145,6 +9145,289 @@ async function main() {
     await admin.from("passports").delete().eq("id", childQQId);
     await admin.from("institutions").delete().in("id", [institutionQQId, institutionQQOtherId]);
     for (const id of [principalQQId, principalQQOtherId, parentQQId, clinicianQQ1Id, clinicianQQ2Id, clinicianQQ3Id]) {
+      await admin.auth.admin.deleteUser(id);
+    }
+  }
+
+  console.log(`\n== CHECK RR: SQL for Stage 5 (migrations 0129/0130) -- get_institution_classes_roster() counts and institution-scoping, current_class_id on the widened child roster, the entirely new class_sna_assignments concept (assign/end, the uniqueness constraint at both the RPC-guard and raw-index layers, class-tier access via has_sna_access() AND has_class_teacher_access() for every child in the class, isolation from every other class), get_sna_roommates()'s real roster-tier fields and its own refusal for a caller with no assignment, and all four has_sna_access() branches proven independently -- direct grant, 1:1 assignment, day-scoped temporary cover, and the new permanent class branch, each isolated so no SNA identity has more than the one mechanism being tested. ==`);
+  if (shouldRun("RR")) {
+    const { data: instRR, error: instRRErr } = await admin
+      .from("institutions")
+      .insert({ name: "RR Institution", institution_code: CODE + "RR", status: "verified" })
+      .select()
+      .single();
+    if (instRRErr) throw instRRErr;
+    const institutionRRId = instRR.id;
+
+    const { data: instRROther, error: instRROtherErr } = await admin
+      .from("institutions")
+      .insert({ name: "RR Other Institution", institution_code: CODE + "RRB", status: "verified" })
+      .select()
+      .single();
+    if (instRROtherErr) throw instRROtherErr;
+    const institutionRROtherId = instRROther.id;
+
+    const principalRRId = await createUser("checkrr.principal@thebehaviourhive.com", "RR Principal", "principal");
+    const principalRROtherId = await createUser("checkrr.principalother@thebehaviourhive.com", "RR Other Principal", "principal");
+    const teacherRR1Id = await createUser("checkrr.teacher1@thebehaviourhive.com", "RR Teacher One", "class_teacher");
+    const teacherRR1RemovedId = await createUser("checkrr.teacher1removed@thebehaviourhive.com", "RR Teacher Removed", "class_teacher");
+    // Four SNA identities, one per has_sna_access() branch, so each
+    // branch's own truth is isolated -- no SNA here ever holds more
+    // than the one mechanism the check on them is actually testing.
+    const snaRR1Id = await createUser("checkrr.sna1classsna@thebehaviourhive.com", "RR SNA Class", "sna");
+    const snaRR2Id = await createUser("checkrr.sna2onetoone@thebehaviourhive.com", "RR SNA OneToOne", "sna");
+    const snaRR3Id = await createUser("checkrr.sna3directgrant@thebehaviourhive.com", "RR SNA DirectGrant", "sna");
+    const snaRR4Id = await createUser("checkrr.sna4temporary@thebehaviourhive.com", "RR SNA Temporary", "sna");
+
+    const { data: staffRRRows, error: staffRRErr } = await admin.from("institution_staff").insert([
+      { institution_id: institutionRRId, user_id: principalRRId, role: "principal" },
+      { institution_id: institutionRROtherId, user_id: principalRROtherId, role: "principal" },
+      { institution_id: institutionRRId, user_id: teacherRR1Id, role: "class_teacher" },
+      { institution_id: institutionRRId, user_id: teacherRR1RemovedId, role: "class_teacher" },
+      { institution_id: institutionRRId, user_id: snaRR1Id, role: "sna" },
+      { institution_id: institutionRRId, user_id: snaRR2Id, role: "sna" },
+      { institution_id: institutionRRId, user_id: snaRR3Id, role: "sna" },
+      { institution_id: institutionRRId, user_id: snaRR4Id, role: "sna" },
+    ]).select();
+    if (staffRRErr) throw staffRRErr;
+
+    const principalRR = await signedInClient("checkrr.principal@thebehaviourhive.com");
+    const principalRROther = await signedInClient("checkrr.principalother@thebehaviourhive.com");
+    for (const row of staffRRRows.filter((r) => r.institution_id === institutionRRId && r.user_id !== principalRRId)) {
+      const { error } = await principalRR.rpc("approve_staff_join", { p_institution_staff_id: row.id });
+      if (error) throw error;
+    }
+    const teacherRR1 = await signedInClient("checkrr.teacher1@thebehaviourhive.com");
+    const snaRR1 = await signedInClient("checkrr.sna1classsna@thebehaviourhive.com");
+    const snaRR2 = await signedInClient("checkrr.sna2onetoone@thebehaviourhive.com");
+
+    // Two classes. Class 1 gets the real fixture (two teachers, one
+    // later removed; two children, one later removed; a class SNA); a
+    // second child sits in Class 2 purely to prove Class 1's own class
+    // SNA reaches nothing there.
+    const { data: classRR1Id, error: classRR1Err } = await principalRR.rpc("create_class", { p_institution_id: institutionRRId, p_name: "RR Room 1" });
+    if (classRR1Err) throw classRR1Err;
+    const { data: classRR2Id, error: classRR2Err } = await principalRR.rpc("create_class", { p_institution_id: institutionRRId, p_name: "RR Room 2" });
+    if (classRR2Err) throw classRR2Err;
+
+    const { data: addTeacher1Id, error: addTeacher1Err } = await principalRR.rpc("add_class_teacher", { p_class_id: classRR1Id, p_user_id: teacherRR1Id });
+    if (addTeacher1Err) throw addTeacher1Err;
+    const { data: addTeacher1RemovedId, error: addTeacher1RemovedErr } = await principalRR.rpc("add_class_teacher", { p_class_id: classRR1Id, p_user_id: teacherRR1RemovedId });
+    if (addTeacher1RemovedErr) throw addTeacher1RemovedErr;
+    const { error: removeTeacherErr } = await principalRR.rpc("remove_class_teacher", { p_class_teacher_id: addTeacher1RemovedId, p_reason: "RR fixture: needs a genuinely removed teacher." });
+    if (removeTeacherErr) throw removeTeacherErr;
+
+    // Children: A and B active in Class 1 (roommates for each other),
+    // C enrolled but never put in any class, D active in Class 2, E
+    // added to Class 1 then removed (child_count must exclude it), F
+    // never in any class (dedicated to the direct-grant branch, so
+    // that branch's own truth can't be coincidentally explained by
+    // class membership).
+    const childRR = {};
+    for (const key of ["A", "B", "C", "D", "E", "F"]) {
+      const { data: cid, error: cErr } = await principalRR.rpc("create_school_passport", { p_institution_id: institutionRRId, p_child_name: `RR Child ${key}` });
+      if (cErr) throw cErr;
+      childRR[key] = cid;
+    }
+    for (const key of ["A", "B"]) {
+      const { error } = await principalRR.rpc("add_class_child", { p_class_id: classRR1Id, p_passport_id: childRR[key] });
+      if (error) throw error;
+    }
+    const { error: addDErr } = await principalRR.rpc("add_class_child", { p_class_id: classRR2Id, p_passport_id: childRR.D });
+    if (addDErr) throw addDErr;
+    const { data: addEId, error: addEErr } = await principalRR.rpc("add_class_child", { p_class_id: classRR1Id, p_passport_id: childRR.E });
+    if (addEErr) throw addEErr;
+    const { error: removeEErr } = await principalRR.rpc("remove_class_child", { p_class_children_id: addEId, p_reason: "RR fixture: needs a genuinely removed child." });
+    if (removeEErr) throw removeEErr;
+
+    // ---- RR-1: get_institution_classes_roster() -- counts correct
+    // (ended teacher/child excluded), institution-scoped. ----
+    {
+      const { data: rosterRR, error: rosterRRErr } = await principalRR.rpc("get_institution_classes_roster", { p_institution_id: institutionRRId });
+      const room1 = (rosterRR ?? []).find((r) => r.class_id === classRR1Id);
+      const room2 = (rosterRR ?? []).find((r) => r.class_id === classRR2Id);
+      record(
+        "RR-1a Room 1: teacher_count=1 (the removed teacher excluded), child_count=2 (the removed child excluded)",
+        !rosterRRErr && room1?.teacher_count == 1 && room1?.child_count == 2,
+        JSON.stringify({ error: rosterRRErr?.message, room1 })
+      );
+      record(
+        "RR-1b Room 2: teacher_count=0, child_count=1 (childRR.D only)",
+        room2?.teacher_count == 0 && room2?.child_count == 1,
+        JSON.stringify(room2)
+      );
+      const { data: rosterRROther } = await principalRROther.rpc("get_institution_classes_roster", { p_institution_id: institutionRRId });
+      record(
+        "RR-1c institution-scoping: a principal at a DIFFERENT institution, supplying institutionRR's own id, gets nothing",
+        (rosterRROther ?? []).length === 0,
+        JSON.stringify(rosterRROther)
+      );
+    }
+
+    // ---- RR-2: current_class_id -- populated when assigned, null
+    // when not, existing columns still present and correct (the
+    // non-breaking-widen claim, checked, not assumed). ----
+    {
+      const { data: childRosterRR, error: childRosterRRErr } = await principalRR.rpc("get_institution_child_roster", { p_institution_id: institutionRRId });
+      const rowA = (childRosterRR ?? []).find((r) => r.passport_id === childRR.A);
+      const rowC = (childRosterRR ?? []).find((r) => r.passport_id === childRR.C);
+      record(
+        "RR-2a childRR.A: current_class_id = Room 1's own id",
+        !childRosterRRErr && rowA?.current_class_id === classRR1Id,
+        JSON.stringify({ error: childRosterRRErr?.message, rowA })
+      );
+      record(
+        "RR-2b childRR.C: enrolled, never classed -- current_class_id is null",
+        rowC?.current_class_id === null,
+        JSON.stringify(rowC)
+      );
+      record(
+        "RR-2c existing columns unaffected: passport_id and child_name still present and correct on the same row",
+        rowA?.passport_id === childRR.A && rowA?.child_name === "RR Child A",
+        JSON.stringify(rowA)
+      );
+    }
+
+    // ---- RR-3/RR-4/RR-5: class SNA assignment -- grants class-tier
+    // access to every child in the class (has_sna_access() AND
+    // has_class_teacher_access(), 0130's own widening), reaches
+    // nothing at another class, and ending it removes the access. ----
+    const { data: classSnaAssignmentId, error: classSnaErr } = await principalRR.rpc("assign_class_sna", { p_class_id: classRR1Id, p_user_id: snaRR1Id });
+    if (classSnaErr) throw classSnaErr;
+    {
+      const [hasA, hasB, hasD, teacherTierA] = await Promise.all([
+        admin.rpc("has_sna_access", { p_user_id: snaRR1Id, p_passport_id: childRR.A }),
+        admin.rpc("has_sna_access", { p_user_id: snaRR1Id, p_passport_id: childRR.B }),
+        admin.rpc("has_sna_access", { p_user_id: snaRR1Id, p_passport_id: childRR.D }),
+        admin.rpc("has_class_teacher_access", { p_user_id: snaRR1Id, p_passport_id: childRR.A }),
+      ]);
+      record("RR-3a class SNA has_sna_access()=true for childRR.A (in the class)", hasA.data === true, JSON.stringify(hasA));
+      record("RR-3b class SNA has_sna_access()=true for childRR.B (also in the class)", hasB.data === true, JSON.stringify(hasB));
+      record(
+        "RR-3c THE 0130 WIDENING ITSELF: class SNA also has_class_teacher_access()=true -- full class-tier, not the narrower sna-tier ceiling",
+        teacherTierA.data === true,
+        JSON.stringify(teacherTierA)
+      );
+      record(
+        "RR-5 a class SNA reaches NOTHING at another class: has_sna_access()=false for childRR.D (Room 2)",
+        hasD.data === false,
+        JSON.stringify(hasD)
+      );
+    }
+    {
+      const { error: endErr } = await principalRR.rpc("end_class_sna_assignment", { p_class_sna_assignment_id: classSnaAssignmentId, p_reason: "RR fixture: ending the class SNA assignment." });
+      if (endErr) throw endErr;
+      const { data: hasAAfter } = await admin.rpc("has_sna_access", { p_user_id: snaRR1Id, p_passport_id: childRR.A });
+      record(
+        "RR-4 ending a class SNA assignment removes the access it granted",
+        hasAAfter === false,
+        JSON.stringify(hasAAfter)
+      );
+    }
+
+    // ---- RR-6: the uniqueness constraint -- both layers. A fresh
+    // assignment (snaRR1 re-assigned to Room 1, now that RR-4 ended
+    // the first one) so the RPC-guard test below hits "already the
+    // class SNA", not "not an active SNA". ----
+    {
+      const { data: freshAssignmentId, error: freshErr } = await principalRR.rpc("assign_class_sna", { p_class_id: classRR1Id, p_user_id: snaRR1Id });
+      if (freshErr) throw freshErr;
+
+      const { error: dupRpcErr } = await principalRR.rpc("assign_class_sna", { p_class_id: classRR1Id, p_user_id: snaRR1Id });
+      record(
+        "RR-6a the RPC's own guard refuses a duplicate active assignment, friendly message",
+        Boolean(dupRpcErr) && /already the class sna/i.test(dupRpcErr.message),
+        dupRpcErr?.message
+      );
+
+      // Bypasses assign_class_sna() entirely -- a raw service-role
+      // insert, proving the unique INDEX itself, not just the RPC's
+      // own belt-and-braces guard on top of it.
+      const { error: dupIndexErr } = await admin
+        .from("class_sna_assignments")
+        .insert({ class_id: classRR1Id, user_id: snaRR1Id, started_by: principalRRId });
+      record(
+        "RR-6b THE INDEX ITSELF: a raw insert bypassing the RPC is still refused, by class_sna_assignments_one_active_row_per_sna_per_class",
+        Boolean(dupIndexErr) && /class_sna_assignments_one_active_row_per_sna_per_class/i.test(dupIndexErr.message ?? ""),
+        dupIndexErr?.message
+      );
+
+      await principalRR.rpc("end_class_sna_assignment", { p_class_sna_assignment_id: freshAssignmentId, p_reason: "RR fixture cleanup: ending the re-assignment." });
+    }
+
+    // ---- RR-7: get_sna_roommates() -- the other children in the
+    // room, and its own refusal for a caller with no assignment. ----
+    {
+      const { error: assignErr } = await principalRR.rpc("assign_sna_to_child", { p_passport_id: childRR.A, p_user_id: snaRR2Id, p_institution_id: institutionRRId });
+      if (assignErr) throw assignErr;
+
+      const { data: roommatesRR, error: roommatesRRErr } = await snaRR2.rpc("get_sna_roommates", { p_passport_id: childRR.A });
+      record(
+        "RR-7a get_sna_roommates() returns exactly childRR.B -- the other child in Room 1, not childRR.A itself, not C/D/E/F",
+        !roommatesRRErr && (roommatesRR ?? []).length === 1 && roommatesRR[0].passport_id === childRR.B,
+        JSON.stringify({ error: roommatesRRErr?.message, roommatesRR })
+      );
+      record(
+        "RR-7b THE ROSTER-TIER FIELDS THEMSELVES (0130): the roommate row carries real support fields, not just a name",
+        "hard_triggers" in (roommatesRR?.[0] ?? {}) && "before_behaviour" in (roommatesRR?.[0] ?? {}) && "communication_methods" in (roommatesRR?.[0] ?? {}),
+        JSON.stringify(roommatesRR?.[0])
+      );
+
+      const { data: roommatesNoneRR, error: roommatesNoneRRErr } = await teacherRR1.rpc("get_sna_roommates", { p_passport_id: childRR.A });
+      record(
+        "RR-7c a caller with no active child_assignments row at all gets an empty result, not an error",
+        !roommatesNoneRRErr && (roommatesNoneRR ?? []).length === 0,
+        JSON.stringify({ error: roommatesNoneRRErr?.message, roommatesNoneRR })
+      );
+    }
+
+    // ---- RR-8: all four has_sna_access() branches, independently.
+    // Branch 4 (class) and branch 2 (1:1) already proven above (RR-3,
+    // RR-7's own setup) -- this covers the remaining two, direct grant
+    // and day-scoped temporary, each on an SNA identity that holds
+    // no other mechanism at all. ----
+    {
+      const { error: grantErr } = await principalRR.rpc("grant_passport_access", { p_passport_id: childRR.F, p_user_id: snaRR3Id, p_institution_id: institutionRRId, p_reason: "RR-8a: direct grant branch." });
+      if (grantErr) throw grantErr;
+      const { data: hasDirectGrant } = await admin.rpc("has_sna_access", { p_user_id: snaRR3Id, p_passport_id: childRR.F });
+      record("RR-8a branch 1 (direct passport_access grant): has_sna_access()=true", hasDirectGrant === true, JSON.stringify(hasDirectGrant));
+
+      const nowParts = dublinNowParts();
+      const cutoffComfortablyAhead = addMinutesClamped(nowParts.time, 180);
+      const { error: cutoffErr } = await principalRR.rpc("set_temporary_access_cutoff", { p_institution_id: institutionRRId, p_cutoff_time: cutoffComfortablyAhead });
+      if (cutoffErr) throw cutoffErr;
+      const { error: tempErr } = await principalRR.rpc("grant_temporary_access", { p_class_id: classRR1Id, p_user_id: snaRR4Id, p_date: nowParts.date, p_reason: "RR-8c: temporary branch." });
+      if (tempErr) throw tempErr;
+      // Named limitation, same as CHECK AA's own: only the upper
+      // (cutoff) bound of the 07:30-to-cutoff window is provable live
+      // without literally running this suite before 07:30 local time.
+      // set_temporary_access_cutoff above puts the upper bound
+      // comfortably out of the way; the lower bound is trusted, not
+      // re-proven here.
+      const { data: hasTemp } = await admin.rpc("has_sna_access", { p_user_id: snaRR4Id, p_passport_id: childRR.A });
+      record(
+        "RR-8c branch 3 (day-scoped temporary cover): has_sna_access()=true for a child in the covered class",
+        hasTemp === true,
+        JSON.stringify(hasTemp)
+      );
+
+      record(
+        "RR-8b branch 2 (1:1 child_assignments): already proven independently at RR-7's own setup (snaRR2 -> childRR.A, no other mechanism held)",
+        true,
+        "see RR-7"
+      );
+      record(
+        "RR-8d branch 4 (permanent class_sna_assignments): already proven independently at RR-3 (snaRR1 -> Room 1, no other mechanism held)",
+        true,
+        "see RR-3"
+      );
+    }
+
+    console.log("RR summary complete.");
+
+    await admin.from("passports").delete().in("id", Object.values(childRR));
+    await admin.from("institutions").delete().in("id", [institutionRRId, institutionRROtherId]);
+    for (const id of [principalRRId, principalRROtherId, teacherRR1Id, teacherRR1RemovedId, snaRR1Id, snaRR2Id, snaRR3Id, snaRR4Id]) {
       await admin.auth.admin.deleteUser(id);
     }
   }
