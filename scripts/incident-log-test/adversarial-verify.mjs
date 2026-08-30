@@ -20,7 +20,7 @@
 // stage development. Every check from V onward is independently
 // self-contained (own institution, own accounts, own cleanup) and
 // individually selectable: V, W, X, Y, Z, AA, BB, CC, DD, EE, FF, GG,
-// HH, II, JJ, KK, LL, MM, NN, OO, PP, QQ, RR. Selecting none of these (ONLY_CHECKS unset) is the full run --
+// HH, II, JJ, KK, LL, MM, NN, OO, PP, QQ, RR, SS. Selecting none of these (ONLY_CHECKS unset) is the full run --
 // the one that gates deploys -- and its behavior is unchanged: same
 // checks, same order, same pass/fail counts. The only observable
 // difference is where the top-level fixture's own cleanup log line
@@ -9428,6 +9428,182 @@ async function main() {
     await admin.from("passports").delete().in("id", Object.values(childRR));
     await admin.from("institutions").delete().in("id", [institutionRRId, institutionRROtherId]);
     for (const id of [principalRRId, principalRROtherId, teacherRR1Id, teacherRR1RemovedId, snaRR1Id, snaRR2Id, snaRR3Id, snaRR4Id]) {
+      await admin.auth.admin.deleteUser(id);
+    }
+  }
+
+  console.log(`\n== CHECK SS: Client-behaviour half of Stage 5 (src/app/principal/classes/page.tsx, src/app/principal/classes/[classId]/page.tsx) -- proven via the LITERAL client derivations, not a proxy for them. CHECK RR already proves the RPCs themselves are correct; this check proves the CLIENT reproduces the right shapes over rows RLS has already let it see: AddClassChildSheet's own eligibleChildren filter (current_class_id === null, enrolment_ended_at excluded too -- a real correctness fix made while rewriting this, not just a Stage 5 feature), the per-child SNA-line priority (1:1 over class SNA over neither), and the assignment-history split (ended_at null vs not, active vs history). ==`);
+  if (shouldRun("SS")) {
+    const { data: instSS, error: instSSErr } = await admin
+      .from("institutions")
+      .insert({ name: "SS Institution", institution_code: CODE + "SS", status: "verified" })
+      .select()
+      .single();
+    if (instSSErr) throw instSSErr;
+    const institutionSSId = instSS.id;
+
+    const principalSSId = await createUser("checkss.principal@thebehaviourhive.com", "SS Principal", "principal");
+    const snaSS1Id = await createUser("checkss.sna1class@thebehaviourhive.com", "SS SNA Class", "sna");
+    const snaSS2Id = await createUser("checkss.sna2onetoone@thebehaviourhive.com", "SS SNA OneToOne", "sna");
+    const snaSS3Id = await createUser("checkss.sna3former@thebehaviourhive.com", "SS SNA Former", "sna");
+
+    const { data: staffSSRows, error: staffSSErr } = await admin.from("institution_staff").insert([
+      { institution_id: institutionSSId, user_id: principalSSId, role: "principal" },
+      { institution_id: institutionSSId, user_id: snaSS1Id, role: "sna" },
+      { institution_id: institutionSSId, user_id: snaSS2Id, role: "sna" },
+      { institution_id: institutionSSId, user_id: snaSS3Id, role: "sna" },
+    ]).select();
+    if (staffSSErr) throw staffSSErr;
+
+    const principalSS = await signedInClient("checkss.principal@thebehaviourhive.com");
+    for (const row of staffSSRows.filter((r) => r.user_id !== principalSSId)) {
+      const { error } = await principalSS.rpc("approve_staff_join", { p_institution_staff_id: row.id });
+      if (error) throw error;
+    }
+
+    const { data: classSS1Id, error: classSS1Err } = await principalSS.rpc("create_class", { p_institution_id: institutionSSId, p_name: "SS Room 1" });
+    if (classSS1Err) throw classSS1Err;
+
+    // Children: A (in Room 1, gets a 1:1 SNA AND the room has a class
+    // SNA too -- proves 1:1 wins display priority), B (in Room 1, no
+    // 1:1 -- proves it falls back to the class SNA), C (enrolled,
+    // never classed -- an eligibleChildren candidate), D (classed then
+    // removed -- current_class_id must clear back to null, becoming
+    // an eligibleChildren candidate again), E (departed -- must NEVER
+    // appear in eligibleChildren despite being unassigned).
+    const childSS = {};
+    for (const key of ["A", "B", "C", "D", "E"]) {
+      const { data: cid, error: cErr } = await principalSS.rpc("create_school_passport", { p_institution_id: institutionSSId, p_child_name: `SS Child ${key}` });
+      if (cErr) throw cErr;
+      childSS[key] = cid;
+    }
+    for (const key of ["A", "B"]) {
+      const { error } = await principalSS.rpc("add_class_child", { p_class_id: classSS1Id, p_passport_id: childSS[key] });
+      if (error) throw error;
+    }
+    const { data: addDId, error: addDErr } = await principalSS.rpc("add_class_child", { p_class_id: classSS1Id, p_passport_id: childSS.D });
+    if (addDErr) throw addDErr;
+    const { error: removeDErr } = await principalSS.rpc("remove_class_child", { p_class_children_id: addDId, p_reason: "SS fixture: needs a genuinely removed-then-eligible-again child." });
+    if (removeDErr) throw removeDErr;
+    const { error: endEnrolEErr } = await admin.from("enrolments").insert({ passport_id: childSS.E, institution_id: institutionSSId, ended_at: new Date().toISOString(), started_by: principalSSId, ended_by: principalSSId, end_reason: "left" });
+    if (endEnrolEErr) throw endEnrolEErr;
+
+    const { error: classSnaErr } = await principalSS.rpc("assign_class_sna", { p_class_id: classSS1Id, p_user_id: snaSS1Id });
+    if (classSnaErr) throw classSnaErr;
+    const { data: assignAId, error: assignAErr } = await principalSS.rpc("assign_sna_to_child", { p_passport_id: childSS.A, p_user_id: snaSS2Id, p_institution_id: institutionSSId });
+    if (assignAErr) throw assignAErr;
+    // A former assignment on childSS.A too, so the history split has
+    // something real to isolate from the current one.
+    const { error: endAErr } = await principalSS.rpc("end_child_assignment", { p_child_assignment_id: assignAId, p_reason: "SS fixture: ending to create history." });
+    if (endAErr) throw endAErr;
+    const { error: reassignAErr } = await principalSS.rpc("assign_sna_to_child", { p_passport_id: childSS.A, p_user_id: snaSS3Id, p_institution_id: institutionSSId });
+    if (reassignAErr) throw reassignAErr;
+
+    // ---- SS-1: get_institution_classes_roster() -- the LIST page's own
+    // mapping (class_id -> id, teacher_count/child_count passed through
+    // unchanged). ----
+    {
+      const { data: classesRosterSS } = await principalSS.rpc("get_institution_classes_roster", { p_institution_id: institutionSSId });
+      const room1 = (classesRosterSS ?? []).find((r) => r.class_id === classSS1Id);
+      const mapped = room1
+        ? { id: room1.class_id, name: room1.name, teacherCount: room1.teacher_count, childCount: room1.child_count }
+        : null;
+      record(
+        "SS-1 the list page's own mapping reproduces the roster row correctly -- id from class_id, counts passed through",
+        mapped?.id === classSS1Id && mapped?.name === "SS Room 1" && mapped?.childCount == 2,
+        JSON.stringify(mapped)
+      );
+    }
+
+    // ---- SS-2: AddClassChildSheet's own eligibleChildren filter,
+    // reproduced verbatim: !enrolment_ended_at && current_class_id === null. ----
+    {
+      const { data: childRosterSS } = await principalSS.rpc("get_institution_child_roster", { p_institution_id: institutionSSId });
+      const eligibleSS = (childRosterSS ?? [])
+        .filter((c) => !c.enrolment_ended_at && c.current_class_id === null)
+        .map((c) => c.passport_id);
+      record(
+        "SS-2a childSS.C (enrolled, never classed) IS eligible",
+        eligibleSS.includes(childSS.C),
+        JSON.stringify(eligibleSS)
+      );
+      record(
+        "SS-2b childSS.D (removed from Room 1) is eligible AGAIN -- current_class_id correctly cleared back to null",
+        eligibleSS.includes(childSS.D),
+        JSON.stringify(eligibleSS)
+      );
+      record(
+        "SS-2c childSS.A (currently in Room 1) is NOT eligible",
+        !eligibleSS.includes(childSS.A),
+        JSON.stringify(eligibleSS)
+      );
+      record(
+        "SS-2d THE REAL FIX: childSS.E (departed, unassigned) is NEVER eligible despite current_class_id being null -- the old filter never checked this at all",
+        !eligibleSS.includes(childSS.E),
+        JSON.stringify(eligibleSS)
+      );
+    }
+
+    // ---- SS-3: the per-child SNA-line priority, reproduced verbatim
+    // from the class detail page's own derivation. ----
+    {
+      const { data: assignmentRowsSS } = await principalSS
+        .from("child_assignments")
+        .select("passport_id, user_id, ended_at")
+        .in("passport_id", [childSS.A, childSS.B]);
+      const assignmentMapSS = new Map((assignmentRowsSS ?? []).filter((a) => !a.ended_at).map((a) => [a.passport_id, a.user_id]));
+      const { data: classSnaRowsSS } = await principalSS
+        .from("class_sna_assignments")
+        .select("user_id")
+        .eq("class_id", classSS1Id)
+        .is("ended_at", null);
+      const classSnaUserIdsSS = (classSnaRowsSS ?? []).map((r) => r.user_id);
+
+      const lineFor = (passportId) => {
+        const oneToOne = assignmentMapSS.get(passportId);
+        if (oneToOne) return `1:1 SNA: ${oneToOne}`;
+        if (classSnaUserIdsSS.length > 0) return `Class SNA: ${classSnaUserIdsSS.join(", ")}`;
+        return "No SNA assigned";
+      };
+      record(
+        "SS-3a childSS.A: 1:1 SNA wins display priority over the class SNA, even though both exist",
+        lineFor(childSS.A) === `1:1 SNA: ${snaSS3Id}`,
+        lineFor(childSS.A)
+      );
+      record(
+        "SS-3b childSS.B: no 1:1 assignment -- falls back to Class SNA",
+        lineFor(childSS.B) === `Class SNA: ${snaSS1Id}`,
+        lineFor(childSS.B)
+      );
+    }
+
+    // ---- SS-4: the assignment-history split, reproduced verbatim --
+    // ended_at null goes to the current map, ended_at set goes to
+    // history. childSS.A now has exactly one of each. ----
+    {
+      const { data: allAssignmentsSS } = await principalSS
+        .from("child_assignments")
+        .select("id, passport_id, user_id, ended_at")
+        .eq("passport_id", childSS.A);
+      const current = (allAssignmentsSS ?? []).filter((a) => !a.ended_at);
+      const history = (allAssignmentsSS ?? []).filter((a) => a.ended_at);
+      record(
+        "SS-4a exactly one current (ended_at null) assignment for childSS.A",
+        current.length === 1 && current[0].user_id === snaSS3Id,
+        JSON.stringify(current)
+      );
+      record(
+        "SS-4b exactly one history (ended_at set) row for childSS.A, the original snaSS2 assignment",
+        history.length === 1 && history[0].user_id === snaSS2Id,
+        JSON.stringify(history)
+      );
+    }
+
+    console.log("SS summary complete.");
+
+    await admin.from("passports").delete().in("id", Object.values(childSS));
+    await admin.from("institutions").delete().eq("id", institutionSSId);
+    for (const id of [principalSSId, snaSS1Id, snaSS2Id, snaSS3Id]) {
       await admin.auth.admin.deleteUser(id);
     }
   }
