@@ -107,23 +107,66 @@ function addMinutesClamped(hhmmss, delta) {
   return `${hh}:${mm}:00`;
 }
 
+// Both helpers below hit Supabase's own auth rate limiter (the "sign-ups
+// and sign-ins" bucket in the dashboard, confirmed 2026-08-30 to cover
+// BOTH signInWithPassword() and admin.createUser() -- not two separate
+// budgets). Raising the dashboard limit (30 -> 300/5min) did not change
+// where a full run crashes: four attempts, wide-ranging gaps between
+// them (immediate, 70min, 90min, a clean 10min), all died at nearly the
+// identical point (CHECK KK's own clinician-verification loop) --
+// evidence this was never actually about the sustained 5-minute budget,
+// which a run's own ~240 total auth calls spread across ~10-12 minutes
+// of real wall-clock runtime should sit well under even at the OLD
+// 30/5min setting. Simplest explanation left standing: the suite's own
+// front-loaded call pattern (CORE's own many createUser() calls,
+// clustered early and close together) bursts hard enough, early enough,
+// that a rolling window is still full of that burst's own tail by the
+// time later checks add a few more calls on top -- a genuine
+// sub-window burst, not a sustained-rate problem the dashboard's own
+// "requests per 5 min" framing suggests. sleep()+retry here treats the
+// actual symptom directly rather than requiring a perfectly-tuned
+// dashboard value or perfectly-spaced manual re-runs.
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+const AUTH_CALL_THROTTLE_MS = 150;
+async function withRateLimitRetry(fn, label) {
+  for (let attempt = 1; attempt <= 4; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      const msg = err?.message ?? "";
+      if (!/rate limit/i.test(msg) || attempt === 4) throw err;
+      const backoffMs = 2000 * attempt;
+      console.log(`  (rate limit hit on ${label}, attempt ${attempt}/4 -- backing off ${backoffMs}ms and retrying)`);
+      await sleep(backoffMs);
+    }
+  }
+}
+
 async function signedInClient(email) {
-  const c = createClient(URL, ANON_KEY, { auth: { autoRefreshToken: false, persistSession: false } });
-  const { error } = await c.auth.signInWithPassword({ email, password: PASSWORD });
-  if (error) throw new Error(`sign-in failed for ${email}: ${error.message}`);
-  return c;
+  await sleep(AUTH_CALL_THROTTLE_MS);
+  return withRateLimitRetry(async () => {
+    const c = createClient(URL, ANON_KEY, { auth: { autoRefreshToken: false, persistSession: false } });
+    const { error } = await c.auth.signInWithPassword({ email, password: PASSWORD });
+    if (error) throw new Error(`sign-in failed for ${email}: ${error.message}`);
+    return c;
+  }, `sign-in(${email})`);
 }
 
 async function createUser(email, fullName, role) {
-  const { data, error } = await admin.auth.admin.createUser({
-    email,
-    password: PASSWORD,
-    email_confirm: true,
-    user_metadata: { full_name: fullName },
-    app_metadata: { role },
-  });
-  if (error) throw error;
-  return data.user.id;
+  await sleep(AUTH_CALL_THROTTLE_MS);
+  return withRateLimitRetry(async () => {
+    const { data, error } = await admin.auth.admin.createUser({
+      email,
+      password: PASSWORD,
+      email_confirm: true,
+      user_metadata: { full_name: fullName },
+      app_metadata: { role },
+    });
+    if (error) throw new Error(error.message ?? String(error));
+    return data.user.id;
+  }, `createUser(${email})`);
 }
 
 async function main() {
