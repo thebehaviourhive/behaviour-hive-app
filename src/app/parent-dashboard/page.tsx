@@ -129,15 +129,25 @@ export default function ParentDashboardPage() {
       // policy is owns_passport()-based) for a claimed guardian too, not
       // just a self-created one.
       //
-      // sectionB/C/D and morning_checkins stay .eq("user_id", user.id):
-      // a claimed guardian's passport can never have rows in any of
-      // these (generate_passport_claim_code() refuses to issue a code
-      // for a passport that already has a guardian, and only a guardian
-      // -- self-creating via section-a/b/c/d -- ever writes them), so
-      // these queries are correct unchanged, not a migration gap. See
-      // CLAUDE.md's "known limitation, not solved" entry for the real,
-      // separate gap this leaves (a claimed guardian can't fill these in
-      // yet at all).
+      // sectionB/C/D now read .eq("passport_id", passportId), not
+      // .eq("user_id", user.id) -- PRD 3 Stage 1 (migration 0138) made
+      // these tables guardian-writable, so the old premise here ("a
+      // claimed guardian's passport can never have rows in these
+      // tables") no longer holds. It's not only a claimed-guardian
+      // concern either: this block only runs .eq("user_id", user.id)
+      // under isSelfCreated below, but isSelfCreated just means "I'm the
+      // original creator," not "I'm the only guardian" -- a second
+      // guardian can be added to a self-created passport too (the claim
+      // flow), and last-writer attribution means the row's user_id
+      // reflects whoever saved most recently, not who created the
+      // passport. The original creator's own resumeHref calculation
+      // would silently see a co-guardian's real, complete section as
+      // empty. passport_id is the correct key regardless of authorship.
+      //
+      // morning_checkins deliberately stays .eq("user_id", user.id) --
+      // that's a separate, already-documented gap (see CLAUDE.md's
+      // "known limitation, not solved" entry on morning check-ins), not
+      // in this stage's scope to fix.
       const [
         { data: passportRow },
         { data: sectionB },
@@ -153,17 +163,17 @@ export default function ParentDashboardPage() {
         supabase
           .from("passport_section_b")
           .select("okay_signals, hard_signals, hard_triggers, section_b_complete")
-          .eq("user_id", user!.id)
+          .eq("passport_id", passportId)
           .maybeSingle(),
         supabase
           .from("passport_section_c")
           .select("section_c_complete")
-          .eq("user_id", user!.id)
+          .eq("passport_id", passportId)
           .maybeSingle(),
         supabase
           .from("passport_section_d")
           .select("before_behaviour, during_distress, after_distress, section_d_complete")
-          .eq("user_id", user!.id)
+          .eq("passport_id", passportId)
           .maybeSingle(),
         supabase
           .from("morning_checkins")

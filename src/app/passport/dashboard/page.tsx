@@ -350,13 +350,18 @@ export default function PassportDashboardPage() {
         // 0117 (passports' SELECT policy is owns_passport()-based) for a
         // claimed guardian too, not just a self-created one.
         //
-        // sectionB/C/D stay .eq("user_id", user.id): a claimed
-        // guardian's passport can never have rows here yet --
-        // generate_passport_claim_code() refuses a passport that already
-        // has a guardian, and only the self-created wizard (still
-        // user_id-keyed, deliberately out of Stage 5 Step 3's scope)
-        // ever writes them. See CLAUDE.md's "known limitation, not
-        // solved" entry for the real, separate gap this leaves.
+        // sectionB/C/D now read .eq("passport_id", passportId), not
+        // .eq("user_id", user.id) -- PRD 3 Stage 1 (migration 0138) made
+        // these tables guardian-writable, so the old reasoning here ("a
+        // claimed guardian's passport can never have rows in these
+        // tables") no longer holds, and the old query shape has a sharper
+        // failure mode than just "claimed guardians see nothing": once
+        // two guardians can both write the SAME section, the row's
+        // user_id reflects whoever saved LAST (see usePassportSectionB's
+        // own header note), so a guardian who didn't personally write the
+        // most recent entry would see their own child's real, complete
+        // data as empty on their own dashboard. passport_id is the
+        // correct key regardless of authorship or who wrote last.
         const [
           { data: passport },
           { data: sectionB },
@@ -373,21 +378,21 @@ export default function PassportDashboardPage() {
           supabase
             .from("passport_section_b")
             .select("okay_signals, hard_signals, hard_triggers, section_b_complete")
-            .eq("user_id", user!.id)
+            .eq("passport_id", passportId)
             .maybeSingle(),
           supabase
             .from("passport_section_c")
             .select(
               "communication_methods, shows_happy, shows_anxious, phrases_to_avoid, section_c_complete"
             )
-            .eq("user_id", user!.id)
+            .eq("passport_id", passportId)
             .maybeSingle(),
           supabase
             .from("passport_section_d")
             .select(
               "before_behaviour, during_distress, after_distress, sensory_seeks, sensory_avoids, section_d_complete"
             )
-            .eq("user_id", user!.id)
+            .eq("passport_id", passportId)
             .maybeSingle(),
         ]);
 
@@ -395,18 +400,23 @@ export default function PassportDashboardPage() {
 
         // A CLAIMED passport (this parent isn't its passports.user_id --
         // that's either a different guardian's self-created row, or null
-        // for a school-created one) has no wizard to resume: section-a
-        // and useSectionB/C/D are all user_id-keyed to whoever originally
-        // created it, deliberately out of Stage 5 Step 3's scope (see
-        // CLAUDE.md's own "known limitation" entry). getPassportResumeHref
-        // doesn't know this distinction -- it would send a not_started
-        // claimed passport to /passport/welcome, which (now that welcome
-        // itself redirects a parent who already has ANY passport straight
-        // back here) is a genuine infinite redirect loop, not just wrong
-        // copy. Found live, driving this exact case end-to-end, not by
-        // inspection. A claimed guardian always lands on this dashboard
-        // itself, however incomplete the underlying data is -- the
-        // section cards below already have their own "nothing added yet"
+        // for a school-created one) skips the guided wizard-resume flow:
+        // getPassportResumeHref only ever runs for isSelfCreated. Section
+        // A/B/C/D are all guardian-writable now (PRD 3 Stage 1, migration
+        // 0138) -- a claimed guardian CAN edit every section, just not
+        // through the sequential wizard redirect; the section cards below
+        // link straight to /passport/section-{a,b/1,c,d/1}, which resolve
+        // and save correctly for a claimed guardian too (useMyPassport()-
+        // based, same as this page). Kept this way deliberately, not a
+        // leftover limitation: routing a claimed guardian through
+        // getPassportResumeHref would send a not_started claimed passport
+        // to /passport/welcome, which (now that welcome itself redirects
+        // a parent who already has ANY passport straight back here) is a
+        // genuine infinite redirect loop, not just wrong copy. Found live,
+        // driving this exact case end-to-end, not by inspection. A
+        // claimed guardian always lands on this dashboard itself, however
+        // incomplete the underlying data is -- the section cards below
+        // already have their own "nothing added yet"
         // empty states for exactly this shape.
         const isSelfCreated = passport?.user_id === user!.id;
 

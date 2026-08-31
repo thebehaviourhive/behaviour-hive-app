@@ -10498,7 +10498,7 @@ async function main() {
     }
   }
 
-  console.log(`\n== CHECK XX: SQL for PRD 3 Stage 1 (migration 0138) -- passports/passport_section_b/c/d RLS moved to owns_passport(). THE UPSERT BUG, found by accident while building this check and locked as a permanent regression (XX0b): .upsert() sends Prefer: return=representation by default, even with no .select() chained, so a first-time insert must pass the SELECT policy (owns_passport(id), 0117) WITHIN THE SAME STATEMENT a trigger hasn't finished its own cross-table write in yet -- every brand-new parent's first save, not a claimed-guardian edge case. XX2a CORRECTS an earlier draft of this check: the OLD onConflict:"user_id" pattern does NOT silently orphan a second passport for a claimed guardian -- it hits the identical upsert bug and fails cleanly, leaving nothing behind. The NEW explicit update-by-id pattern (XX2b) succeeds and leaves exactly one passport, the claimed one, updated. Section B/C/D: a claimed guardian can now SELECT/INSERT/UPDATE with a real passport_id; a spoofed user_id in the payload is refused (WITH CHECK's own user_id = auth.uid()); an outsider with zero passport_guardians row is refused on all four tables, both directions, proven by re-reading the actual row afterward, not by absence of a client error. LAST-WRITER ATTRIBUTION, proven not assumed: two real guardians on the same claimed passport, sequential updates -- each one's own payload includes user_id, matching how the real hooks already write -- the row's user_id ends up as whoever wrote last and a field neither update touched survives untouched. A genuine self-created passport's own original owner is unaffected -- the regression control. ==`);
+  console.log(`\n== CHECK XX: SQL for PRD 3 Stage 1 (migration 0138) -- passports/passport_section_b/c/d RLS moved to owns_passport(). THE UPSERT BUG, found by accident while building this check and locked as a permanent regression (XX0b): .upsert() sends Prefer: return=representation by default, even with no .select() chained, so a first-time insert must pass the SELECT policy (owns_passport(id), 0117) WITHIN THE SAME STATEMENT a trigger hasn't finished its own cross-table write in yet -- every brand-new parent's first save, not a claimed-guardian edge case. XX2a CORRECTS an earlier draft of this check: the OLD onConflict:"user_id" pattern does NOT silently orphan a second passport for a claimed guardian -- it hits the identical upsert bug and fails cleanly, leaving nothing behind. The NEW explicit update-by-id pattern (XX2b) succeeds and leaves exactly one passport, the claimed one, updated. Section B/C/D: a claimed guardian can now SELECT/INSERT/UPDATE with a real passport_id; a spoofed user_id in the payload is refused (WITH CHECK's own user_id = auth.uid()); an outsider with zero passport_guardians row is refused on all four tables, both directions, proven by re-reading the actual row afterward, not by absence of a client error. LAST-WRITER ATTRIBUTION, proven not assumed: two real guardians on the same claimed passport, sequential updates -- each one's own payload includes user_id, matching how the real hooks already write -- the row's user_id ends up as whoever wrote last and a field neither update touched survives untouched. A genuine self-created passport's own original owner is unaffected -- the regression control. XX2c: passports.user_id is explicitly re-read and confirmed still null after a claimed guardian's real save, not just inferred from the payload never mentioning it. XX8: the DASHBOARD READ bug found sweeping for the same shape after this check first went green -- parent-dashboard/page.tsx and passport/dashboard/page.tsx both used to read sectionB/C/D via .eq("user_id", user.id), harmless before this migration (a claimed guardian could never have a row there) but wrong the moment a row can be attributed to a co-guardian who isn't the one viewing their own dashboard; both fixed to .eq("passport_id", ...), proven here in both the broken-old-shape and fixed-new-shape directions. ==`);
   if (shouldRun("XX")) {
     const { data: instXX, error: instXXErr } = await admin
       .from("institutions")
@@ -10647,8 +10647,18 @@ async function main() {
       .update({ diagnoses: ["adhd"], school: "XX National School" })
       .eq("id", childXXId);
     record("XX2b THE FIX: the NEW explicit update-by-id pattern succeeds", !newPatternXXErr, newPatternXXErr?.message);
-    const { data: allXXPassportsForGuardian1 } = await admin.from("passports").select("id, diagnoses, school").or(`id.eq.${childXXId},user_id.eq.${guardian1XXId}`);
+    const { data: allXXPassportsForGuardian1 } = await admin.from("passports").select("id, user_id, diagnoses, school").or(`id.eq.${childXXId},user_id.eq.${guardian1XXId}`);
     record("XX2b-confirm: exactly ONE passport exists for this family now -- the claimed one, updated in place, not a second one", allXXPassportsForGuardian1.length === 1 && allXXPassportsForGuardian1[0].id === childXXId && JSON.stringify(allXXPassportsForGuardian1[0].diagnoses) === JSON.stringify(["adhd"]) && allXXPassportsForGuardian1[0].school === "XX National School", JSON.stringify(allXXPassportsForGuardian1));
+    // XX2c: explicit, direct proof of the fourth item on Daniel's own
+    // coverage list -- not implied by XX2b-confirm above (that re-read
+    // never selected user_id at all). savePassport()'s real payload
+    // (section-a/page.tsx) never includes user_id on the update branch
+    // for exactly this reason: user_id carries 0113's dual-write-trigger
+    // meaning, not "who edited this," and a claimed passport must keep
+    // it null. This update call already never mentioned user_id -- this
+    // just re-reads the column afterward to prove it, rather than assume
+    // it from the payload shape alone.
+    record("XX2c passports.user_id stays null on a claimed guardian's real save -- explicitly re-read, not inferred from the payload never mentioning it", allXXPassportsForGuardian1[0].user_id === null, JSON.stringify(allXXPassportsForGuardian1[0]));
 
     // ---- XX3: section B/C/D -- a claimed guardian CAN now read/write,
     // with a real passport_id, on all three tables independently. ----
@@ -10722,6 +10732,25 @@ async function main() {
     record("XX6b THE ATTRIBUTION: the row's user_id now reads guardian 2 -- whoever wrote last, as designed", finalRowXX.user_id === guardian2XXId, JSON.stringify(finalRowXX));
     record("XX6c THE FIELD guardian 2's update never touched (hard_signals) SURVIVES, exactly as guardian 1 left it -- a plain column-scoped UPDATE, not a silent overwrite of the whole row", JSON.stringify(finalRowXX.hard_signals) === JSON.stringify(["loud noises"]), JSON.stringify(finalRowXX));
     record("XX6d THE FIELD guardian 2 DID write (okay_signals) reflects their own value", JSON.stringify(finalRowXX.okay_signals) === JSON.stringify(["favourite song"]), JSON.stringify(finalRowXX));
+
+    // ---- XX8: the DASHBOARD READ shape, found sweeping for the same
+    // fix -- parent-dashboard/page.tsx and passport/dashboard/page.tsx
+    // both used to read sectionB/C/D via .eq("user_id", user.id) for
+    // their own summary/resume-href display. That was harmless before
+    // this migration (a claimed guardian could never have a row there
+    // at all), but XX6 above just proved a real row can now be
+    // attributed to a DIFFERENT guardian than the one viewing their own
+    // dashboard. guardian1XX wrote hard_signals first but is no longer
+    // this row's user_id (guardian 2 saved last) -- the OLD dashboard
+    // query, .eq("user_id", guardian1XXId), would find nothing for
+    // guardian 1 even though their own child's section B is genuinely
+    // complete with real data. Both dashboards were fixed in the same
+    // pass to .eq("passport_id", passportId) instead -- this proves
+    // that shape, exactly as the fixed client code now queries it. ----
+    const { data: g1OldShapeXX } = await guardian1XX.from("passport_section_b").select("hard_signals, okay_signals").eq("user_id", guardian1XXId).maybeSingle();
+    record("XX8a THE BUG THIS WOULD HAVE BEEN: the OLD dashboard query shape (.eq('user_id', guardian1's own id)) finds NOTHING for guardian 1 -- their own child's data, invisible to their own dashboard, because guardian 2 saved last", g1OldShapeXX === null, JSON.stringify(g1OldShapeXX));
+    const { data: g1NewShapeXX } = await guardian1XX.from("passport_section_b").select("hard_signals, okay_signals").eq("passport_id", childXXId).maybeSingle();
+    record("XX8b THE FIX: the NEW dashboard query shape (.eq('passport_id', ...)) finds the real row for guardian 1 regardless of who wrote it last", g1NewShapeXX !== null && JSON.stringify(g1NewShapeXX.hard_signals) === JSON.stringify(["loud noises"]) && JSON.stringify(g1NewShapeXX.okay_signals) === JSON.stringify(["favourite song"]), JSON.stringify(g1NewShapeXX));
 
     // ---- XX7: regression -- a genuine self-created passport's own
     // original owner is unaffected by any of this. ----
