@@ -5,10 +5,10 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { createClient } from "@/lib/supabase/client";
-import { AlertTriangleIcon } from "@/components/ui/icons";
+import { AlertTriangleIcon, CheckIcon } from "@/components/ui/icons";
 import { AttestationPromptCard } from "@/components/incident-log/AttestationPromptCard";
 import { PrincipalBottomNav } from "@/components/principal/PrincipalBottomNav";
-import { IncidentCard, type InstitutionIncidentRow } from "@/components/principal/IncidentCard";
+import { IncidentCard, formatIncidentDate, type InstitutionIncidentRow } from "@/components/principal/IncidentCard";
 
 // Minimal principal surface, per the brief: "a sign-off queue and
 // access to incidents" -- nothing more. The full principal daily
@@ -25,6 +25,70 @@ import { IncidentCard, type InstitutionIncidentRow } from "@/components/principa
 // what was unioned, what was fixed as a bug, and what was deliberately
 // NOT carried over (the old "Debrief required" pill, provably false on
 // any signed-off incident -- suppressed pending Stage 7's RPC widening).
+//
+// PRD 2, Stage 7: the "later build" above is this build. Seven action-
+// item buckets, five of which needed no new SQL at all -- three already
+// live on get_institution_incidents() (awaiting-countersignature,
+// outstanding debriefs, inherited-from-a-supply-teacher: all three are
+// derivable from teacher_signed_at/countersigned_at/debrief_required/
+// is_inherited, columns this RPC has returned since 0107), one on
+// get_institution_staff_roster() (pending joins, already fetched here
+// before this stage), one on get_institution_child_roster() (enrolled-
+// but-unassigned, current_class_id is null). Only two needed new
+// migration 0134 RPCs: get_institution_restraints_needing_parent_call()
+// and get_institution_withdrawn_attestations() -- see CLAUDE.md's new
+// entry for why neither is built on school_notices.
+//
+// CORRECTION TO THE STAGE 7 RECON REPORT: "inherited incidents...
+// rendered nowhere" was wrong. IncidentCard has rendered the inherited
+// badge (is_inherited/inherited_from_name/inherited_transferred_at)
+// since PRD 1 Stage 3 -- it just had no DEDICATED section calling it
+// out as its own to-do item, buried wherever the incident's OTHER
+// status happened to sort it. That's what this stage adds for it: not
+// a new render, a new SECTION.
+//
+// Empty state: every bucket below renders only when non-empty. If
+// EVERY bucket (join requests, awaiting sign-off, parent calls owed,
+// withdrawn attestations, unassigned children, outstanding debriefs,
+// inherited incidents) is empty at once, one reassuring card replaces
+// all seven rather than seven stacked "nothing here" boxes -- most days
+// this is what a principal sees, and it has to read as checked and
+// clear, not broken or unbuilt. AttestationPromptCard (the principal's
+// OWN attestation duties, distinct from the withdrawn-attestations
+// bucket, which is about OTHER staff) stays exactly as it was --
+// Daniel's fold-in instruction was for the teacher's dashboard
+// specifically, not this one.
+
+interface RestraintNeedingCallRow {
+  incident_children_id: string;
+  incident_id: string;
+  occurred_at: string;
+  location: string;
+  child_index: string;
+  child_name: string | null;
+  owning_teacher_name: string | null;
+}
+
+interface WithdrawnAttestationRow {
+  incident_id: string;
+  incident_staff_id: string;
+  occurred_at: string;
+  location: string;
+  staff_user_id: string;
+  staff_name: string | null;
+  withdrawn_at: string;
+  withdrawn_by: string;
+  withdrawn_by_name: string | null;
+  withdrawal_reason: string;
+  is_closed: boolean;
+}
+
+interface ChildRosterRow {
+  passport_id: string;
+  child_name: string;
+  enrolment_ended_at: string | null;
+  current_class_id: string | null;
+}
 
 export default function PrincipalDashboardPage() {
   const router = useRouter();
@@ -34,13 +98,15 @@ export default function PrincipalDashboardPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   // PRD 2, Stage 2: the dashboard's own state-aware deep link into
-  // Staff's Pending segment. No dedicated "outstanding items" RPC exists
-  // yet (Stage 7's own job) -- this is the one roster RPC already built
-  // for exactly this, called a second time here, count-only. Genuinely
-  // the honest minimum: this card shows when there's something to act
-  // on and says nothing when there isn't, rather than a placeholder
-  // always-there widget.
+  // Staff's Pending segment. Genuinely the honest minimum: this card
+  // shows when there's something to act on and says nothing when there
+  // isn't, rather than a placeholder always-there widget.
   const [pendingStaffCount, setPendingStaffCount] = useState(0);
+  const [parentCalls, setParentCalls] = useState<RestraintNeedingCallRow[]>([]);
+  const [withdrawnAttestations, setWithdrawnAttestations] = useState<WithdrawnAttestationRow[]>([]);
+  const [unassignedChildren, setUnassignedChildren] = useState<ChildRosterRow[]>([]);
+  const [markingCalledId, setMarkingCalledId] = useState<string | null>(null);
+  const [markCalledError, setMarkCalledError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!user) return;
@@ -122,13 +188,22 @@ export default function PrincipalDashboardPage() {
         // best-effort; see comment above
       }
 
-      const [{ data: rows, error: rpcError }, staffRosterResult] = await Promise.all([
+      const [
+        { data: rows, error: rpcError },
+        staffRosterResult,
+        parentCallResult,
+        withdrawnAttestationResult,
+        childRosterResult,
+      ] = await Promise.all([
         supabase.rpc("get_institution_incidents", { p_institution_id: staffRow.institution_id }),
         supabase.rpc("get_institution_staff_roster", {
           p_institution_id: staffRow.institution_id,
           p_include_inactive: false,
           p_include_pending: true,
         }),
+        supabase.rpc("get_institution_restraints_needing_parent_call", { p_institution_id: staffRow.institution_id }),
+        supabase.rpc("get_institution_withdrawn_attestations", { p_institution_id: staffRow.institution_id }),
+        supabase.rpc("get_institution_child_roster", { p_institution_id: staffRow.institution_id }),
       ]);
 
       if (!isMounted) return;
@@ -139,13 +214,24 @@ export default function PrincipalDashboardPage() {
         return;
       }
 
-      // Not fatal on its own -- same posture as every other secondary
-      // read on this page. Left at 0 (card simply doesn't show) rather
-      // than surfacing a second error banner for it.
+      // None of the four secondary reads below are fatal on their own --
+      // same posture as the pre-existing staff-roster read. Each bucket
+      // simply stays empty (and so doesn't render) rather than a second
+      // error banner for any one of them.
       if (!staffRosterResult.error) {
         setPendingStaffCount(
           ((staffRosterResult.data ?? []) as { is_pending: boolean }[]).filter((s) => s.is_pending).length
         );
+      }
+      if (!parentCallResult.error) {
+        setParentCalls((parentCallResult.data ?? []) as RestraintNeedingCallRow[]);
+      }
+      if (!withdrawnAttestationResult.error) {
+        setWithdrawnAttestations((withdrawnAttestationResult.data ?? []) as WithdrawnAttestationRow[]);
+      }
+      if (!childRosterResult.error) {
+        const roster = (childRosterResult.data ?? []) as ChildRosterRow[];
+        setUnassignedChildren(roster.filter((c) => !c.enrolment_ended_at && c.current_class_id === null));
       }
 
       setIncidents((rows ?? []) as InstitutionIncidentRow[]);
@@ -158,12 +244,45 @@ export default function PrincipalDashboardPage() {
     };
   }, [user, router]);
 
+  async function handleMarkCalled(row: RestraintNeedingCallRow) {
+    setMarkingCalledId(row.incident_children_id);
+    setMarkCalledError(null);
+    const supabase = createClient();
+    const { error: markError } = await supabase.rpc("mark_parent_called", {
+      p_incident_children_id: row.incident_children_id,
+    });
+    setMarkingCalledId(null);
+    if (markError) {
+      setMarkCalledError(markError.message);
+      return;
+    }
+    setParentCalls((prev) => prev.filter((r) => r.incident_children_id !== row.incident_children_id));
+  }
+
   if (!isReady) {
     return null;
   }
 
   const awaitingSignoff = incidents.filter((i) => i.teacher_signed_at && !i.countersigned_at);
   const rest = incidents.filter((i) => !(i.teacher_signed_at && !i.countersigned_at));
+  // Outstanding = still blocking the teacher's own sign-off -- 0077's
+  // trigger guarantees a completed debrief exists the moment teacher_
+  // signed_at is set, so debrief_required alone (without this second
+  // condition) would be provably false on every signed-off incident,
+  // exactly the reason IncidentCard's own old pill was removed.
+  const outstandingDebriefs = incidents.filter((i) => i.debrief_required && !i.teacher_signed_at);
+  const inherited = incidents.filter((i) => i.is_inherited);
+
+  const nothingOutstanding =
+    !isLoading &&
+    !error &&
+    pendingStaffCount === 0 &&
+    awaitingSignoff.length === 0 &&
+    parentCalls.length === 0 &&
+    withdrawnAttestations.length === 0 &&
+    unassignedChildren.length === 0 &&
+    outstandingDebriefs.length === 0 &&
+    inherited.length === 0;
 
   return (
     <div className="flex min-h-full flex-1 flex-col bg-brand-off-white/40 pb-24">
@@ -189,19 +308,6 @@ export default function PrincipalDashboardPage() {
       </header>
 
       <main className="flex-1 px-4">
-        {pendingStaffCount > 0 && (
-          <Link
-            href="/principal/staff?segment=pending"
-            className="mb-4 block rounded-2xl border border-brand-golden-brown/30 bg-brand-golden-brown/10 p-4"
-          >
-            <p className="text-xs font-semibold uppercase tracking-wide text-brand-golden-brown">
-              Join request{pendingStaffCount === 1 ? "" : "s"}
-            </p>
-            <p className="mt-1 text-sm text-brand-neutral-black">
-              {pendingStaffCount} staff member{pendingStaffCount === 1 ? "" : "s"} waiting on your review.
-            </p>
-          </Link>
-        )}
         <AttestationPromptCard className="mb-4" />
         {isLoading ? (
           <div className="flex flex-col gap-2">
@@ -224,17 +330,150 @@ export default function PrincipalDashboardPage() {
           <>
             <section className="mb-6">
               <h2 className="mb-2 font-heading text-sm font-bold uppercase tracking-wide text-brand-neutral-black/60">
-                Awaiting sign-off
+                Needs your attention
               </h2>
-              {awaitingSignoff.length === 0 ? (
-                <p className="rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-center text-sm text-brand-neutral-black/60">
-                  No incidents awaiting your sign-off.
-                </p>
+
+              {nothingOutstanding ? (
+                <div className="flex items-center gap-3 rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-sm text-brand-neutral-black/60">
+                  <CheckIcon className="h-5 w-5 flex-shrink-0 text-brand-prussian-blue/40" />
+                  <p>Nothing needs your attention right now.</p>
+                </div>
               ) : (
-                <div className="flex flex-col gap-2">
-                  {awaitingSignoff.map((incident) => (
-                    <IncidentCard key={incident.incident_id} incident={incident} needsSignoff />
-                  ))}
+                <div className="flex flex-col gap-4">
+                  {pendingStaffCount > 0 && (
+                    <Link
+                      href="/principal/staff?segment=pending"
+                      className="block rounded-2xl border border-brand-golden-brown/30 bg-brand-golden-brown/10 p-4"
+                    >
+                      <p className="text-xs font-semibold uppercase tracking-wide text-brand-golden-brown">
+                        Join request{pendingStaffCount === 1 ? "" : "s"}
+                      </p>
+                      <p className="mt-1 text-sm text-brand-neutral-black">
+                        {pendingStaffCount} staff member{pendingStaffCount === 1 ? "" : "s"} waiting on your review.
+                      </p>
+                    </Link>
+                  )}
+
+                  {awaitingSignoff.length > 0 && (
+                    <div>
+                      <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-brand-neutral-black/50">
+                        Awaiting your sign-off
+                      </h3>
+                      <div className="flex flex-col gap-2">
+                        {awaitingSignoff.map((incident) => (
+                          <IncidentCard key={incident.incident_id} incident={incident} needsSignoff />
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {parentCalls.length > 0 && (
+                    <div>
+                      <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-brand-neutral-black/50">
+                        Parent{parentCalls.length === 1 ? "" : "s"} still to be called
+                      </h3>
+                      <div className="flex flex-col gap-2">
+                        {parentCalls.map((row) => (
+                          <div key={row.incident_children_id} className="rounded-2xl border border-brand-golden-brown/30 bg-white p-4 shadow-sm">
+                            <Link href={`/teacher/incidents/${row.incident_id}`} className="block">
+                              <p className="text-sm font-semibold text-brand-neutral-black">
+                                {row.child_name ?? `Child ${row.child_index}`}
+                              </p>
+                              <p className="mt-0.5 text-xs text-brand-neutral-black/60">
+                                {formatIncidentDate(row.occurred_at)} · {row.location}
+                                {row.owning_teacher_name ? ` · ${row.owning_teacher_name}` : ""}
+                              </p>
+                            </Link>
+                            <button
+                              type="button"
+                              onClick={() => handleMarkCalled(row)}
+                              disabled={markingCalledId === row.incident_children_id}
+                              className="mt-3 rounded-xl border border-brand-golden-brown/40 px-3 py-1.5 text-xs font-semibold text-brand-golden-brown disabled:opacity-50"
+                            >
+                              {markingCalledId === row.incident_children_id ? "Marking…" : "Mark called"}
+                            </button>
+                          </div>
+                        ))}
+                        {markCalledError && (
+                          <p role="alert" className="text-xs font-medium text-brand-golden-brown">
+                            {markCalledError}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {withdrawnAttestations.length > 0 && (
+                    <div>
+                      <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-brand-neutral-black/50">
+                        Withdrawn attestation{withdrawnAttestations.length === 1 ? "" : "s"}
+                      </h3>
+                      <div className="flex flex-col gap-2">
+                        {withdrawnAttestations.map((row) => (
+                          <Link
+                            key={row.incident_staff_id}
+                            href={`/teacher/incidents/${row.incident_id}`}
+                            className="block rounded-2xl border border-brand-golden-brown/30 bg-white p-4 shadow-sm"
+                          >
+                            <p className="text-sm font-semibold text-brand-neutral-black">
+                              {row.staff_name ?? "A staff member"}
+                            </p>
+                            <p className="mt-0.5 text-xs text-brand-neutral-black/60">
+                              {formatIncidentDate(row.occurred_at)} · {row.location}
+                            </p>
+                            <p className="mt-1.5 text-xs text-brand-golden-brown">
+                              &ldquo;{row.withdrawal_reason}&rdquo; -- {row.withdrawn_by_name ?? "withdrawn"}
+                            </p>
+                          </Link>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {unassignedChildren.length > 0 && (
+                    <div>
+                      <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-brand-neutral-black/50">
+                        Enrolled, not yet assigned to a class
+                      </h3>
+                      <div className="flex flex-col gap-2">
+                        {unassignedChildren.map((child) => (
+                          <Link
+                            key={child.passport_id}
+                            href={`/principal/passports/${child.passport_id}`}
+                            className="block rounded-2xl border border-black/5 bg-white p-4 shadow-sm"
+                          >
+                            <p className="text-sm font-semibold text-brand-neutral-black">{child.child_name}</p>
+                          </Link>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {outstandingDebriefs.length > 0 && (
+                    <div>
+                      <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-brand-neutral-black/50">
+                        Debrief{outstandingDebriefs.length === 1 ? "" : "s"} outstanding
+                      </h3>
+                      <div className="flex flex-col gap-2">
+                        {outstandingDebriefs.map((incident) => (
+                          <IncidentCard key={incident.incident_id} incident={incident} />
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {inherited.length > 0 && (
+                    <div>
+                      <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-brand-neutral-black/50">
+                        Inherited from a supply teacher
+                      </h3>
+                      <div className="flex flex-col gap-2">
+                        {inherited.map((incident) => (
+                          <IncidentCard key={incident.incident_id} incident={incident} />
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </section>
