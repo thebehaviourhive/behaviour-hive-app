@@ -20,7 +20,7 @@
 // stage development. Every check from V onward is independently
 // self-contained (own institution, own accounts, own cleanup) and
 // individually selectable: V, W, X, Y, Z, AA, BB, CC, DD, EE, FF, GG,
-// HH, II, JJ, KK, LL, MM, NN, OO, PP, QQ, RR, SS, TT, UU, VV. Selecting none of these (ONLY_CHECKS unset) is the full run --
+// HH, II, JJ, KK, LL, MM, NN, OO, PP, QQ, RR, SS, TT, UU, VV, WW. Selecting none of these (ONLY_CHECKS unset) is the full run --
 // the one that gates deploys -- and its behavior is unchanged: same
 // checks, same order, same pass/fail counts. The only observable
 // difference is where the top-level fixture's own cleanup log line
@@ -10210,6 +10210,290 @@ async function main() {
     await admin.from("passports").delete().in("id", [child1VVId, child2VVId, childVVOtherId]);
     await admin.from("institutions").delete().in("id", [institutionVVId, institutionVVOtherId]);
     for (const id of [principalVVId, principalVVOtherId, teacherVVId, staffVVId]) {
+      await admin.auth.admin.deleteUser(id);
+    }
+  }
+
+  console.log(`\n== CHECK WW: SQL for Stage 7's teacher action items (migrations 0135/0136/0137) -- get_my_incidents() as a genuinely NEW capability (no query or screen has ever listed a teacher's own incidents before this), the debrief-completed real signal, the transfer case proving visibility and to-do membership are different claims, the countersign/not-signed-off INVERSION proven on one incident moving through both states rather than two separate fixtures, get_my_incident_attestation_issues()'s withdrawn/stale/current/not-owner distinctions, get_my_cover_grants_expiring_today()'s grantor scoping, get_my_class_sna_gaps()'s three-classes-one-call shape with 1:1/class-SNA/former-class exclusions, and institution_staff standing enforced identically across all four. ==`);
+  if (shouldRun("WW")) {
+    const { data: instWW, error: instWWErr } = await admin
+      .from("institutions")
+      .insert({ name: "WW Institution", institution_code: CODE + "WW", status: "verified" })
+      .select()
+      .single();
+    if (instWWErr) throw instWWErr;
+    const institutionWWId = instWW.id;
+
+    const { data: instWWOther, error: instWWOtherErr } = await admin
+      .from("institutions")
+      .insert({ name: "WW Other Institution", institution_code: CODE + "WWB", status: "verified" })
+      .select()
+      .single();
+    if (instWWOtherErr) throw instWWOtherErr;
+    const institutionWWOtherId = instWWOther.id;
+
+    const principalWWId = await createUser("checkww.principal@thebehaviourhive.com", "WW Principal", "principal");
+    const teacher1WWId = await createUser("checkww.teacher1@thebehaviourhive.com", "WW Teacher One", "class_teacher");
+    const teacher2WWId = await createUser("checkww.teacher2@thebehaviourhive.com", "WW Teacher Two", "class_teacher");
+    const supplyWWId = await createUser("checkww.supply@thebehaviourhive.com", "WW Supply", "sna");
+    const principalWWOtherId = await createUser("checkww.principalother@thebehaviourhive.com", "WW Other Principal", "principal");
+    const teacherWWOtherId = await createUser("checkww.teacherother@thebehaviourhive.com", "WW Other Teacher", "class_teacher");
+
+    const { data: staffWWRows, error: staffWWErr } = await admin.from("institution_staff").insert([
+      { institution_id: institutionWWId, user_id: principalWWId, role: "principal" },
+      { institution_id: institutionWWId, user_id: teacher1WWId, role: "class_teacher" },
+      { institution_id: institutionWWId, user_id: teacher2WWId, role: "class_teacher" },
+      { institution_id: institutionWWId, user_id: supplyWWId, role: "sna" },
+      { institution_id: institutionWWOtherId, user_id: principalWWOtherId, role: "principal" },
+      { institution_id: institutionWWOtherId, user_id: teacherWWOtherId, role: "class_teacher" },
+    ]).select();
+    if (staffWWErr) throw staffWWErr;
+
+    const principalWW = await signedInClient("checkww.principal@thebehaviourhive.com");
+    const principalWWOther = await signedInClient("checkww.principalother@thebehaviourhive.com");
+    for (const row of staffWWRows.filter((r) => r.institution_id === institutionWWId && r.user_id !== principalWWId)) {
+      const { error } = await principalWW.rpc("approve_staff_join", { p_institution_staff_id: row.id });
+      if (error) throw error;
+    }
+    for (const row of staffWWRows.filter((r) => r.institution_id === institutionWWOtherId && r.user_id !== principalWWOtherId)) {
+      const { error } = await principalWWOther.rpc("approve_staff_join", { p_institution_staff_id: row.id });
+      if (error) throw error;
+    }
+    const teacher1WW = await signedInClient("checkww.teacher1@thebehaviourhive.com");
+    const teacher2WW = await signedInClient("checkww.teacher2@thebehaviourhive.com");
+    const supplyWW = await signedInClient("checkww.supply@thebehaviourhive.com");
+    const teacherWWOther = await signedInClient("checkww.teacherother@thebehaviourhive.com");
+
+    const { data: locWW } = await admin.from("incident_locations").select("id").eq("value", "Classroom").is("institution_id", null).single();
+
+    // ==== WW1: get_my_incidents() -- basic scoping ====
+    const { data: childWW1Id, error: childWW1Err } = await principalWW.rpc("create_school_passport", { p_institution_id: institutionWWId, p_child_name: "WW Child One" });
+    if (childWW1Err) throw childWW1Err;
+
+    const { data: incidentWW1Id, error: incidentWW1Err } = await teacher1WW.rpc("create_incident_stamp", {
+      p_institution_id: institutionWWId, p_occurred_at: new Date().toISOString(), p_location_id: locWW.id,
+      p_child_passport_ids: [childWW1Id], p_staff: [{ user_id: teacher2WWId }],
+    });
+    if (incidentWW1Err) throw incidentWW1Err;
+
+    const { data: mineWW1, error: mineWW1Err } = await teacher1WW.rpc("get_my_incidents");
+    record("WW-1a get_my_incidents() -- the NEW CAPABILITY: teacher1 CAN call it and sees their own unsigned incident", !mineWW1Err && (mineWW1 ?? []).some((r) => r.incident_id === incidentWW1Id), JSON.stringify({ error: mineWW1Err?.message, ids: (mineWW1 ?? []).map((r) => r.incident_id) }));
+
+    const { data: mineWW2 } = await teacher2WW.rpc("get_my_incidents");
+    record("WW-1b teacher2, merely NAMED as staff on teacher1's incident (not owning it), does NOT see it on their own get_my_incidents()", !(mineWW2 ?? []).some((r) => r.incident_id === incidentWW1Id), JSON.stringify((mineWW2 ?? []).map((r) => r.incident_id)));
+
+    const { data: mineWWOther } = await teacherWWOther.rpc("get_my_incidents");
+    record("WW-1c a teacher at a DIFFERENT institution sees nothing of it either (self-scoped, no institution id even needed to prove this)", (mineWWOther ?? []).length === 0, JSON.stringify(mineWWOther));
+
+    // ==== WW2: the debrief bucket -- real completion signal, not the ====
+    // principal dashboard's own signed_at proxy (which cannot apply here
+    // -- this bucket is entirely pre-signoff incidents).
+    await teacher1WW.from("incidents").update({ debrief_required: true }).eq("id", incidentWW1Id);
+    const { data: mineWW2a } = await teacher1WW.rpc("get_my_incidents");
+    const rowWW2a = (mineWW2a ?? []).find((r) => r.incident_id === incidentWW1Id);
+    record("WW-2a debrief_required=true, not yet completed -- debrief_completed reads false, teacher_signed_at still null (the 'debrief owed' bucket would include this row)", rowWW2a?.debrief_required === true && rowWW2a?.debrief_completed === false && rowWW2a?.teacher_signed_at === null, JSON.stringify(rowWW2a));
+
+    const { data: debriefWWRow, error: debriefWWErr } = await teacher1WW
+      .from("incident_debriefs")
+      .insert({ incident_id: incidentWW1Id, debrief_date: "2026-01-01", staff_present: ["WW Teacher One"], notes: "WW fixture debrief." })
+      .select()
+      .single();
+    if (debriefWWErr) throw debriefWWErr;
+    await teacher1WW.from("incident_debriefs").update({ completed_at: new Date().toISOString(), completed_by: teacher1WWId }).eq("id", debriefWWRow.id);
+
+    const { data: mineWW2b } = await teacher1WW.rpc("get_my_incidents");
+    const rowWW2b = (mineWW2b ?? []).find((r) => r.incident_id === incidentWW1Id);
+    record("WW-2b once the debrief is completed, debrief_completed flips true LIVE -- this incident would now drop out of the 'debrief owed' bucket even though it's still not signed off", rowWW2b?.debrief_completed === true && rowWW2b?.teacher_signed_at === null, JSON.stringify(rowWW2b));
+
+    // ==== WW3: the transfer case -- visibility and to-do membership ====
+    // are different claims, the distinction that made 0136 a real bug.
+    const nowPartsWW = dublinNowParts();
+    const cutoffAheadWW = addMinutesClamped(nowPartsWW.time, 180);
+    const { error: cutoffWWErr } = await principalWW.rpc("set_temporary_access_cutoff", { p_institution_id: institutionWWId, p_cutoff_time: cutoffAheadWW });
+    if (cutoffWWErr) throw cutoffWWErr;
+    const { data: classWWTransferId, error: classWWTransferErr } = await principalWW.rpc("create_class", { p_institution_id: institutionWWId, p_name: "WW Transfer Room" });
+    if (classWWTransferErr) throw classWWTransferErr;
+    const { data: grantWWId, error: grantWWErr } = await principalWW.rpc("grant_temporary_access", { p_class_id: classWWTransferId, p_user_id: supplyWWId, p_date: nowPartsWW.date, p_reason: "WW fixture: supply cover, then lapsing." });
+    if (grantWWErr) throw grantWWErr;
+
+    const { data: incidentWWTransferId, error: incidentWWTransferErr } = await supplyWW.rpc("create_incident_stamp", {
+      p_institution_id: institutionWWId, p_occurred_at: new Date().toISOString(), p_location_id: locWW.id,
+      p_child_passport_ids: [childWW1Id], p_staff: [],
+    });
+    if (incidentWWTransferErr) throw incidentWWTransferErr;
+    const { data: preTransferCheck } = await admin.from("incidents").select("owning_teacher_id, created_by").eq("id", incidentWWTransferId).single();
+    record("WW-3-setup: the supply teacher genuinely owns this incident before the transfer", preTransferCheck.owning_teacher_id === supplyWWId && preTransferCheck.created_by === supplyWWId, JSON.stringify(preTransferCheck));
+
+    const { data: mineWWSupplyBefore } = await supplyWW.rpc("get_my_incidents");
+    record("WW-3a before the transfer, the supply teacher DOES see it on their own get_my_incidents()", (mineWWSupplyBefore ?? []).some((r) => r.incident_id === incidentWWTransferId), JSON.stringify((mineWWSupplyBefore ?? []).map((r) => r.incident_id)));
+
+    const { error: revokeWWErr } = await principalWW.rpc("revoke_temporary_access", { p_temporary_access_id: grantWWId, p_reason: "WW fixture: ending cover early to trigger the transfer." });
+    if (revokeWWErr) throw revokeWWErr;
+    const { error: resolveWWErr } = await principalWW.rpc("resolve_lapsed_incident_ownership", { p_institution_id: institutionWWId });
+    if (resolveWWErr) throw resolveWWErr;
+    const { data: postTransferCheck } = await admin.from("incidents").select("owning_teacher_id, created_by").eq("id", incidentWWTransferId).single();
+    record("WW-3-setup2: ownership genuinely moved to the principal; created_by is UNCHANGED (it never changes)", postTransferCheck.owning_teacher_id === principalWWId && postTransferCheck.created_by === supplyWWId, JSON.stringify(postTransferCheck));
+
+    const { data: mineWWSupplyAfter } = await supplyWW.rpc("get_my_incidents");
+    record("WW-3b THE FIX ITSELF: after the transfer, the supply teacher's get_my_incidents() no longer includes it -- they have no remaining authority over it", !(mineWWSupplyAfter ?? []).some((r) => r.incident_id === incidentWWTransferId), JSON.stringify((mineWWSupplyAfter ?? []).map((r) => r.incident_id)));
+
+    const { data: mineWWPrincipalAfter } = await principalWW.rpc("get_my_incidents");
+    record("WW-3c the principal's OWN get_my_incidents() now includes it -- they genuinely own it, via the same generic mechanism, even though the principal dashboard itself doesn't call this RPC today", (mineWWPrincipalAfter ?? []).some((r) => r.incident_id === incidentWWTransferId), JSON.stringify((mineWWPrincipalAfter ?? []).map((r) => r.incident_id)));
+
+    const { data: supplyStillViews, error: supplyStillViewsErr } = await supplyWW.from("incidents").select("id").eq("id", incidentWWTransferId);
+    record("WW-3d THE DISTINCTION THAT MADE 0136 A REAL BUG: the supply teacher can STILL VIEW the incident directly (created_by, per AA-7e) even though it no longer belongs on their to-do list -- visibility and to-do membership are different claims, proven as two different, simultaneously-true facts about the SAME row", !supplyStillViewsErr && (supplyStillViews ?? []).length === 1, JSON.stringify({ error: supplyStillViewsErr?.message, rows: supplyStillViews }));
+
+    // ==== WW4: THE INVERSION -- one incident, two states, both RPCs ====
+    // called at each state. Stronger than two fixtures: a single
+    // incident moving cannot be correct for reasons unrelated to the
+    // predicates under test the way two independently-built fixtures
+    // could be.
+    const { data: incidentWW4Id, error: incidentWW4Err } = await teacher1WW.rpc("create_incident_stamp", {
+      p_institution_id: institutionWWId, p_occurred_at: new Date().toISOString(), p_location_id: locWW.id,
+      p_child_passport_ids: [childWW1Id], p_staff: [],
+    });
+    if (incidentWW4Err) throw incidentWW4Err;
+
+    // State B (unsigned) first.
+    const { data: instIncWWBefore } = await principalWW.rpc("get_institution_incidents", { p_institution_id: institutionWWId });
+    const onPrincipalQueueBefore = (instIncWWBefore ?? []).some((r) => r.incident_id === incidentWW4Id && r.teacher_signed_at && !r.countersigned_at);
+    record("WW-4a STATE B (unsigned): does NOT appear on the principal's countersign-pending predicate", !onPrincipalQueueBefore, JSON.stringify((instIncWWBefore ?? []).find((r) => r.incident_id === incidentWW4Id)));
+
+    const { data: mineWW4Before } = await teacher1WW.rpc("get_my_incidents");
+    const onTeacherNotSignedBefore = (mineWW4Before ?? []).some((r) => r.incident_id === incidentWW4Id && !r.teacher_signed_at);
+    record("WW-4b STATE B (unsigned): DOES appear on the teacher's own 'not signed off' filter", onTeacherNotSignedBefore, JSON.stringify((mineWW4Before ?? []).find((r) => r.incident_id === incidentWW4Id)));
+
+    // Now sign it off -- State A.
+    await teacher1WW.from("incidents").update({ teacher_signed_at: new Date().toISOString(), teacher_signed_by: teacher1WWId }).eq("id", incidentWW4Id);
+
+    const { data: instIncWWAfter } = await principalWW.rpc("get_institution_incidents", { p_institution_id: institutionWWId });
+    const onPrincipalQueueAfter = (instIncWWAfter ?? []).some((r) => r.incident_id === incidentWW4Id && r.teacher_signed_at && !r.countersigned_at);
+    record("WW-4c STATE A (signed): the SAME incident NOW appears on the principal's countersign-pending predicate", onPrincipalQueueAfter, JSON.stringify((instIncWWAfter ?? []).find((r) => r.incident_id === incidentWW4Id)));
+
+    const { data: mineWW4After } = await teacher1WW.rpc("get_my_incidents");
+    const onTeacherNotSignedAfter = (mineWW4After ?? []).some((r) => r.incident_id === incidentWW4Id && !r.teacher_signed_at);
+    record("WW-4d STATE A (signed): the SAME incident NO LONGER appears on the teacher's own 'not signed off' filter -- opposite states on the same two columns, not the same predicate at a different scope", !onTeacherNotSignedAfter, JSON.stringify((mineWW4After ?? []).find((r) => r.incident_id === incidentWW4Id)));
+
+    // ==== WW5: get_my_incident_attestation_issues() ====
+    const { data: incidentWW5Id, error: incidentWW5Err } = await teacher1WW.rpc("create_incident_stamp", {
+      p_institution_id: institutionWWId, p_occurred_at: new Date().toISOString(), p_location_id: locWW.id,
+      p_child_passport_ids: [childWW1Id], p_staff: [{ user_id: teacher2WWId }],
+    });
+    if (incidentWW5Err) throw incidentWW5Err;
+    const { data: staffWW5Row } = await admin.from("incident_staff").select("id").eq("incident_id", incidentWW5Id).eq("user_id", teacher2WWId).single();
+
+    await teacher2WW.rpc("attest_to_incident", { p_incident_staff_id: staffWW5Row.id, p_addendum: "Confirmed." });
+    const { data: issuesWW5Current } = await teacher1WW.rpc("get_my_incident_attestation_issues");
+    record("WW-5a a merely-CURRENT attestation on an incident the caller owns is EXCLUDED", !(issuesWW5Current ?? []).some((r) => r.incident_staff_id === staffWW5Row.id), JSON.stringify((issuesWW5Current ?? []).map((r) => r.incident_staff_id)));
+
+    await teacher1WW.from("incidents").update({ narrative: "WW fixture: revised after attestation, to trigger staleness." }).eq("id", incidentWW5Id);
+    const { data: issuesWW5Stale } = await teacher1WW.rpc("get_my_incident_attestation_issues");
+    const rowWW5Stale = (issuesWW5Stale ?? []).find((r) => r.incident_staff_id === staffWW5Row.id);
+    record("WW-5b a STALE attestation on an incident the caller owns IS included, with status_label 'Stale' and the right staff_name", rowWW5Stale?.status === "stale" && rowWW5Stale?.status_label === "Stale" && rowWW5Stale?.staff_name === "WW Teacher Two", JSON.stringify(rowWW5Stale));
+
+    await teacher2WW.rpc("withdraw_attestation", { p_incident_staff_id: staffWW5Row.id, p_reason: "WW fixture: withdrawing after the narrative changed." });
+    const { data: issuesWW5Withdrawn } = await teacher1WW.rpc("get_my_incident_attestation_issues");
+    const rowWW5Withdrawn = (issuesWW5Withdrawn ?? []).find((r) => r.incident_staff_id === staffWW5Row.id);
+    record("WW-5c a WITHDRAWN attestation on an incident the caller owns IS included, with status_label 'Withdrawn'", rowWW5Withdrawn?.status === "withdrawn" && rowWW5Withdrawn?.status_label === "Withdrawn", JSON.stringify(rowWW5Withdrawn));
+
+    const { data: issuesWW5NotOwner } = await teacher2WW.rpc("get_my_incident_attestation_issues");
+    record("WW-5d teacher2, the one who actually withdrew, sees NOTHING calling this themselves -- they don't OWN the incident, ownership is the predicate, not being named", (issuesWW5NotOwner ?? []).length === 0, JSON.stringify(issuesWW5NotOwner));
+
+    // ==== WW6: get_my_cover_grants_expiring_today() ====
+    const { data: classWW6Id, error: classWW6Err } = await principalWW.rpc("create_class", { p_institution_id: institutionWWId, p_name: "WW Cover Room" });
+    if (classWW6Err) throw classWW6Err;
+    await principalWW.rpc("add_class_teacher", { p_class_id: classWW6Id, p_user_id: teacher1WWId });
+    const { data: grantWW6Id, error: grantWW6Err } = await teacher1WW.rpc("grant_temporary_access", { p_class_id: classWW6Id, p_user_id: supplyWWId, p_date: nowPartsWW.date, p_reason: "WW fixture: teacher1's own grant, today." });
+    if (grantWW6Err) throw grantWW6Err;
+
+    const { data: coverWW6a } = await teacher1WW.rpc("get_my_cover_grants_expiring_today");
+    record("WW-6a a grant teacher1 made today IS included, with the right class_name/granted_to_name", (coverWW6a ?? []).some((r) => r.grant_id === grantWW6Id && r.class_name === "WW Cover Room" && r.granted_to_name === "WW Supply"), JSON.stringify(coverWW6a));
+
+    const { data: coverWW6b } = await principalWW.rpc("get_my_cover_grants_expiring_today");
+    record("WW-6b a DIFFERENT person's grant (the principal calling, teacher1 is the actual grantor) does NOT show up for them", !(coverWW6b ?? []).some((r) => r.grant_id === grantWW6Id), JSON.stringify(coverWW6b));
+
+    await principalWW.rpc("revoke_temporary_access", { p_temporary_access_id: grantWW6Id, p_reason: "WW fixture: revoking to prove exclusion." });
+    const { data: coverWW6c } = await teacher1WW.rpc("get_my_cover_grants_expiring_today");
+    record("WW-6c once revoked, the SAME grant no longer appears -- it's already over, not 'expiring'", !(coverWW6c ?? []).some((r) => r.grant_id === grantWW6Id), JSON.stringify(coverWW6c));
+
+    // ==== WW7: get_my_class_sna_gaps() -- three classes, one call, ====
+    // plus the three exclusion shapes.
+    const { data: classWWGap1Id } = await principalWW.rpc("create_class", { p_institution_id: institutionWWId, p_name: "WW Gap Room 1" });
+    const { data: classWWGap2Id } = await principalWW.rpc("create_class", { p_institution_id: institutionWWId, p_name: "WW Gap Room 2" });
+    const { data: classWWMixedId } = await principalWW.rpc("create_class", { p_institution_id: institutionWWId, p_name: "WW Mixed Room" });
+    const { data: classWWClassSnaId } = await principalWW.rpc("create_class", { p_institution_id: institutionWWId, p_name: "WW Class-SNA Room" });
+    const { data: classWWFormerId } = await principalWW.rpc("create_class", { p_institution_id: institutionWWId, p_name: "WW Former Room" });
+
+    for (const cid of [classWWGap1Id, classWWGap2Id, classWWMixedId, classWWClassSnaId]) {
+      await principalWW.rpc("add_class_teacher", { p_class_id: cid, p_user_id: teacher1WWId });
+    }
+    const formerClassTeacherWWId = await principalWW.rpc("add_class_teacher", { p_class_id: classWWFormerId, p_user_id: teacher1WWId }).then((r) => r.data);
+
+    const { data: childGap1Id } = await principalWW.rpc("create_school_passport", { p_institution_id: institutionWWId, p_child_name: "WW Gap Child 1" });
+    const { data: childGap2Id } = await principalWW.rpc("create_school_passport", { p_institution_id: institutionWWId, p_child_name: "WW Gap Child 2" });
+    const { data: childMixedGapId } = await principalWW.rpc("create_school_passport", { p_institution_id: institutionWWId, p_child_name: "WW Mixed Room Gap Child" });
+    const { data: childMixed1to1Id } = await principalWW.rpc("create_school_passport", { p_institution_id: institutionWWId, p_child_name: "WW Mixed Room 1:1 Child" });
+    const { data: childClassSnaId } = await principalWW.rpc("create_school_passport", { p_institution_id: institutionWWId, p_child_name: "WW Class-SNA Child" });
+    const { data: childFormerId } = await principalWW.rpc("create_school_passport", { p_institution_id: institutionWWId, p_child_name: "WW Former Room Child" });
+
+    await principalWW.rpc("add_class_child", { p_class_id: classWWGap1Id, p_passport_id: childGap1Id });
+    await principalWW.rpc("add_class_child", { p_class_id: classWWGap2Id, p_passport_id: childGap2Id });
+    await principalWW.rpc("add_class_child", { p_class_id: classWWMixedId, p_passport_id: childMixedGapId });
+    await principalWW.rpc("add_class_child", { p_class_id: classWWMixedId, p_passport_id: childMixed1to1Id });
+    await principalWW.rpc("add_class_child", { p_class_id: classWWClassSnaId, p_passport_id: childClassSnaId });
+    await principalWW.rpc("add_class_child", { p_class_id: classWWFormerId, p_passport_id: childFormerId });
+
+    await principalWW.rpc("assign_sna_to_child", { p_passport_id: childMixed1to1Id, p_user_id: supplyWWId, p_institution_id: institutionWWId });
+    await principalWW.rpc("assign_class_sna", { p_class_id: classWWClassSnaId, p_user_id: supplyWWId });
+    await principalWW.rpc("remove_class_teacher", { p_class_teacher_id: formerClassTeacherWWId, p_reason: "WW fixture: ending this one to prove historical membership excludes." });
+
+    const { data: gapsWW7, error: gapsWW7Err } = await teacher1WW.rpc("get_my_class_sna_gaps");
+    record("WW-7a get_my_class_sna_gaps() succeeds and returns exactly the three genuine gaps, one per class, THREE CLASSES in ONE call", !gapsWW7Err && (gapsWW7 ?? []).length === 3, JSON.stringify({ error: gapsWW7Err?.message, rows: gapsWW7 }));
+    const gapIdsWW7 = (gapsWW7 ?? []).map((r) => r.passport_id);
+    record("WW-7b class 1's genuinely unassigned child IS included", gapIdsWW7.includes(childGap1Id), JSON.stringify(gapIdsWW7));
+    record("WW-7c class 2's genuinely unassigned child IS included (the second of the three classes)", gapIdsWW7.includes(childGap2Id), JSON.stringify(gapIdsWW7));
+    record("WW-7d the Mixed Room's unassigned child IS included (the third of the three classes)", gapIdsWW7.includes(childMixedGapId), JSON.stringify(gapIdsWW7));
+    record("WW-7e the SAME Mixed Room's 1:1-assigned child is EXCLUDED, even though its classmate is included -- proves per-child, not per-class", !gapIdsWW7.includes(childMixed1to1Id), JSON.stringify(gapIdsWW7));
+    record("WW-7f the Class-SNA Room's child is EXCLUDED -- a class-level SNA assignment covers it", !gapIdsWW7.includes(childClassSnaId), JSON.stringify(gapIdsWW7));
+    record("WW-7g THE NEGATIVE CONTROL: the Former Room's child contributes NOTHING -- a class_teachers row with ended_at set is historical membership, not current", !gapIdsWW7.includes(childFormerId), JSON.stringify(gapIdsWW7));
+
+    // ==== WW8: institution_staff standing, identically across all four ====
+    const { data: teacher1WWStaffRow } = await admin.from("institution_staff").select("id").eq("institution_id", institutionWWId).eq("user_id", teacher1WWId).single();
+    await principalWW.rpc("deactivate_institution_staff", { p_institution_staff_id: teacher1WWStaffRow.id, p_reason: "WW fixture: proving the standing gate on all four new functions." });
+
+    const { data: deactivatedIncidents } = await teacher1WW.rpc("get_my_incidents");
+    record("WW-8a a DEACTIVATED teacher's get_my_incidents() returns nothing, though several of their own incidents still structurally exist", (deactivatedIncidents ?? []).length === 0, JSON.stringify(deactivatedIncidents));
+
+    const { data: deactivatedIssues } = await teacher1WW.rpc("get_my_incident_attestation_issues");
+    record("WW-8b a DEACTIVATED teacher's get_my_incident_attestation_issues() returns nothing", (deactivatedIssues ?? []).length === 0, JSON.stringify(deactivatedIssues));
+
+    const { data: deactivatedGaps } = await teacher1WW.rpc("get_my_class_sna_gaps");
+    record("WW-8c a DEACTIVATED teacher's get_my_class_sna_gaps() returns nothing", (deactivatedGaps ?? []).length === 0, JSON.stringify(deactivatedGaps));
+
+    const { data: classWW8Id } = await admin.from("classes").select("id").eq("institution_id", institutionWWId).eq("name", "WW Cover Room").single();
+    const { data: grantWW8Id, error: grantWW8Err } = await admin.from("temporary_access").insert({
+      institution_id: institutionWWId, class_id: classWW8Id.id, granted_to: supplyWWId,
+      granted_for_date: nowPartsWW.date, granted_by: teacher1WWId, granted_by_role: "class_teacher",
+      reason: "WW fixture: a grant attributed to the now-deactivated teacher1, for WW-8d.",
+    }).select().single();
+    if (grantWW8Err) throw grantWW8Err;
+    const { data: deactivatedCover } = await teacher1WW.rpc("get_my_cover_grants_expiring_today");
+    record("WW-8d a DEACTIVATED teacher's get_my_cover_grants_expiring_today() returns nothing, even for a grant genuinely attributed to them today", !(deactivatedCover ?? []).some((r) => r.grant_id === grantWW8Id.id), JSON.stringify(deactivatedCover));
+
+    console.log("WW summary complete.");
+
+    await admin.from("temporary_access").delete().in("id", [grantWW8Id.id]);
+    await admin.from("class_sna_assignments").delete().eq("class_id", classWWClassSnaId);
+    await admin.from("child_assignments").delete().eq("passport_id", childMixed1to1Id);
+    await admin.from("incident_attestations").delete().in("incident_staff_id", [staffWW5Row.id]);
+    await admin.from("incident_staff").delete().in("incident_id", [incidentWW1Id, incidentWW5Id]);
+    await admin.from("incident_debriefs").delete().eq("incident_id", incidentWW1Id);
+    await admin.from("incident_children").delete().in("incident_id", [incidentWW1Id, incidentWWTransferId, incidentWW4Id, incidentWW5Id]);
+    await admin.from("incident_ownership_transfers").delete().in("incident_id", [incidentWWTransferId]);
+    await admin.from("incidents").delete().in("id", [incidentWW1Id, incidentWWTransferId, incidentWW4Id, incidentWW5Id]);
+    await admin.from("passports").delete().in("id", [childWW1Id, childGap1Id, childGap2Id, childMixedGapId, childMixed1to1Id, childClassSnaId, childFormerId]);
+    await admin.from("institutions").delete().in("id", [institutionWWId, institutionWWOtherId]);
+    for (const id of [principalWWId, teacher1WWId, teacher2WWId, supplyWWId, principalWWOtherId, teacherWWOtherId]) {
       await admin.auth.admin.deleteUser(id);
     }
   }
