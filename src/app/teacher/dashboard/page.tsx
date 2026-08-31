@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { useMessagesAwaitingActionCount } from "@/hooks/useMessagesAwaitingActionCount";
@@ -16,8 +16,89 @@ import { TeacherQuickActions } from "@/components/teacher/TeacherQuickActions";
 import { TeacherActivityCard } from "@/components/teacher/TeacherActivityCard";
 import { QuestionnairePromptCard } from "@/components/questionnaire/QuestionnairePromptCard";
 import { AttestationPromptCard } from "@/components/incident-log/AttestationPromptCard";
+import { IncidentCard, formatIncidentDate, type InstitutionIncidentRow } from "@/components/principal/IncidentCard";
+import { CheckIcon } from "@/components/ui/icons";
 
 const GRID_CAP = 6;
+
+// PRD 2, Stage 7: this dashboard's own "Needs your attention" section,
+// unconditional like AttestationPromptCard already was (a teacher with
+// zero linked passports can still own incidents, hold cover grants, or
+// teach a class with no SNA -- none of that requires a single linked
+// passport of their own). get_my_incidents() is the genuinely NEW
+// capability here -- no query or screen anywhere in this codebase has
+// ever listed a teacher's own incidents before this migration
+// (0135/0136/0137); every other new bucket below is either built on it
+// or is its own small, dedicated, self-scoped RPC.
+//
+// AttestationPromptCard folds in as ONE bucket among these rather than
+// staying a second, separate always-on-top surface -- same component,
+// same fetch, same not_attested/stale filter, just repositioned inside
+// this section and given an onCountChange callback (additive, optional)
+// so its count can join this section's own empty-state computation. Its
+// three OTHER render sites (principal/dashboard, sna/passports,
+// teacher/incidents/attestations) are untouched -- they simply don't
+// pass the new prop. The component is NOT deletable: it's still doing
+// real, unmodified work everywhere else.
+interface MyIncidentRow {
+  incident_id: string;
+  occurred_at: string;
+  recorded_at: string;
+  location: string;
+  category: string | null;
+  status: string;
+  child_indices: string[] | null;
+  debrief_required: boolean;
+  debrief_completed: boolean;
+  teacher_signed_at: string | null;
+  countersigned_at: string | null;
+  has_restrictive_practice: boolean;
+  planning_status: string[] | null;
+  ncse_report_complete: boolean[] | null;
+}
+
+interface AttestationIssueRow {
+  incident_id: string;
+  incident_staff_id: string;
+  occurred_at: string;
+  location: string;
+  staff_user_id: string;
+  staff_name: string | null;
+  status: string;
+  status_label: string;
+}
+
+interface CoverGrantRow {
+  grant_id: string;
+  class_id: string;
+  class_name: string;
+  granted_to: string;
+  granted_to_name: string | null;
+}
+
+interface SnaGapRow {
+  passport_id: string;
+  child_name: string;
+  class_id: string;
+  class_name: string;
+}
+
+// Adapts a MyIncidentRow (self-scoped, no institution-wide fields) onto
+// IncidentCard's own InstitutionIncidentRow shape -- owning_teacher_name/
+// created_by_name/is_inherited are always "me"/null/false here (this
+// caller IS the owner by construction, and inheritance never transfers
+// to a teacher, only to a principal), not fields get_my_incidents()
+// needs to return itself.
+function toIncidentCardRow(row: MyIncidentRow): InstitutionIncidentRow {
+  return {
+    ...row,
+    owning_teacher_name: null,
+    created_by_name: null,
+    is_inherited: false,
+    inherited_from_name: null,
+    inherited_transferred_at: null,
+  };
+}
 
 function getGreeting(): string {
   const hour = new Date().getHours();
@@ -46,12 +127,46 @@ export default function TeacherDashboardPage() {
     user?.id ?? null
   );
 
-  // "Unopened Messages" goes live (Stage 2): count of open messages
-  // addressed to this teacher, across every linked pupil -- the same
-  // rows the triage view's own Open tab surfaces. Neutral styling only
-  // (no isAlert) -- explicitly NOT the Red Alerts treatment, per the
-  // zero-urgency rule.
   const [unopenedMessagesCount, setUnopenedMessagesCount] = useState<number | null>(null);
+
+  // ---- "Needs your attention" state ----
+  const [isLoadingActionItems, setIsLoadingActionItems] = useState(true);
+  const [myIncidents, setMyIncidents] = useState<MyIncidentRow[]>([]);
+  const [attestationIssues, setAttestationIssues] = useState<AttestationIssueRow[]>([]);
+  const [coverGrants, setCoverGrants] = useState<CoverGrantRow[]>([]);
+  const [snaGaps, setSnaGaps] = useState<SnaGapRow[]>([]);
+  // null until AttestationPromptCard's own fetch reports in -- kept out
+  // of the empty-state computation until then, so the reassuring card
+  // never flashes and then gets replaced once that count arrives.
+  const [attestationsOwedCount, setAttestationsOwedCount] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!user) return;
+    let isMounted = true;
+    async function loadActionItems() {
+      const supabase = createClient();
+      const [incidentsResult, issuesResult, coverResult, gapsResult] = await Promise.all([
+        supabase.rpc("get_my_incidents"),
+        supabase.rpc("get_my_incident_attestation_issues"),
+        supabase.rpc("get_my_cover_grants_expiring_today"),
+        supabase.rpc("get_my_class_sna_gaps"),
+      ]);
+      if (!isMounted) return;
+      if (!incidentsResult.error) setMyIncidents((incidentsResult.data ?? []) as MyIncidentRow[]);
+      if (!issuesResult.error) setAttestationIssues((issuesResult.data ?? []) as AttestationIssueRow[]);
+      if (!coverResult.error) setCoverGrants((coverResult.data ?? []) as CoverGrantRow[]);
+      if (!gapsResult.error) setSnaGaps((gapsResult.data ?? []) as SnaGapRow[]);
+      setIsLoadingActionItems(false);
+    }
+    loadActionItems();
+    return () => {
+      isMounted = false;
+    };
+  }, [user]);
+
+  const handleAttestationCountChange = useCallback((count: number) => {
+    setAttestationsOwedCount(count);
+  }, []);
 
   useEffect(() => {
     if (!user) return;
@@ -89,22 +204,130 @@ export default function TeacherDashboardPage() {
   const gridPupils = pupils.slice(0, GRID_CAP);
   const overflowCount = pupils.length - GRID_CAP;
 
+  const notSignedOff = myIncidents.filter((i) => !i.teacher_signed_at);
+  const debriefOwed = myIncidents.filter((i) => i.debrief_required && !i.debrief_completed);
+
+  const actionItemsReady = !isLoadingActionItems && attestationsOwedCount !== null;
+  const nothingOutstanding =
+    actionItemsReady &&
+    notSignedOff.length === 0 &&
+    debriefOwed.length === 0 &&
+    attestationIssues.length === 0 &&
+    attestationsOwedCount === 0 &&
+    coverGrants.length === 0 &&
+    snaGaps.length === 0;
+
   return (
     <div className="flex min-h-full flex-1 flex-col bg-brand-off-white/40 pb-24">
       <h1 className="mt-6 px-4 font-heading text-2xl font-bold text-brand-prussian-blue">
         {getGreeting()}, {firstName}
       </h1>
 
-      {/* Unconditional, unlike QuestionnairePromptCard below -- a
-          teacher can be named staff on an incident they don't own
-          (and don't need a single linked child of their own for) via
-          institution-roster visibility, same as the SNA/principal
-          dashboards' own copies of this card. Nesting it inside the
-          hasStudents branch was a real gap: a teacher with zero linked
-          passports but an outstanding attestation saw nothing at all,
-          on the exact roster-wide-visibility branch 0089 was written
-          to un-hide. Caught live in browser verification, not by eye. */}
-      <AttestationPromptCard className="mt-4 px-4" />
+      {/* Unconditional, like the section it replaces -- a teacher can be
+          named staff on an incident, own one, hold a cover grant, or
+          teach a class with no SNA without a single linked passport of
+          their own. */}
+      <section className="mt-4 px-4">
+        <h2 className="mb-2 font-heading text-sm font-bold uppercase tracking-wide text-brand-neutral-black/60">
+          Needs your attention
+        </h2>
+
+        {actionItemsReady && nothingOutstanding ? (
+          <div className="flex items-center gap-3 rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-sm text-brand-neutral-black/60">
+            <CheckIcon className="h-5 w-5 flex-shrink-0 text-brand-prussian-blue/40" />
+            <p>Nothing needs your attention right now.</p>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-4">
+            <AttestationPromptCard onCountChange={handleAttestationCountChange} />
+
+            {notSignedOff.length > 0 && (
+              <div>
+                <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-brand-neutral-black/50">
+                  Not signed off
+                </h3>
+                <div className="flex flex-col gap-2">
+                  {notSignedOff.map((incident) => (
+                    <IncidentCard key={incident.incident_id} incident={toIncidentCardRow(incident)} needsSignoff />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {debriefOwed.length > 0 && (
+              <div>
+                <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-brand-neutral-black/50">
+                  Debrief{debriefOwed.length === 1 ? "" : "s"} owed
+                </h3>
+                <div className="flex flex-col gap-2">
+                  {debriefOwed.map((incident) => (
+                    <IncidentCard key={incident.incident_id} incident={toIncidentCardRow(incident)} />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {attestationIssues.length > 0 && (
+              <div>
+                <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-brand-neutral-black/50">
+                  Attestation{attestationIssues.length === 1 ? "" : "s"} needing a look
+                </h3>
+                <div className="flex flex-col gap-2">
+                  {attestationIssues.map((row) => (
+                    <Link
+                      key={row.incident_staff_id}
+                      href={`/teacher/incidents/${row.incident_id}`}
+                      className="block rounded-2xl border border-brand-golden-brown/30 bg-white p-4 shadow-sm"
+                    >
+                      <p className="text-sm font-semibold text-brand-neutral-black">
+                        {row.staff_name ?? "A staff member"}
+                      </p>
+                      <p className="mt-0.5 text-xs text-brand-neutral-black/60">
+                        {formatIncidentDate(row.occurred_at)} · {row.location}
+                      </p>
+                      <p className="mt-1.5 text-xs font-semibold text-brand-golden-brown">{row.status_label}</p>
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {coverGrants.length > 0 && (
+              <div>
+                <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-brand-neutral-black/50">
+                  Cover expiring today
+                </h3>
+                <div className="flex flex-col gap-2">
+                  {coverGrants.map((row) => (
+                    <div key={row.grant_id} className="rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
+                      <p className="text-sm font-semibold text-brand-neutral-black">{row.class_name}</p>
+                      <p className="mt-0.5 text-xs text-brand-neutral-black/60">
+                        Covered by {row.granted_to_name ?? "someone"} until today&apos;s cut-off
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {snaGaps.length > 0 && (
+              <div>
+                <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-brand-neutral-black/50">
+                  No SNA assigned
+                </h3>
+                <div className="flex flex-col gap-2">
+                  {snaGaps.map((row) => (
+                    <div key={row.passport_id} className="rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
+                      <p className="text-sm font-semibold text-brand-neutral-black">{row.child_name}</p>
+                      <p className="mt-0.5 text-xs text-brand-neutral-black/60">{row.class_name}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </section>
 
       {!hasStudents ? (
         <EmptyState

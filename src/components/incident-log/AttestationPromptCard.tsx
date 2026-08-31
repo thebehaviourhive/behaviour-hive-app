@@ -25,7 +25,19 @@ interface AttestationRow {
   is_closed: boolean;
 }
 
-export function AttestationPromptCard({ className = "" }: { className?: string }) {
+export function AttestationPromptCard({
+  className = "",
+  onCountChange,
+}: {
+  className?: string;
+  // PRD 2, Stage 7: optional, additive -- lets a parent page (the
+  // teacher dashboard's own "Needs your attention" section) fold this
+  // card's count into a wider empty-state computation without
+  // duplicating its fetch or its not_attested/stale filter. Every
+  // other render site simply doesn't pass it; nothing about their own
+  // behaviour changes.
+  onCountChange?: (count: number) => void;
+}) {
   const [outstandingCount, setOutstandingCount] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -44,11 +56,13 @@ export function AttestationPromptCard({ className = "" }: { className?: string }
       const count = rows.filter((r) => !r.is_closed && (r.status === "not_attested" || r.status === "stale")).length;
       setOutstandingCount(count);
       setIsLoading(false);
+      onCountChange?.(count);
     }
     load();
     return () => {
       isMounted = false;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   if (isLoading || outstandingCount === 0) {
