@@ -20,6 +20,24 @@
   --color-calm-ink-raw: #c95f55;
 }
 
+/* PRD 4, Stage 1 -- colour-to-state mapping. Not a new token layer,
+   the values already exist above; this is the usage rule every stage
+   from here on follows, written down once instead of re-decided per
+   screen:
+     Prussian Blue  -- primary navigation, active states, primary
+                       actions, routine headers.
+     Golden Brown   -- urgent action required, missing information,
+                       withdrawn attestations. The only colour that
+                       carries urgency -- never red.
+     Pastel Blue    -- selected states, secondary row backgrounds,
+                       table header borders.
+     Safe Ivory     -- "Cream" in the brand doc, same token, same hex
+                       (#F1E6B2) as before this PRD. Text and accent
+                       only -- never a background.
+     Off White      -- page and sidebar backgrounds.
+   No semantic red/amber/green anywhere in the principal track; Calm's
+   pair above stays exclusive to Calm, same as always. */
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -37,6 +55,35 @@
   --font-heading: var(--font-baloo-2);
   --font-sans: var(--font-nunito-sans);
   --font-accent: var(--font-quicksand);
+
+  /* PRD 4, Stage 1 -- the principal track's type scale. Size and
+     line-height only, as named Tailwind size tokens (text-h1, text-h2,
+     text-body, text-eyebrow); family, weight, tracking and case stay
+     applied utilities alongside them (e.g. `font-heading font-bold
+     text-h1`), matching how every other component in this codebase is
+     already written -- no fused component classes, no new authoring
+     pattern. Recon for this stage measured the drift these replace:
+     what should be one "page title" role is text-xl in 10 places and
+     text-2xl in 2; section headers use font-heading (Baloo 2) at
+     text-sm uppercase where the brief calls for a distinct Quicksand
+     eyebrow, which is used zero times in the principal track today;
+     body text splits 126/93 between text-sm and text-xs against a
+     single existing use of text-base. These tokens are defined here
+     (Stage 1, foundations) but not yet applied to existing screen
+     content -- that lands screen by screen in Stages 2-6 as each one
+     is restyled. Expect a broad diff there: this is the scale reaching
+     content that has never had one, not scope creep.
+     Button (Nunito Sans 16/Semi-bold) reuses --text-body -- same
+     family and size as Body, only the weight differs, and weight is
+     already an applied utility under this scheme. */
+  --text-h1: 2rem; /* 32px, Baloo 2 Bold -- page headers */
+  --text-h1--line-height: 2.5rem;
+  --text-h2: 1.5rem; /* 24px, Baloo 2 Semi-bold -- card titles, modal headers */
+  --text-h2--line-height: 2rem;
+  --text-body: 1rem; /* 16px, Nunito Sans -- row text, detail, all actions */
+  --text-body--line-height: 1.5rem;
+  --text-eyebrow: 0.75rem; /* 12px, Quicksand Bold Uppercase -- state, role, timestamp */
+  --text-eyebrow--line-height: 1rem;
 }
 
 body {
