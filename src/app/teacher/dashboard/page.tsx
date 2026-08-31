@@ -302,7 +302,7 @@ export default function TeacherDashboardPage() {
                     <div key={row.grant_id} className="rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
                       <p className="text-sm font-semibold text-brand-neutral-black">{row.class_name}</p>
                       <p className="mt-0.5 text-xs text-brand-neutral-black/60">
-                        Covered by {row.granted_to_name ?? "someone"} until today&apos;s cut-off
+                        {`Covered by ${row.granted_to_name ?? "someone"} until today's cut-off`}
                       </p>
                     </div>
                   ))}
