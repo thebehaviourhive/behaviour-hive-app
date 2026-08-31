@@ -484,6 +484,17 @@ export function ABCLogger({
             </p>
           </div>
 
+          {/* PRD 3, Stage 4 -- one label, no role branching. Reads
+              correctly whoever's logging: own-authored-or-explicitly-
+              shared is the real rule (0064/0104), not an absolute wall,
+              so "family and clinical team" is accurate for a parent's
+              own entry and for a teacher's until they share it. Above
+              every field, on every step -- a returning draft can land a
+              guardian mid-form without ever seeing step 1 again. */}
+          <p className="mt-2 text-xs text-black/40">
+            Only you, {childName}&apos;s family, and their clinical team can see this.
+          </p>
+
           {showRecoveryBanner && (
             <div className="mt-4 rounded-xl border border-brand-golden-brown/30 bg-brand-safe-ivory/40 p-4">
               <p className="text-sm text-brand-neutral-black">

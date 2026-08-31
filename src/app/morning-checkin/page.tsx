@@ -202,6 +202,11 @@ export default function MorningCheckinPage() {
       <header className="flex flex-col gap-1 px-4 pt-6 pb-2">
         <p className="text-xs font-medium text-black/40">Step {step} of 4</p>
         <p className="text-sm font-semibold text-brand-neutral-black">{childName}</p>
+        {/* PRD 3, Stage 4 -- school-wide by design (has_child_access(),
+            unchanged since Stage 1), same one-line copy as PassportProgress. */}
+        <p className="text-xs text-black/40">
+          Everyone working with your child at school can read this.
+        </p>
       </header>
 
       <div className="relative flex-1 overflow-hidden">
