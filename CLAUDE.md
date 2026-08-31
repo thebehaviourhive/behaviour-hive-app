@@ -80,6 +80,12 @@ Learned the hard way, on the School Incident Log build. Read before writing any 
 
 # Parked work
 
+- **PARENT INVITATION BY EMAIL — PARKED.** Claim codes must currently be handed over in person, which fails once a school is inviting parents remotely. Recon done. Scope when picked up: an email carrying the school's name, an explanation and a LINK to the claim screen — NOT the code and NOT the child's name, so a mistyped address costs nothing and the credential stays on a separate channel. Principal-only, one action beside "Generate code". The show-the-code path stays untouched.
+
+  Open questions: whether Resend already exists as Supabase's custom SMTP provider (dashboard config, invisible to a codebase grep) and whether its domain is already verified — which would remove both the deliverability warm-up and the new-processor question. Do NOT use `inviteUserByEmail()`: it routes through the Supabase Auth signup bucket, the same one currently inflated 30→300 and flagged as must-revert-before-scale.
+
+  Auto-applying the code through signup is a SEPARATE, larger piece of work — confirmation is OTP-entry not a magic link, so there is no link-click for a query param to ride on, and chaining it would touch shared registration code every account type depends on.
+
 - **PARENT-TRACK LEFTOVERS FROM THE PARENT-LED MODEL.** PRD 1 changed who owns a child's file; the parent's own screens were never revisited. Still live: `AddChildSheet`'s teacher/SNA self-link by passport code (a second route to child access that bypasses the principal, gated on `approved_by_parent`); `ShareBottomSheet`'s parent-approves-a-school-by-code flow (the old direction entirely, superseded by school-issued claim codes); the Connected Schools list (now read-only, undecided whether it stays as information). All three are PRD 3's scope, not fixes to make in passing.
 
   The `AddChildSheet` item is worth its own line, not just a list entry: a teacher or SNA self-links to a child by entering the child's own passport code — the parent-led linking mechanism, running in parallel with `grant_passport_access()` ever since Stage 4, never superseded. Three screens expose it (`teacher/dashboard`, `teacher/students`, `sna/passports`). In the school-led model a teacher shouldn't be self-linking by code at all — the principal grants, or class membership confers. This is a second route to a child's records that bypasses the principal entirely and depends on a flag (`approved_by_parent`) the parent controls, not the school.
