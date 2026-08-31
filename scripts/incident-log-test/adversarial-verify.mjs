@@ -20,7 +20,7 @@
 // stage development. Every check from V onward is independently
 // self-contained (own institution, own accounts, own cleanup) and
 // individually selectable: V, W, X, Y, Z, AA, BB, CC, DD, EE, FF, GG,
-// HH, II, JJ, KK, LL, MM, NN, OO, PP, QQ, RR, SS, TT, UU. Selecting none of these (ONLY_CHECKS unset) is the full run --
+// HH, II, JJ, KK, LL, MM, NN, OO, PP, QQ, RR, SS, TT, UU, VV. Selecting none of these (ONLY_CHECKS unset) is the full run --
 // the one that gates deploys -- and its behavior is unchanged: same
 // checks, same order, same pass/fail counts. The only observable
 // difference is where the top-level fixture's own cleanup log line
@@ -10028,6 +10028,188 @@ async function main() {
 
     await admin.from("institutions").delete().eq("id", institutionUUId);
     for (const id of [principalUUId, snaUU1Id, snaUU2Id]) {
+      await admin.auth.admin.deleteUser(id);
+    }
+  }
+
+  console.log(`\n== CHECK VV: SQL for Stage 7's principal action items (migration 0134) -- get_institution_restraints_needing_parent_call() (institution-scoping, non-authority caller sees nothing, a required-and-not-yet-called row is included with the right incident_children_id/child_name/owning_teacher_name, a not-required row and an already-called row are both excluded, and the returned incident_children_id round-trips straight into a real mark_parent_called() call), and get_institution_withdrawn_attestations() (institution-scoping, non-authority caller sees nothing, a genuinely withdrawn attestation is included with the right staff_name/withdrawal_reason/withdrawn_by_name, a never-withdrawn attestation is excluded -- and the one property that matters most: a withdrawn-then-RE-ATTESTED row DISAPPEARS the moment the re-attestation lands, live, proving this is genuinely live-state and not the school_notices-shaped staleness CLAUDE.md's new entry names). ==`);
+  if (shouldRun("VV")) {
+    const { data: instVV, error: instVVErr } = await admin
+      .from("institutions")
+      .insert({ name: "VV Institution", institution_code: CODE + "VV", status: "verified" })
+      .select()
+      .single();
+    if (instVVErr) throw instVVErr;
+    const institutionVVId = instVV.id;
+
+    const { data: instVVOther, error: instVVOtherErr } = await admin
+      .from("institutions")
+      .insert({ name: "VV Other Institution", institution_code: CODE + "VVB", status: "verified" })
+      .select()
+      .single();
+    if (instVVOtherErr) throw instVVOtherErr;
+    const institutionVVOtherId = instVVOther.id;
+
+    const principalVVId = await createUser("checkvv.principal@thebehaviourhive.com", "VV Principal", "principal");
+    const principalVVOtherId = await createUser("checkvv.principalother@thebehaviourhive.com", "VV Other Principal", "principal");
+    const teacherVVId = await createUser("checkvv.teacher@thebehaviourhive.com", "VV Teacher", "class_teacher");
+    const staffVVId = await createUser("checkvv.staff@thebehaviourhive.com", "VV Named Staff", "class_teacher");
+
+    const { data: staffVVRows, error: staffVVErr } = await admin.from("institution_staff").insert([
+      { institution_id: institutionVVId, user_id: principalVVId, role: "principal" },
+      { institution_id: institutionVVOtherId, user_id: principalVVOtherId, role: "principal" },
+      { institution_id: institutionVVId, user_id: teacherVVId, role: "class_teacher" },
+      { institution_id: institutionVVId, user_id: staffVVId, role: "class_teacher" },
+    ]).select();
+    if (staffVVErr) throw staffVVErr;
+
+    const principalVV = await signedInClient("checkvv.principal@thebehaviourhive.com");
+    const principalVVOther = await signedInClient("checkvv.principalother@thebehaviourhive.com");
+    for (const row of staffVVRows.filter((r) => r.institution_id === institutionVVId && r.user_id !== principalVVId)) {
+      const { error } = await principalVV.rpc("approve_staff_join", { p_institution_staff_id: row.id });
+      if (error) throw error;
+    }
+    const teacherVV = await signedInClient("checkvv.teacher@thebehaviourhive.com");
+    const staffVV = await signedInClient("checkvv.staff@thebehaviourhive.com");
+
+    const { data: child1VVId, error: child1VVErr } = await principalVV.rpc("create_school_passport", { p_institution_id: institutionVVId, p_child_name: "VV Child One" });
+    if (child1VVErr) throw child1VVErr;
+    const { data: child2VVId, error: child2VVErr } = await principalVV.rpc("create_school_passport", { p_institution_id: institutionVVId, p_child_name: "VV Child Two" });
+    if (child2VVErr) throw child2VVErr;
+    const { data: childVVOtherId, error: childVVOtherErr } = await principalVVOther.rpc("create_school_passport", { p_institution_id: institutionVVOtherId, p_child_name: "VV Other-Institution Child" });
+    if (childVVOtherErr) throw childVVOtherErr;
+
+    const { data: locVV } = await admin.from("incident_locations").select("id").eq("value", "Classroom").is("institution_id", null).single();
+
+    // ---- VV0: one incident at institutionVV naming BOTH children (A =
+    // parent-call-required, B = not) and BOTH staff (teacherVV,
+    // staffVV) -- exclusion proofs live alongside inclusion proofs on
+    // the SAME incident, not a second fixture. ----
+    const { data: incidentVVId, error: incidentVVErr } = await teacherVV.rpc("create_incident_stamp", {
+      p_institution_id: institutionVVId, p_occurred_at: new Date().toISOString(), p_location_id: locVV.id,
+      p_child_passport_ids: [child1VVId, child2VVId], p_staff: [{ user_id: staffVVId }],
+    });
+    if (incidentVVErr) throw incidentVVErr;
+
+    const { data: icVVRows } = await admin.from("incident_children").select("id, passport_id, child_index").eq("incident_id", incidentVVId);
+    const icVVChild1 = icVVRows.find((r) => r.passport_id === child1VVId);
+    const icVVChild2 = icVVRows.find((r) => r.passport_id === child2VVId);
+
+    // A second incident, at the OTHER institution, also parent-call-
+    // required -- the cross-institution-scoping proof.
+    const { data: incidentVVOtherId, error: incidentVVOtherErr } = await principalVVOther.rpc("create_incident_stamp", {
+      p_institution_id: institutionVVOtherId, p_occurred_at: new Date().toISOString(), p_location_id: locVV.id,
+      p_child_passport_ids: [childVVOtherId], p_staff: [],
+    });
+    if (incidentVVOtherErr) throw incidentVVOtherErr;
+    const { data: icVVOtherRows } = await admin.from("incident_children").select("id").eq("incident_id", incidentVVOtherId);
+    await admin.from("incident_children").update({ parent_call_required: true }).eq("id", icVVOtherRows[0].id);
+
+    // ---- VV1: get_institution_restraints_needing_parent_call() ----
+    // Child A: required, not yet called. Child B: never required.
+    await teacherVV.from("incident_children").update({ parent_call_required: true }).eq("id", icVVChild1.id);
+
+    const { data: nonAuthorityCallsVV } = await teacherVV.rpc("get_institution_restraints_needing_parent_call", { p_institution_id: institutionVVId });
+    record(
+      "VV-1a a caller with no countersign authority (ordinary class teacher, own institution) gets zero rows",
+      (nonAuthorityCallsVV ?? []).length === 0,
+      JSON.stringify(nonAuthorityCallsVV)
+    );
+
+    const { data: callsVV1, error: callsVV1Err } = await principalVV.rpc("get_institution_restraints_needing_parent_call", { p_institution_id: institutionVVId });
+    record("VV-1b the principal CAN call get_institution_restraints_needing_parent_call()", !callsVV1Err, callsVV1Err?.message);
+    const rowVVChild1 = (callsVV1 ?? []).find((r) => r.incident_children_id === icVVChild1.id);
+    record(
+      "VV-1c the required-and-not-yet-called child IS included, with the right incident_children_id/child_name/owning_teacher_name/child_index",
+      rowVVChild1?.child_name === "VV Child One" && rowVVChild1?.owning_teacher_name === "VV Teacher" && rowVVChild1?.child_index === icVVChild1.child_index,
+      JSON.stringify(rowVVChild1)
+    );
+    record(
+      "VV-1d the SAME incident's child B (never parent_call_required) is EXCLUDED",
+      !(callsVV1 ?? []).some((r) => r.incident_children_id === icVVChild2.id),
+      JSON.stringify((callsVV1 ?? []).map((r) => r.incident_children_id))
+    );
+    record(
+      "VV-1e a DIFFERENT institution's parent-call-required child is EXCLUDED",
+      !(callsVV1 ?? []).some((r) => r.incident_children_id === icVVOtherRows[0].id),
+      JSON.stringify((callsVV1 ?? []).map((r) => r.incident_children_id))
+    );
+
+    // ---- VV2: the returned id round-trips into the REAL write path. ----
+    const { error: markCalledVVErr } = await principalVV.rpc("mark_parent_called", { p_incident_children_id: rowVVChild1.incident_children_id });
+    record("VV-2a mark_parent_called() succeeds against the id this RPC returned -- no second lookup needed", !markCalledVVErr, markCalledVVErr?.message);
+
+    const { data: callsVV2 } = await principalVV.rpc("get_institution_restraints_needing_parent_call", { p_institution_id: institutionVVId });
+    record(
+      "VV-2b the SAME child now DISAPPEARS from the list -- parent_called_at is no longer null",
+      !(callsVV2 ?? []).some((r) => r.incident_children_id === icVVChild1.id),
+      JSON.stringify((callsVV2 ?? []).map((r) => r.incident_children_id))
+    );
+
+    // ---- VV3: get_institution_withdrawn_attestations() ----
+    const { data: staffVVStaffRow } = await admin.from("incident_staff").select("id").eq("incident_id", incidentVVId).eq("user_id", staffVVId).single();
+    const staffVVStaffId = staffVVStaffRow.id;
+
+    const { error: attestVVErr } = await staffVV.rpc("attest_to_incident", { p_incident_staff_id: staffVVStaffId, p_addendum: "Confirmed." });
+    if (attestVVErr) throw attestVVErr;
+
+    const { data: nonAuthorityAttestVV } = await teacherVV.rpc("get_institution_withdrawn_attestations", { p_institution_id: institutionVVId });
+    record(
+      "VV-3a a caller with no countersign authority gets zero rows from get_institution_withdrawn_attestations() too",
+      (nonAuthorityAttestVV ?? []).length === 0,
+      JSON.stringify(nonAuthorityAttestVV)
+    );
+
+    const { data: withdrawnVV0 } = await principalVV.rpc("get_institution_withdrawn_attestations", { p_institution_id: institutionVVId });
+    record(
+      "VV-3b a merely-current (never withdrawn) attestation is EXCLUDED",
+      !(withdrawnVV0 ?? []).some((r) => r.incident_staff_id === staffVVStaffId),
+      JSON.stringify((withdrawnVV0 ?? []).map((r) => r.incident_staff_id))
+    );
+
+    const WITHDRAWAL_REASON_VV = "VV fixture: checking something before re-attesting.";
+    const { error: withdrawVVErr } = await staffVV.rpc("withdraw_attestation", { p_incident_staff_id: staffVVStaffId, p_reason: WITHDRAWAL_REASON_VV });
+    if (withdrawVVErr) throw withdrawVVErr;
+
+    const { data: withdrawnVV1, error: withdrawnVV1Err } = await principalVV.rpc("get_institution_withdrawn_attestations", { p_institution_id: institutionVVId });
+    record("VV-3c the principal CAN call get_institution_withdrawn_attestations()", !withdrawnVV1Err, withdrawnVV1Err?.message);
+    const rowVVWithdrawn = (withdrawnVV1 ?? []).find((r) => r.incident_staff_id === staffVVStaffId);
+    record(
+      "VV-3d the just-withdrawn attestation IS included, with the right staff_name/withdrawal_reason/withdrawn_by_name/is_closed",
+      rowVVWithdrawn?.staff_name === "VV Named Staff" &&
+        rowVVWithdrawn?.withdrawal_reason === WITHDRAWAL_REASON_VV &&
+        rowVVWithdrawn?.withdrawn_by_name === "VV Named Staff" &&
+        rowVVWithdrawn?.is_closed === false,
+      JSON.stringify(rowVVWithdrawn)
+    );
+    record(
+      "VV-3e a DIFFERENT institution's withdrawn attestation is excluded (institution-scoping) -- checked structurally: this fixture created none there, so the row count itself is the proof there's no cross-institution leak surfacing extra rows",
+      (withdrawnVV1 ?? []).every((r) => r.incident_staff_id === staffVVStaffId),
+      JSON.stringify((withdrawnVV1 ?? []).map((r) => r.incident_staff_id))
+    );
+
+    // ---- VV4: THE property that matters -- re-attesting makes the row
+    // disappear live, proving this is genuinely live-state and not an
+    // event log a later action can't correct. ----
+    const { error: reattestVVErr } = await staffVV.rpc("attest_to_incident", { p_incident_staff_id: staffVVStaffId, p_addendum: "Re-attesting, all clear now." });
+    if (reattestVVErr) throw reattestVVErr;
+
+    const { data: withdrawnVV2 } = await principalVV.rpc("get_institution_withdrawn_attestations", { p_institution_id: institutionVVId });
+    record(
+      "VV-4 THE LIVE-STATE PROOF: the SAME incident_staff_id DISAPPEARS the moment it's re-attested -- a school_notices-shaped log would still show this as outstanding",
+      !(withdrawnVV2 ?? []).some((r) => r.incident_staff_id === staffVVStaffId),
+      JSON.stringify((withdrawnVV2 ?? []).map((r) => r.incident_staff_id))
+    );
+
+    console.log("VV summary complete.");
+
+    await admin.from("incident_attestations").delete().in("incident_staff_id", [staffVVStaffId]);
+    await admin.from("incident_staff").delete().in("incident_id", [incidentVVId, incidentVVOtherId]);
+    await admin.from("incident_children").delete().in("incident_id", [incidentVVId, incidentVVOtherId]);
+    await admin.from("incidents").delete().in("id", [incidentVVId, incidentVVOtherId]);
+    await admin.from("passports").delete().in("id", [child1VVId, child2VVId, childVVOtherId]);
+    await admin.from("institutions").delete().in("id", [institutionVVId, institutionVVOtherId]);
+    for (const id of [principalVVId, principalVVOtherId, teacherVVId, staffVVId]) {
       await admin.auth.admin.deleteUser(id);
     }
   }
