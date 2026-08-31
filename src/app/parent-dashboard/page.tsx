@@ -28,6 +28,21 @@ interface TeacherUpdateData {
   headsUp: string | null;
 }
 
+// PRD 3, Stage 5 -- get_todays_checkin()'s own return shape. isMine
+// decides which of the three states CheckInCard shows; the RPC's own
+// priority ordering (a caller's own row wins even when a co-guardian
+// also submitted) is what makes isMine=true mean "here's yours to
+// review," not just "the only one that happens to exist."
+interface TodaysCheckin {
+  isMine: boolean;
+  submittedByName: string | null;
+  sleepQuality: string | null;
+  regulationState: string | null;
+  morningStressors: string[];
+  headsUp: string | null;
+  submittedAt: string;
+}
+
 const SETTLED_BADGE: Record<SettledState, { label: string; dotClassName: string; badgeClassName: string }> = {
   settled: {
     label: "Settled and Regulated",
@@ -86,8 +101,7 @@ export default function ParentDashboardPage() {
   const [isSelfCreatedPassport, setIsSelfCreatedPassport] = useState(true);
   const [isSectionAComplete, setIsSectionAComplete] = useState(false);
   const [isLoadingDashboardData, setIsLoadingDashboardData] = useState(true);
-  const [hasCheckedInToday, setHasCheckedInToday] = useState(false);
-  const [checkedInAt, setCheckedInAt] = useState<string | null>(null);
+  const [todaysCheckin, setTodaysCheckin] = useState<TodaysCheckin | null>(null);
   const [hasTeacherUpdateToday, setHasTeacherUpdateToday] = useState(false);
   const [teacherUpdate, setTeacherUpdate] = useState<TeacherUpdateData | null>(null);
   const [isPassportCardDismissed, setIsPassportCardDismissed] = useState(false);
@@ -143,16 +157,22 @@ export default function ParentDashboardPage() {
       // would silently see a co-guardian's real, complete section as
       // empty. passport_id is the correct key regardless of authorship.
       //
-      // morning_checkins deliberately stays .eq("user_id", user.id) --
-      // that's a separate, already-documented gap (see CLAUDE.md's
-      // "known limitation, not solved" entry on morning check-ins), not
-      // in this stage's scope to fix.
+      // PRD 3, Stage 5 -- morning_checkins moves off .eq("user_id", ...)
+      // entirely, onto get_todays_checkin(). The RLS widening (0144)
+      // means a plain client select could now correctly return a co-
+      // guardian's row too, but the RPC is still the right tool here --
+      // it resolves the submitter's display name (the same reason every
+      // other feature in this build reaches for a SECURITY DEFINER
+      // function instead of a raw select), and its own priority
+      // ordering IS the three-state UI CheckInCard renders below: the
+      // caller's own row wins if one exists, otherwise the most recent
+      // row from any guardian, otherwise nothing.
       const [
         { data: passportRow },
         { data: sectionB },
         { data: sectionC },
         { data: sectionD },
-        { data: todaysCheckin },
+        { data: checkinRows },
       ] = await Promise.all([
         supabase
           .from("passports")
@@ -174,15 +194,15 @@ export default function ParentDashboardPage() {
           .select("before_behaviour, during_distress, after_distress, section_d_complete")
           .eq("passport_id", passportId)
           .maybeSingle(),
-        supabase
-          .from("morning_checkins")
-          .select("submitted_at")
-          .eq("user_id", user!.id)
-          .gte("checked_in_at", startOfToday.toISOString())
-          .order("checked_in_at", { ascending: false })
-          .limit(1)
-          .maybeSingle(),
+        // No .maybeSingle() chained -- no precedent for that anywhere
+        // else in this codebase's own RPC calls, and get_todays_checkin()
+        // already guarantees at most one row via its own LIMIT 1.
+        supabase.rpc("get_todays_checkin", {
+          p_passport_id: passportId,
+          p_start_of_today: startOfToday.toISOString(),
+        }),
       ]);
+      const checkinRow = checkinRows?.[0] ?? null;
 
       if (!isMounted) return;
 
@@ -193,8 +213,19 @@ export default function ParentDashboardPage() {
       setPassportStatus(status);
       setIsSelfCreatedPassport(isSelfCreated);
       setIsSectionAComplete(Boolean(passportRow?.section_a_complete));
-      setHasCheckedInToday(Boolean(todaysCheckin));
-      setCheckedInAt(todaysCheckin?.submitted_at ?? null);
+      setTodaysCheckin(
+        checkinRow
+          ? {
+              isMine: Boolean(checkinRow.is_mine),
+              submittedByName: checkinRow.submitted_by_name,
+              sleepQuality: checkinRow.sleep_quality,
+              regulationState: checkinRow.regulation_state,
+              morningStressors: checkinRow.morning_stressors ?? [],
+              headsUp: checkinRow.heads_up,
+              submittedAt: checkinRow.submitted_at,
+            }
+          : null
+      );
 
       const { data: todaysUpdate } = await supabase
         .from("teacher_updates")
@@ -313,8 +344,7 @@ export default function ParentDashboardPage() {
         <CheckInCard
           childName={childName}
           isBefore1pm={isBefore1pm}
-          hasCheckedInToday={hasCheckedInToday}
-          checkedInAt={checkedInAt}
+          todaysCheckin={todaysCheckin}
           hasTeacherUpdateToday={hasTeacherUpdateToday}
           teacherUpdate={teacherUpdate}
         />
@@ -423,22 +453,33 @@ export default function ParentDashboardPage() {
   );
 }
 
+const CHECKIN_SLEEP_LABELS: Record<string, string> = {
+  slept_through: "Slept through / Well rested",
+  woke_briefly: "Woke up briefly",
+  very_restless: "Very restless / Up multiple times",
+  barely_slept: "Barely slept",
+};
+
+const CHECKIN_REGULATION_LABELS: Record<string, string> = {
+  settled: "Settled and Calm",
+  unsettled: "A bit unsettled / Anxious",
+  dysregulated: "Highly dysregulated / Upset",
+};
+
 function CheckInCard({
   childName,
   isBefore1pm,
-  hasCheckedInToday,
-  checkedInAt,
+  todaysCheckin,
   hasTeacherUpdateToday,
   teacherUpdate,
 }: {
   childName: string;
   isBefore1pm: boolean;
-  hasCheckedInToday: boolean;
-  checkedInAt: string | null;
+  todaysCheckin: TodaysCheckin | null;
   hasTeacherUpdateToday: boolean;
   teacherUpdate: TeacherUpdateData | null;
 }) {
-  if (isBefore1pm && !hasCheckedInToday) {
+  if (isBefore1pm && !todaysCheckin) {
     return (
       <Link
         href="/morning-checkin"
@@ -468,7 +509,64 @@ function CheckInCard({
     );
   }
 
-  if (isBefore1pm && hasCheckedInToday) {
+  // PRD 3, Stage 5 -- the state of the CHILD's morning, not the
+  // viewer's own submission history. get_todays_checkin()'s own
+  // priority ordering already resolved which row this is: the viewer's
+  // own if they submitted (regardless of whether a co-guardian also
+  // did), otherwise the most recent from any guardian. isMine is what
+  // tells these two apart -- not a block, information: a guardian who
+  // wasn't there sees it's covered and can still add their own account
+  // if they were.
+  if (isBefore1pm && todaysCheckin && !todaysCheckin.isMine) {
+    return (
+      <div className="flex flex-col gap-3 rounded-2xl border border-green-100 bg-green-50 p-4 shadow-sm">
+        <div className="flex items-center gap-3">
+          <span
+            aria-hidden
+            className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-green-100 text-lg"
+          >
+            ✅
+          </span>
+          <div className="flex-1">
+            <p className="text-sm font-semibold text-brand-neutral-black">
+              Morning update completed by {todaysCheckin.submittedByName ?? "a guardian"}
+            </p>
+            <p className="text-xs text-black/50">
+              Sent to your teacher at {formatTime(todaysCheckin.submittedAt)}
+            </p>
+          </div>
+        </div>
+        <div className="flex flex-col gap-1 text-sm text-black/70">
+          {todaysCheckin.sleepQuality && (
+            <p>
+              <span className="font-semibold text-black/50">Sleep: </span>
+              {CHECKIN_SLEEP_LABELS[todaysCheckin.sleepQuality] ?? todaysCheckin.sleepQuality}
+            </p>
+          )}
+          {todaysCheckin.regulationState && (
+            <p>
+              <span className="font-semibold text-black/50">This morning: </span>
+              {CHECKIN_REGULATION_LABELS[todaysCheckin.regulationState] ?? todaysCheckin.regulationState}
+            </p>
+          )}
+          {todaysCheckin.headsUp && (
+            <p>
+              <span className="font-semibold text-black/50">Heads up: </span>
+              {todaysCheckin.headsUp}
+            </p>
+          )}
+        </div>
+        <Link
+          href="/morning-checkin"
+          className="text-sm font-semibold text-brand-prussian-blue"
+        >
+          Were you with {childName} this morning? Add your own account
+        </Link>
+      </div>
+    );
+  }
+
+  if (isBefore1pm && todaysCheckin?.isMine) {
     return (
       <div className="flex items-center gap-3 rounded-2xl border border-green-100 bg-green-50 p-4 shadow-sm">
         <span
@@ -482,9 +580,7 @@ function CheckInCard({
             Morning check-in sent
           </p>
           <p className="text-xs text-black/50">
-            {checkedInAt
-              ? `Sent to your teacher at ${formatTime(checkedInAt)}`
-              : "Your teacher has been updated for today"}
+            {`Sent to your teacher at ${formatTime(todaysCheckin.submittedAt)}`}
           </p>
         </div>
       </div>

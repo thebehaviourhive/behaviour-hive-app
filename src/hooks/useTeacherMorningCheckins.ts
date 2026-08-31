@@ -8,16 +8,28 @@ import { useTeacherPassports, type TeacherPassport } from "./useTeacherPassports
 type SleepQuality = "slept_through" | "woke_briefly" | "very_restless" | "barely_slept" | null;
 type RegulationState = "settled" | "unsettled" | "dysregulated" | null;
 
-export interface MorningPupilStatus {
-  passportId: string;
-  firstName: string;
-  displayName: string;
-  rag: RagStatus;
+// PRD 3, Stage 5 -- one guardian's own account of the morning, plural
+// now: a child can have more than one today, and each stays separate,
+// attributed by name, never merged into one.
+export interface CheckinAccount {
+  submittedByName: string | null;
   sleepQuality: SleepQuality;
   regulationState: RegulationState;
   morningStressors: string[];
   headsUp: string | null;
-  checkedInAt: string | null;
+  submittedAt: string;
+}
+
+export interface MorningPupilStatus {
+  passportId: string;
+  firstName: string;
+  displayName: string;
+  // Worst-of-all-accounts -- if either guardian reports dysregulation,
+  // the child sorts red. A false "looks fine" from averaging or picking
+  // one account arbitrarily is worse than a settled child getting an
+  // early check-in they didn't need.
+  rag: RagStatus;
+  checkins: CheckinAccount[];
 }
 
 interface UseTeacherMorningCheckinsResult {
@@ -36,6 +48,19 @@ function sortPupils(pupils: MorningPupilStatus[]): MorningPupilStatus[] {
     if (tierDiff !== 0) return tierDiff;
     return a.firstName.localeCompare(b.firstName);
   });
+}
+
+// The worst (lowest RAG_TIER_ORDER) tier across every account for this
+// child today. A child with zero accounts stays grey, matching
+// getRagStatus(null)'s own existing behaviour.
+function worstRag(checkins: CheckinAccount[]): RagStatus {
+  if (checkins.length === 0) return "grey";
+  let worst: RagStatus = "grey";
+  for (const c of checkins) {
+    const tier = getRagStatus({ regulationState: c.regulationState, sleepQuality: c.sleepQuality });
+    if (RAG_TIER_ORDER[tier] < RAG_TIER_ORDER[worst]) worst = tier;
+  }
+  return worst;
 }
 
 // passportsOverride: optional, additive -- when provided, this hook
@@ -80,15 +105,17 @@ export function useTeacherMorningCheckins(
       const startOfToday = new Date();
       startOfToday.setHours(0, 0, 0, 0);
 
-      const { data: checkinRows, error } = await supabase
-        .from("morning_checkins")
-        .select("passport_id, sleep_quality, regulation_state, morning_stressors, heads_up, checked_in_at")
-        .in(
-          "passport_id",
-          passports.map((p) => p.passportId)
-        )
-        .gte("checked_in_at", startOfToday.toISOString())
-        .order("checked_in_at", { ascending: false });
+      // PRD 3, Stage 5 -- get_todays_checkins_for_passports() resolves
+      // each submitter's name (a plain client select can't join
+      // auth.users) and, deliberately, does NOT reduce to one row per
+      // child -- that reduction used to be correct (two rows meant a
+      // resubmission) but now silently drops a second guardian's real,
+      // different account. Every row from today comes back; grouping
+      // by passport_id happens here, in full.
+      const { data: checkinRows, error } = await supabase.rpc("get_todays_checkins_for_passports", {
+        p_passport_ids: passports.map((p) => p.passportId),
+        p_start_of_today: startOfToday.toISOString(),
+      });
 
       if (!isMounted) return;
 
@@ -98,34 +125,32 @@ export function useTeacherMorningCheckins(
         return;
       }
 
-      // Most recent check-in wins if a child has more than one row today —
-      // rows are already ordered newest first.
-      const checkinByPassport = new Map<string, (typeof checkinRows)[number]>();
+      const checkinsByPassport = new Map<string, CheckinAccount[]>();
       for (const row of checkinRows ?? []) {
-        if (!checkinByPassport.has(row.passport_id)) {
-          checkinByPassport.set(row.passport_id, row);
+        const account: CheckinAccount = {
+          submittedByName: row.submitted_by_name,
+          sleepQuality: row.sleep_quality as SleepQuality,
+          regulationState: row.regulation_state as RegulationState,
+          morningStressors: row.morning_stressors ?? [],
+          headsUp: row.heads_up,
+          submittedAt: row.submitted_at,
+        };
+        const existing = checkinsByPassport.get(row.passport_id);
+        if (existing) {
+          existing.push(account);
+        } else {
+          checkinsByPassport.set(row.passport_id, [account]);
         }
       }
 
       const merged: MorningPupilStatus[] = passports.map((passport) => {
-        const checkin = checkinByPassport.get(passport.passportId) ?? null;
+        const checkins = checkinsByPassport.get(passport.passportId) ?? [];
         return {
           passportId: passport.passportId,
           firstName: passport.firstName,
           displayName: passport.displayName,
-          rag: getRagStatus(
-            checkin
-              ? {
-                  regulationState: checkin.regulation_state as RegulationState,
-                  sleepQuality: checkin.sleep_quality as SleepQuality,
-                }
-              : null
-          ),
-          sleepQuality: (checkin?.sleep_quality as SleepQuality) ?? null,
-          regulationState: (checkin?.regulation_state as RegulationState) ?? null,
-          morningStressors: checkin?.morning_stressors ?? [],
-          headsUp: checkin?.heads_up ?? null,
-          checkedInAt: checkin?.checked_in_at ?? null,
+          rag: worstRag(checkins),
+          checkins,
         };
       });
 

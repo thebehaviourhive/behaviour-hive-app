@@ -20,7 +20,7 @@
 // stage development. Every check from V onward is independently
 // self-contained (own institution, own accounts, own cleanup) and
 // individually selectable: V, W, X, Y, Z, AA, BB, CC, DD, EE, FF, GG,
-// HH, II, JJ, KK, LL, MM, NN, OO, PP, QQ, RR, SS, TT, UU, VV, WW, XX, YY, ZZ. Selecting none of these (ONLY_CHECKS unset) is the full run --
+// HH, II, JJ, KK, LL, MM, NN, OO, PP, QQ, RR, SS, TT, UU, VV, WW, XX, YY, ZZ, AAA, BBB. Selecting none of these (ONLY_CHECKS unset) is the full run --
 // the one that gates deploys -- and its behavior is unchanged: same
 // checks, same order, same pass/fail counts. The only observable
 // difference is where the top-level fixture's own cleanup log line
@@ -10988,6 +10988,227 @@ async function main() {
     await admin.from("passports").delete().eq("id", childZZId);
     await admin.from("institutions").delete().eq("id", institutionZZId);
     for (const id of [principalZZId, teacherZZId, teacherNoAccessZZId, outsiderZZId, guardian1ZZId, guardian2ZZId]) {
+      await admin.auth.admin.deleteUser(id);
+    }
+  }
+
+  console.log(`\n== CHECK AAA: SQL for PRD 3 Stage 5 (migration 0144) -- morning check-in visibility. THE RLS WIDENING IS THE STAGE: "Users can view their own check-ins" moves from auth.uid() = user_id to owns_passport(passport_id), proven with two real guardians via the actual claim chain, not a hand-set passport_guardians row -- a co-guardian genuinely could not read another guardian's row before this migration, confirmed directly, not assumed from the query shape alone. INSERT stays exactly as it was: each guardian writes their own, a spoofed user_id refused. No UPDATE policy exists on this table, by design (an audit trail), and none is added. No unique constraint exists and none is added -- two real guardians BOTH submit today, for the same child, and both rows persist. get_todays_checkin()'s own priority ordering IS the three-state UI: a caller's own row wins even when a co-guardian ALSO submitted today (not just when they're the only one), proven on the same passport after both have real rows. ==`);
+  if (shouldRun("AAA")) {
+    const { data: instAAA, error: instAAAErr } = await admin
+      .from("institutions")
+      .insert({ name: "AAA Institution", institution_code: CODE + "AAA", status: "verified" })
+      .select()
+      .single();
+    if (instAAAErr) throw instAAAErr;
+    const institutionAAAId = instAAA.id;
+
+    const principalAAAId = await createUser("checkaaa.principal@thebehaviourhive.com", "AAA Principal", "principal");
+    const guardian1AAAId = await createUser("checkaaa.guardian1@thebehaviourhive.com", "AAA Guardian One", "parent");
+    const guardian2AAAId = await createUser("checkaaa.guardian2@thebehaviourhive.com", "AAA Guardian Two", "parent");
+    const outsiderAAAId = await createUser("checkaaa.outsider@thebehaviourhive.com", "AAA Outsider", "parent");
+
+    const { error: staffAAAErr } = await admin.from("institution_staff").insert({
+      institution_id: institutionAAAId, user_id: principalAAAId, role: "principal",
+    });
+    if (staffAAAErr) throw staffAAAErr;
+
+    const principalAAA = await signedInClient("checkaaa.principal@thebehaviourhive.com");
+    const guardian1AAA = await signedInClient("checkaaa.guardian1@thebehaviourhive.com");
+    const guardian2AAA = await signedInClient("checkaaa.guardian2@thebehaviourhive.com");
+    const outsiderAAA = await signedInClient("checkaaa.outsider@thebehaviourhive.com");
+
+    // ---- AAA0: setup -- a real school-created, claimed-by-two-guardians
+    // child, exactly CHECK XX/ZZ's own established pattern. ----
+    const { data: childAAAId, error: childAAAErr } = await principalAAA.rpc("create_school_passport", {
+      p_institution_id: institutionAAAId, p_child_name: "AAA Child",
+    });
+    if (childAAAErr) throw childAAAErr;
+
+    const { data: code1AAA } = await principalAAA.rpc("generate_passport_claim_code", { p_institution_id: institutionAAAId, p_passport_id: childAAAId });
+    await guardian1AAA.rpc("redeem_passport_claim_code", { p_code: code1AAA });
+    const { data: code2AAA } = await principalAAA.rpc("generate_passport_claim_code", { p_institution_id: institutionAAAId, p_passport_id: childAAAId });
+    await guardian2AAA.rpc("redeem_passport_claim_code", { p_code: code2AAA });
+
+    const startOfTodayAAA = new Date();
+    startOfTodayAAA.setHours(0, 0, 0, 0);
+
+    // ---- AAA1: before anyone submits -- nothing to read, nothing to
+    // derive. ----
+    const { data: nothingYetAAA } = await guardian1AAA.rpc("get_todays_checkin", {
+      p_passport_id: childAAAId, p_start_of_today: startOfTodayAAA.toISOString(),
+    });
+    record("AAA1 before either guardian submits, get_todays_checkin() returns nothing", (nothingYetAAA ?? []).length === 0, JSON.stringify(nothingYetAAA));
+
+    // ---- AAA2: guardian 1 submits. Guardian 2 -- who has NOT submitted
+    // -- can now read guardian 1's row directly (the RLS widening
+    // itself), and get_todays_checkin() correctly attributes it as NOT
+    // theirs. ----
+    const { error: g1InsertAAAErr } = await guardian1AAA.from("morning_checkins").insert({
+      passport_id: childAAAId, user_id: guardian1AAAId,
+      sleep_quality: "barely_slept", regulation_state: "dysregulated", heads_up: "Rough night, up twice.",
+    });
+    record("AAA2a guardian 1 can insert their own check-in", !g1InsertAAAErr, g1InsertAAAErr?.message);
+
+    const { data: g2ReadsG1AAA } = await guardian2AAA.from("morning_checkins").select("sleep_quality").eq("passport_id", childAAAId);
+    record("AAA2b THE RLS WIDENING ITSELF: guardian 2 -- who has not submitted -- can now read guardian 1's row directly, before this migration they could not", (g2ReadsG1AAA ?? []).length === 1 && g2ReadsG1AAA[0].sleep_quality === "barely_slept", JSON.stringify(g2ReadsG1AAA));
+
+    const { data: g2ViewAAA } = await guardian2AAA.rpc("get_todays_checkin", {
+      p_passport_id: childAAAId, p_start_of_today: startOfTodayAAA.toISOString(),
+    });
+    const g2ViewRowAAA = (g2ViewAAA ?? [])[0];
+    record("AAA2c guardian 2's own view: is_mine=false, attributed to guardian 1 by name, guardian 1's real content", Boolean(g2ViewRowAAA) && g2ViewRowAAA.is_mine === false && g2ViewRowAAA.submitted_by_name === "AAA Guardian One" && g2ViewRowAAA.sleep_quality === "barely_slept", JSON.stringify(g2ViewRowAAA));
+
+    const { data: g1ViewAAA } = await guardian1AAA.rpc("get_todays_checkin", {
+      p_passport_id: childAAAId, p_start_of_today: startOfTodayAAA.toISOString(),
+    });
+    const g1ViewRowAAA = (g1ViewAAA ?? [])[0];
+    record("AAA2d guardian 1's own view: is_mine=true, their own content", Boolean(g1ViewRowAAA) && g1ViewRowAAA.is_mine === true && g1ViewRowAAA.sleep_quality === "barely_slept", JSON.stringify(g1ViewRowAAA));
+
+    // ---- AAA3: an outsider, zero relationship, reads nothing. ----
+    const { data: outsiderReadAAA } = await outsiderAAA.from("morning_checkins").select("id").eq("passport_id", childAAAId);
+    record("AAA3 an outsider with no relationship to this child reads nothing", (outsiderReadAAA ?? []).length === 0, JSON.stringify(outsiderReadAAA));
+
+    // ---- AAA4: guardian 1 cannot spoof guardian 2's user_id on insert
+    // -- INSERT stays exactly as it was. ----
+    const { error: spoofAAAErr } = await guardian1AAA.from("morning_checkins").insert({
+      passport_id: childAAAId, user_id: guardian2AAAId, sleep_quality: "slept_through",
+    });
+    record("AAA4 a guardian cannot insert a check-in claiming to be someone else -- INSERT unchanged, still user_id = auth.uid()", Boolean(spoofAAAErr), spoofAAAErr?.message);
+
+    // ---- AAA5: THE CORE CLAIM -- guardian 2 now ALSO submits (a
+    // genuinely different account of the same morning). No unique
+    // constraint blocks it. Both rows persist. Each guardian's own view
+    // still shows THEIR OWN row -- not the other's, and not whichever
+    // was submitted most recently. ----
+    const { error: g2InsertAAAErr } = await guardian2AAA.from("morning_checkins").insert({
+      passport_id: childAAAId, user_id: guardian2AAAId,
+      sleep_quality: "slept_through", regulation_state: "settled", heads_up: "Great morning here.",
+    });
+    record("AAA5a guardian 2 can also submit their own, genuinely different account of the same morning -- no unique constraint blocks it", !g2InsertAAAErr, g2InsertAAAErr?.message);
+
+    const { data: bothRowsAAA } = await admin.from("morning_checkins").select("id, user_id, sleep_quality").eq("passport_id", childAAAId);
+    record("AAA5b both rows persist -- two real, disagreeing accounts, neither overwritten", bothRowsAAA?.length === 2, JSON.stringify(bothRowsAAA));
+
+    const { data: g1ViewAfterAAA } = await guardian1AAA.rpc("get_todays_checkin", {
+      p_passport_id: childAAAId, p_start_of_today: startOfTodayAAA.toISOString(),
+    });
+    const g1ViewAfterRowAAA = (g1ViewAfterAAA ?? [])[0];
+    record("AAA5c THE PRIORITY ORDERING: guardian 1's own view STILL shows their own row (is_mine=true, barely_slept) -- not guardian 2's more recent one", Boolean(g1ViewAfterRowAAA) && g1ViewAfterRowAAA.is_mine === true && g1ViewAfterRowAAA.sleep_quality === "barely_slept", JSON.stringify(g1ViewAfterRowAAA));
+
+    const { data: g2ViewAfterAAA } = await guardian2AAA.rpc("get_todays_checkin", {
+      p_passport_id: childAAAId, p_start_of_today: startOfTodayAAA.toISOString(),
+    });
+    const g2ViewAfterRowAAA = (g2ViewAfterAAA ?? [])[0];
+    record("AAA5d guardian 2's own view shows THEIR OWN row (is_mine=true, slept_through)", Boolean(g2ViewAfterRowAAA) && g2ViewAfterRowAAA.is_mine === true && g2ViewAfterRowAAA.sleep_quality === "slept_through", JSON.stringify(g2ViewAfterRowAAA));
+
+    console.log("AAA summary complete.");
+
+    await admin.from("morning_checkins").delete().eq("passport_id", childAAAId);
+    await admin.from("passport_guardians").delete().eq("passport_id", childAAAId);
+    await admin.from("passports").delete().eq("id", childAAAId);
+    await admin.from("institutions").delete().eq("id", institutionAAAId);
+    for (const id of [principalAAAId, guardian1AAAId, guardian2AAAId, outsiderAAAId]) {
+      await admin.auth.admin.deleteUser(id);
+    }
+  }
+
+  console.log(`\n== CHECK BBB: SQL for PRD 3 Stage 5, teacher-side (migration 0146) -- get_todays_checkins_for_passports(). Two real guardians via the actual claim chain submit genuinely disagreeing accounts of the same morning; a teacher with real access gets BOTH, attributed by name, in full -- no "most recent wins" reduction, the exact silent-data-loss useTeacherMorningCheckins.ts's own old client-side reduction would have produced. A second teacher with access to a DIFFERENT child in the same call gets nothing for this one -- has_child_access() scoping proven per-row inside an array argument, not just per-call. An outsider with no access at all gets nothing. ==`);
+  if (shouldRun("BBB")) {
+    const { data: instBBB, error: instBBBErr } = await admin
+      .from("institutions")
+      .insert({ name: "BBB Institution", institution_code: CODE + "BBB", status: "verified" })
+      .select()
+      .single();
+    if (instBBBErr) throw instBBBErr;
+    const institutionBBBId = instBBB.id;
+
+    const principalBBBId = await createUser("checkbbb.principal@thebehaviourhive.com", "BBB Principal", "principal");
+    const teacherBBBId = await createUser("checkbbb.teacher@thebehaviourhive.com", "BBB Teacher", "class_teacher");
+    const otherTeacherBBBId = await createUser("checkbbb.otherteacher@thebehaviourhive.com", "BBB Other Teacher", "class_teacher");
+    const outsiderBBBId = await createUser("checkbbb.outsider@thebehaviourhive.com", "BBB Outsider", "class_teacher");
+    const guardian1BBBId = await createUser("checkbbb.guardian1@thebehaviourhive.com", "BBB Guardian One", "parent");
+    const guardian2BBBId = await createUser("checkbbb.guardian2@thebehaviourhive.com", "BBB Guardian Two", "parent");
+
+    const { error: staffBBBErr } = await admin.from("institution_staff").insert([
+      { institution_id: institutionBBBId, user_id: principalBBBId, role: "principal" },
+      { institution_id: institutionBBBId, user_id: teacherBBBId, role: "class_teacher", approved_at: new Date().toISOString(), approved_by: principalBBBId, approval_source: "principal" },
+      { institution_id: institutionBBBId, user_id: otherTeacherBBBId, role: "class_teacher", approved_at: new Date().toISOString(), approved_by: principalBBBId, approval_source: "principal" },
+    ]);
+    if (staffBBBErr) throw staffBBBErr;
+
+    const principalBBB = await signedInClient("checkbbb.principal@thebehaviourhive.com");
+    const teacherBBB = await signedInClient("checkbbb.teacher@thebehaviourhive.com");
+    const otherTeacherBBB = await signedInClient("checkbbb.otherteacher@thebehaviourhive.com");
+    const outsiderBBB = await signedInClient("checkbbb.outsider@thebehaviourhive.com");
+    const guardian1BBB = await signedInClient("checkbbb.guardian1@thebehaviourhive.com");
+    const guardian2BBB = await signedInClient("checkbbb.guardian2@thebehaviourhive.com");
+
+    // ---- BBB0: setup -- teacherBBB has real access to childBBB;
+    // otherTeacherBBB has real access to a SEPARATE child, proving the
+    // RPC's own per-row scoping, not just a per-call authorization gate. ----
+    const { data: childBBBId } = await principalBBB.rpc("create_school_passport", { p_institution_id: institutionBBBId, p_child_name: "BBB Child" });
+    const { data: code1BBB } = await principalBBB.rpc("generate_passport_claim_code", { p_institution_id: institutionBBBId, p_passport_id: childBBBId });
+    await guardian1BBB.rpc("redeem_passport_claim_code", { p_code: code1BBB });
+    const { data: code2BBB } = await principalBBB.rpc("generate_passport_claim_code", { p_institution_id: institutionBBBId, p_passport_id: childBBBId });
+    await guardian2BBB.rpc("redeem_passport_claim_code", { p_code: code2BBB });
+    await principalBBB.rpc("grant_passport_access", { p_passport_id: childBBBId, p_user_id: teacherBBBId, p_institution_id: institutionBBBId, p_reason: "Class teacher." });
+
+    const { data: otherChildBBBId } = await principalBBB.rpc("create_school_passport", { p_institution_id: institutionBBBId, p_child_name: "BBB Other Child" });
+    await principalBBB.rpc("grant_passport_access", { p_passport_id: otherChildBBBId, p_user_id: otherTeacherBBBId, p_institution_id: institutionBBBId, p_reason: "Class teacher." });
+
+    const startOfTodayBBB = new Date();
+    startOfTodayBBB.setHours(0, 0, 0, 0);
+
+    // ---- BBB1: two guardians submit genuinely disagreeing accounts. ----
+    const { error: g1InsertBBBErr } = await guardian1BBB.from("morning_checkins").insert({
+      passport_id: childBBBId, user_id: guardian1BBBId,
+      sleep_quality: "barely_slept", regulation_state: "dysregulated", heads_up: "Rough night.",
+    });
+    if (g1InsertBBBErr) throw g1InsertBBBErr;
+    const { error: g2InsertBBBErr } = await guardian2BBB.from("morning_checkins").insert({
+      passport_id: childBBBId, user_id: guardian2BBBId,
+      sleep_quality: "slept_through", regulation_state: "settled", heads_up: "Great morning.",
+    });
+    if (g2InsertBBBErr) throw g2InsertBBBErr;
+
+    // ---- BBB2: the teacher with real access gets BOTH, attributed --
+    // no reduction, no silent drop. ----
+    const { data: teacherViewBBB } = await teacherBBB.rpc("get_todays_checkins_for_passports", {
+      p_passport_ids: [childBBBId, otherChildBBBId], p_start_of_today: startOfTodayBBB.toISOString(),
+    });
+    const forChildBBB = (teacherViewBBB ?? []).filter((r) => r.passport_id === childBBBId);
+    record("BBB2a THE CORE CLAIM: the teacher receives BOTH disagreeing accounts, not just the most recent -- no silent drop", forChildBBB.length === 2, JSON.stringify(forChildBBB));
+    record("BBB2b both accounts are attributed by real name", forChildBBB.every((r) => typeof r.submitted_by_name === "string" && r.submitted_by_name.length > 0) && forChildBBB.some((r) => r.submitted_by_name === "BBB Guardian One") && forChildBBB.some((r) => r.submitted_by_name === "BBB Guardian Two"), JSON.stringify(forChildBBB.map((r) => r.submitted_by_name)));
+    record("BBB2c the two accounts' own content is genuinely different, neither overwritten", forChildBBB.some((r) => r.sleep_quality === "barely_slept") && forChildBBB.some((r) => r.sleep_quality === "slept_through"), JSON.stringify(forChildBBB.map((r) => r.sleep_quality)));
+
+    // ---- BBB3: the SAME call also asked about otherChildBBB, which
+    // has zero check-ins today -- proves per-row scoping, not a blanket
+    // "this teacher passed access somewhere" gate. ----
+    const forOtherChildBBB = (teacherViewBBB ?? []).filter((r) => r.passport_id === otherChildBBBId);
+    record("BBB3 the same call correctly returns nothing for the other child (zero check-ins today), not an error and not childBBB's rows leaking across", forOtherChildBBB.length === 0, JSON.stringify(forOtherChildBBB));
+
+    // ---- BBB4: a second teacher, with real access only to the OTHER
+    // child, gets nothing for childBBB even when childBBB's id is in
+    // the same array argument -- has_child_access() scoped per row. ----
+    const { data: otherTeacherViewBBB } = await otherTeacherBBB.rpc("get_todays_checkins_for_passports", {
+      p_passport_ids: [childBBBId, otherChildBBBId], p_start_of_today: startOfTodayBBB.toISOString(),
+    });
+    record("BBB4 a teacher without access to childBBB gets nothing for it, even with its id in the same array argument", !(otherTeacherViewBBB ?? []).some((r) => r.passport_id === childBBBId), JSON.stringify(otherTeacherViewBBB));
+
+    // ---- BBB5: an outsider with no relationship to either child gets
+    // nothing at all. ----
+    const { data: outsiderViewBBB } = await outsiderBBB.rpc("get_todays_checkins_for_passports", {
+      p_passport_ids: [childBBBId, otherChildBBBId], p_start_of_today: startOfTodayBBB.toISOString(),
+    });
+    record("BBB5 an outsider with no access to either child gets nothing", (outsiderViewBBB ?? []).length === 0, JSON.stringify(outsiderViewBBB));
+
+    console.log("BBB summary complete.");
+
+    await admin.from("morning_checkins").delete().in("passport_id", [childBBBId, otherChildBBBId]);
+    await admin.from("passport_guardians").delete().eq("passport_id", childBBBId);
+    await admin.from("passports").delete().in("id", [childBBBId, otherChildBBBId]);
+    await admin.from("institutions").delete().eq("id", institutionBBBId);
+    for (const id of [principalBBBId, teacherBBBId, otherTeacherBBBId, outsiderBBBId, guardian1BBBId, guardian2BBBId]) {
       await admin.auth.admin.deleteUser(id);
     }
   }
