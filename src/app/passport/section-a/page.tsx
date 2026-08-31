@@ -10,13 +10,44 @@ import { DiagnosisSelect } from "@/components/passport/DiagnosisSelect";
 import { createClient } from "@/lib/supabase/client";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { useRegions } from "@/hooks/useRegions";
+import { useMyPassport } from "@/hooks/useMyPassport";
 import { getPassportProgressPercent } from "@/lib/passportProgress";
 import { IMPORTANT_PEOPLE_TITLE } from "@/lib/passportCopy";
 import { DIAGNOSIS_OTHER } from "@/lib/diagnosisOptions";
 
+// PRD 3, Stage 1 -- two real bugs fixed together, same client change:
+//
+// (1) THE URGENT ONE: .upsert(payload, { onConflict: "user_id" }) sends
+// Prefer: return=representation by default, even with no .select()
+// chained -- so the new row had to pass passports' own SELECT policy
+// (owns_passport(id), migration 0117) WITHIN THE SAME STATEMENT. That
+// policy depends on a passport_guardians row a trigger creates AFTER
+// the insert -- invisible to the same-statement check. Every brand-new
+// parent's first-ever save hit this, in production, since 0117 shipped
+// -- not a claimed-guardian edge case, everyone's first save. See
+// CLAUDE.md's new gotcha entry.
+//
+// (2) THE ONE THIS STAGE SET OUT TO FIX: a claimed guardian's passport
+// has no user_id at all, so onConflict: "user_id" could never find it
+// to update -- it would silently create a second, orphaned passport
+// instead (RLS permits it; a fresh row with the guardian's own user_id
+// is a perfectly legal insert on its own terms).
+//
+// Same fix closes both: resolve the existing passport (if any) via
+// useMyPassport() -- guardian-aware, works for both origins -- THEN
+// branch explicitly. An existing passport gets a plain .update().eq(
+// "id", ...), payload never including user_id (that column carries
+// migration 0113's own dual-write-trigger meaning, not "who edited
+// this"; a claimed guardian must never set it, and leaving it out of
+// an update on a self-created passport leaves it correctly unchanged
+// either way). No existing passport means a genuine first-time
+// .insert(), user_id included, exactly as before -- and, per gotcha
+// #new, that bare insert is never followed by a chained .select().
+
 export default function PassportSectionAPage() {
   const router = useRouter();
   const { user, isReady } = useRequireRole("parent");
+  const { passportId: existingPassportId, isLoading: isLoadingPassportId } = useMyPassport(user?.id);
 
   const [childName, setChildName] = useState("");
   const [dateOfBirth, setDateOfBirth] = useState("");
@@ -39,7 +70,14 @@ export default function PassportSectionAPage() {
   >("not_started");
 
   useEffect(() => {
-    if (!user) return;
+    if (!user || isLoadingPassportId) return;
+
+    if (!existingPassportId) {
+      // Genuinely nothing to load -- a brand-new parent, first visit.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setIsLoadingExisting(false);
+      return;
+    }
 
     let isMounted = true;
 
@@ -50,7 +88,7 @@ export default function PassportSectionAPage() {
         .select(
           "child_name, date_of_birth, school, important_people, diagnoses, diagnosis_other, county_id, passport_status"
         )
-        .eq("user_id", user!.id)
+        .eq("id", existingPassportId)
         .maybeSingle();
 
       if (!isMounted || !data) {
@@ -76,7 +114,7 @@ export default function PassportSectionAPage() {
     return () => {
       isMounted = false;
     };
-  }, [user]);
+  }, [user, existingPassportId, isLoadingPassportId]);
 
   function toggleDiagnosis(value: string) {
     setDiagnoses((prev) =>
@@ -84,9 +122,11 @@ export default function PassportSectionAPage() {
     );
   }
 
+  // Deliberately never includes user_id -- see the header note. The
+  // insert branch below adds it back in only for a genuinely new
+  // passport.
   function buildPayload() {
     return {
-      user_id: user!.id,
       child_name: childName || null,
       date_of_birth: dateOfBirth || null,
       school: school || null,
@@ -104,6 +144,26 @@ export default function PassportSectionAPage() {
     };
   }
 
+  // Explicit insert-vs-update, never upsert -- see the header note for
+  // both reasons why. Neither branch chains .select(): the insert
+  // branch would hit the same same-statement SELECT-policy timing gap
+  // upsert did (owns_passport(id) can't see the trigger's own
+  // passport_guardians row yet); the update branch doesn't need
+  // representation back at all. Confirming the write succeeded, on the
+  // rare occasion a caller needs to, means a separate follow-up query,
+  // not a chained one.
+  async function savePassport(
+    payload: ReturnType<typeof buildPayload> & { section_a_complete?: boolean }
+  ): Promise<string | null> {
+    const supabase = createClient();
+    if (existingPassportId) {
+      const { error } = await supabase.from("passports").update(payload).eq("id", existingPassportId);
+      return error?.message ?? null;
+    }
+    const { error } = await supabase.from("passports").insert({ ...payload, user_id: user!.id });
+    return error?.message ?? null;
+  }
+
   async function handleSaveAndContinue(event: FormEvent) {
     event.preventDefault();
     if (!user) return;
@@ -111,18 +171,12 @@ export default function PassportSectionAPage() {
     setError(null);
     setIsSaving(true);
 
-    const supabase = createClient();
-    const { error: upsertError } = await supabase
-      .from("passports")
-      .upsert(
-        { ...buildPayload(), section_a_complete: true },
-        { onConflict: "user_id" }
-      );
+    const saveError = await savePassport({ ...buildPayload(), section_a_complete: true });
 
     setIsSaving(false);
 
-    if (upsertError) {
-      setError(upsertError.message);
+    if (saveError) {
+      setError(saveError);
       return;
     }
 
@@ -135,15 +189,12 @@ export default function PassportSectionAPage() {
     setError(null);
     setIsSaving(true);
 
-    const supabase = createClient();
-    const { error: upsertError } = await supabase
-      .from("passports")
-      .upsert(buildPayload(), { onConflict: "user_id" });
+    const saveError = await savePassport(buildPayload());
 
     setIsSaving(false);
 
-    if (upsertError) {
-      setError(upsertError.message);
+    if (saveError) {
+      setError(saveError);
       return;
     }
 

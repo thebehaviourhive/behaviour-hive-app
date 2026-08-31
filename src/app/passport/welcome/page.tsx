@@ -30,6 +30,19 @@ export default function PassportWelcomePage() {
     router.replace("/passport/dashboard");
   }, [isCheckingExisting, existingPassportId, router]);
 
+  // PRD 3, Stage 1: was .upsert({user_id, passport_status}, {onConflict:
+  // "user_id"}) -- .upsert() sends Prefer: return=representation by
+  // default, even with no .select() chained, so the new row had to pass
+  // passports' own SELECT policy (owns_passport(id), 0117) WITHIN THE
+  // SAME STATEMENT. That policy depends on a passport_guardians row a
+  // trigger creates AFTER the insert -- invisible to the same-statement
+  // check. Every brand-new parent hit this on their very first save,
+  // in production, since 0117 shipped -- see CLAUDE.md's new gotcha
+  // entry. A plain .insert() closes it -- this handler only ever runs
+  // once useMyPassport() above has already confirmed no passport exists
+  // yet (the effect at the top of this component redirects away the
+  // instant one does), so there is never a real conflict to resolve;
+  // onConflict was never doing anything here except triggering the bug.
   async function handleSaveAndExit() {
     if (!user) return;
 
@@ -37,17 +50,14 @@ export default function PassportWelcomePage() {
     setIsSaving(true);
 
     const supabase = createClient();
-    const { error: upsertError } = await supabase
+    const { error: insertError } = await supabase
       .from("passports")
-      .upsert(
-        { user_id: user.id, passport_status: "in_progress" },
-        { onConflict: "user_id", ignoreDuplicates: false }
-      );
+      .insert({ user_id: user.id, passport_status: "in_progress" });
 
     setIsSaving(false);
 
-    if (upsertError) {
-      setError(upsertError.message);
+    if (insertError) {
+      setError(insertError.message);
       return;
     }
 

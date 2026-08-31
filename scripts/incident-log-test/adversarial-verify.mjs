@@ -20,7 +20,7 @@
 // stage development. Every check from V onward is independently
 // self-contained (own institution, own accounts, own cleanup) and
 // individually selectable: V, W, X, Y, Z, AA, BB, CC, DD, EE, FF, GG,
-// HH, II, JJ, KK, LL, MM, NN, OO, PP, QQ, RR, SS, TT, UU, VV, WW. Selecting none of these (ONLY_CHECKS unset) is the full run --
+// HH, II, JJ, KK, LL, MM, NN, OO, PP, QQ, RR, SS, TT, UU, VV, WW, XX. Selecting none of these (ONLY_CHECKS unset) is the full run --
 // the one that gates deploys -- and its behavior is unchanged: same
 // checks, same order, same pass/fail counts. The only observable
 // difference is where the top-level fixture's own cleanup log line
@@ -10494,6 +10494,254 @@ async function main() {
     await admin.from("passports").delete().in("id", [childWW1Id, childGap1Id, childGap2Id, childMixedGapId, childMixed1to1Id, childClassSnaId, childFormerId]);
     await admin.from("institutions").delete().in("id", [institutionWWId, institutionWWOtherId]);
     for (const id of [principalWWId, teacher1WWId, teacher2WWId, supplyWWId, principalWWOtherId, teacherWWOtherId]) {
+      await admin.auth.admin.deleteUser(id);
+    }
+  }
+
+  console.log(`\n== CHECK XX: SQL for PRD 3 Stage 1 (migration 0138) -- passports/passport_section_b/c/d RLS moved to owns_passport(). THE UPSERT BUG, found by accident while building this check and locked as a permanent regression (XX0b): .upsert() sends Prefer: return=representation by default, even with no .select() chained, so a first-time insert must pass the SELECT policy (owns_passport(id), 0117) WITHIN THE SAME STATEMENT a trigger hasn't finished its own cross-table write in yet -- every brand-new parent's first save, not a claimed-guardian edge case. XX2a CORRECTS an earlier draft of this check: the OLD onConflict:"user_id" pattern does NOT silently orphan a second passport for a claimed guardian -- it hits the identical upsert bug and fails cleanly, leaving nothing behind. The NEW explicit update-by-id pattern (XX2b) succeeds and leaves exactly one passport, the claimed one, updated. Section B/C/D: a claimed guardian can now SELECT/INSERT/UPDATE with a real passport_id; a spoofed user_id in the payload is refused (WITH CHECK's own user_id = auth.uid()); an outsider with zero passport_guardians row is refused on all four tables, both directions, proven by re-reading the actual row afterward, not by absence of a client error. LAST-WRITER ATTRIBUTION, proven not assumed: two real guardians on the same claimed passport, sequential updates -- each one's own payload includes user_id, matching how the real hooks already write -- the row's user_id ends up as whoever wrote last and a field neither update touched survives untouched. A genuine self-created passport's own original owner is unaffected -- the regression control. ==`);
+  if (shouldRun("XX")) {
+    const { data: instXX, error: instXXErr } = await admin
+      .from("institutions")
+      .insert({ name: "XX Institution", institution_code: CODE + "XX", status: "verified" })
+      .select()
+      .single();
+    if (instXXErr) throw instXXErr;
+    const institutionXXId = instXX.id;
+
+    const principalXXId = await createUser("checkxx.principal@thebehaviourhive.com", "XX Principal", "principal");
+    const guardian1XXId = await createUser("checkxx.guardian1@thebehaviourhive.com", "XX Guardian One", "parent");
+    const guardian2XXId = await createUser("checkxx.guardian2@thebehaviourhive.com", "XX Guardian Two", "parent");
+    const outsiderXXId = await createUser("checkxx.outsider@thebehaviourhive.com", "XX Outsider Parent", "parent");
+    const selfCreatedXXId = await createUser("checkxx.selfcreated@thebehaviourhive.com", "XX Self-Created Parent", "parent");
+
+    const { error: staffXXErr } = await admin.from("institution_staff").insert({
+      institution_id: institutionXXId, user_id: principalXXId, role: "principal",
+    });
+    if (staffXXErr) throw staffXXErr;
+
+    const principalXX = await signedInClient("checkxx.principal@thebehaviourhive.com");
+    const guardian1XX = await signedInClient("checkxx.guardian1@thebehaviourhive.com");
+    const guardian2XX = await signedInClient("checkxx.guardian2@thebehaviourhive.com");
+    const outsiderXX = await signedInClient("checkxx.outsider@thebehaviourhive.com");
+    const selfCreatedXX = await signedInClient("checkxx.selfcreated@thebehaviourhive.com");
+
+    // ---- XX0: a real school-created passport, claimed by TWO real
+    // guardians through the actual redeem chain -- never a hand-set
+    // passport_guardians row. ----
+    const { data: childXXId, error: childXXErr } = await principalXX.rpc("create_school_passport", {
+      p_institution_id: institutionXXId, p_child_name: "XX Child",
+    });
+    if (childXXErr) throw childXXErr;
+
+    const { data: code1XX, error: code1XXErr } = await principalXX.rpc("generate_passport_claim_code", {
+      p_institution_id: institutionXXId, p_passport_id: childXXId,
+    });
+    if (code1XXErr) throw code1XXErr;
+    const { error: redeem1XXErr } = await guardian1XX.rpc("redeem_passport_claim_code", { p_code: code1XX });
+    if (redeem1XXErr) throw redeem1XXErr;
+
+    const { data: code2XX, error: code2XXErr } = await principalXX.rpc("generate_passport_claim_code", {
+      p_institution_id: institutionXXId, p_passport_id: childXXId,
+    });
+    if (code2XXErr) throw code2XXErr;
+    const { error: redeem2XXErr } = await guardian2XX.rpc("redeem_passport_claim_code", { p_code: code2XX });
+    if (redeem2XXErr) throw redeem2XXErr;
+
+    const { data: preCheckXX } = await admin.from("passports").select("id, user_id, diagnoses").eq("id", childXXId).single();
+    record("XX0: the claimed passport genuinely has user_id null -- the exact shape that broke the old upsert", preCheckXX.user_id === null, JSON.stringify(preCheckXX));
+
+    // ---- XX0b: THE OTHER BUG, found by accident while building this
+    // check -- not a claimed-guardian edge case, every brand-new
+    // parent's first-ever save, live in production since 0117 shipped.
+    // .upsert() sends Prefer: return=representation by default, even
+    // with no .select() chained -- so the new row has to pass passports'
+    // own SELECT policy (owns_passport(id)) WITHIN THE SAME STATEMENT.
+    // That policy depends on a passport_guardians row a trigger creates
+    // AFTER the insert -- invisible to the same-statement check. A
+    // permanent regression lock: this must keep failing for exactly
+    // this reason (proving the library behavior this whole bug hinges
+    // on hasn't quietly changed under us), while a plain insert for the
+    // identical row must keep succeeding -- the fix both client files
+    // now use instead of upsert. ----
+    {
+      const freshXXId = await createUser("checkxx.freshupsert@thebehaviourhive.com", "XX Fresh Upsert Victim", "parent");
+      const freshXX = await signedInClient("checkxx.freshupsert@thebehaviourhive.com");
+
+      const { error: brokenUpsertXXErr } = await freshXX.from("passports").upsert(
+        { user_id: freshXXId, passport_status: "in_progress" },
+        { onConflict: "user_id" }
+      );
+      record("XX0b THE BUG, LOCKED AS A REGRESSION CHECK: .upsert() on a genuinely first-time passport still fails, even with no .select() chained -- Prefer: return=representation is implicit, and owns_passport(id) can't see the trigger's own passport_guardians row within the same statement", Boolean(brokenUpsertXXErr) && /row-level security/i.test(brokenUpsertXXErr.message), brokenUpsertXXErr?.message);
+      const { data: noOrphanFromBrokenUpsertXX } = await admin.from("passports").select("id").eq("user_id", freshXXId);
+      record("XX0b-confirm: the failed upsert left NOTHING behind -- a clean failure, not a partial write", (noOrphanFromBrokenUpsertXX ?? []).length === 0, JSON.stringify(noOrphanFromBrokenUpsertXX));
+
+      const { error: fixedInsertXXErr } = await freshXX.from("passports").insert(
+        { user_id: freshXXId, passport_status: "in_progress" }
+      );
+      record("XX0b THE FIX: a plain insert, identical row, succeeds -- the exact pattern both client files now use", !fixedInsertXXErr, fixedInsertXXErr?.message);
+
+      await admin.from("passport_guardians").delete().eq("user_id", freshXXId);
+      await admin.from("passports").delete().eq("user_id", freshXXId);
+      await admin.auth.admin.deleteUser(freshXXId);
+    }
+
+    // A genuinely self-created passport, for the regression control.
+    // Plain insert, not upsert -- upsert sends Prefer: return=
+    // representation by default even with no .select() chained, which
+    // requires the new row to pass passports' own SELECT policy
+    // (owns_passport(id)) WITHIN THE SAME STATEMENT -- and that policy
+    // depends on a passport_guardians row a trigger creates AFTER the
+    // insert, invisible to the same-statement check. Found live, by
+    // this exact line failing first, before either client file was
+    // fixed to stop using upsert at all -- see CLAUDE.md's new gotcha.
+    const { error: selfCreatedXXErr } = await selfCreatedXX.from("passports").insert(
+      { user_id: selfCreatedXXId, child_name: "XX Self-Created Child", passport_status: "in_progress" }
+    );
+    if (selfCreatedXXErr) throw selfCreatedXXErr;
+    const { data: selfCreatedPassportXX } = await admin.from("passports").select("id").eq("user_id", selfCreatedXXId).single();
+    const selfCreatedPassportXXId = selfCreatedPassportXX.id;
+
+    // ---- XX1: passports UPDATE via owns_passport(id). ----
+    const { error: guardian1UpdateXXErr } = await guardian1XX
+      .from("passports")
+      .update({ diagnoses: ["autism"] })
+      .eq("id", childXXId);
+    record("XX1a a claimed guardian CAN update the passport they claimed, via owns_passport(id)", !guardian1UpdateXXErr, guardian1UpdateXXErr?.message);
+    const { data: afterGuardian1UpdateXX } = await admin.from("passports").select("diagnoses").eq("id", childXXId).single();
+    record("XX1a-confirm: the update actually persisted (re-read via service role, not assumed from the absence of an error)", JSON.stringify(afterGuardian1UpdateXX.diagnoses) === JSON.stringify(["autism"]), JSON.stringify(afterGuardian1UpdateXX));
+
+    const { error: outsiderUpdateXXErr } = await outsiderXX
+      .from("passports")
+      .update({ diagnoses: ["should not land"] })
+      .eq("id", childXXId);
+    const { data: afterOutsiderUpdateXX } = await admin.from("passports").select("diagnoses").eq("id", childXXId).single();
+    record("XX1b an OUTSIDER with no passport_guardians row is refused -- re-read confirms the value is UNCHANGED, not just that no client error was thrown (RLS on UPDATE silently filters)", JSON.stringify(afterOutsiderUpdateXX.diagnoses) === JSON.stringify(["autism"]), JSON.stringify({ clientError: outsiderUpdateXXErr?.message, actualValue: afterOutsiderUpdateXX.diagnoses }));
+
+    // ---- XX2: the OLD pattern vs. the NEW pattern, on the same
+    // claimed passport. CORRECTED from an earlier draft of this check
+    // (and from what was first reported): the old onConflict:"user_id"
+    // pattern does NOT silently create a second, orphaned passport for
+    // a claimed guardian -- it hits the SAME upsert-triggers-
+    // representation bug XX0b already proved (a brand-new row's own
+    // trigger-created passport_guardians entry isn't visible to the
+    // same-statement SELECT-policy check either), and fails cleanly,
+    // leaving nothing behind. The real, empirically-confirmed shape of
+    // the bug is narrower than first assumed: not silent corruption,
+    // a loud failure on every first save, guardian or not -- still
+    // real, still worth the same fix, just not the mechanism first
+    // described.
+    const { error: oldPatternXXErr } = await guardian1XX.from("passports").upsert(
+      { user_id: guardian1XXId, diagnoses: ["orphan attempt"] },
+      { onConflict: "user_id" }
+    );
+    record("XX2a THE OLD PATTERN FAILS CLEANLY, not silently -- same upsert-representation bug as XX0b, for the same reason", Boolean(oldPatternXXErr) && /row-level security/i.test(oldPatternXXErr.message), oldPatternXXErr?.message);
+    const { data: afterOrphanXX } = await admin.from("passports").select("id, user_id, diagnoses").eq("user_id", guardian1XXId);
+    record("XX2a-confirm: NO orphan was created -- the failed write left nothing behind, and the claimed passport itself is untouched", (afterOrphanXX ?? []).length === 0, JSON.stringify({ rowsForGuardian1: afterOrphanXX, claimedPassportId: childXXId }));
+    const { data: claimedStillThereXX } = await admin.from("passports").select("id, user_id").eq("id", childXXId).single();
+    record("XX2a-confirm2: the claimed passport is still exactly one row, still null user_id, unaffected by the failed attempt", claimedStillThereXX.user_id === null, JSON.stringify(claimedStillThereXX));
+
+    // 2b: the NEW pattern -- explicit update-by-id, the fix the client
+    // moves to. Same claimed passport, same guardian.
+    const { error: newPatternXXErr } = await guardian1XX
+      .from("passports")
+      .update({ diagnoses: ["adhd"], school: "XX National School" })
+      .eq("id", childXXId);
+    record("XX2b THE FIX: the NEW explicit update-by-id pattern succeeds", !newPatternXXErr, newPatternXXErr?.message);
+    const { data: allXXPassportsForGuardian1 } = await admin.from("passports").select("id, diagnoses, school").or(`id.eq.${childXXId},user_id.eq.${guardian1XXId}`);
+    record("XX2b-confirm: exactly ONE passport exists for this family now -- the claimed one, updated in place, not a second one", allXXPassportsForGuardian1.length === 1 && allXXPassportsForGuardian1[0].id === childXXId && JSON.stringify(allXXPassportsForGuardian1[0].diagnoses) === JSON.stringify(["adhd"]) && allXXPassportsForGuardian1[0].school === "XX National School", JSON.stringify(allXXPassportsForGuardian1));
+
+    // ---- XX3: section B/C/D -- a claimed guardian CAN now read/write,
+    // with a real passport_id, on all three tables independently. ----
+    for (const [table, completeCol] of [
+      ["passport_section_b", "section_b_complete"],
+      ["passport_section_c", "section_c_complete"],
+      ["passport_section_d", "section_d_complete"],
+    ]) {
+      const { data: selectBeforeXX } = await guardian1XX.from(table).select("*").eq("passport_id", childXXId);
+      record(`XX3-${table}-a a claimed guardian SELECTs their own (currently empty) section -- zero rows, not an error`, (selectBeforeXX ?? []).length === 0, JSON.stringify(selectBeforeXX));
+
+      const insertPayload = { passport_id: childXXId, user_id: guardian1XXId };
+      insertPayload[completeCol] = false;
+      const { error: insertXXErr } = await guardian1XX.from(table).insert(insertPayload);
+      record(`XX3-${table}-b a claimed guardian CAN insert into ${table} with a real passport_id -- unblocked, not a NOT NULL violation`, !insertXXErr, insertXXErr?.message);
+
+      const { data: rowXX } = await admin.from(table).select("id").eq("passport_id", childXXId).single();
+      const updatePayload = {};
+      updatePayload[completeCol] = true;
+      const { error: updateXXErr } = await guardian1XX.from(table).update(updatePayload).eq("id", rowXX.id);
+      record(`XX3-${table}-c the SAME guardian CAN update it via owns_passport(passport_id)`, !updateXXErr, updateXXErr?.message);
+      const { data: afterUpdateXX } = await admin.from(table).select(completeCol).eq("id", rowXX.id).single();
+      record(`XX3-${table}-c-confirm: the update actually persisted`, afterUpdateXX[completeCol] === true, JSON.stringify(afterUpdateXX));
+    }
+
+    // ---- XX4: spoofing refused -- WITH CHECK's user_id = auth.uid(). ----
+    const { error: spoofXXErr } = await guardian1XX.from("passport_section_b").upsert(
+      { passport_id: childXXId, user_id: guardian2XXId, section_b_complete: false },
+      { onConflict: "passport_id" }
+    );
+    record("XX4 a guardian CANNOT write a section row claiming someone ELSE's user_id, even a fellow guardian's -- WITH CHECK's own user_id = auth.uid() catches it", Boolean(spoofXXErr), spoofXXErr?.message);
+
+    // ---- XX5: an outsider, zero relationship, refused on all four
+    // tables, both directions. ----
+    const { error: outsiderPassportXXErr } = await outsiderXX.from("passports").update({ diagnoses: ["nope"] }).eq("id", childXXId);
+    const { data: afterOutsiderPassportXX } = await admin.from("passports").select("diagnoses").eq("id", childXXId).single();
+    record("XX5a an outsider is refused on passports UPDATE -- re-read confirms unchanged", JSON.stringify(afterOutsiderPassportXX.diagnoses) === JSON.stringify(["adhd"]), JSON.stringify({ clientError: outsiderPassportXXErr?.message, actual: afterOutsiderPassportXX.diagnoses }));
+
+    for (const table of ["passport_section_b", "passport_section_c", "passport_section_d"]) {
+      const { data: outsiderSelectXX } = await outsiderXX.from(table).select("*").eq("passport_id", childXXId);
+      record(`XX5b-${table} an outsider SELECTs nothing for this passport's section`, (outsiderSelectXX ?? []).length === 0, JSON.stringify(outsiderSelectXX));
+      const { error: outsiderInsertXXErr } = await outsiderXX.from(table).insert({ passport_id: childXXId, user_id: outsiderXXId });
+      record(`XX5c-${table} an outsider CANNOT insert into this passport's section`, Boolean(outsiderInsertXXErr), outsiderInsertXXErr?.message);
+    }
+
+    // ---- XX6: LAST-WRITER ATTRIBUTION, proven not assumed. Guardian 1
+    // writes hard_signals; guardian 2 (a REAL, second guardian on the
+    // SAME passport, via the actual claim chain, not a hand-set row)
+    // writes only okay_signals afterwards, in a SEPARATE statement that
+    // never mentions hard_signals at all. ----
+    await admin.from("passport_section_b").delete().eq("passport_id", childXXId);
+    const { error: g1WriteXXErr } = await guardian1XX.from("passport_section_b").insert({
+      passport_id: childXXId, user_id: guardian1XXId, hard_signals: ["loud noises"], section_b_complete: false,
+    });
+    if (g1WriteXXErr) throw g1WriteXXErr;
+    const { data: g2RowXX } = await admin.from("passport_section_b").select("id").eq("passport_id", childXXId).single();
+    // user_id: guardian2XXId is deliberately included -- WITH CHECK
+    // requires user_id = auth.uid() on the RESULTING row, and an update
+    // that never mentions the column leaves it exactly as it was
+    // (guardian 1's id), correctly refused. This matches how the real
+    // client hooks already behave (usePassportSectionB.ts's own save()
+    // always includes user_id in its own payload) -- not a workaround
+    // invented for this check.
+    const { error: g2WriteXXErr } = await guardian2XX.from("passport_section_b").update({
+      user_id: guardian2XXId,
+      okay_signals: ["favourite song"],
+    }).eq("id", g2RowXX.id);
+    record("XX6a guardian 2's own update succeeds -- they're a real second guardian on this passport", !g2WriteXXErr, g2WriteXXErr?.message);
+
+    const { data: finalRowXX } = await admin.from("passport_section_b").select("user_id, hard_signals, okay_signals").eq("id", g2RowXX.id).single();
+    record("XX6b THE ATTRIBUTION: the row's user_id now reads guardian 2 -- whoever wrote last, as designed", finalRowXX.user_id === guardian2XXId, JSON.stringify(finalRowXX));
+    record("XX6c THE FIELD guardian 2's update never touched (hard_signals) SURVIVES, exactly as guardian 1 left it -- a plain column-scoped UPDATE, not a silent overwrite of the whole row", JSON.stringify(finalRowXX.hard_signals) === JSON.stringify(["loud noises"]), JSON.stringify(finalRowXX));
+    record("XX6d THE FIELD guardian 2 DID write (okay_signals) reflects their own value", JSON.stringify(finalRowXX.okay_signals) === JSON.stringify(["favourite song"]), JSON.stringify(finalRowXX));
+
+    // ---- XX7: regression -- a genuine self-created passport's own
+    // original owner is unaffected by any of this. ----
+    const { error: selfCreatedUpdateXXErr } = await selfCreatedXX
+      .from("passports")
+      .update({ school: "XX Self-Created School" })
+      .eq("id", selfCreatedPassportXXId);
+    record("XX7 REGRESSION: a self-created passport's own original owner can still update it exactly as before", !selfCreatedUpdateXXErr, selfCreatedUpdateXXErr?.message);
+    const { data: selfCreatedAfterXX } = await admin.from("passports").select("school").eq("id", selfCreatedPassportXXId).single();
+    record("XX7-confirm: the update actually persisted", selfCreatedAfterXX.school === "XX Self-Created School", JSON.stringify(selfCreatedAfterXX));
+
+    console.log("XX summary complete.");
+
+    await admin.from("passport_section_b").delete().eq("passport_id", childXXId);
+    await admin.from("passport_section_c").delete().eq("passport_id", childXXId);
+    await admin.from("passport_section_d").delete().eq("passport_id", childXXId);
+    await admin.from("passport_guardians").delete().eq("passport_id", childXXId);
+    await admin.from("passports").delete().in("id", [childXXId, selfCreatedPassportXXId]);
+    await admin.from("institutions").delete().eq("id", institutionXXId);
+    for (const id of [principalXXId, guardian1XXId, guardian2XXId, outsiderXXId, selfCreatedXXId]) {
       await admin.auth.admin.deleteUser(id);
     }
   }
