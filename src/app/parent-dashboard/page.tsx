@@ -11,7 +11,7 @@ import { useMessagesAwaitingActionCount } from "@/hooks/useMessagesAwaitingActio
 import { getPassportResumeHref } from "@/lib/getPassportResumeHref";
 import { RecentUpdatesCard } from "@/components/parent/RecentUpdatesCard";
 import { IncidentNoticeCard } from "@/components/parent/IncidentNoticeCard";
-import { HomeProfilePromptCard } from "@/components/passport/HomeProfilePromptCard";
+import { PassportCompletionPromptCard } from "@/components/passport/PassportCompletionPromptCard";
 import { ClinicalSupportSection } from "@/components/parent/ClinicalSupportSection";
 import { QuickActionButtons } from "@/components/parent/QuickActionButtons";
 import { YourTeamCard } from "@/components/parent/YourTeamCard";
@@ -78,15 +78,13 @@ export default function ParentDashboardPage() {
   const childName = resolvedChildName || "your child";
   const [passportStatus, setPassportStatus] = useState<PassportStatus>("not_started");
   const [resumeHref, setResumeHref] = useState("/passport/welcome");
-  // A CLAIMED passport (this parent isn't its passports.user_id) has no
-  // wizard to resume -- section-a/useSectionB/C/D are all user_id-keyed
-  // to whoever originally created it, deliberately out of Stage 5 Step
-  // 3's scope. Found live, driving the exact case end-to-end: without
-  // this, "Build your child's passport" renders for a passport a claimed
-  // guardian structurally cannot build, and its link would otherwise
-  // route through the same /passport/welcome->/passport/dashboard hop
-  // passport/dashboard/page.tsx's own matching fix now short-circuits.
+  // Distinguishes a self-created passport (the full wizard resume-logic
+  // applies) from a claimed one (Section A only -- see the resumeHref
+  // computation below). Section-a/b/c/d have been guardian-aware since
+  // Stage 1 (PRD 3); this flag no longer means "structurally can't
+  // build," only "which resume path applies."
   const [isSelfCreatedPassport, setIsSelfCreatedPassport] = useState(true);
+  const [isSectionAComplete, setIsSectionAComplete] = useState(false);
   const [isLoadingDashboardData, setIsLoadingDashboardData] = useState(true);
   const [hasCheckedInToday, setHasCheckedInToday] = useState(false);
   const [checkedInAt, setCheckedInAt] = useState<string | null>(null);
@@ -194,6 +192,7 @@ export default function ParentDashboardPage() {
 
       setPassportStatus(status);
       setIsSelfCreatedPassport(isSelfCreated);
+      setIsSectionAComplete(Boolean(passportRow?.section_a_complete));
       setHasCheckedInToday(Boolean(todaysCheckin));
       setCheckedInAt(todaysCheckin?.submitted_at ?? null);
 
@@ -252,7 +251,18 @@ export default function ParentDashboardPage() {
                   }
                 : null,
             })
-          : "/passport/dashboard"
+          // PRD 3, Stage 3 -- a claimed guardian's own entry point, now
+          // that section-a is guardian-aware (Stage 1). Deliberately not
+          // routed through getPassportResumeHref()'s full A->B->C->D
+          // walk -- that's the self-created wizard's own resume logic,
+          // and for a claimed guardian this card's whole job is "get
+          // them to Section A," not replicate the wizard. Once Section A
+          // is done, the card stops rendering at all (see below); there
+          // is nothing left for this shortcut to resolve to but the
+          // dashboard.
+          : passportRow?.section_a_complete
+            ? "/passport/dashboard"
+            : "/passport/section-a"
       );
       setIsLoadingDashboardData(false);
     }
@@ -311,7 +321,7 @@ export default function ParentDashboardPage() {
 
         <IncidentNoticeCard passportId={passportId} />
 
-        <HomeProfilePromptCard />
+        <PassportCompletionPromptCard />
 
         {passportStatus === "complete" ? (
           !isPassportCardDismissed && (
@@ -346,7 +356,16 @@ export default function ParentDashboardPage() {
               </div>
             </section>
           )
-        ) : isSelfCreatedPassport ? (
+        ) : isSelfCreatedPassport || !isSectionAComplete ? (
+          // PRD 3, Stage 3 -- a claimed guardian now gets this card too,
+          // once Section A is genuinely reachable and writable for them
+          // (Stage 1). Closes CLAUDE.md's own "claimed passport can be
+          // read but not completed" known limitation: the last missing
+          // piece was never the write path, it was that this exact card
+          // never offered the door in. Stops rendering the moment
+          // Section A is done -- for a claimed guardian this card's job
+          // is specifically getting them there, not replicating the
+          // self-created wizard's full A-through-D walk.
           <section>
             <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-black/40">
               Get started
@@ -376,18 +395,7 @@ export default function ParentDashboardPage() {
               </span>
             </Link>
           </section>
-        ) : (
-          // A claimed, still-incomplete passport: neither "Passport
-          // Completed!" (it isn't) nor "Build your child's passport"
-          // (this parent structurally can't -- section-a is user_id-keyed
-          // to whoever originally created it) fits. No card, matching
-          // this section's own existing precedent for "nothing to show
-          // here" (a dismissed completed-card also renders null). The
-          // real fix -- a genuine "complete your child's passport" flow
-          // for a claimed guardian -- is CLAUDE.md's own already-named
-          // known limitation, not attempted here.
-          null
-        )}
+        ) : null}
 
         <ClinicalSupportSection passportId={passportId} childName={childName} />
 

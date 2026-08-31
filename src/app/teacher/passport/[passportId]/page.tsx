@@ -10,7 +10,7 @@ import { ABCLogger } from "@/components/abc-logger/ABCLogger";
 import { ABCTimeline } from "@/components/abc-logger/ABCTimeline";
 import { usePassportClinicalContent } from "@/hooks/usePassportClinicalContent";
 import { ClinicalTeamSection } from "@/components/passport/clinical-team/ClinicalTeamSection";
-import { HomeProfileSection } from "@/components/passport/HomeProfileSection";
+import { PassportCompletionSection } from "@/components/passport/PassportCompletionSection";
 import { InlineErrorState } from "@/components/ui/InlineErrorState";
 import { ProgressSurface } from "@/components/progress/ProgressSurface";
 import { TeacherPassportMessagesTab } from "@/components/teacher/TeacherPassportMessagesTab";
@@ -95,6 +95,7 @@ export default function TeacherPassportPage() {
 
   const [profile, setProfile] = useState<ClassroomProfile | null>(null);
   const [institutionId, setInstitutionId] = useState<string | null>(null);
+  const [isSectionAComplete, setIsSectionAComplete] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   // Read once at mount, e.g. an incident-note message's "View log"
   // linking straight into ?tab=incidents (same convention as the
@@ -179,7 +180,7 @@ export default function TeacherPassportPage() {
       ] = await Promise.all([
         supabase
           .from("passports")
-          .select("child_name, diagnoses, diagnosis_other")
+          .select("child_name, diagnoses, diagnosis_other, section_a_complete")
           .eq("id", passportId)
           .maybeSingle(),
         supabase
@@ -227,6 +228,8 @@ export default function TeacherPassportPage() {
         setIsLoading(false);
         return;
       }
+
+      setIsSectionAComplete(Boolean(passport.section_a_complete));
 
       setProfile({
         childFirstName: getChildFirstName(passport.child_name),
@@ -399,12 +402,18 @@ export default function TeacherPassportPage() {
               <EmptyCard text="No communication methods provided." />
             )}
 
-            {/* PRD 3, Stage 3 -- the home column. Deliberately its own
-                section, not folded into "Profile" above: this is
-                request-scoped, per-guardian content from a mechanism
-                Section A-D has no concept of. */}
-            <SectionHeading>Home Profile</SectionHeading>
-            {institutionId && <HomeProfileSection passportId={passportId} institutionId={institutionId} />}
+            {/* PRD 3, Stage 3 -- CORRECTED. Not a new content section --
+                the answer is Section A itself, already rendered above
+                ("Profile"/"Key Communication") once a guardian fills it
+                in. This is just the ask-and-track action. */}
+            <SectionHeading>Passport Completion</SectionHeading>
+            {institutionId && (
+              <PassportCompletionSection
+                passportId={passportId}
+                institutionId={institutionId}
+                sectionAComplete={isSectionAComplete}
+              />
+            )}
           </>
         )}
 
