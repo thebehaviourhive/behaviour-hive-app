@@ -9,6 +9,7 @@ import { ABCLogger } from "@/components/abc-logger/ABCLogger";
 import { ABCTimeline } from "@/components/abc-logger/ABCTimeline";
 import { usePassportClinicalContent } from "@/hooks/usePassportClinicalContent";
 import { ClinicalTeamSection } from "@/components/passport/clinical-team/ClinicalTeamSection";
+import { HomeProfileSection } from "@/components/passport/HomeProfileSection";
 import { InlineErrorState } from "@/components/ui/InlineErrorState";
 
 // SNA's scoped passport view -- a deliberately narrower sibling of
@@ -84,6 +85,7 @@ export default function SnaPassportPage() {
   const searchParams = useSearchParams();
 
   const [profile, setProfile] = useState<ClassroomProfile | null>(null);
+  const [institutionId, setInstitutionId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<TabKey>(() => {
     const requested = searchParams.get("tab");
@@ -128,6 +130,23 @@ export default function SnaPassportPage() {
       if (!hasAccess) {
         setIsLoading(false);
         return;
+      }
+
+      // PRD 3, Stage 3 -- request_passport_home_profile() needs this
+      // SNA's own institution_id. has_sna_access() (above) covers direct
+      // grants, 1:1 assignment, temporary cover, and class-tier access,
+      // but only a direct passport_access grant satisfies the RPC's own
+      // narrower issuing gate -- a covering SNA can still view this
+      // page, correctly, but a "Request Home Profile" tap will get the
+      // RPC's own honest refusal rather than silently doing nothing.
+      const { data: staffRow } = await supabase
+        .from("institution_staff")
+        .select("institution_id")
+        .eq("user_id", user!.id)
+        .is("deactivated_at", null)
+        .maybeSingle();
+      if (isMounted && staffRow) {
+        setInstitutionId(staffRow.institution_id);
       }
 
       const startOfToday = new Date();
@@ -337,6 +356,13 @@ export default function SnaPassportPage() {
             ) : (
               <EmptyCard text="No communication methods provided." />
             )}
+
+            {/* PRD 3, Stage 3 -- the home column. Deliberately its own
+                section, not folded into "Profile" above: this is
+                request-scoped, per-guardian content from a mechanism
+                Section A-D has no concept of. */}
+            <SectionHeading>Home Profile</SectionHeading>
+            {institutionId && <HomeProfileSection passportId={passportId} institutionId={institutionId} />}
           </>
         )}
 

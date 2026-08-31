@@ -90,6 +90,16 @@ interface ChildRosterRow {
   current_class_id: string | null;
 }
 
+// PRD 3, Stage 3 -- sixth instance of the established bucket pattern.
+interface HomeProfileOutstandingRow {
+  id: string;
+  passport_id: string;
+  child_name: string;
+  recipient_name: string | null;
+  status: "sent" | "in_progress";
+  created_at: string;
+}
+
 export default function PrincipalDashboardPage() {
   const router = useRouter();
   const { user, isReady } = useRequireRole("principal");
@@ -105,6 +115,7 @@ export default function PrincipalDashboardPage() {
   const [parentCalls, setParentCalls] = useState<RestraintNeedingCallRow[]>([]);
   const [withdrawnAttestations, setWithdrawnAttestations] = useState<WithdrawnAttestationRow[]>([]);
   const [unassignedChildren, setUnassignedChildren] = useState<ChildRosterRow[]>([]);
+  const [homeProfilesOutstanding, setHomeProfilesOutstanding] = useState<HomeProfileOutstandingRow[]>([]);
   const [markingCalledId, setMarkingCalledId] = useState<string | null>(null);
   const [markCalledError, setMarkCalledError] = useState<string | null>(null);
 
@@ -194,6 +205,7 @@ export default function PrincipalDashboardPage() {
         parentCallResult,
         withdrawnAttestationResult,
         childRosterResult,
+        homeProfilesResult,
       ] = await Promise.all([
         supabase.rpc("get_institution_incidents", { p_institution_id: staffRow.institution_id }),
         supabase.rpc("get_institution_staff_roster", {
@@ -204,6 +216,7 @@ export default function PrincipalDashboardPage() {
         supabase.rpc("get_institution_restraints_needing_parent_call", { p_institution_id: staffRow.institution_id }),
         supabase.rpc("get_institution_withdrawn_attestations", { p_institution_id: staffRow.institution_id }),
         supabase.rpc("get_institution_child_roster", { p_institution_id: staffRow.institution_id }),
+        supabase.rpc("get_institution_home_profiles_outstanding", { p_institution_id: staffRow.institution_id }),
       ]);
 
       if (!isMounted) return;
@@ -232,6 +245,9 @@ export default function PrincipalDashboardPage() {
       if (!childRosterResult.error) {
         const roster = (childRosterResult.data ?? []) as ChildRosterRow[];
         setUnassignedChildren(roster.filter((c) => !c.enrolment_ended_at && c.current_class_id === null));
+      }
+      if (!homeProfilesResult.error) {
+        setHomeProfilesOutstanding((homeProfilesResult.data ?? []) as HomeProfileOutstandingRow[]);
       }
 
       setIncidents((rows ?? []) as InstitutionIncidentRow[]);
@@ -282,7 +298,8 @@ export default function PrincipalDashboardPage() {
     withdrawnAttestations.length === 0 &&
     unassignedChildren.length === 0 &&
     outstandingDebriefs.length === 0 &&
-    inherited.length === 0;
+    inherited.length === 0 &&
+    homeProfilesOutstanding.length === 0;
 
   return (
     <div className="flex min-h-full flex-1 flex-col bg-brand-off-white/40 pb-24">
@@ -443,6 +460,30 @@ export default function PrincipalDashboardPage() {
                             className="block rounded-2xl border border-black/5 bg-white p-4 shadow-sm"
                           >
                             <p className="text-sm font-semibold text-brand-neutral-black">{child.child_name}</p>
+                          </Link>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {homeProfilesOutstanding.length > 0 && (
+                    <div>
+                      <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-brand-neutral-black/50">
+                        {homeProfilesOutstanding.length} parent profile
+                        {homeProfilesOutstanding.length === 1 ? "" : "s"} outstanding
+                      </h3>
+                      <div className="flex flex-col gap-2">
+                        {homeProfilesOutstanding.map((row) => (
+                          <Link
+                            key={row.id}
+                            href={`/principal/passports/${row.passport_id}`}
+                            className="block rounded-2xl border border-black/5 bg-white p-4 shadow-sm"
+                          >
+                            <p className="text-sm font-semibold text-brand-neutral-black">{row.child_name}</p>
+                            <p className="mt-0.5 text-xs text-brand-neutral-black/60">
+                              Asked of {row.recipient_name ?? "a guardian"} ·{" "}
+                              {row.status === "in_progress" ? "In progress" : "Not yet started"}
+                            </p>
                           </Link>
                         ))}
                       </div>

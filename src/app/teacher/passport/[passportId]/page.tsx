@@ -10,6 +10,7 @@ import { ABCLogger } from "@/components/abc-logger/ABCLogger";
 import { ABCTimeline } from "@/components/abc-logger/ABCTimeline";
 import { usePassportClinicalContent } from "@/hooks/usePassportClinicalContent";
 import { ClinicalTeamSection } from "@/components/passport/clinical-team/ClinicalTeamSection";
+import { HomeProfileSection } from "@/components/passport/HomeProfileSection";
 import { InlineErrorState } from "@/components/ui/InlineErrorState";
 import { ProgressSurface } from "@/components/progress/ProgressSurface";
 import { TeacherPassportMessagesTab } from "@/components/teacher/TeacherPassportMessagesTab";
@@ -93,6 +94,7 @@ export default function TeacherPassportPage() {
   const searchParams = useSearchParams();
 
   const [profile, setProfile] = useState<ClassroomProfile | null>(null);
+  const [institutionId, setInstitutionId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   // Read once at mount, e.g. an incident-note message's "View log"
   // linking straight into ?tab=incidents (same convention as the
@@ -150,7 +152,7 @@ export default function TeacherPassportPage() {
       // is the exact path a revoked teacher would use to reach this page.
       const { data: access } = await supabase
         .from("passport_access")
-        .select("is_active")
+        .select("is_active, institution_id")
         .eq("passport_id", passportId)
         .eq("teacher_id", user!.id)
         .maybeSingle();
@@ -161,6 +163,8 @@ export default function TeacherPassportPage() {
         setIsLoading(false);
         return;
       }
+
+      setInstitutionId(access.institution_id);
 
       const startOfToday = new Date();
       startOfToday.setHours(0, 0, 0, 0);
@@ -394,6 +398,13 @@ export default function TeacherPassportPage() {
             ) : (
               <EmptyCard text="No communication methods provided." />
             )}
+
+            {/* PRD 3, Stage 3 -- the home column. Deliberately its own
+                section, not folded into "Profile" above: this is
+                request-scoped, per-guardian content from a mechanism
+                Section A-D has no concept of. */}
+            <SectionHeading>Home Profile</SectionHeading>
+            {institutionId && <HomeProfileSection passportId={passportId} institutionId={institutionId} />}
           </>
         )}
 

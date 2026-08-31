@@ -20,7 +20,7 @@
 // stage development. Every check from V onward is independently
 // self-contained (own institution, own accounts, own cleanup) and
 // individually selectable: V, W, X, Y, Z, AA, BB, CC, DD, EE, FF, GG,
-// HH, II, JJ, KK, LL, MM, NN, OO, PP, QQ, RR, SS, TT, UU, VV, WW, XX, YY. Selecting none of these (ONLY_CHECKS unset) is the full run --
+// HH, II, JJ, KK, LL, MM, NN, OO, PP, QQ, RR, SS, TT, UU, VV, WW, XX, YY, ZZ. Selecting none of these (ONLY_CHECKS unset) is the full run --
 // the one that gates deploys -- and its behavior is unchanged: same
 // checks, same order, same pass/fail counts. The only observable
 // difference is where the top-level fixture's own cleanup log line
@@ -10826,6 +10826,191 @@ async function main() {
     await admin.from("passports").delete().eq("id", passportYYId);
     await admin.from("institutions").delete().eq("id", institutionYYId);
     await admin.auth.admin.deleteUser(parentYYId);
+  }
+
+  console.log(`\n== CHECK ZZ: SQL for PRD 3 Stage 3 (migrations 0141/0142) -- passport_home_profile_requests, the sibling table to fba_instrument_requests. request_passport_home_profile()'s own gate (institution standing AND an active passport_access grant, narrower than read access) proven independently from has_child_access()-gated reads. ONE ROW PER GUARDIAN, never merged: two real guardians via the actual claim chain, each with their own request and their own attributable answer, proven to coexist without either overwriting the other -- the core claim this whole stage exists to serve. Column-scoped write proven both ways -- a recipient can change their own six fields and status, and cannot touch passport_id/institution_id/requested_by/recipient_id even by including them in the payload. A co-guardian can VIEW a sibling's answer (owns_passport) but cannot WRITE it (recipient_id mismatch). Staff with real access, a verified linked clinician, and a passport-access-less outsider all proven on the read side. The completed_at trigger fires once, on first completion, and survives a later edit unchanged. get_my_passport_profile_requests() and get_institution_home_profiles_outstanding() both proven to only ever surface OUTSTANDING (not completed) rows, and the institution bucket proven non-authority-caller-sees-nothing. ==`);
+  if (shouldRun("ZZ")) {
+    const { data: instZZ, error: instZZErr } = await admin
+      .from("institutions")
+      .insert({ name: "ZZ Institution", institution_code: CODE + "ZZ", status: "verified" })
+      .select()
+      .single();
+    if (instZZErr) throw instZZErr;
+    const institutionZZId = instZZ.id;
+
+    const principalZZId = await createUser("checkzz.principal@thebehaviourhive.com", "ZZ Principal", "principal");
+    const teacherZZId = await createUser("checkzz.teacher@thebehaviourhive.com", "ZZ Teacher", "class_teacher");
+    const teacherNoAccessZZId = await createUser("checkzz.teachernoaccess@thebehaviourhive.com", "ZZ Teacher No Access", "class_teacher");
+    const outsiderZZId = await createUser("checkzz.outsider@thebehaviourhive.com", "ZZ Outsider", "class_teacher");
+    const clinicianZZId = await createUser("checkzz.clinician@thebehaviourhive.com", "ZZ Clinician", "clinician");
+    const guardian1ZZId = await createUser("checkzz.guardian1@thebehaviourhive.com", "ZZ Guardian One", "parent");
+    const guardian2ZZId = await createUser("checkzz.guardian2@thebehaviourhive.com", "ZZ Guardian Two", "parent");
+
+    const { error: staffZZErr } = await admin.from("institution_staff").insert([
+      { institution_id: institutionZZId, user_id: principalZZId, role: "principal" },
+      { institution_id: institutionZZId, user_id: teacherZZId, role: "class_teacher", approved_at: new Date().toISOString(), approved_by: principalZZId, approval_source: "principal" },
+      { institution_id: institutionZZId, user_id: teacherNoAccessZZId, role: "class_teacher", approved_at: new Date().toISOString(), approved_by: principalZZId, approval_source: "principal" },
+    ]);
+    if (staffZZErr) throw staffZZErr;
+    const { error: clinRowZZErr } = await admin.from("clinicians").insert({
+      user_id: clinicianZZId, specialty: "behavioural_psychologist", verification_status: "verified",
+    });
+    if (clinRowZZErr) throw clinRowZZErr;
+
+    const principalZZ = await signedInClient("checkzz.principal@thebehaviourhive.com");
+    const teacherZZ = await signedInClient("checkzz.teacher@thebehaviourhive.com");
+    const teacherNoAccessZZ = await signedInClient("checkzz.teachernoaccess@thebehaviourhive.com");
+    const outsiderZZ = await signedInClient("checkzz.outsider@thebehaviourhive.com");
+    const clinicianZZ = await signedInClient("checkzz.clinician@thebehaviourhive.com");
+    const guardian1ZZ = await signedInClient("checkzz.guardian1@thebehaviourhive.com");
+    const guardian2ZZ = await signedInClient("checkzz.guardian2@thebehaviourhive.com");
+
+    // ---- ZZ0: setup -- a real school-created, claimed-by-two-guardians
+    // child, exactly CHECK XX's own established pattern. ----
+    const { data: childZZId, error: childZZErr } = await principalZZ.rpc("create_school_passport", {
+      p_institution_id: institutionZZId, p_child_name: "ZZ Child",
+    });
+    if (childZZErr) throw childZZErr;
+
+    const { data: code1ZZ } = await principalZZ.rpc("generate_passport_claim_code", { p_institution_id: institutionZZId, p_passport_id: childZZId });
+    await guardian1ZZ.rpc("redeem_passport_claim_code", { p_code: code1ZZ });
+    const { data: code2ZZ } = await principalZZ.rpc("generate_passport_claim_code", { p_institution_id: institutionZZId, p_passport_id: childZZId });
+    await guardian2ZZ.rpc("redeem_passport_claim_code", { p_code: code2ZZ });
+
+    const { error: grantZZErr } = await principalZZ.rpc("grant_passport_access", {
+      p_passport_id: childZZId, p_user_id: teacherZZId, p_institution_id: institutionZZId, p_reason: "Class teacher.",
+    });
+    if (grantZZErr) throw grantZZErr;
+    await admin.from("clinician_access").insert({ passport_id: childZZId, clinician_id: clinicianZZId, is_active: true });
+
+    // ---- ZZ1: request_passport_home_profile()'s own refusals. ----
+    const { error: noStandingZZErr } = await outsiderZZ.rpc("request_passport_home_profile", { p_passport_id: childZZId, p_institution_id: institutionZZId });
+    record("ZZ1a refused: no standing at this institution at all", Boolean(noStandingZZErr) && /active member of staff/i.test(noStandingZZErr.message), noStandingZZErr?.message);
+
+    const { error: noAccessZZErr } = await teacherNoAccessZZ.rpc("request_passport_home_profile", { p_passport_id: childZZId, p_institution_id: institutionZZId });
+    record("ZZ1b refused: real standing, but no passport_access grant on this child", Boolean(noAccessZZErr) && /need access/i.test(noAccessZZErr.message), noAccessZZErr?.message);
+
+    // A passport with zero guardians -- a fresh school-created child, no
+    // claim redeemed yet.
+    const { data: childZZNoGuardianId } = await principalZZ.rpc("create_school_passport", { p_institution_id: institutionZZId, p_child_name: "ZZ No Guardian Child" });
+    await principalZZ.rpc("grant_passport_access", { p_passport_id: childZZNoGuardianId, p_user_id: teacherZZId, p_institution_id: institutionZZId, p_reason: "Class teacher." });
+    const { error: noGuardianZZErr } = await teacherZZ.rpc("request_passport_home_profile", { p_passport_id: childZZNoGuardianId, p_institution_id: institutionZZId });
+    record("ZZ1c refused: passport has no guardian to notify yet", Boolean(noGuardianZZErr) && /no guardian/i.test(noGuardianZZErr.message), noGuardianZZErr?.message);
+    await admin.from("passports").delete().eq("id", childZZNoGuardianId);
+
+    // ---- ZZ2: THE REAL REQUEST -- two guardians, two rows. ----
+    const { data: createdCountZZ, error: requestZZErr } = await teacherZZ.rpc("request_passport_home_profile", { p_passport_id: childZZId, p_institution_id: institutionZZId });
+    record("ZZ2a a real eligible teacher's request succeeds", !requestZZErr, requestZZErr?.message);
+    record("ZZ2b THE COUNT: exactly 2 new requests created -- one per current guardian", createdCountZZ === 2, createdCountZZ);
+
+    const { data: rowsAfterZZ } = await admin.from("passport_home_profile_requests").select("id, recipient_id, status").eq("passport_id", childZZId);
+    record("ZZ2c exactly 2 rows exist, one per guardian, both status='sent'", rowsAfterZZ?.length === 2 && rowsAfterZZ.every((r) => r.status === "sent") && rowsAfterZZ.some((r) => r.recipient_id === guardian1ZZId) && rowsAfterZZ.some((r) => r.recipient_id === guardian2ZZId), JSON.stringify(rowsAfterZZ));
+
+    const guardian1RowZZ = rowsAfterZZ.find((r) => r.recipient_id === guardian1ZZId);
+    const guardian2RowZZ = rowsAfterZZ.find((r) => r.recipient_id === guardian2ZZId);
+
+    // ---- ZZ3: re-requesting when everyone already has a row is refused,
+    // not silently duplicated. ----
+    const { error: alreadyRequestedZZErr } = await teacherZZ.rpc("request_passport_home_profile", { p_passport_id: childZZId, p_institution_id: institutionZZId });
+    record("ZZ3a refused: every current guardian already has a row", Boolean(alreadyRequestedZZErr) && /already been requested/i.test(alreadyRequestedZZErr.message), alreadyRequestedZZErr?.message);
+    const { data: stillTwoRowsZZ } = await admin.from("passport_home_profile_requests").select("id").eq("passport_id", childZZId);
+    record("ZZ3b confirm: still exactly 2 rows, the refused attempt created nothing", stillTwoRowsZZ?.length === 2, JSON.stringify(stillTwoRowsZZ));
+
+    // ---- ZZ4: guardian1 answers -- their own row, own attribution. ----
+    const { error: g1WriteZZErr } = await guardian1ZZ.from("passport_home_profile_requests").update({
+      what_works_at_home: "A quiet corner and headphones.",
+      sleep: "Settles best with a weighted blanket.",
+      status: "completed",
+    }).eq("id", guardian1RowZZ.id);
+    record("ZZ4a guardian 1 can update their own row's content and status", !g1WriteZZErr, g1WriteZZErr?.message);
+
+    const { data: g1AfterZZ } = await admin.from("passport_home_profile_requests").select("status, what_works_at_home, sleep, food, completed_at").eq("id", guardian1RowZZ.id).single();
+    record("ZZ4b the write persisted -- re-read via service role, not assumed from the absence of an error", g1AfterZZ.status === "completed" && g1AfterZZ.what_works_at_home === "A quiet corner and headphones." && g1AfterZZ.sleep === "Settles best with a weighted blanket.", JSON.stringify(g1AfterZZ));
+    record("ZZ4c a field guardian 1 never mentioned (food) stays null -- a plain column-scoped UPDATE, not a silent whole-row overwrite", g1AfterZZ.food === null, JSON.stringify(g1AfterZZ));
+    record("ZZ4d THE TRIGGER: completed_at was set automatically on first completion", g1AfterZZ.completed_at !== null, g1AfterZZ.completed_at);
+
+    // ---- ZZ5: guardian 2's row is completely untouched by guardian 1's
+    // answer -- THE CORE CLAIM: never merged. ----
+    const { data: g2StillEmptyZZ } = await admin.from("passport_home_profile_requests").select("status, what_works_at_home, sleep").eq("id", guardian2RowZZ.id).single();
+    record("ZZ5 THE CORE CLAIM: guardian 2's own row is completely unaffected by guardian 1's answer -- status still 'sent', every field still null", g2StillEmptyZZ.status === "sent" && g2StillEmptyZZ.what_works_at_home === null && g2StillEmptyZZ.sleep === null, JSON.stringify(g2StillEmptyZZ));
+
+    // ---- ZZ6: guardian 2 cannot write guardian 1's row -- recipient_id
+    // mismatch, even though they're both real guardians of this exact
+    // passport. ----
+    const { error: crossWriteZZErr } = await guardian2ZZ.from("passport_home_profile_requests").update({ sleep: "should not land" }).eq("id", guardian1RowZZ.id);
+    const { data: crossWriteCheckZZ } = await admin.from("passport_home_profile_requests").select("sleep").eq("id", guardian1RowZZ.id).single();
+    record("ZZ6 a co-guardian CANNOT write another guardian's own row -- re-read confirms unchanged, not just absence of a client error", crossWriteCheckZZ.sleep === "Settles best with a weighted blanket.", JSON.stringify({ clientError: crossWriteZZErr?.message, actual: crossWriteCheckZZ.sleep }));
+
+    // ---- ZZ7: guardian 2 CAN however read guardian 1's completed
+    // answer -- owns_passport(), family-wide visibility, attribution not
+    // access control. ----
+    const { data: g2ReadsG1ZZ } = await guardian2ZZ.from("passport_home_profile_requests").select("what_works_at_home").eq("id", guardian1RowZZ.id).maybeSingle();
+    record("ZZ7 a co-guardian CAN read another guardian's completed answer -- family-wide visibility, never merged, just not editable by anyone but its own recipient", g2ReadsG1ZZ?.what_works_at_home === "A quiet corner and headphones.", JSON.stringify(g2ReadsG1ZZ));
+
+    // ---- ZZ8: column-scoped WITH CHECK -- a recipient cannot spoof the
+    // columns that were never granted, even by including them in the
+    // same payload as a legitimate change. ----
+    const { error: spoofZZErr } = await guardian1ZZ.from("passport_home_profile_requests").update({
+      food: "trying to sneak this in",
+      passport_id: childZZId,
+    }).eq("id", guardian1RowZZ.id);
+    record("ZZ8 a recipient cannot include an ungranted column (passport_id) in their own update, even alongside a legitimate one -- column-level grant refuses the whole statement", Boolean(spoofZZErr), spoofZZErr?.message);
+
+    // ---- ZZ9: read-side boundary -- staff with real access, a verified
+    // linked clinician, and a passport-access-less outsider. ----
+    const { data: teacherReadZZ } = await teacherZZ.from("passport_home_profile_requests").select("id").eq("passport_id", childZZId);
+    record("ZZ9a staff WITH real child access can read the responses", (teacherReadZZ ?? []).length === 2, JSON.stringify(teacherReadZZ));
+
+    const { data: noAccessReadZZ } = await teacherNoAccessZZ.from("passport_home_profile_requests").select("id").eq("passport_id", childZZId);
+    record("ZZ9b staff WITHOUT child access reads nothing -- not an error, zero rows", (noAccessReadZZ ?? []).length === 0, JSON.stringify(noAccessReadZZ));
+
+    const { data: clinicianReadZZ } = await clinicianZZ.from("passport_home_profile_requests").select("id").eq("passport_id", childZZId);
+    record("ZZ9c a verified linked clinician can read the responses", (clinicianReadZZ ?? []).length === 2, JSON.stringify(clinicianReadZZ));
+
+    const { data: outsiderReadZZ } = await outsiderZZ.from("passport_home_profile_requests").select("id").eq("passport_id", childZZId);
+    record("ZZ9d an outsider with no relationship to this child reads nothing", (outsiderReadZZ ?? []).length === 0, JSON.stringify(outsiderReadZZ));
+
+    // ---- ZZ10: get_passport_home_profile_responses() -- resolved
+    // names, same boundary. ----
+    const { data: resolvedZZ } = await teacherZZ.rpc("get_passport_home_profile_responses", { p_passport_id: childZZId });
+    record("ZZ10a the resolved-name RPC returns both rows with real recipient names attached", resolvedZZ?.length === 2 && resolvedZZ.every((r) => typeof r.recipient_name === "string" && r.recipient_name.length > 0), JSON.stringify(resolvedZZ));
+    const { data: resolvedOutsiderZZ } = await outsiderZZ.rpc("get_passport_home_profile_responses", { p_passport_id: childZZId });
+    record("ZZ10b the same RPC returns nothing for an outsider -- SECURITY DEFINER doesn't mean unauthenticated-through", (resolvedOutsiderZZ ?? []).length === 0, JSON.stringify(resolvedOutsiderZZ));
+
+    // ---- ZZ11: get_my_passport_profile_requests() -- only OUTSTANDING,
+    // recipient-scoped. Guardian 1 is already 'completed' (ZZ4); guardian
+    // 2 is still 'sent'. ----
+    const { data: g1FeedZZ } = await guardian1ZZ.rpc("get_my_passport_profile_requests");
+    record("ZZ11a a completed request no longer appears in the recipient's own outstanding feed", (g1FeedZZ ?? []).filter((r) => r.passport_id === childZZId).length === 0, JSON.stringify(g1FeedZZ));
+    const { data: g2FeedZZ } = await guardian2ZZ.rpc("get_my_passport_profile_requests");
+    const g2FeedRowZZ = (g2FeedZZ ?? []).find((r) => r.passport_id === childZZId);
+    record("ZZ11b guardian 2's own still-outstanding request appears, labeled by institution name", Boolean(g2FeedRowZZ) && g2FeedRowZZ.institution_name === "ZZ Institution" && g2FeedRowZZ.child_name === "ZZ Child", JSON.stringify(g2FeedRowZZ));
+
+    // ---- ZZ12: get_institution_home_profiles_outstanding() -- the
+    // principal's own bucket. Exactly 1 outstanding row (guardian 2's);
+    // guardian 1's completed row must NOT appear. ----
+    const { data: bucketZZ } = await principalZZ.rpc("get_institution_home_profiles_outstanding", { p_institution_id: institutionZZId });
+    record("ZZ12a exactly one outstanding row -- the completed one is correctly excluded, live state not an event log", bucketZZ?.length === 1 && bucketZZ[0].status === "sent" && bucketZZ[0].child_name === "ZZ Child", JSON.stringify(bucketZZ));
+    const { data: bucketOutsiderZZ } = await outsiderZZ.rpc("get_institution_home_profiles_outstanding", { p_institution_id: institutionZZId });
+    record("ZZ12b non-authority caller (no standing at this institution) sees nothing", (bucketOutsiderZZ ?? []).length === 0, JSON.stringify(bucketOutsiderZZ));
+
+    // ---- ZZ13: a later edit doesn't reset completed_at. ----
+    const { error: g1EditZZErr } = await guardian1ZZ.from("passport_home_profile_requests").update({ food: "Adding this later." }).eq("id", guardian1RowZZ.id);
+    if (g1EditZZErr) throw g1EditZZErr;
+    const { data: g1AfterEditZZ } = await admin.from("passport_home_profile_requests").select("completed_at, food").eq("id", guardian1RowZZ.id).single();
+    record("ZZ13 completed_at is unchanged by a later edit -- set once, on first completion, not on every subsequent save", g1AfterEditZZ.completed_at === g1AfterZZ.completed_at && g1AfterEditZZ.food === "Adding this later.", JSON.stringify({ before: g1AfterZZ.completed_at, after: g1AfterEditZZ }));
+
+    console.log("ZZ summary complete.");
+
+    await admin.from("passport_home_profile_requests").delete().eq("passport_id", childZZId);
+    await admin.from("clinician_access").delete().eq("passport_id", childZZId);
+    await admin.from("passport_guardians").delete().eq("passport_id", childZZId);
+    await admin.from("passports").delete().eq("id", childZZId);
+    await admin.from("clinicians").delete().eq("user_id", clinicianZZId);
+    await admin.from("institutions").delete().eq("id", institutionZZId);
+    for (const id of [principalZZId, teacherZZId, teacherNoAccessZZId, outsiderZZId, clinicianZZId, guardian1ZZId, guardian2ZZId]) {
+      await admin.auth.admin.deleteUser(id);
+    }
   }
 
   console.log(`\n== Summary ==`);

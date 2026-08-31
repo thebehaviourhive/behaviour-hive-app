@@ -11,6 +11,7 @@ import { useMessagesAwaitingActionCount } from "@/hooks/useMessagesAwaitingActio
 import { getPassportResumeHref } from "@/lib/getPassportResumeHref";
 import { RecentUpdatesCard } from "@/components/parent/RecentUpdatesCard";
 import { IncidentNoticeCard } from "@/components/parent/IncidentNoticeCard";
+import { HomeProfilePromptCard } from "@/components/passport/HomeProfilePromptCard";
 import { ClinicalSupportSection } from "@/components/parent/ClinicalSupportSection";
 import { QuickActionButtons } from "@/components/parent/QuickActionButtons";
 import { YourTeamCard } from "@/components/parent/YourTeamCard";
@@ -309,6 +310,8 @@ export default function ParentDashboardPage() {
         />
 
         <IncidentNoticeCard passportId={passportId} />
+
+        <HomeProfilePromptCard />
 
         {passportStatus === "complete" ? (
           !isPassportCardDismissed && (
