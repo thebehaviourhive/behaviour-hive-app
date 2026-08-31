@@ -5,7 +5,6 @@ import { useMemo, useState } from "react";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { useTeacherPassports, type TeacherPassport } from "@/hooks/useTeacherPassports";
 import { getChildDisplayName } from "@/lib/childDisplayName";
-import { AddChildSheet } from "@/components/teacher/AddChildSheet";
 import { TeacherBottomNav } from "@/components/teacher/TeacherBottomNav";
 import { PeopleIcon } from "@/components/ui/icons";
 
@@ -29,14 +28,10 @@ export default function TeacherStudentsPage() {
   const {
     isLoading,
     error,
-    institutionId,
-    institutionCode,
     passports,
-    refresh,
   } = useTeacherPassports(user?.id ?? null);
 
   const [query, setQuery] = useState("");
-  const [isAddChildOpen, setIsAddChildOpen] = useState(false);
 
   const sorted = useMemo(
     () => [...passports].sort((a, b) => a.firstName.localeCompare(b.firstName)),
@@ -57,16 +52,6 @@ export default function TeacherStudentsPage() {
     <div className="flex min-h-full flex-1 flex-col bg-brand-off-white/40 pb-24">
       <header className="flex items-center justify-between gap-3 p-4">
         <h1 className="font-heading text-2xl text-brand-prussian-blue">My Students</h1>
-        {institutionId && (
-          <button
-            type="button"
-            onClick={() => setIsAddChildOpen(true)}
-            aria-label="Add a child"
-            className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-brand-prussian-blue text-lg text-white shadow-sm"
-          >
-            +
-          </button>
-        )}
       </header>
 
       <div className="sticky top-0 z-[1] bg-brand-off-white/40 px-4 pb-4">
@@ -99,8 +84,8 @@ export default function TeacherStudentsPage() {
               No students assigned yet.
             </p>
             <p className="max-w-[280px] font-sans text-sm text-brand-neutral-black/60">
-              Share your Institution Code with parents to link their child&apos;s
-              passport to your classroom.
+              Ask your principal to grant you access to your students &mdash;
+              once they do, they&apos;ll appear here.
             </p>
           </div>
         ) : filtered.length === 0 ? (
@@ -119,18 +104,6 @@ export default function TeacherStudentsPage() {
           </div>
         )}
       </main>
-
-      {institutionId && (
-        <AddChildSheet
-          isOpen={isAddChildOpen}
-          onClose={() => setIsAddChildOpen(false)}
-          teacherId={user!.id}
-          teacherName={(user!.user_metadata?.full_name as string | undefined) ?? "A teacher"}
-          institutionId={institutionId}
-          institutionCode={institutionCode}
-          onAdded={refresh}
-        />
-      )}
 
       <TeacherBottomNav />
     </div>

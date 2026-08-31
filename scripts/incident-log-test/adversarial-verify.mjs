@@ -20,7 +20,7 @@
 // stage development. Every check from V onward is independently
 // self-contained (own institution, own accounts, own cleanup) and
 // individually selectable: V, W, X, Y, Z, AA, BB, CC, DD, EE, FF, GG,
-// HH, II, JJ, KK, LL, MM, NN, OO, PP, QQ, RR, SS, TT, UU, VV, WW, XX. Selecting none of these (ONLY_CHECKS unset) is the full run --
+// HH, II, JJ, KK, LL, MM, NN, OO, PP, QQ, RR, SS, TT, UU, VV, WW, XX, YY. Selecting none of these (ONLY_CHECKS unset) is the full run --
 // the one that gates deploys -- and its behavior is unchanged: same
 // checks, same order, same pass/fail counts. The only observable
 // difference is where the top-level fixture's own cleanup log line
@@ -7719,7 +7719,7 @@ async function main() {
     {
       const { data: row } = await admin.from("passport_institution_links").select("approved_by_parent").eq("passport_id", childJJId).eq("institution_id", institutionJJId).single();
       record(
-        "JJ-6 THE DECISION HOLDS: ending the enrolment does NOT touch approved_by_parent -- that's the parent's own consent flag, not a principal's to clear",
+        "JJ-6 THE DECISION HOLDS: ending the enrolment does NOT touch approved_by_parent -- not a principal's to clear (PRD 3 Stage 2: this column is a compatibility default on school-created links, not a live consent record any client can still write, but ending an enrolment still has no business touching it either way)",
         row?.approved_by_parent === true,
         JSON.stringify(row)
       );
@@ -10773,6 +10773,59 @@ async function main() {
     for (const id of [principalXXId, guardian1XXId, guardian2XXId, outsiderXXId, selfCreatedXXId]) {
       await admin.auth.admin.deleteUser(id);
     }
+  }
+
+  console.log(`\n== CHECK YY: Client-behaviour half of PRD 3 Stage 2 (src/app/passport/dashboard/page.tsx's loadApprovedInstitutions()) -- proven via the LITERAL client query shape, not a proxy for it. approved_by_parent is a compatibility default now, not a consent record (create_school_passport() always sets it true; ShareBottomSheet's own handleApprove() -- the only other writer -- is deleted this stage), so a link sitting at approved_by_parent = false is not evidence a school isn't really connected, it's just old data or an edge case nothing ever flips back to true. The old .eq("approved_by_parent", true) filter hid exactly this shape from a parent's own Connected Schools list. This check reproduces the query byte-for-byte (institution_id, parent_approved_at, institutions(name), .eq("passport_id", ...), no approved_by_parent filter) against a real false-approved link and proves it's now returned. ==`);
+  if (shouldRun("YY")) {
+    const { data: instYY, error: instYYErr } = await admin
+      .from("institutions")
+      .insert({ name: "YY Institution", institution_code: CODE + "YY", status: "verified" })
+      .select()
+      .single();
+    if (instYYErr) throw instYYErr;
+    const institutionYYId = instYY.id;
+
+    const parentYYId = await createUser("checkyy.parent@thebehaviourhive.com", "YY Parent", "parent");
+    const parentYY = await signedInClient("checkyy.parent@thebehaviourhive.com");
+
+    // Bare insert, no chained .select() -- a fresh self-created passport's
+    // own passport_guardians row is created by a trigger AFTER this
+    // insert, invisible to owns_passport(id) within the same statement
+    // (see CLAUDE.md's upsert/representation gotcha; CHECK XX's own
+    // XX0b proves this same-statement race directly). A separate
+    // follow-up read is the correct pattern, not a workaround.
+    const { error: passportYYErr } = await parentYY
+      .from("passports")
+      .insert({ user_id: parentYYId, child_name: "YY Child", passport_status: "in_progress" });
+    if (passportYYErr) throw passportYYErr;
+    const { data: passportYY } = await admin.from("passports").select("id").eq("user_id", parentYYId).single();
+    const passportYYId = passportYY.id;
+
+    // The exact shape a genuinely never-approved link has -- not
+    // reachable through any live client path today (both writers set it
+    // true unconditionally), but real as old data, and this is what the
+    // fix has to handle regardless of how a false row came to exist.
+    const { error: linkYYErr } = await admin.from("passport_institution_links").insert({
+      passport_id: passportYYId,
+      institution_id: institutionYYId,
+      approved_by_parent: false,
+    });
+    if (linkYYErr) throw linkYYErr;
+
+    // loadApprovedInstitutions()'s own literal query shape.
+    const { data: rowsYY, error: queryYYErr } = await parentYY
+      .from("passport_institution_links")
+      .select("institution_id, parent_approved_at, institutions(name)")
+      .eq("passport_id", passportYYId)
+      .order("parent_approved_at", { ascending: false });
+    record("YY1 THE FIX: the client's own Connected Schools query now returns a link that was never approved_by_parent -- the old filter would have shown zero rows here", !queryYYErr && (rowsYY ?? []).length === 1 && rowsYY[0].institution_id === institutionYYId, JSON.stringify({ error: queryYYErr?.message, rowsYY }));
+
+    console.log("YY summary complete.");
+
+    await admin.from("passport_institution_links").delete().eq("passport_id", passportYYId);
+    await admin.from("passports").delete().eq("id", passportYYId);
+    await admin.from("institutions").delete().eq("id", institutionYYId);
+    await admin.auth.admin.deleteUser(parentYYId);
   }
 
   console.log(`\n== Summary ==`);

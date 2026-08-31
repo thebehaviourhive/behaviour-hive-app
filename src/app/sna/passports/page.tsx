@@ -7,7 +7,6 @@ import { useRequireRole } from "@/hooks/useRequireRole";
 import { useSnaChildren } from "@/hooks/useSnaChildren";
 import { useTeacherMorningCheckins, type MorningPupilStatus } from "@/hooks/useTeacherMorningCheckins";
 import { getChildDisplayName } from "@/lib/childDisplayName";
-import { AddChildSheet } from "@/components/teacher/AddChildSheet";
 import { SnaBottomNav } from "@/components/sna/SnaBottomNav";
 import { TemporaryAccessBanner } from "@/components/shared/TemporaryAccessBanner";
 import { AlertTriangleIcon, PeopleIcon } from "@/components/ui/icons";
@@ -65,10 +64,8 @@ export default function SnaPassportsPage() {
     isLoading: isLoadingPassports,
     error,
     institutionId,
-    institutionCode,
     children,
     activeCoverage,
-    refresh,
   } = useSnaChildren(user?.id ?? null);
   const { isLoading: isLoadingCheckins, pupils } = useTeacherMorningCheckins(user?.id ?? null, {
     isLoading: isLoadingPassports,
@@ -77,7 +74,6 @@ export default function SnaPassportsPage() {
   });
 
   const [query, setQuery] = useState("");
-  const [isAddChildOpen, setIsAddChildOpen] = useState(false);
 
   const isLoading = isLoadingPassports || isLoadingCheckins;
 
@@ -137,16 +133,6 @@ export default function SnaPassportsPage() {
               <AlertTriangleIcon className="h-5 w-5" />
             </Link>
           )}
-          {institutionId && (
-            <button
-              type="button"
-              onClick={() => setIsAddChildOpen(true)}
-              aria-label="Add a child"
-              className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-brand-prussian-blue text-lg text-white shadow-sm"
-            >
-              +
-            </button>
-          )}
         </div>
       </header>
 
@@ -190,7 +176,7 @@ export default function SnaPassportsPage() {
             <p className="font-sans text-sm text-red-600">{error}</p>
           </div>
         ) : children.length === 0 ? (
-          <EmptyState institutionCode={institutionCode} onAddChild={() => setIsAddChildOpen(true)} />
+          <EmptyState />
         ) : filtered.length === 0 ? (
           <p className="px-4 pt-6 text-center font-sans text-sm text-brand-neutral-black/60">
             No children match &quot;{query}&quot;.
@@ -213,19 +199,6 @@ export default function SnaPassportsPage() {
           </div>
         )}
       </main>
-
-      {institutionId && user && (
-        <AddChildSheet
-          isOpen={isAddChildOpen}
-          onClose={() => setIsAddChildOpen(false)}
-          teacherId={user.id}
-          teacherName={(user.user_metadata?.full_name as string | undefined) ?? "An SNA"}
-          institutionId={institutionId}
-          institutionCode={institutionCode}
-          onAdded={refresh}
-          actorRole="sna"
-        />
-      )}
 
       <SnaBottomNav />
     </div>
@@ -303,22 +276,12 @@ function ChildRowSkeleton() {
   );
 }
 
-function EmptyState({
-  institutionCode,
-  onAddChild,
-}: {
-  institutionCode: string | null;
-  onAddChild: () => void;
-}) {
-  const [copied, setCopied] = useState(false);
-
-  function handleCopy() {
-    if (!institutionCode) return;
-    navigator.clipboard.writeText(institutionCode);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
-  }
-
+// PRD 3, Stage 2 -- was a card promising "share your Institution Code
+// so they can approve you first" plus a "+ Add Child" button opening
+// AddChildSheet. Both endpoints of that flow are gone this stage. An
+// SNA reaches a child through the principal granting access (or a class
+// assignment, or temporary cover) now, not a code changing hands.
+function EmptyState() {
   return (
     <div className="flex flex-col items-center gap-3 px-4 pt-6 text-center">
       <span className="flex h-20 w-20 items-center justify-center rounded-full bg-brand-pastel-blue/30 text-brand-prussian-blue">
@@ -328,36 +291,9 @@ function EmptyState({
         No children linked yet.
       </p>
       <p className="max-w-[280px] font-sans text-sm text-brand-neutral-black/60">
-        Ask a parent for their child&apos;s passport code, or share your
-        school&apos;s institution code so they can approve you first.
+        Ask your principal to grant you access to a child&apos;s passport
+        &mdash; once they do, that child will appear here.
       </p>
-
-      <div className="mt-3 w-full rounded-3xl border border-brand-off-white bg-white p-6 shadow-sm">
-        <p className="mb-2 font-accent text-xs font-semibold uppercase tracking-wide text-brand-neutral-black/40">
-          Your Institution Code
-        </p>
-        <div className="mb-4 flex items-center justify-between rounded-2xl border border-dashed border-brand-prussian-blue/30 bg-brand-pastel-blue/10 px-5 py-4">
-          <span className="font-heading text-2xl font-bold tracking-[0.2em] text-brand-prussian-blue">
-            {institutionCode ?? "——————"}
-          </span>
-          <button
-            type="button"
-            onClick={handleCopy}
-            disabled={!institutionCode}
-            className="rounded-full bg-brand-prussian-blue px-4 py-2 text-xs font-semibold text-white disabled:opacity-40"
-          >
-            {copied ? "Copied!" : "Copy Code"}
-          </button>
-        </div>
-
-        <button
-          type="button"
-          onClick={onAddChild}
-          className="w-full rounded-2xl bg-brand-golden-brown py-3.5 text-base font-semibold text-white shadow-sm"
-        >
-          + Add Child
-        </button>
-      </div>
     </div>
   );
 }

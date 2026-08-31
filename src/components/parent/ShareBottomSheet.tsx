@@ -6,6 +6,15 @@ import { createClient } from "@/lib/supabase/client";
 import { generateUniquePassportCode } from "@/lib/generatePassportCode";
 import { logActivity } from "@/lib/logActivity";
 
+// PRD 3, Stage 2 -- handleApprove() (a parent approving a school by
+// code, raw client write to passport_institution_links.approved_by_
+// parent) and its own entry point (the "Enter your school's institution
+// code" input + "Approve school access" button) are removed. The school
+// connects itself to a child now (create_school_passport() at creation,
+// or a claim code the school issues) -- there is no longer a parent-
+// side "approve a school" step to trigger. The outbound passport-code
+// section above and handleConnectClinician() below are both unrelated
+// to approved_by_parent and are untouched.
 export function ShareBottomSheet({
   isOpen,
   onClose,
@@ -14,7 +23,6 @@ export function ShareBottomSheet({
   passportCode,
   focusClinicianCode = false,
   onCodeGenerated,
-  onApproved,
   onClinicianConnected,
 }: {
   isOpen: boolean;
@@ -28,7 +36,6 @@ export function ShareBottomSheet({
   // on the school-code section above it.
   focusClinicianCode?: boolean;
   onCodeGenerated: (code: string) => void;
-  onApproved: () => void;
   onClinicianConnected: () => void;
 }) {
   const [isGeneratingCode, setIsGeneratingCode] = useState(false);
@@ -59,11 +66,6 @@ export function ShareBottomSheet({
       isUnmountedRef.current = true;
     };
   }, []);
-
-  const [institutionCodeInput, setInstitutionCodeInput] = useState("");
-  const [isApproving, setIsApproving] = useState(false);
-  const [approveError, setApproveError] = useState<string | null>(null);
-  const [approveSuccess, setApproveSuccess] = useState<string | null>(null);
 
   const [clinicianCodeInput, setClinicianCodeInput] = useState("");
   const [isConnectingClinician, setIsConnectingClinician] = useState(false);
@@ -151,79 +153,10 @@ export function ShareBottomSheet({
   }
 
   function handleClose() {
-    setInstitutionCodeInput("");
-    setApproveError(null);
-    setApproveSuccess(null);
     setClinicianCodeInput("");
     setClinicianError(null);
     setClinicianSuccess(null);
     onClose();
-  }
-
-  async function handleApprove() {
-    if (!institutionCodeInput.trim()) return;
-
-    setApproveError(null);
-    setApproveSuccess(null);
-    setIsApproving(true);
-
-    const supabase = createClient();
-    const { data: institution, error: lookupError } = await supabase
-      .from("institutions")
-      .select("id, name")
-      .ilike("institution_code", institutionCodeInput.trim())
-      .maybeSingle();
-
-    if (lookupError) {
-      setIsApproving(false);
-      setApproveError(lookupError.message);
-      return;
-    }
-
-    if (!institution) {
-      setIsApproving(false);
-      setApproveError(
-        "We couldn't find a school with that code. Please check with your school and try again."
-      );
-      return;
-    }
-
-    const { data: existingLink } = await supabase
-      .from("passport_institution_links")
-      .select("id, approved_by_parent")
-      .eq("passport_id", passportId)
-      .eq("institution_id", institution.id)
-      .maybeSingle();
-
-    if (existingLink?.approved_by_parent) {
-      setIsApproving(false);
-      setApproveError("You have already approved this school.");
-      return;
-    }
-
-    const nowIso = new Date().toISOString();
-    const { error: saveError } = existingLink
-      ? await supabase
-          .from("passport_institution_links")
-          .update({ approved_by_parent: true, parent_approved_at: nowIso })
-          .eq("id", existingLink.id)
-      : await supabase.from("passport_institution_links").insert({
-          passport_id: passportId,
-          institution_id: institution.id,
-          approved_by_parent: true,
-          parent_approved_at: nowIso,
-        });
-
-    setIsApproving(false);
-
-    if (saveError) {
-      setApproveError(saveError.message);
-      return;
-    }
-
-    setInstitutionCodeInput("");
-    setApproveSuccess(`${institution.name} has been approved to access ${childName}'s passport.`);
-    onApproved();
   }
 
   async function handleConnectClinician() {
@@ -350,39 +283,6 @@ export function ShareBottomSheet({
         Share this code with your child&apos;s class teacher. They will enter
         it in the app to access {childName}&apos;s classroom profile.
       </p>
-
-      <div className="my-5 border-t border-black/5" />
-
-      <p className="text-sm font-semibold text-brand-neutral-black">
-        Enter your school&apos;s institution code
-      </p>
-      <input
-        type="text"
-        value={institutionCodeInput}
-        onChange={(e) => setInstitutionCodeInput(e.target.value)}
-        placeholder="e.g. BHPS0000"
-        className="mt-1.5 w-full rounded-xl border border-black/10 bg-white px-4 py-3 text-base uppercase tracking-widest text-brand-neutral-black placeholder:normal-case placeholder:tracking-normal placeholder:text-black/30 focus:border-brand-prussian-blue focus:outline-none focus:ring-2 focus:ring-brand-pastel-blue"
-      />
-
-      {approveError && (
-        <p role="alert" className="mt-3 text-sm font-medium text-red-600">
-          {approveError}
-        </p>
-      )}
-      {approveSuccess && (
-        <p className="mt-3 rounded-xl bg-green-50 px-4 py-3 text-sm font-medium text-green-800">
-          {approveSuccess}
-        </p>
-      )}
-
-      <button
-        type="button"
-        onClick={handleApprove}
-        disabled={!institutionCodeInput.trim() || isApproving}
-        className="mt-4 w-full rounded-2xl bg-brand-prussian-blue py-3.5 text-base font-semibold text-white transition-colors disabled:cursor-not-allowed disabled:opacity-40"
-      >
-        {isApproving ? "Approving…" : "Approve school access"}
-      </button>
 
       <div className="my-5 border-t border-black/5" />
 

@@ -9,7 +9,6 @@ import { useMessagesAwaitingActionCount } from "@/hooks/useMessagesAwaitingActio
 import { useTeacherPassports } from "@/hooks/useTeacherPassports";
 import { useTeacherMorningCheckins, type MorningPupilStatus } from "@/hooks/useTeacherMorningCheckins";
 import { TeacherBottomNav } from "@/components/teacher/TeacherBottomNav";
-import { AddChildSheet } from "@/components/teacher/AddChildSheet";
 import { MorningPupilCard, MorningPupilCardSkeleton } from "@/components/teacher/MorningPupilCard";
 import { MorningCheckinDetailSheet } from "@/components/teacher/MorningCheckinDetailSheet";
 import { TeacherQuickActions } from "@/components/teacher/TeacherQuickActions";
@@ -112,15 +111,12 @@ export default function TeacherDashboardPage() {
   const { user, isReady } = useRequireRole("class_teacher");
   const messagesAwaitingCount = useMessagesAwaitingActionCount(user?.id ?? null);
 
-  const [isAddChildOpen, setIsAddChildOpen] = useState(false);
   const [selectedPupil, setSelectedPupil] = useState<MorningPupilStatus | null>(null);
 
   const {
     isLoading: isLoadingPassports,
     institutionId,
-    institutionCode,
     passports,
-    refresh,
   } = useTeacherPassports(user?.id ?? null);
 
   const { isLoading: isLoadingCheckins, pupils, redAlertCount } = useTeacherMorningCheckins(
@@ -330,10 +326,7 @@ export default function TeacherDashboardPage() {
       </section>
 
       {!hasStudents ? (
-        <EmptyState
-          institutionCode={institutionCode}
-          onAddChild={() => setIsAddChildOpen(true)}
-        />
+        <EmptyState />
       ) : (
         <>
           <div className="scrollbar-hide mt-4 flex gap-4 overflow-x-auto px-4 py-2">
@@ -382,18 +375,6 @@ export default function TeacherDashboardPage() {
           <TeacherQuickActions messagesAwaitingCount={messagesAwaitingCount} />
           <TeacherActivityCard />
         </>
-      )}
-
-      {institutionId && (
-        <AddChildSheet
-          isOpen={isAddChildOpen}
-          onClose={() => setIsAddChildOpen(false)}
-          teacherId={user!.id}
-          teacherName={(user!.user_metadata?.full_name as string | undefined) ?? "A teacher"}
-          institutionId={institutionId}
-          institutionCode={institutionCode}
-          onAdded={refresh}
-        />
       )}
 
       <MorningCheckinDetailSheet pupil={selectedPupil} onClose={() => setSelectedPupil(null)} />
@@ -449,60 +430,26 @@ function StatCard({
   return <div className={className}>{content}</div>;
 }
 
-function EmptyState({
-  institutionCode,
-  onAddChild,
-}: {
-  institutionCode: string | null;
-  onAddChild: () => void;
-}) {
-  const [copied, setCopied] = useState(false);
-
-  function handleCopy() {
-    if (!institutionCode) return;
-    navigator.clipboard.writeText(institutionCode);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
-  }
-
+// PRD 3, Stage 2 -- was a card promising "share your Institution Code
+// with parents, once they link their child's passport to this code,
+// they will appear right here" plus an "Add Child" button opening
+// AddChildSheet. Both endpoints of that flow are gone this stage
+// (ShareBottomSheet's own parent-approval half, and AddChildSheet
+// itself) -- the school connects a class teacher to their students by
+// the principal granting access now, not by a code changing hands. This
+// empty state says that plainly instead of describing a flow that no
+// longer does anything.
+function EmptyState() {
   return (
     <div className="flex flex-1 flex-col items-center px-4 pt-6 text-center">
-      <p className="mb-6 font-sans text-sm leading-relaxed text-brand-neutral-black/60">
+      <p className="mb-2 font-sans text-sm leading-relaxed text-brand-neutral-black/60">
         This is where you will see your students&apos; daily check-ins. Your
         dashboard is currently empty.
       </p>
-
-      <div className="w-full rounded-3xl border border-brand-off-white bg-white p-6 shadow-sm">
-        <p className="mb-2 font-accent text-xs font-semibold uppercase tracking-wide text-brand-neutral-black/40">
-          Your Institution Code
-        </p>
-        <div className="mb-4 flex items-center justify-between rounded-2xl border border-dashed border-brand-prussian-blue/30 bg-brand-pastel-blue/10 px-5 py-4">
-          <span className="font-heading text-2xl font-bold tracking-[0.2em] text-brand-prussian-blue">
-            {institutionCode ?? "——————"}
-          </span>
-          <button
-            type="button"
-            onClick={handleCopy}
-            disabled={!institutionCode}
-            className="rounded-full bg-brand-prussian-blue px-4 py-2 text-xs font-semibold text-white disabled:opacity-40"
-          >
-            {copied ? "Copied!" : "Copy Code"}
-          </button>
-        </div>
-        <p className="font-sans text-sm leading-relaxed text-brand-neutral-black/60">
-          Share this unique Institution Code with parents. Once they link
-          their child&apos;s passport to this code, they will appear right
-          here.
-        </p>
-      </div>
-
-      <button
-        type="button"
-        onClick={onAddChild}
-        className="mt-6 w-full rounded-2xl bg-brand-golden-brown py-3.5 text-base font-semibold text-white shadow-sm"
-      >
-        Add Child
-      </button>
+      <p className="mb-6 font-sans text-sm leading-relaxed text-brand-neutral-black/60">
+        Ask your principal to grant you access to your students &mdash;
+        once they do, your students will appear here.
+      </p>
 
       {/* Incident Log stamping is institution-roster-scoped, not
           passport_access-scoped (decision 5) -- reachable even with zero

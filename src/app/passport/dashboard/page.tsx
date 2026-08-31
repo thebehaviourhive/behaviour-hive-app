@@ -268,6 +268,14 @@ export default function PassportDashboardPage() {
     [summary, isShareHintDismissed]
   );
 
+  // PRD 3, Stage 2 -- dropped the .eq("approved_by_parent", true) filter.
+  // That flag was a genuine consent record when a parent approving a
+  // school by code was the only way a link got created; it's a
+  // compatibility default now (create_school_passport() always sets it
+  // true, since a school-created child has no parent action to record --
+  // see that function's own comment and CLAUDE.md). Filtering on it here
+  // would hide every future link, not just show approved ones: the
+  // column no longer distinguishes "connected" from "not yet connected."
   async function loadApprovedInstitutions(passportId: string) {
     setInstitutionsError(null);
     const supabase = createClient();
@@ -275,7 +283,6 @@ export default function PassportDashboardPage() {
       .from("passport_institution_links")
       .select("institution_id, parent_approved_at, institutions(name)")
       .eq("passport_id", passportId)
-      .eq("approved_by_parent", true)
       .order("parent_approved_at", { ascending: false });
 
     if (error) {
@@ -772,14 +779,17 @@ export default function PassportDashboardPage() {
                 )}
               </div>
 
-              {/* Deliberately read-only. The parent no longer has a
-                  revoke action for a school's own access here -- see
-                  CLAUDE.md/the PRD 1 completion report: "the school owns
-                  the child's file now" once enrolled, the same way
-                  ending an enrolment is a principal's action, not a
-                  parent's. This list's own future (stay as information,
-                  or go entirely) is an open question, not decided by
-                  this change -- only the revoke ACTION was removed. */}
+              {/* Deliberately read-only and purely informational -- PRD 3
+                  Stage 2 resolved the open question this comment used to
+                  pose. The school connects itself to a child now
+                  (create_school_passport() at creation, or a claim code
+                  the school issues) -- there is no parent approve/revoke
+                  action here at all, and the heading and empty state say
+                  so plainly rather than implying the parent granted or
+                  could grant this link. */}
+              <h3 className="mb-2 text-sm font-semibold text-brand-neutral-black/70">
+                Connected Schools
+              </h3>
               {institutionsError ? (
                 <InlineErrorState
                   message={institutionsError}
@@ -787,8 +797,8 @@ export default function PassportDashboardPage() {
                 />
               ) : approvedInstitutions.length === 0 ? (
                 <p className="text-center text-sm text-brand-neutral-black/60">
-                  No schools approved yet. Tap the share button above to approve
-                  your child&apos;s school.
+                  No schools connected yet. Your child&apos;s school connects
+                  itself once they add your child&apos;s passport.
                 </p>
               ) : (
                 <div>
@@ -1130,7 +1140,6 @@ export default function PassportDashboardPage() {
         onCodeGenerated={(code) =>
           setSummary((prev) => (prev ? { ...prev, passportCode: code } : prev))
         }
-        onApproved={() => loadApprovedInstitutions(summary.passportId)}
         onClinicianConnected={() => {
           loadConnectedClinicians(summary.passportId);
           // Connecting a clinician is the concrete moment the unlock
