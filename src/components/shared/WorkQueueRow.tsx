@@ -68,8 +68,15 @@ export function WorkQueueRow({
     urgent ? "border-brand-golden-brown/20 bg-brand-pastel-blue/15" : "border-black/5 bg-white"
   }`;
 
+  // w-full lg:w-auto -- full-width below the row at <lg (the PRD's own
+  // "full-width action button below" mobile spec), sized to its content
+  // in its own flex-shrink-0 column at lg+. Both variants share this:
+  // without it here, the button (onClick) variant stretched to fill the
+  // row's own flex-1 Exception column at lg+ instead of sitting in its
+  // own column (caught live, PRD 4 Stage 2's own verification pass,
+  // Approve overlapping "Waiting for approval").
   const actionButtonClassName =
-    "mt-3 flex-shrink-0 rounded-xl bg-brand-prussian-blue px-4 py-2 text-center font-sans text-body font-semibold text-white transition-colors disabled:cursor-not-allowed disabled:opacity-50 lg:mt-0";
+    "w-full lg:w-auto mt-3 flex-shrink-0 rounded-xl bg-brand-prussian-blue px-4 py-2 text-center font-sans text-body font-semibold text-white transition-colors disabled:cursor-not-allowed disabled:opacity-50 lg:mt-0";
 
   const action = href ? (
     <Link href={href} className={`block ${actionButtonClassName}`}>
@@ -80,7 +87,7 @@ export function WorkQueueRow({
       type="button"
       onClick={onAction}
       disabled={isActionPending}
-      className={`w-full ${actionButtonClassName}`}
+      className={actionButtonClassName}
     >
       {isActionPending ? "…" : actionLabel}
     </button>
