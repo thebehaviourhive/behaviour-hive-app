@@ -267,12 +267,36 @@ export function CountersignCard({ incidentId, userId, onCountersigned }: Counter
             Countersigning is still required either way.
           </p>
 
-          <div className="flex gap-2">
-            <Button type="button" onClick={() => setIsConfirmOpen(true)} className="flex-1">
-              Countersign
+          {/* PRD 4, Stage 3 -- both buttons now read as equally legitimate
+              outcomes, not just equal size. Golden Brown on "Add an
+              amendment" (this card's original, pre-PRD-4 treatment) cast
+              disagreement as the urgent/problem option under this app's
+              now-explicit colour-to-state mapping (Golden Brown = urgent
+              action required, missing information, withdrawn attestations)
+              -- exactly the asymmetry Daniel's own instruction warns
+              against. Both solid Prussian Blue treatments (primary/
+              secondary), stacked -- a narrow sticky rail at 1280px and a
+              375px sticky footer are both too narrow for the full labels
+              side by side without wrapping awkwardly, so this stacks at
+              every width rather than only below a breakpoint.
+
+              A real fixed-to-viewport footer below lg, not just
+              sticky-in-card -- "the report scrolls, a sticky footer
+              docks the two buttons" only holds if the footer stays
+              pinned regardless of how far into a long report the reader
+              has scrolled. Measured live before building this (PRD 4
+              Stage 3 recon): 133px tall with this exact copy, un-wrapped
+              even at 320px -- 16% of a 375x812 viewport, 23% of a
+              320x568 one. At lg+ this un-fixes entirely (lg:static) and
+              sits inside the parent's own lg:sticky rail instead --
+              fixed positioning would otherwise pin it to the browser
+              viewport rather than the 4-column action panel. */}
+          <div className="fixed inset-x-0 bottom-0 z-20 flex flex-col gap-2 border-t border-black/5 bg-white px-4 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] lg:static lg:border-0 lg:bg-transparent lg:p-0">
+            <Button type="button" onClick={() => setIsAmendOpen(true)} variant="secondary">
+              Add amendment and countersign
             </Button>
-            <Button type="button" onClick={() => setIsAmendOpen(true)} className="flex-1 !bg-brand-golden-brown">
-              Add an amendment
+            <Button type="button" onClick={() => setIsConfirmOpen(true)}>
+              Countersign record
             </Button>
           </div>
         </>

@@ -1134,7 +1134,13 @@ export default function IncidentRecordPage() {
   const hasCpiSelected = Boolean(restraintAction && selectedActionTypeIds.includes(restraintAction.id));
 
   return (
-    <div className="flex min-h-full flex-1 flex-col bg-brand-off-white/40 pb-10">
+    // PRD 4, Stage 3 -- extra bottom clearance below lg whenever
+    // CountersignCard might dock its own action buttons as a fixed
+    // footer (see that component). Harmless on the already-countersigned
+    // branch too (that state renders no footer) -- just some unused
+    // white space at the foot of the page, not worth threading that
+    // narrower condition up through this many levels of nesting.
+    <div className={`flex min-h-full flex-1 flex-col bg-brand-off-white/40 pb-10 ${isLocked ? "pb-40 lg:pb-10" : ""}`}>
       <header className="flex items-center gap-3 px-4 pt-6 pb-4">
         <button
           type="button"
@@ -1156,7 +1162,19 @@ export default function IncidentRecordPage() {
         ) : error ? (
           <p className="text-sm text-brand-neutral-black/60">{error}</p>
         ) : summary ? (
-          <div className="flex flex-col gap-6">
+          // PRD 4, Stage 3 -- the split pane is specifically the
+          // countersign moment: isLocked && user is the exact condition
+          // CountersignCard's own render is gated on below, so the grid
+          // and the card either both apply or neither does. At <lg this
+          // is inert (flex flex-col gap-6, identical spacing to before
+          // this stage -- the outer gap-6 falls between the two wrapper
+          // divs, the inner gap-6 falls between the report's own
+          // children, both 6-unit, so nothing visibly changes). Every
+          // OTHER state of this page (mid-form, awaiting attestations,
+          // not yet signed off) never reaches this condition and stays
+          // single-column exactly as it always has.
+          <div className={`flex flex-col gap-6 ${isLocked ? "lg:grid lg:grid-cols-12 lg:items-start lg:gap-6" : ""}`}>
+          <div className={isLocked ? "flex flex-col gap-6 lg:col-span-8" : "contents"}>
             <div className="rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
               <p className="text-sm font-semibold text-brand-neutral-black">{formatDateTime(summary.occurredAt)}</p>
               <p className="mt-0.5 text-sm text-brand-neutral-black/70">{summary.locationValue}</p>
@@ -2174,23 +2192,34 @@ export default function IncidentRecordPage() {
                 (returns null) if the current user isn't named on this
                 incident at all. */}
             <AttestationCard incidentId={params.incidentId as string} isClosed={isLocked} />
+          </div>
 
-            {/* Countersign -- Phase 4 piece 3. Only meaningful once
-                teacher-signed (isLocked); self-hides entirely for
-                anyone get_countersign_summary() refuses, so no
-                separate "am I a countersigner" check is needed here.
-                Full record is already rendered read-only above for
-                anyone who can see this page at all -- this card adds
-                what the teacher's own form doesn't show: who
-                attested, who didn't, addenda in full, withdrawals with
-                their reason. */}
-            {isLocked && user && (
-              <CountersignCard
-                incidentId={params.incidentId as string}
-                userId={user.id}
-                onCountersigned={() => window.location.reload()}
-              />
-            )}
+          {/* Countersign -- Phase 4 piece 3. Only meaningful once
+              teacher-signed (isLocked); self-hides entirely for
+              anyone get_countersign_summary() refuses, so no separate
+              "am I a countersigner" check is needed here. Full record
+              is already rendered read-only in the report column for
+              anyone who can see this page at all -- this card adds
+              what the teacher's own form doesn't show: who attested,
+              who didn't, addenda in full, withdrawals with their
+              reason.
+              PRD 4, Stage 3 -- the sticky action panel itself. Only
+              exists in the tree at all when isLocked (matching the
+              CountersignCard gate one line down, and the left column's
+              own isLocked check above) -- an unlocked incident renders
+              no second child here, so the outer flex-col above has
+              nothing extra to add spacing around. */}
+          {isLocked && (
+            <div className="lg:col-span-4 lg:sticky lg:top-6">
+              {user && (
+                <CountersignCard
+                  incidentId={params.incidentId as string}
+                  userId={user.id}
+                  onCountersigned={() => window.location.reload()}
+                />
+              )}
+            </div>
+          )}
           </div>
         ) : null}
       </main>
