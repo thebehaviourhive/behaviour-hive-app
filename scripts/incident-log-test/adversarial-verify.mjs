@@ -20,7 +20,7 @@
 // stage development. Every check from V onward is independently
 // self-contained (own institution, own accounts, own cleanup) and
 // individually selectable: V, W, X, Y, Z, AA, BB, CC, DD, EE, FF, GG,
-// HH, II, JJ, KK, LL, MM, NN, OO, PP, QQ, RR, SS, TT, UU, VV, WW, XX, YY, ZZ, AAA, BBB. Selecting none of these (ONLY_CHECKS unset) is the full run --
+// HH, II, JJ, KK, LL, MM, NN, OO, PP, QQ, RR, SS, TT, UU, VV, WW, XX, YY, ZZ, AAA, BBB, CCC. Selecting none of these (ONLY_CHECKS unset) is the full run --
 // the one that gates deploys -- and its behavior is unchanged: same
 // checks, same order, same pass/fail counts. The only observable
 // difference is where the top-level fixture's own cleanup log line
@@ -11209,6 +11209,237 @@ async function main() {
     await admin.from("passports").delete().in("id", [childBBBId, otherChildBBBId]);
     await admin.from("institutions").delete().eq("id", institutionBBBId);
     for (const id of [principalBBBId, teacherBBBId, otherTeacherBBBId, outsiderBBBId, guardian1BBBId, guardian2BBBId]) {
+      await admin.auth.admin.deleteUser(id);
+    }
+  }
+
+  console.log(`\n== CHECK CCC: SQL for PRD 4 Stage 6 (migration 0147) -- get_institution_term_overview(). Authorization (outsider, non-principal, a DIFFERENT institution's principal, and -- via a real hand_over_principal() -- a just-deactivated former principal, all refused), input validation (null start, end before start), and the counting rules agreed for this stage: drafts excluded; an incident with mixed restrictive_practices holds (one in_bsp, one not_planned) counts as unplanned, not planned, under the ANY-not-planned rule; a restraint is attributed to the CHILD ACTUALLY RESTRAINED, not merely present; by_class resolves each incident's class HISTORICALLY (class_children's own started_at/ended_at), proven by moving a real child from Class A to Class B mid-test and confirming the EARLIER incident stays attributed to Class A, not the child's later, current class; an incident touching two different classes counts once for each, never merged, never dropped; a child with no class membership at all lands in the Unassigned bucket; and the prior-period comparison is the same-length window immediately preceding, computed server-side. ==`);
+  if (shouldRun("CCC")) {
+    // Independently selectable (ONLY_CHECKS=CCC) -- fetches its own
+    // location/restraint-action ids rather than relying on CORE's
+    // shared loc/restraintAction, which are block-scoped inside CORE's
+    // own `if (shouldRun("CORE"))` and genuinely undefined on a scoped
+    // run, matching every other independently-selectable check's own
+    // convention (locVV, locWW, etc.) from V onward.
+    const { data: locCCC } = await admin.from("incident_locations").select("id").eq("value", "Classroom").is("institution_id", null).single();
+    const { data: restraintActionCCC } = await admin.from("incident_action_types").select("id").eq("value", "Physical restraint (CPI)").is("institution_id", null).single();
+
+    const { data: instCCC, error: instCCCErr } = await admin
+      .from("institutions")
+      .insert({ name: "CCC Institution", institution_code: CODE + "CCC", status: "verified" })
+      .select()
+      .single();
+    if (instCCCErr) throw instCCCErr;
+    const institutionCCCId = instCCC.id;
+
+    const { data: otherInstCCC, error: otherInstCCCErr } = await admin
+      .from("institutions")
+      .insert({ name: "CCC Other Institution", institution_code: CODE + "CCCOTHER", status: "verified" })
+      .select()
+      .single();
+    if (otherInstCCCErr) throw otherInstCCCErr;
+    const otherInstitutionCCCId = otherInstCCC.id;
+
+    const principalCCCId = await createUser("ccc.principal@thebehaviourhive.com", "CCC Principal", "principal");
+    const teacherCCCId = await createUser("ccc.teacher@thebehaviourhive.com", "CCC Teacher", "class_teacher");
+    const outsiderCCCId = await createUser("ccc.outsider@thebehaviourhive.com", "CCC Outsider", "parent");
+    const otherPrincipalCCCId = await createUser("ccc.otherprincipal@thebehaviourhive.com", "CCC Other Principal", "principal");
+
+    // Bootstrap-approves (derive_staff_join_approval()); teacher lands
+    // pending and must be approved via the real approve_staff_join()
+    // RPC, not a hand-set approved_at -- CLAUDE.md, "Fixtures and new
+    // lifecycle state".
+    await admin.from("institution_staff").insert({ institution_id: institutionCCCId, user_id: principalCCCId, role: "principal" });
+    const { data: teacherCCCStaffRow } = await admin
+      .from("institution_staff")
+      .insert({ institution_id: institutionCCCId, user_id: teacherCCCId, role: "class_teacher" })
+      .select()
+      .single();
+    await admin.from("institution_staff").insert({ institution_id: otherInstitutionCCCId, user_id: otherPrincipalCCCId, role: "principal" });
+
+    const principalCCC = await signedInClient("ccc.principal@thebehaviourhive.com");
+    const teacherCCC = await signedInClient("ccc.teacher@thebehaviourhive.com");
+    const outsiderCCC = await signedInClient("ccc.outsider@thebehaviourhive.com");
+    const otherPrincipalCCC = await signedInClient("ccc.otherprincipal@thebehaviourhive.com");
+
+    const { error: approveTeacherCCCErr } = await principalCCC.rpc("approve_staff_join", { p_institution_staff_id: teacherCCCStaffRow.id });
+    if (approveTeacherCCCErr) throw approveTeacherCCCErr;
+
+    const classANonPrincipalAttempt = await teacherCCC.rpc("create_class", { p_institution_id: institutionCCCId, p_name: "CCC Class A, attempted by a non-principal" });
+    record("CCC0 create_class() itself refuses a non-principal (background fact this fixture depends on, not a Stage 6 assertion)", Boolean(classANonPrincipalAttempt.error), classANonPrincipalAttempt.error?.message);
+
+    const { data: classACCCId, error: classACCCErr } = await principalCCC.rpc("create_class", { p_institution_id: institutionCCCId, p_name: "CCC Class A" });
+    if (classACCCErr) throw classACCCErr;
+    const { data: classBCCCId, error: classBCCCErr } = await principalCCC.rpc("create_class", { p_institution_id: institutionCCCId, p_name: "CCC Class B" });
+    if (classBCCCErr) throw classBCCCErr;
+    const { data: classCCCCId, error: classCCCCErr } = await principalCCC.rpc("create_class", { p_institution_id: institutionCCCId, p_name: "CCC Class C" });
+    if (classCCCCErr) throw classCCCCErr;
+
+    const { data: child1CCCId } = await principalCCC.rpc("create_school_passport", { p_institution_id: institutionCCCId, p_child_name: "CCC Child One (moves class)" });
+    const { data: child2CCCId } = await principalCCC.rpc("create_school_passport", { p_institution_id: institutionCCCId, p_child_name: "CCC Child Two (restrained)" });
+    const { data: child3CCCId } = await principalCCC.rpc("create_school_passport", { p_institution_id: institutionCCCId, p_child_name: "CCC Child Three (unassigned)" });
+    const { data: child4CCCId } = await principalCCC.rpc("create_school_passport", { p_institution_id: institutionCCCId, p_child_name: "CCC Child Four (present, not restrained)" });
+
+    const nowForRange = new Date();
+    const todayCCC = nowForRange.toISOString().slice(0, 10);
+    const yesterdayCCC = new Date(nowForRange.getTime() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
+    async function stampAndSignOff(passportIds, occurredAtIso) {
+      const { data: incId, error: stampErr } = await teacherCCC.rpc("create_incident_stamp", {
+        p_institution_id: institutionCCCId,
+        p_occurred_at: occurredAtIso,
+        p_location_id: locCCC.id,
+        p_child_passport_ids: passportIds,
+        p_staff: [{ user_id: teacherCCCId, involvement: "involved" }],
+      });
+      if (stampErr) throw stampErr;
+      await teacherCCC.from("incidents").update({ category: "one_party_incident", narrative: "CCC test incident." }).eq("id", incId);
+      const { error: signErr } = await teacherCCC.rpc("sign_off_incident", { p_incident_id: incId });
+      if (signErr) throw signErr;
+      return incId;
+    }
+
+    // Timestamps for the class-move test are captured AFTER each
+    // add_class_child() call has actually completed server-side, with a
+    // 1.5s safety margin against client/server clock skew -- occurred_at
+    // is compared against class_children.started_at (a server
+    // timestamp), so an incident's occurred_at must be unambiguously
+    // later, not just later by JS's own clock.
+
+    // ---- CCC1: child1, in Class A. No restraint. ----
+    await principalCCC.rpc("add_class_child", { p_class_id: classACCCId, p_passport_id: child1CCCId });
+    await sleep(1500);
+    const incident1CCCId = await stampAndSignOff([child1CCCId], new Date().toISOString());
+
+    // ---- CCC2: child1 MOVES to Class B, then a second incident. A
+    // wrong "current class" implementation would put BOTH incident1 and
+    // incident2 under Class B (child1's class at query time); the
+    // agreed, correct behaviour keeps incident1 under Class A. ----
+    await sleep(1500);
+    await principalCCC.rpc("add_class_child", { p_class_id: classBCCCId, p_passport_id: child1CCCId });
+    await sleep(1500);
+    const incident2CCCId = await stampAndSignOff([child1CCCId], new Date().toISOString());
+
+    // ---- CCC3: child2 (Class A) is restrained with TWO holds, one
+    // in_bsp and one not_planned -- the ANY-not-planned rule. child4
+    // (Class C) is present in the SAME incident but NOT restrained --
+    // proves restraint is attributed to who was actually restrained,
+    // and that one incident touching two classes counts once for each. ----
+    await principalCCC.rpc("add_class_child", { p_class_id: classACCCId, p_passport_id: child2CCCId });
+    await principalCCC.rpc("add_class_child", { p_class_id: classCCCCId, p_passport_id: child4CCCId });
+    await sleep(1500);
+    const { data: incident3CCCId, error: stamp3Err } = await teacherCCC.rpc("create_incident_stamp", {
+      p_institution_id: institutionCCCId,
+      p_occurred_at: new Date().toISOString(),
+      p_location_id: locCCC.id,
+      p_child_passport_ids: [child2CCCId, child4CCCId],
+      p_staff: [{ user_id: teacherCCCId, involvement: "involved" }],
+    });
+    if (stamp3Err) throw stamp3Err;
+    await teacherCCC.from("incidents").update({ category: "behaviour_leading_to_injury", narrative: "CCC restraint incident." }).eq("id", incident3CCCId);
+    await teacherCCC.from("restrictive_practices").insert({ incident_id: incident3CCCId, passport_id: child2CCCId, planning_status: "in_bsp" });
+    await teacherCCC.from("restrictive_practices").insert({ incident_id: incident3CCCId, passport_id: child2CCCId, planning_status: "not_planned" });
+    await teacherCCC.from("incident_actions").insert({ incident_id: incident3CCCId, action_type_id: restraintActionCCC.id });
+    const { error: sign3Err } = await teacherCCC.rpc("sign_off_incident", { p_incident_id: incident3CCCId });
+    if (sign3Err) throw sign3Err;
+
+    // ---- CCC4: child3, no class membership at all -- Unassigned. ----
+    const incident4CCCId = await stampAndSignOff([child3CCCId], new Date().toISOString());
+
+    // ---- CCC5: a DRAFT, never signed off -- must be excluded entirely. ----
+    const { data: draftCCCId, error: draftErr } = await teacherCCC.rpc("create_incident_stamp", {
+      p_institution_id: institutionCCCId,
+      p_occurred_at: new Date().toISOString(),
+      p_location_id: locCCC.id,
+      p_child_passport_ids: [child1CCCId],
+      p_staff: [{ user_id: teacherCCCId, involvement: "involved" }],
+    });
+    if (draftErr) throw draftErr;
+
+    // ---- CCC6: an incident in the PRIOR period (yesterday) -- must
+    // count in `prior`, never in `current`, and never in by_child/
+    // by_class (current-period only). ----
+    const priorIncidentCCCId = await stampAndSignOff([child1CCCId], `${yesterdayCCC}T12:00:00.000Z`);
+
+    // ==== Authorization ====
+    const { error: outsiderErr } = await outsiderCCC.rpc("get_institution_term_overview", { p_institution_id: institutionCCCId, p_start: todayCCC, p_end: todayCCC });
+    record("CCC-auth1 an outsider with no relationship to this institution is refused", Boolean(outsiderErr), outsiderErr?.message);
+
+    const { error: nonPrincipalErr } = await teacherCCC.rpc("get_institution_term_overview", { p_institution_id: institutionCCCId, p_start: todayCCC, p_end: todayCCC });
+    record("CCC-auth2 a real, approved, active TEACHER at this institution is still refused -- principal only", Boolean(nonPrincipalErr), nonPrincipalErr?.message);
+
+    const { error: crossInstErr } = await otherPrincipalCCC.rpc("get_institution_term_overview", { p_institution_id: institutionCCCId, p_start: todayCCC, p_end: todayCCC });
+    record("CCC-auth3 a genuine principal, but of a DIFFERENT institution, is refused for this one", Boolean(crossInstErr), crossInstErr?.message);
+
+    // ==== Input validation ====
+    const { error: nullStartErr } = await principalCCC.rpc("get_institution_term_overview", { p_institution_id: institutionCCCId, p_start: null, p_end: todayCCC });
+    record("CCC-val1 a null start date is refused, not silently defaulted -- 'default to nothing' enforced at the data layer too", Boolean(nullStartErr), nullStartErr?.message);
+
+    const { error: endBeforeStartErr } = await principalCCC.rpc("get_institution_term_overview", { p_institution_id: institutionCCCId, p_start: todayCCC, p_end: yesterdayCCC });
+    record("CCC-val2 an end date before the start date is refused", Boolean(endBeforeStartErr), endBeforeStartErr?.message);
+
+    // ==== The real call, current period = today only ====
+    const { data: overview, error: overviewErr } = await principalCCC.rpc("get_institution_term_overview", {
+      p_institution_id: institutionCCCId, p_start: todayCCC, p_end: todayCCC,
+    });
+    if (overviewErr) throw overviewErr;
+
+    record("CCC1 total_incidents counts exactly the four signed-off, non-draft, today incidents -- the draft and yesterday's are both excluded", overview.current.total_incidents === 4, JSON.stringify(overview.current));
+    record("CCC2 total_restraints counts the one restraint incident", overview.current.total_restraints === 1, JSON.stringify(overview.current));
+    record("CCC3 THE ANY-NOT-PLANNED RULE: one in_bsp hold + one not_planned hold on the same incident counts it as unplanned, not planned", overview.current.unplanned_restraints === 1 && overview.current.planned_restraints === 0, JSON.stringify(overview.current));
+
+    const child2Row = (overview.by_child ?? []).find((r) => r.passport_id === child2CCCId);
+    const child4Row = (overview.by_child ?? []).find((r) => r.passport_id === child4CCCId);
+    record("CCC4 restraint is attributed to the child ACTUALLY restrained (child2), not merely present", Boolean(child2Row) && child2Row.restraint_count === 1 && child2Row.unplanned_restraint_count === 1, JSON.stringify(child2Row));
+    record("CCC5 the co-present, NOT-restrained child (child4) shows the incident but zero restraints", Boolean(child4Row) && child4Row.incident_count === 1 && child4Row.restraint_count === 0, JSON.stringify(child4Row));
+    record("CCC6 real child names are returned, not anonymised codes", child2Row?.child_name === "CCC Child Two (restrained)", child2Row?.child_name);
+
+    const classARow = (overview.by_class ?? []).find((r) => r.class_id === classACCCId);
+    const classBRow = (overview.by_class ?? []).find((r) => r.class_id === classBCCCId);
+    const classCRow = (overview.by_class ?? []).find((r) => r.class_id === classCCCCId);
+    const unassignedRow = (overview.by_class ?? []).find((r) => r.class_id === null);
+    record("CCC7 HISTORICAL CLASS RESOLUTION: incident1 (before child1's move) is attributed to Class A", Boolean(classARow) && classARow.incident_count === 2, JSON.stringify(classARow));
+    record("CCC8 incident2 (after child1's move) is attributed to Class B, NOT Class A, even though this is queried after the move too -- proves it's not just 'both moved, both wrong'", Boolean(classBRow) && classBRow.incident_count === 1, JSON.stringify(classBRow));
+    record("CCC9 the restraint on child2 shows under Class A (child2's own class), not Class C", Boolean(classARow) && classARow.restraint_count === 1 && classARow.unplanned_restraint_count === 1, JSON.stringify(classARow));
+    record("CCC10 the SAME incident3 also shows under Class C (child4's class, via presence) but with zero restraints there -- one incident, counted once per class it touched, not merged into one row", Boolean(classCRow) && classCRow.incident_count === 1 && classCRow.restraint_count === 0, JSON.stringify(classCRow));
+    record("CCC11 child3 (no class membership at all) lands in the Unassigned bucket", Boolean(unassignedRow) && unassignedRow.incident_count === 1, JSON.stringify(unassignedRow));
+
+    // ==== Prior period ====
+    const expectedPriorStart = yesterdayCCC;
+    const expectedPriorEnd = yesterdayCCC;
+    record("CCC12 prior_period is computed as the same-length window immediately preceding p_start (a 1-day current period -> a 1-day prior period, yesterday)", overview.prior_period.start === expectedPriorStart && overview.prior_period.end === expectedPriorEnd, JSON.stringify(overview.prior_period));
+    record("CCC13 yesterday's incident counts in `prior`, not `current`", overview.prior.total_incidents === 1 && overview.current.total_incidents === 4, JSON.stringify({ prior: overview.prior, current: overview.current }));
+
+    // ==== Authorization, part 2: a real handover, then the just-
+    // deactivated former principal is refused -- proves the standing
+    // check (institution_staff_has_current_standing()) added on TOP of
+    // get_institution_incidents()'s own weaker gate actually does
+    // something, not just decoration. ====
+    const { error: handoverErr } = await principalCCC.rpc("hand_over_principal", {
+      p_successor_user_id: teacherCCCId, p_outcome: "leaving", p_staying_role: null, p_reason: "CCC test handover.",
+    });
+    if (handoverErr) throw handoverErr;
+
+    const { error: afterHandoverErr } = await principalCCC.rpc("get_institution_term_overview", { p_institution_id: institutionCCCId, p_start: todayCCC, p_end: todayCCC });
+    record("CCC14 a just-deactivated former principal (real hand_over_principal(), not a hand-set deactivated_at) is refused -- the standing check is live, not decorative", Boolean(afterHandoverErr), afterHandoverErr?.message);
+
+    const newPrincipalCCC = await signedInClient("ccc.teacher@thebehaviourhive.com");
+    const { error: newPrincipalErr } = await newPrincipalCCC.rpc("get_institution_term_overview", { p_institution_id: institutionCCCId, p_start: todayCCC, p_end: todayCCC });
+    record("CCC15 the new principal (via the same real handover) can call it successfully -- continuity, not just the old principal locked out", !newPrincipalErr, newPrincipalErr?.message);
+
+    console.log("CCC summary complete.");
+
+    await admin.from("restrictive_practices").delete().eq("incident_id", incident3CCCId);
+    await admin.from("incident_actions").delete().eq("incident_id", incident3CCCId);
+    await admin.from("incident_children").delete().in("incident_id", [incident1CCCId, incident2CCCId, incident3CCCId, incident4CCCId, draftCCCId, priorIncidentCCCId]);
+    await admin.from("incident_staff").delete().in("incident_id", [incident1CCCId, incident2CCCId, incident3CCCId, incident4CCCId, draftCCCId, priorIncidentCCCId]);
+    await admin.from("incidents").delete().in("id", [incident1CCCId, incident2CCCId, incident3CCCId, incident4CCCId, draftCCCId, priorIncidentCCCId]);
+    await admin.from("class_children").delete().in("passport_id", [child1CCCId, child2CCCId, child4CCCId]);
+    await admin.from("classes").delete().in("id", [classACCCId, classBCCCId, classCCCCId]);
+    await admin.from("passport_guardians").delete().in("passport_id", [child1CCCId, child2CCCId, child3CCCId, child4CCCId]);
+    await admin.from("passports").delete().in("id", [child1CCCId, child2CCCId, child3CCCId, child4CCCId]);
+    await admin.from("institutions").delete().in("id", [institutionCCCId, otherInstitutionCCCId]);
+    for (const id of [principalCCCId, teacherCCCId, outsiderCCCId, otherPrincipalCCCId]) {
       await admin.auth.admin.deleteUser(id);
     }
   }

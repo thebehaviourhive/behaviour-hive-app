@@ -316,17 +316,37 @@ export default function PrincipalDashboardPage() {
         {/* Classes/Staff/Incidents links removed -- PrincipalBottomNav
             (and, at lg+, PrincipalSidebar) now owns navigation between
             top-level screens. Record-incident stays: a quick action,
-            not inter-screen navigation. */}
-        <Link
-          href="/teacher/incidents/new"
-          aria-label="Record incident"
-          className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-brand-golden-brown text-white shadow-sm"
-        >
-          <AlertTriangleIcon className="h-5 w-5" />
-        </Link>
+            not inter-screen navigation.
+
+            PRD 4, Stage 6 -- "View Term Overview" joins it here, lg+
+            only. Deliberately NOT in primary nav (it's one level down
+            from the work queue by design); this button and the feed-
+            top one below are its only entry point, and only one of the
+            two ever renders at a given width. */}
+        <div className="flex flex-shrink-0 items-center gap-2">
+          <Link
+            href="/principal/term-overview"
+            className="hidden flex-shrink-0 rounded-full border border-brand-prussian-blue px-4 py-2.5 font-sans text-eyebrow font-bold uppercase tracking-wide text-brand-prussian-blue lg:inline-flex lg:items-center"
+          >
+            View Term Overview
+          </Link>
+          <Link
+            href="/teacher/incidents/new"
+            aria-label="Record incident"
+            className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-brand-golden-brown text-white shadow-sm"
+          >
+            <AlertTriangleIcon className="h-5 w-5" />
+          </Link>
+        </div>
       </header>
 
       <main className="flex-1 px-4">
+        <Link
+          href="/principal/term-overview"
+          className="mb-4 flex items-center justify-center rounded-2xl border border-brand-prussian-blue px-4 py-3 font-sans text-body font-bold text-brand-prussian-blue lg:hidden"
+        >
+          View Term Overview
+        </Link>
         <AttestationPromptCard className="mb-4" />
         {isLoading ? (
           // Skeleton rows mirror the final layout -- uniform placeholder
