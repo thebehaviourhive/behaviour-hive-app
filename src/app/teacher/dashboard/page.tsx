@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { useMessagesAwaitingActionCount } from "@/hooks/useMessagesAwaitingActionCount";
@@ -14,46 +14,71 @@ import { MorningCheckinDetailSheet } from "@/components/teacher/MorningCheckinDe
 import { TeacherQuickActions } from "@/components/teacher/TeacherQuickActions";
 import { TeacherActivityCard } from "@/components/teacher/TeacherActivityCard";
 import { QuestionnairePromptCard } from "@/components/questionnaire/QuestionnairePromptCard";
-import { AttestationPromptCard } from "@/components/incident-log/AttestationPromptCard";
-import { IncidentCard, formatIncidentDate, type InstitutionIncidentRow } from "@/components/principal/IncidentCard";
+import { WorkQueueRow } from "@/components/shared/WorkQueueRow";
+import { formatWaitingSince } from "@/lib/workQueueFormatting";
+import { formatTimeOfDay } from "@/lib/temporaryAccessTime";
 import { CheckIcon } from "@/components/ui/icons";
 
 const GRID_CAP = 6;
 
 // PRD 2, Stage 7: this dashboard's own "Needs your attention" section,
-// unconditional like AttestationPromptCard already was (a teacher with
-// zero linked passports can still own incidents, hold cover grants, or
-// teach a class with no SNA -- none of that requires a single linked
-// passport of their own). get_my_incidents() is the genuinely NEW
-// capability here -- no query or screen anywhere in this codebase has
-// ever listed a teacher's own incidents before this migration
-// (0135/0136/0137); every other new bucket below is either built on it
-// or is its own small, dedicated, self-scoped RPC.
+// unconditional (a teacher with zero linked passports can still own
+// incidents, hold cover grants, or teach a class with no SNA -- none of
+// that requires a single linked passport of their own). get_my_incidents()
+// is the genuinely NEW capability here -- no query or screen anywhere in
+// this codebase has ever listed a teacher's own incidents before this
+// migration (0135/0136/0137); every other bucket below is either built
+// on it or is its own small, dedicated, self-scoped RPC.
 //
-// AttestationPromptCard folds in as ONE bucket among these rather than
-// staying a second, separate always-on-top surface -- same component,
-// same fetch, same not_attested/stale filter, just repositioned inside
-// this section and given an onCountChange callback (additive, optional)
-// so its count can join this section's own empty-state computation. Its
-// three OTHER render sites (principal/dashboard, sna/passports,
-// teacher/incidents/attestations) are untouched -- they simply don't
-// pass the new prop. The component is NOT deletable: it's still doing
-// real, unmodified work everywhere else.
+// PRD 4, Stage 2 -- work-queue rewrite, same shared WorkQueueRow the
+// principal dashboard now uses (src/components/shared/WorkQueueRow.tsx),
+// one definition serving both. Six buckets: attestations owed, not
+// signed off, debriefs owed, attestation issues (withdrawn/stale on
+// incidents I own), cover expiring today, no SNA assigned.
+//
+// AttestationPromptCard no longer renders on THIS page -- the component
+// itself is untouched (still exactly what principal/dashboard,
+// sna/passports and teacher/incidents/attestations render, unchanged,
+// per PRD 4's "do not fork shared components" rule) but its single
+// collapsed-count card doesn't fit a work queue whose whole point is one
+// row per outstanding thing. This page now calls
+// get_my_incident_attestations() directly, matching how the other five
+// buckets already fetch their own RPC, and renders one row per
+// not_attested/stale attestation instead of one summary card.
+//
+// No SQL this stage. Cover-expiring-today's Context ("Ends 3pm") reads
+// institutions.temporary_access_cutoff_time directly -- an existing,
+// publicly-selectable column (RLS: "Authenticated users can look up an
+// institution", using(true), live since migration 0013), the same read
+// /principal/school already performs for the identical value. Not a new
+// RPC, not new SQL -- a new call site for an existing, already-public
+// read. No-SNA-assigned's Context is genuinely absent: a standing gap
+// has no meaningful "since".
+//
+// Incident-derived rows (not signed off, debrief owed, attestation
+// issues) use LOCATION as Entity, not a child name -- get_my_incidents()
+// and its siblings have never resolved real child names (only
+// per-incident child_index codes), matching get_institution_incidents()'s
+// own deliberate privacy boundary on the principal side.
 interface MyIncidentRow {
   incident_id: string;
   occurred_at: string;
-  recorded_at: string;
   location: string;
-  category: string | null;
-  status: string;
   child_indices: string[] | null;
   debrief_required: boolean;
   debrief_completed: boolean;
   teacher_signed_at: string | null;
   countersigned_at: string | null;
-  has_restrictive_practice: boolean;
-  planning_status: string[] | null;
-  ncse_report_complete: boolean[] | null;
+}
+
+interface AttestationOwedRow {
+  incident_id: string;
+  incident_staff_id: string;
+  occurred_at: string;
+  location: string;
+  status: string;
+  status_label: string;
+  is_closed: boolean;
 }
 
 interface AttestationIssueRow {
@@ -82,21 +107,9 @@ interface SnaGapRow {
   class_name: string;
 }
 
-// Adapts a MyIncidentRow (self-scoped, no institution-wide fields) onto
-// IncidentCard's own InstitutionIncidentRow shape -- owning_teacher_name/
-// created_by_name/is_inherited are always "me"/null/false here (this
-// caller IS the owner by construction, and inheritance never transfers
-// to a teacher, only to a principal), not fields get_my_incidents()
-// needs to return itself.
-function toIncidentCardRow(row: MyIncidentRow): InstitutionIncidentRow {
-  return {
-    ...row,
-    owning_teacher_name: null,
-    created_by_name: null,
-    is_inherited: false,
-    inherited_from_name: null,
-    inherited_transferred_at: null,
-  };
+function childCountLabel(childIndices: string[] | null): string {
+  const count = (childIndices ?? []).length;
+  return `${count} child${count === 1 ? "" : "ren"} named`;
 }
 
 function getGreeting(): string {
@@ -128,27 +141,27 @@ export default function TeacherDashboardPage() {
   // ---- "Needs your attention" state ----
   const [isLoadingActionItems, setIsLoadingActionItems] = useState(true);
   const [myIncidents, setMyIncidents] = useState<MyIncidentRow[]>([]);
+  const [attestationsOwed, setAttestationsOwed] = useState<AttestationOwedRow[]>([]);
   const [attestationIssues, setAttestationIssues] = useState<AttestationIssueRow[]>([]);
   const [coverGrants, setCoverGrants] = useState<CoverGrantRow[]>([]);
   const [snaGaps, setSnaGaps] = useState<SnaGapRow[]>([]);
-  // null until AttestationPromptCard's own fetch reports in -- kept out
-  // of the empty-state computation until then, so the reassuring card
-  // never flashes and then gets replaced once that count arrives.
-  const [attestationsOwedCount, setAttestationsOwedCount] = useState<number | null>(null);
+  const [cutoffTime, setCutoffTime] = useState<string | null>(null);
 
   useEffect(() => {
     if (!user) return;
     let isMounted = true;
     async function loadActionItems() {
       const supabase = createClient();
-      const [incidentsResult, issuesResult, coverResult, gapsResult] = await Promise.all([
+      const [incidentsResult, owedResult, issuesResult, coverResult, gapsResult] = await Promise.all([
         supabase.rpc("get_my_incidents"),
+        supabase.rpc("get_my_incident_attestations"),
         supabase.rpc("get_my_incident_attestation_issues"),
         supabase.rpc("get_my_cover_grants_expiring_today"),
         supabase.rpc("get_my_class_sna_gaps"),
       ]);
       if (!isMounted) return;
       if (!incidentsResult.error) setMyIncidents((incidentsResult.data ?? []) as MyIncidentRow[]);
+      if (!owedResult.error) setAttestationsOwed((owedResult.data ?? []) as AttestationOwedRow[]);
       if (!issuesResult.error) setAttestationIssues((issuesResult.data ?? []) as AttestationIssueRow[]);
       if (!coverResult.error) setCoverGrants((coverResult.data ?? []) as CoverGrantRow[]);
       if (!gapsResult.error) setSnaGaps((gapsResult.data ?? []) as SnaGapRow[]);
@@ -160,9 +173,28 @@ export default function TeacherDashboardPage() {
     };
   }, [user]);
 
-  const handleAttestationCountChange = useCallback((count: number) => {
-    setAttestationsOwedCount(count);
-  }, []);
+  // Cover-expiring-today's Context deadline -- only fetched once an
+  // institution id is known and only when there's a grant to show it
+  // on, matching every other secondary read on this page's own
+  // not-fatal posture.
+  useEffect(() => {
+    if (!institutionId) return;
+    let isMounted = true;
+    async function loadCutoff() {
+      const supabase = createClient();
+      const { data, error } = await supabase
+        .from("institutions")
+        .select("temporary_access_cutoff_time")
+        .eq("id", institutionId)
+        .maybeSingle();
+      if (!isMounted || error || !data?.temporary_access_cutoff_time) return;
+      setCutoffTime(data.temporary_access_cutoff_time);
+    }
+    loadCutoff();
+    return () => {
+      isMounted = false;
+    };
+  }, [institutionId]);
 
   useEffect(() => {
     if (!user) return;
@@ -200,127 +232,119 @@ export default function TeacherDashboardPage() {
   const gridPupils = pupils.slice(0, GRID_CAP);
   const overflowCount = pupils.length - GRID_CAP;
 
+  const owed = attestationsOwed.filter((r) => !r.is_closed && (r.status === "not_attested" || r.status === "stale"));
   const notSignedOff = myIncidents.filter((i) => !i.teacher_signed_at);
   const debriefOwed = myIncidents.filter((i) => i.debrief_required && !i.debrief_completed);
 
-  const actionItemsReady = !isLoadingActionItems && attestationsOwedCount !== null;
+  const actionItemsReady = !isLoadingActionItems;
   const nothingOutstanding =
     actionItemsReady &&
+    owed.length === 0 &&
     notSignedOff.length === 0 &&
     debriefOwed.length === 0 &&
     attestationIssues.length === 0 &&
-    attestationsOwedCount === 0 &&
     coverGrants.length === 0 &&
     snaGaps.length === 0;
 
   return (
     <div className="flex min-h-full flex-1 flex-col bg-brand-off-white/40 pb-24">
-      <h1 className="mt-6 px-4 font-heading text-2xl font-bold text-brand-prussian-blue">
+      <h1 className="mt-6 px-4 font-heading text-h1 font-bold text-brand-prussian-blue">
         {getGreeting()}, {firstName}
       </h1>
 
-      {/* Unconditional, like the section it replaces -- a teacher can be
-          named staff on an incident, own one, hold a cover grant, or
-          teach a class with no SNA without a single linked passport of
-          their own. */}
+      {/* Unconditional -- a teacher can be named staff on an incident,
+          own one, hold a cover grant, or teach a class with no SNA
+          without a single linked passport of their own. */}
       <section className="mt-4 px-4">
         <h2 className="mb-2 font-heading text-sm font-bold uppercase tracking-wide text-brand-neutral-black/60">
           Needs your attention
         </h2>
 
-        {actionItemsReady && nothingOutstanding ? (
-          <div className="flex items-center gap-3 rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-sm text-brand-neutral-black/60">
-            <CheckIcon className="h-5 w-5 flex-shrink-0 text-brand-prussian-blue/40" />
-            <p>Nothing needs your attention right now.</p>
+        {!actionItemsReady ? (
+          <div className="flex flex-col gap-2">
+            {[0, 1, 2].map((i) => (
+              <div key={i} className="flex animate-pulse items-center gap-4 rounded-2xl border border-black/5 bg-white p-4">
+                <div className="h-5 w-[120px] flex-shrink-0 rounded bg-black/10" />
+                <div className="h-4 flex-1 rounded bg-black/5" />
+              </div>
+            ))}
+          </div>
+        ) : nothingOutstanding ? (
+          <div className="flex flex-col items-center gap-1 rounded-2xl bg-white p-8 text-center shadow-sm">
+            <CheckIcon className="mb-2 h-6 w-6 text-brand-prussian-blue/40" />
+            <p className="font-heading text-h2 font-semibold text-brand-neutral-black">All clear.</p>
+            <p className="font-sans text-body text-brand-neutral-black/60">
+              There are no outstanding actions requiring your attention today.
+            </p>
           </div>
         ) : (
-          <div className="flex flex-col gap-4">
-            <AttestationPromptCard onCountChange={handleAttestationCountChange} />
+          <div className="flex flex-col gap-2">
+            {owed.map((row) => (
+              <WorkQueueRow
+                key={row.incident_staff_id}
+                urgent
+                entity={row.location}
+                exception={`${row.status_label} attestation`}
+                context={formatWaitingSince(row.occurred_at)}
+                actionLabel="Review"
+                href={`/teacher/incidents/${row.incident_id}`}
+              />
+            ))}
 
-            {notSignedOff.length > 0 && (
-              <div>
-                <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-brand-neutral-black/50">
-                  Not signed off
-                </h3>
-                <div className="flex flex-col gap-2">
-                  {notSignedOff.map((incident) => (
-                    <IncidentCard key={incident.incident_id} incident={toIncidentCardRow(incident)} needsSignoff />
-                  ))}
-                </div>
-              </div>
-            )}
+            {notSignedOff.map((incident) => (
+              <WorkQueueRow
+                key={incident.incident_id}
+                urgent
+                entity={incident.location}
+                exception={`${childCountLabel(incident.child_indices)} · not signed off`}
+                context={formatWaitingSince(incident.occurred_at)}
+                actionLabel="Sign off"
+                href={`/teacher/incidents/${incident.incident_id}`}
+              />
+            ))}
 
-            {debriefOwed.length > 0 && (
-              <div>
-                <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-brand-neutral-black/50">
-                  Debrief{debriefOwed.length === 1 ? "" : "s"} owed
-                </h3>
-                <div className="flex flex-col gap-2">
-                  {debriefOwed.map((incident) => (
-                    <IncidentCard key={incident.incident_id} incident={toIncidentCardRow(incident)} />
-                  ))}
-                </div>
-              </div>
-            )}
+            {debriefOwed.map((incident) => (
+              <WorkQueueRow
+                key={incident.incident_id}
+                entity={incident.location}
+                exception={`${childCountLabel(incident.child_indices)} · debrief owed`}
+                context={formatWaitingSince(incident.occurred_at)}
+                actionLabel="Complete debrief"
+                href={`/teacher/incidents/${incident.incident_id}`}
+              />
+            ))}
 
-            {attestationIssues.length > 0 && (
-              <div>
-                <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-brand-neutral-black/50">
-                  Attestation{attestationIssues.length === 1 ? "" : "s"} needing a look
-                </h3>
-                <div className="flex flex-col gap-2">
-                  {attestationIssues.map((row) => (
-                    <Link
-                      key={row.incident_staff_id}
-                      href={`/teacher/incidents/${row.incident_id}`}
-                      className="block rounded-2xl border border-brand-golden-brown/30 bg-white p-4 shadow-sm"
-                    >
-                      <p className="text-sm font-semibold text-brand-neutral-black">
-                        {row.staff_name ?? "A staff member"}
-                      </p>
-                      <p className="mt-0.5 text-xs text-brand-neutral-black/60">
-                        {formatIncidentDate(row.occurred_at)} · {row.location}
-                      </p>
-                      <p className="mt-1.5 text-xs font-semibold text-brand-golden-brown">{row.status_label}</p>
-                    </Link>
-                  ))}
-                </div>
-              </div>
-            )}
+            {attestationIssues.map((row) => (
+              <WorkQueueRow
+                key={row.incident_staff_id}
+                entity={row.staff_name ?? "A staff member"}
+                exception={row.status_label}
+                context={formatWaitingSince(row.occurred_at)}
+                actionLabel="Review"
+                href={`/teacher/incidents/${row.incident_id}`}
+              />
+            ))}
 
-            {coverGrants.length > 0 && (
-              <div>
-                <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-brand-neutral-black/50">
-                  Cover expiring today
-                </h3>
-                <div className="flex flex-col gap-2">
-                  {coverGrants.map((row) => (
-                    <div key={row.grant_id} className="rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
-                      <p className="text-sm font-semibold text-brand-neutral-black">{row.class_name}</p>
-                      <p className="mt-0.5 text-xs text-brand-neutral-black/60">
-                        {`Covered by ${row.granted_to_name ?? "someone"} until today's cut-off`}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
+            {coverGrants.map((row) => (
+              <WorkQueueRow
+                key={row.grant_id}
+                entity={row.class_name}
+                exception={`Covered by ${row.granted_to_name ?? "someone"}`}
+                context={cutoffTime ? `Ends ${formatTimeOfDay(cutoffTime)}` : undefined}
+                actionLabel="Review"
+                href="/teacher/class"
+              />
+            ))}
 
-            {snaGaps.length > 0 && (
-              <div>
-                <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-brand-neutral-black/50">
-                  No SNA assigned
-                </h3>
-                <div className="flex flex-col gap-2">
-                  {snaGaps.map((row) => (
-                    <div key={row.passport_id} className="rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
-                      <p className="text-sm font-semibold text-brand-neutral-black">{row.child_name}</p>
-                      <p className="mt-0.5 text-xs text-brand-neutral-black/60">{row.class_name}</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
+            {snaGaps.map((row) => (
+              <WorkQueueRow
+                key={row.passport_id}
+                entity={row.child_name}
+                exception={`No SNA assigned · ${row.class_name}`}
+                actionLabel="Review"
+                href="/teacher/class"
+              />
+            ))}
           </div>
         )}
       </section>
