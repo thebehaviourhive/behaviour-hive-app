@@ -9,6 +9,7 @@ import { PrincipalBottomNav } from "@/components/principal/PrincipalBottomNav";
 import { HandOverPrincipalSheet } from "@/components/principal/HandOverPrincipalSheet";
 import { SetCutoffSheet } from "@/components/principal/SetCutoffSheet";
 import { SetStartTimeSheet } from "@/components/principal/SetStartTimeSheet";
+import { IncidentLocationsCard } from "@/components/principal/IncidentLocationsCard";
 import { formatTimeOfDay } from "@/lib/temporaryAccessTime";
 
 // PRD 2, Stage 1. New top-level tab -- "School" owns settings and
@@ -30,6 +31,24 @@ import { formatTimeOfDay } from "@/lib/temporaryAccessTime";
 // added alongside -- activation used to be a fixed 07:30 constant with
 // no control anywhere; it's now a settable sibling of the cut-off, same
 // pattern, same section.
+//
+// PRD 4, Stage 5 -- Routine Controls (Settings, renamed) becomes a
+// single-column list capped at 8 columns wide at lg+, so it doesn't
+// stretch edge to edge on a laptop; Incident locations joins it as a
+// genuinely new control (IncidentLocationsCard -- 0068's own write
+// policy, never given a client before this). Physical intervention
+// vocabularies (cpi_reason_types/cpi_disengagement_types/
+// cpi_result_types) do NOT join it -- parked, CLAUDE.md, pending a
+// clinical decision on who may edit a school's trained intervention
+// terms, not a technical gap.
+//
+// Handover moves to the bottom, isolated: its own eyebrow (ACCOUNT
+// ADMINISTRATION, Prussian Blue), 64px clear of Routine Controls above
+// it, its own card. Used perhaps twice in a school's lifetime and hands
+// away every permission the person has -- findable without hunting,
+// never adjacent to a routine control it could be tapped alongside by
+// accident. HandOverPrincipalSheet itself is unchanged -- reskin never
+// reimplement -- including its confirmation copy.
 
 interface StaffRow {
   user_id: string;
@@ -111,78 +130,83 @@ export default function PrincipalSchoolPage() {
   return (
     <div className="flex min-h-full flex-1 flex-col bg-brand-off-white/40 pb-24">
       <header className="px-4 pt-6 pb-4">
-        <h1 className="font-heading text-xl font-bold text-brand-prussian-blue">School</h1>
+        <h1 className="font-heading text-h1 font-bold text-brand-prussian-blue">School</h1>
         {institutionName && (
-          <p className="mt-0.5 text-sm text-brand-neutral-black/60">{institutionName}</p>
+          <p className="mt-0.5 font-sans text-body text-brand-neutral-black/60">{institutionName}</p>
         )}
       </header>
 
       <main className="flex-1 px-4">
-        {isLoading ? (
-          <div className="flex flex-col gap-2">
-            <div className="h-16 animate-pulse rounded-2xl bg-white" />
-            <div className="h-16 animate-pulse rounded-2xl bg-white" />
-          </div>
-        ) : error ? (
-          <p className="text-sm text-brand-neutral-black/60">{error}</p>
-        ) : (
-          <>
-            <section className="mb-6">
-              <h2 className="mb-2 font-heading text-sm font-bold uppercase tracking-wide text-brand-neutral-black/60">
-                Settings
-              </h2>
-              <div className="flex flex-col gap-2">
-                <div className="flex items-center justify-between rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
-                  <div>
-                    <p className="text-sm font-semibold text-brand-neutral-black">Temporary cover start time</p>
-                    <p className="mt-0.5 text-xs text-brand-neutral-black/50">
-                      Starts daily at {formatTimeOfDay(startTime)}, ends at {formatTimeOfDay(cutoffTime)}
-                    </p>
+        <div className="lg:max-w-[66.6667%]">
+          {isLoading ? (
+            <div className="flex flex-col gap-2">
+              <div className="h-[120px] animate-pulse rounded-2xl bg-white" />
+              <div className="h-[120px] animate-pulse rounded-2xl bg-white" />
+              <div className="h-[120px] animate-pulse rounded-2xl bg-white" />
+            </div>
+          ) : error ? (
+            <p className="font-sans text-body text-brand-neutral-black/60">{error}</p>
+          ) : (
+            <>
+              <section>
+                <h2 className="mb-2 font-accent text-eyebrow font-bold uppercase tracking-wide text-brand-prussian-blue">
+                  Routine Controls
+                </h2>
+                <div className="flex flex-col gap-2">
+                  <div className="flex items-center justify-between rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
+                    <div>
+                      <p className="font-sans text-body font-semibold text-brand-neutral-black">Temporary cover start time</p>
+                      <p className="mt-0.5 font-sans text-eyebrow text-brand-neutral-black/50">
+                        Starts daily at {formatTimeOfDay(startTime)}, ends at {formatTimeOfDay(cutoffTime)}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setIsStartTimeOpen(true)}
+                      className="flex-shrink-0 font-sans text-body font-semibold text-brand-prussian-blue"
+                    >
+                      Change
+                    </button>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => setIsStartTimeOpen(true)}
-                    className="flex-shrink-0 text-sm font-semibold text-brand-prussian-blue"
-                  >
-                    Change
-                  </button>
-                </div>
 
-                <div className="flex items-center justify-between rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
-                  <div>
-                    <p className="text-sm font-semibold text-brand-neutral-black">Temporary cover cut-off</p>
-                    <p className="mt-0.5 text-xs text-brand-neutral-black/50">
-                      Starts {formatTimeOfDay(startTime)}, ends daily at {formatTimeOfDay(cutoffTime)}
-                    </p>
+                  <div className="flex items-center justify-between rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
+                    <div>
+                      <p className="font-sans text-body font-semibold text-brand-neutral-black">Temporary cover cut-off</p>
+                      <p className="mt-0.5 font-sans text-eyebrow text-brand-neutral-black/50">
+                        Starts {formatTimeOfDay(startTime)}, ends daily at {formatTimeOfDay(cutoffTime)}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setIsCutoffOpen(true)}
+                      className="flex-shrink-0 font-sans text-body font-semibold text-brand-prussian-blue"
+                    >
+                      Change
+                    </button>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => setIsCutoffOpen(true)}
-                    className="flex-shrink-0 text-sm font-semibold text-brand-prussian-blue"
-                  >
-                    Change
-                  </button>
-                </div>
-              </div>
-            </section>
 
-            <section>
-              <h2 className="mb-2 font-heading text-sm font-bold uppercase tracking-wide text-brand-neutral-black/60">
-                Account Administration
-              </h2>
-              <button
-                type="button"
-                onClick={() => setIsHandOverOpen(true)}
-                className="block w-full rounded-2xl border border-brand-prussian-blue bg-white p-4 text-left shadow-sm"
-              >
-                <p className="text-sm font-semibold text-brand-prussian-blue">Hand Over Principal Role</p>
-                <p className="mt-0.5 text-xs text-brand-neutral-black/50">
-                  Promotes another active staff member. This cannot be undone from your own account.
-                </p>
-              </button>
-            </section>
-          </>
-        )}
+                  <IncidentLocationsCard institutionId={institutionId} />
+                </div>
+              </section>
+
+              <section className="mt-16">
+                <h2 className="mb-2 font-accent text-eyebrow font-bold uppercase tracking-wide text-brand-prussian-blue">
+                  Account Administration
+                </h2>
+                <button
+                  type="button"
+                  onClick={() => setIsHandOverOpen(true)}
+                  className="block w-full rounded-2xl border border-brand-prussian-blue bg-white p-4 text-left shadow-sm"
+                >
+                  <p className="font-sans text-body font-semibold text-brand-prussian-blue">Transfer Principal Role</p>
+                  <p className="mt-0.5 font-sans text-eyebrow text-brand-neutral-black/50">
+                    Promotes another active staff member. This cannot be undone from your own account.
+                  </p>
+                </button>
+              </section>
+            </>
+          )}
+        </div>
       </main>
 
       <HandOverPrincipalSheet

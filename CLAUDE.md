@@ -94,6 +94,8 @@ Learned the hard way, on the School Incident Log build. Read before writing any 
 
 # Parked work
 
+- **CPI VOCABULARY EDITING — PARKED, NEEDS A CLINICAL DECISION.** `cpi_reason_types`, `cpi_disengagement_types` and `cpi_result_types` are select-only by design (`0068`). Schema-ready for a write policy, but the question is not technical: these describe a school's TRAINED physical intervention system. A school on MAPA or Team Teach needs different terms, but an editable list means staff can record a technique nobody was trained in, on a legal record. Needs Catherine's view on who may change it and on what basis, before any UI or RLS is built. Cut from PRD 4 Stage 5's Routine Controls for this reason, not because building it would have required a migration during a no-SQL stage (it would have, but that's not why).
+
 - **PARENT INVITATION BY EMAIL — PARKED.** Claim codes must currently be handed over in person, which fails once a school is inviting parents remotely. Recon done. Scope when picked up: an email carrying the school's name, an explanation and a LINK to the claim screen — NOT the code and NOT the child's name, so a mistyped address costs nothing and the credential stays on a separate channel. Principal-only, one action beside "Generate code". The show-the-code path stays untouched.
 
   Open questions: whether Resend already exists as Supabase's custom SMTP provider (dashboard config, invisible to a codebase grep) and whether its domain is already verified — which would remove both the deliverability warm-up and the new-processor question. Do NOT use `inviteUserByEmail()`: it routes through the Supabase Auth signup bucket, the same one currently inflated 30→300 and flagged as must-revert-before-scale.
