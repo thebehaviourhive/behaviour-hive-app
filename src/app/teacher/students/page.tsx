@@ -84,8 +84,9 @@ export default function TeacherStudentsPage() {
               No students assigned yet.
             </p>
             <p className="max-w-[280px] font-sans text-sm text-brand-neutral-black/60">
-              Ask your principal to grant you access to your students &mdash;
-              once they do, they&apos;ll appear here.
+              Ask your principal to add you to a class, or to grant you
+              access to a specific child &mdash; either way, they&apos;ll
+              appear here.
             </p>
           </div>
         ) : filtered.length === 0 ? (

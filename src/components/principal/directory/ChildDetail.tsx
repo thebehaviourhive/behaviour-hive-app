@@ -54,6 +54,12 @@ import { CLINICIAN_SPECIALTY_LABEL, type ClinicianSpecialty } from "@/lib/clinic
 
 interface AccessRow {
   id: string;
+  // 'direct_grant' | 'class_teacher' | 'class_sna' -- migration 0148.
+  // Only 'direct_grant' rows are revocable here; a derived row's
+  // "Revoke" is removing the child from the class, a different action
+  // on a different screen, not this button.
+  source: string;
+  sourceDetail: string | null;
   userId: string;
   fullName: string;
   actorRole: string;
@@ -382,6 +388,8 @@ export function ChildDetail({
     for (const r of accessResult.data ?? []) {
       const row: AccessRow = {
         id: r.id,
+        source: r.source,
+        sourceDetail: r.source_detail,
         userId: r.user_id,
         fullName: r.full_name,
         actorRole: r.actor_role,
@@ -657,34 +665,58 @@ export function ChildDetail({
 
                 {access.active.length === 0 ? (
                   <p className="rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-center text-sm text-brand-neutral-black/60">
-                    No direct access granted. Access is derived from class or 1:1 assignments.
+                    No one currently has access to this child.
                   </p>
                 ) : (
                   <div className="flex flex-col gap-2">
-                    {access.active.map((a) => (
-                      <div key={a.id} className="rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
-                        <div className="flex items-start justify-between gap-2">
-                          <div>
-                            <p className="text-sm font-semibold text-brand-neutral-black">{a.fullName}</p>
-                            <p className="mt-0.5 text-xs text-brand-neutral-black/50">{ROLE_LABEL[a.actorRole] ?? a.actorRole}</p>
+                    {access.active.map((a) => {
+                      const isDerived = a.source !== "direct_grant";
+                      return (
+                        <div key={a.id} className="rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
+                          <div className="flex items-start justify-between gap-2">
+                            <div>
+                              <p className="text-sm font-semibold text-brand-neutral-black">{a.fullName}</p>
+                              <p className="mt-0.5 text-xs text-brand-neutral-black/50">{ROLE_LABEL[a.actorRole] ?? a.actorRole}</p>
+                            </div>
+                            {/* Two visually distinct kinds of row, per
+                                Daniel's own spec -- a principal must see
+                                at a glance that someone already has
+                                access before granting it again, which is
+                                exactly what stacking a redundant manual
+                                grant on top of working class access used
+                                to make impossible to tell. */}
+                            <span
+                              className={`flex-shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${
+                                isDerived
+                                  ? "bg-brand-off-white text-brand-neutral-black/70"
+                                  : "bg-brand-pastel-blue/20 text-brand-prussian-blue"
+                              }`}
+                            >
+                              {isDerived ? `Via ${a.sourceDetail}` : "Directly Granted"}
+                            </span>
                           </div>
-                          <span className="flex-shrink-0 rounded-full bg-brand-pastel-blue/20 px-2.5 py-1 text-xs font-semibold text-brand-prussian-blue">
-                            Active
-                          </span>
+                          {isDerived ? (
+                            <p className="mt-2 text-xs text-brand-neutral-black/50">
+                              Ends automatically if they leave this class -- nothing to revoke here.
+                            </p>
+                          ) : (
+                            <>
+                              <p className="mt-2 text-xs text-brand-neutral-black/50">
+                                Granted {formatDate(a.linkedAt)}
+                                {a.grantedByName ? ` by ${a.grantedByName}` : ""}
+                              </p>
+                              <button
+                                type="button"
+                                onClick={() => setRevokeTarget(a)}
+                                className="mt-3 block w-full rounded-xl border border-brand-golden-brown py-2 text-center text-xs font-semibold text-brand-golden-brown"
+                              >
+                                Revoke access
+                              </button>
+                            </>
+                          )}
                         </div>
-                        <p className="mt-2 text-xs text-brand-neutral-black/50">
-                          Granted {formatDate(a.linkedAt)}
-                          {a.grantedByName ? ` by ${a.grantedByName}` : ""}
-                        </p>
-                        <button
-                          type="button"
-                          onClick={() => setRevokeTarget(a)}
-                          className="mt-3 block w-full rounded-xl border border-brand-golden-brown py-2 text-center text-xs font-semibold text-brand-golden-brown"
-                        >
-                          Revoke access
-                        </button>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </section>

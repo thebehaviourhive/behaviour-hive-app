@@ -146,26 +146,35 @@ export default function TeacherPassportPage() {
     async function load() {
       const supabase = createClient();
 
-      // Explicit access guard, checked before anything else: a teacher
-      // whose access has been revoked (or was never granted) must see the
-      // clean "no access" state immediately, not fire five more queries
-      // that RLS would filter to empty anyway. A bookmarked/history URL
-      // is the exact path a revoked teacher would use to reach this page.
-      const { data: access } = await supabase
-        .from("passport_access")
-        .select("is_active, institution_id")
-        .eq("passport_id", passportId)
-        .eq("teacher_id", user!.id)
+      // No explicit access guard here any more -- deleted, not fixed.
+      // This used to be a direct passport_access-only check, a second,
+      // separate instance of the exact pattern get_my_accessible_
+      // children() (0148) fixed in useTeacherPassports.ts: it had no
+      // idea class-membership-derived access exists, so a class-only
+      // teacher with zero passport_access rows saw "no access" here
+      // even though has_child_access() RLS on `passports` already
+      // correctly let them read the row. The passports SELECT below
+      // already returns null via RLS for someone with genuinely no
+      // access (any source) -- the existing `if (!passport)` branch a
+      // few lines down was always the real guard; this one was
+      // redundant and, for a class-derived teacher, actively wrong.
+      //
+      // institutionId here is the teacher's OWN current institution
+      // (institution_staff), not derived from any one access source --
+      // correct regardless of whether this passport is reachable via a
+      // direct grant, class-teacher membership, or class-tier SNA
+      // assignment.
+      const { data: staffRow } = await supabase
+        .from("institution_staff")
+        .select("institution_id")
+        .eq("user_id", user!.id)
+        .is("deactivated_at", null)
+        .not("approved_at", "is", null)
         .maybeSingle();
 
       if (!isMounted) return;
 
-      if (!access?.is_active) {
-        setIsLoading(false);
-        return;
-      }
-
-      setInstitutionId(access.institution_id);
+      setInstitutionId(staffRow?.institution_id ?? null);
 
       const startOfToday = new Date();
       startOfToday.setHours(0, 0, 0, 0);

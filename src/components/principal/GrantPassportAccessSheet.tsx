@@ -60,6 +60,20 @@ function friendlyGrantError(message: string): string {
   if (/already has active/i.test(message)) {
     return "They already have active access to this child.";
   }
+  // Migration 0148's new guard -- class membership already covers this
+  // person for this child. The RPC's own message already names the
+  // person, the source (class teacher/class SNA), and the class, so
+  // it's passed through as-is rather than replaced with something
+  // vaguer -- this is the fifth reachable refusal, not a new pattern to
+  // hide. Reachable from this sheet whenever eligibleStaff's own filter
+  // (ChildDetail.tsx, activeUserIds) is stale relative to a class
+  // assignment made in another tab/session since this list loaded --
+  // the normal picker excludes anyone with derived access already, so
+  // this is defense-in-depth for that race, same posture as the
+  // "not an active member" case above.
+  if (/already has access to this child through/i.test(message)) {
+    return message;
+  }
   return message;
 }
 

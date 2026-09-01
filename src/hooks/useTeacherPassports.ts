@@ -4,6 +4,15 @@ import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getChildDisplayName, getChildFirstName } from "@/lib/childDisplayName";
 
+interface AccessibleChildRow {
+  passport_id: string;
+  child_name: string;
+  diagnoses: string[] | null;
+  diagnosis_other: string | null;
+  access_source: "direct_grant" | "class_teacher" | "class_sna";
+  source_detail: string | null;
+}
+
 export interface TeacherPassport {
   passportId: string;
   childName: string;
@@ -11,6 +20,15 @@ export interface TeacherPassport {
   displayName: string;
   diagnoses: string[] | null;
   diagnosisOther: string | null;
+  // Optional -- only get_my_accessible_children()'s own rows carry a
+  // real value. useSnaChildren.ts extends this same interface (SnaChild)
+  // for two OTHER sources this migration didn't touch (temporary class
+  // cover, 1:1 child_assignments) -- it already carries its own
+  // isTemporary/isAssigned flags for those, so leaving these undefined
+  // there is honest, not a gap: neither source maps onto this
+  // three-value vocabulary without inventing a meaning it doesn't have.
+  accessSource?: "direct_grant" | "class_teacher" | "class_sna";
+  sourceDetail?: string | null;
 }
 
 interface UseTeacherPassportsResult {
@@ -22,29 +40,26 @@ interface UseTeacherPassportsResult {
   refresh: () => void;
 }
 
-// A passport_access row alone isn't enough to count as "this teacher's
-// student" -- passport_institution_links must have a row for the SAME
-// institution too (institution-matched existence), otherwise a stale
-// passport_access.institution_id pointing nowhere real would silently
-// count. This join is the one true definition of "real student" shared
-// by the dashboard stats, morning grid, ABC log passport-select, and the
-// Students page -- kept in one place rather than four copies of the same
-// two-step query.
+// The thirteenth instance of "access granted correctly, screens read
+// the wrong thing" -- this hook's own query used to be exactly that
+// wrong thing. It read passport_access directly, with no idea
+// class_children/class_teachers/class_sna_assignments exist, so a
+// class-assigned teacher with zero passport_access rows was invisible
+// to every one of the five surfaces sharing this hook (Students,
+// dashboard, ABC log picker, messages, and via useTeacherMorningCheckins,
+// the morning grid and morning-updates page) -- even though
+// has_class_teacher_access() (0104, widened 0130) has always correctly
+// granted them real RLS-level access underneath. Confirmed empirically
+// before this fix (migration 0148): a real fixture, class-only teacher,
+// zero passport_access rows, passport SELECT/ABC insert/teacher_update
+// insert all worked as that teacher's own session -- the database was
+// never the problem, this query was.
 //
-// PRD 1, Stage 4: no longer requires approved_by_parent = true. Found
-// live while building the principal's grant screen (Step 3) -- the
-// seventh instance of "grant access, never test the destination":
-// grant_passport_access() (Step 2) deliberately allows granting against
-// an UNAPPROVED link (Step 0's own decision 4 -- roster visibility, and
-// now grantability, was never approval-gated), but this hook's old
-// approved_by_parent filter meant a teacher granted access this way
-// would have a genuinely active passport_access row and still see
-// nothing on their own dashboard/Students page -- confirmed empirically,
-// not assumed, before this line changed. Revoke durability is
-// UNAFFECTED by this: handleRevoke() (passport/dashboard) flips
-// passport_access.is_active = false unconditionally for the whole
-// institution, which this hook's FIRST filter (line below) already
-// checks -- that's what drops a revoked child from view, not this join.
+// get_my_accessible_children() (0148) is the one true definition of
+// "this teacher's students" now, in the database, not here -- every
+// source (direct grant, class-teacher membership, class-tier SNA
+// assignment) in one call, so the next access source added has to be
+// remembered in one function, not this hook.
 export function useTeacherPassports(userId: string | null): UseTeacherPassportsResult {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -104,78 +119,26 @@ export function useTeacherPassports(userId: string | null): UseTeacherPassportsR
       if (!isMounted) return;
       setInstitutionCode(institutionRow?.institution_code ?? null);
 
-      const { data: accessRows, error: accessError } = await supabase
-        .from("passport_access")
-        .select("passport_id, institution_id")
-        .eq("teacher_id", userId)
-        .eq("is_active", true);
+      const { data: childRows, error: childError } = await supabase.rpc("get_my_accessible_children");
 
       if (!isMounted) return;
 
-      if (accessError) {
-        setError(accessError.message);
-        setIsLoading(false);
-        return;
-      }
-
-      const candidatePassportIds = Array.from(
-        new Set((accessRows ?? []).map((row) => row.passport_id))
-      );
-
-      if (candidatePassportIds.length === 0) {
-        setPassports([]);
-        setIsLoading(false);
-        return;
-      }
-
-      const { data: linkRows, error: linkError } = await supabase
-        .from("passport_institution_links")
-        .select("passport_id, institution_id")
-        .in("passport_id", candidatePassportIds);
-
-      if (!isMounted) return;
-
-      if (linkError) {
-        setError(linkError.message);
-        setIsLoading(false);
-        return;
-      }
-
-      const linkedPairs = new Set(
-        (linkRows ?? []).map((row) => `${row.passport_id}|${row.institution_id}`)
-      );
-
-      const passportIds = (accessRows ?? [])
-        .filter((row) => linkedPairs.has(`${row.passport_id}|${row.institution_id}`))
-        .map((row) => row.passport_id);
-
-      if (passportIds.length === 0) {
-        setPassports([]);
-        setIsLoading(false);
-        return;
-      }
-
-      const { data: passportRows, error: passportError } = await supabase
-        .from("passports")
-        .select("id, child_name, diagnoses, diagnosis_other")
-        .in("id", passportIds);
-
-      if (!isMounted) return;
-
-      if (passportError) {
-        setError(passportError.message);
+      if (childError) {
+        setError(childError.message);
         setIsLoading(false);
         return;
       }
 
       setPassports(
-        (passportRows ?? []).map((row) => ({
-          passportId: row.id,
+        ((childRows ?? []) as AccessibleChildRow[]).map((row) => ({
+          passportId: row.passport_id,
           childName: row.child_name || "This child",
           firstName: getChildFirstName(row.child_name),
           displayName: getChildDisplayName(row.child_name),
           diagnoses: row.diagnoses,
           diagnosisOther: row.diagnosis_other,
+          accessSource: row.access_source,
+          sourceDetail: row.source_detail,
         }))
       );
       setIsLoading(false);
