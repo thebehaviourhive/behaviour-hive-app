@@ -66,7 +66,7 @@ export default function EnrolChildPage() {
     <div className="flex min-h-full flex-1 flex-col bg-brand-off-white/40">
       <header className="flex items-center gap-3 px-4 pt-6 pb-4">
         <Link
-          href="/principal/passports"
+          href="/principal/directory?segment=children"
           aria-label="Back"
           className="flex h-8 w-8 flex-shrink-0 items-center justify-center text-2xl leading-none text-brand-prussian-blue"
         >
@@ -103,7 +103,7 @@ export default function EnrolChildPage() {
           {isSubmitting ? "Enrolling…" : "Enrol Child"}
         </Button>
         <Link
-          href="/principal/passports"
+          href="/principal/directory?segment=children"
           className="mt-2 block rounded-2xl border border-black/10 py-3 text-center text-sm font-semibold text-black/60"
         >
           Cancel
