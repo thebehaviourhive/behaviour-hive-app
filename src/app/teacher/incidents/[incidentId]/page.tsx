@@ -1492,14 +1492,26 @@ export default function IncidentRecordPage() {
                               {child.parentCalledBy && ` by ${staffNameById.get(child.parentCalledBy) || "a staff member"}`}.
                             </p>
                           ) : (
-                            <Button
-                              type="button"
-                              onClick={() => markParentCalled(child.id)}
-                              disabled={markingCalledChildId === child.id}
-                              className="!w-auto !bg-brand-golden-brown !px-4 !py-2 !text-sm"
-                            >
-                              {markingCalledChildId === child.id ? "Recording…" : "Mark parent called"}
-                            </Button>
+                            <>
+                              {/* Instruction, not an error -- the teacher is
+                                  being asked to do something away from the
+                                  app before this button is meaningful. Plain
+                                  copy, no Golden Brown alarm box (that
+                                  treatment is reserved for real inconsistency
+                                  warnings elsewhere on this page). */}
+                              <p className="mb-2 text-sm text-brand-neutral-black/70">
+                                Please get in contact with the child&apos;s parent, then return to continue with this
+                                report.
+                              </p>
+                              <Button
+                                type="button"
+                                onClick={() => markParentCalled(child.id)}
+                                disabled={markingCalledChildId === child.id}
+                                className="!w-auto !bg-brand-golden-brown !px-4 !py-2 !text-sm"
+                              >
+                                {markingCalledChildId === child.id ? "Recording…" : "Mark parent called"}
+                              </Button>
+                            </>
                           )}
                         </div>
                       )}
@@ -2191,7 +2203,7 @@ export default function IncidentRecordPage() {
                 attested to even after it closes. Self-hides entirely
                 (returns null) if the current user isn't named on this
                 incident at all. */}
-            <AttestationCard incidentId={params.incidentId as string} isClosed={isLocked} />
+            <AttestationCard incidentId={params.incidentId as string} isClosed={isLocked} ownerUserId={owningTeacherId} />
           </div>
 
           {/* Countersign -- Phase 4 piece 3. Only meaningful once

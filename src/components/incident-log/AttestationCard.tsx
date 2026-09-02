@@ -63,9 +63,23 @@ function formatDateTime(value: string): string {
 interface AttestationCardProps {
   incidentId: string;
   isClosed: boolean;
+  // The account's own author -- owning_teacher_id, not created_by. They
+  // diverge after a supply-teacher ownership transfer, and it's
+  // deliberately owning_teacher_id: that's the only identity the
+  // incidents UPDATE policy ("Owning teacher can edit before teacher
+  // sign-off", 0069/0106) actually lets write the narrative, so it's
+  // the one person with genuinely nothing to attest to -- their own
+  // account is theirs regardless of who did the stage-one stamp.
+  // created_by keeps write access only for as long as it also happens
+  // to equal owning_teacher_id (the common, untransferred case); once
+  // they diverge, a departed original creator can no longer edit this
+  // record at all, so excluding by created_by would incorrectly keep
+  // showing "Your attestation" to the person who actually owns and
+  // writes the account today.
+  ownerUserId: string | null;
 }
 
-export function AttestationCard({ incidentId, isClosed }: AttestationCardProps) {
+export function AttestationCard({ incidentId, isClosed, ownerUserId }: AttestationCardProps) {
   const [isLoading, setIsLoading] = useState(true);
   const [incidentStaffId, setIncidentStaffId] = useState<string | null>(null);
   const [involvement, setInvolvement] = useState<string | null>(null);
@@ -105,6 +119,15 @@ export function AttestationCard({ incidentId, isClosed }: AttestationCardProps) 
       data: { user },
     } = await supabase.auth.getUser();
     if (!user) return null;
+
+    // The account's own author has nothing to attest to -- their own
+    // account is theirs. Checked before the incident_staff lookup below,
+    // not after: this is a real "don't ask", not a slower path to the
+    // same "nothing to show" result the !staffRow branch already gives
+    // a genuine non-owner with no account row.
+    if (ownerUserId && user.id === ownerUserId) {
+      return null;
+    }
 
     const { data: staffRow } = await supabase
       .from("incident_staff")
@@ -166,7 +189,7 @@ export function AttestationCard({ incidentId, isClosed }: AttestationCardProps) 
       isMounted = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [incidentId]);
+  }, [incidentId, ownerUserId]);
 
   async function handleAttest() {
     if (!incidentStaffId) return;
