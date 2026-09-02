@@ -1,12 +1,17 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { InlineErrorState } from "@/components/ui/InlineErrorState";
 import { PrincipalBottomNav } from "@/components/principal/PrincipalBottomNav";
-import { IncidentCard, STATUS_LABEL, formatIncidentDate, type InstitutionIncidentRow } from "@/components/principal/IncidentCard";
+import { IncidentCard, formatIncidentDate, type InstitutionIncidentRow } from "@/components/principal/IncidentCard";
+import {
+  deriveIncidentDisplayStatus,
+  INCIDENT_DISPLAY_STATUS_LABEL,
+  INCIDENT_DISPLAY_STATUS_STYLE,
+} from "@/lib/incidentDisplayStatus";
 
 // Phase 6, Part G. A list, not a dashboard -- the real principal
 // dashboard is a separate build (PRD 2 Stage 7, now PRD 4 Stage 2's
@@ -14,13 +19,18 @@ import { IncidentCard, STATUS_LABEL, formatIncidentDate, type InstitutionInciden
 // already supports date-range and planning_status/ncse_complete
 // filtering -- unchanged this stage, no new params.
 //
-// PRD 4, Stage 3 -- table at lg+ (Date, Child, Status, Location, no
-// Reporter column -- none existed before this stage either; the closest
-// thing was the CSV export's own "Owning teacher" column, gone along
-// with the whole CSV mechanism below), pill filters, PDF export
-// replacing CSV. Below lg, the row list stays IncidentCard, unchanged --
-// PRD 4 doesn't ask for a mobile table, and IncidentCard already carries
-// more context than the four bare columns would at that width.
+// PRD 4, Stage 3 -- table at lg+ (Date, Child, Status, Location), pill
+// filters, PDF export replacing CSV. Below lg, the row list stays
+// IncidentCard, unchanged -- PRD 4 doesn't ask for a mobile table, and
+// IncidentCard already carries more context than the bare columns would
+// at that width.
+//
+// A later pass (this file's own table-header comment below has the
+// full recon) added real child names, sortable Class and Logged By
+// columns, and a colour-coded four-state status badge -- overruling
+// this stage's own "no Reporter column, no sortable who-logged-this
+// axis" reasoning. See CLAUDE.md: identification and sorting are fine,
+// a performance-metric framing is not.
 //
 // Filters: three pills map onto the RPC's EXISTING params, no widening.
 // Date Range only toggles the from/to inputs' visibility -- it isn't a
@@ -75,6 +85,13 @@ export default function PrincipalIncidentsListPage() {
   const [rows, setRows] = useState<InstitutionIncidentRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  // Class and Logged By are sortable -- overruling PRD 4 Stage 3's own
+  // "no sortable who-logged-this axis" rule (CLAUDE.md now records why:
+  // identification and sorting are fine, a performance-metric framing
+  // is not). Client-side over the already-fetched rows, same as every
+  // other client-side derivation on this page -- no new RPC param.
+  const [sortKey, setSortKey] = useState<"class" | "loggedBy" | null>(null);
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
 
   useEffect(() => {
     if (!user) return;
@@ -144,13 +161,35 @@ export default function PrincipalIncidentsListPage() {
     };
   }, [institutionId, start, end, planningSubFilter, isNcsePending]);
 
+  // Client-side only for the one combination the RPC's own params can't
+  // express (restraint used, any planning status) -- see header comment.
+  const visibleRows = isRestraintUsed && !planningSubFilter ? rows.filter((r) => r.has_restrictive_practice) : rows;
+
+  // useMemo is a hook -- must run unconditionally, so this stays above
+  // the `!isReady` early return below rather than beside printHref.
+  const sortedRows = useMemo(() => {
+    if (!sortKey) return visibleRows;
+    const withKey = (r: InstitutionIncidentRow) =>
+      sortKey === "class" ? (r.class_names ?? []).join(", ") : (r.created_by_name ?? "");
+    const sorted = [...visibleRows].sort((a, b) => withKey(a).localeCompare(withKey(b)));
+    return sortDirection === "asc" ? sorted : sorted.reverse();
+  }, [visibleRows, sortKey, sortDirection]);
+
   if (!isReady) {
     return null;
   }
 
-  // Client-side only for the one combination the RPC's own params can't
-  // express (restraint used, any planning status) -- see header comment.
-  const visibleRows = isRestraintUsed && !planningSubFilter ? rows.filter((r) => r.has_restrictive_practice) : rows;
+  // Class and Logged By only -- Daniel's literal ask, not extended to
+  // Date/Child/Status/Location. Toggling the same key flips direction;
+  // picking a new key starts ascending.
+  function toggleSort(key: "class" | "loggedBy") {
+    if (sortKey === key) {
+      setSortDirection((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortKey(key);
+      setSortDirection("asc");
+    }
+  }
 
   const printHref = `/principal/incidents/print?${new URLSearchParams({
     start,
@@ -251,15 +290,28 @@ export default function PrincipalIncidentsListPage() {
           </p>
         ) : (
           <>
-            {/* The table -- lg+ only. Date, Child, Status, Location.
-                Deliberately no Reporter/author column and no sortable
-                "who logged this" axis -- staff appear as authors within
-                a record (the countersign report), never as a column to
-                sort by. Child is the incident's own anonymous per-
-                incident letter code(s) (child_indices), not a real name
-                -- get_institution_incidents() has never resolved one,
-                the same deliberate boundary IncidentCard already holds
-                below lg. */}
+            {/* The table -- lg+ only. Date, Child, Status, Location, Class,
+                Logged By.
+                Child now shows real names (child_names), not the
+                anonymous per-incident letter code -- checked before
+                lifting it (migration 0150's own header comment has the
+                full recon): child_index is never referenced by any
+                narrative or user-facing copy, get_institution_incidents()
+                is principal-only (three call sites, all gated on
+                can_countersign_incident(), which is itself one of
+                can_view_incident()'s own OR-branches -- real names are
+                already one click away on every row's detail page today).
+                child_indices is untouched and still what IncidentCard
+                (below lg) and the print export read -- not extended
+                there yet, an open question, not an oversight.
+                Class and Logged By are new, and sortable -- CLAUDE.md now
+                records why this overrules PRD 4 Stage 3's old "no
+                sortable who-logged-this axis" rule: a principal seeing
+                one name recur is identifying where support is needed,
+                not ranking people. Status is a colour-coded four-state
+                badge (incidentDisplayStatus.ts) instead of the raw
+                incidents.status text -- colour is never the only signal,
+                the label is always alongside. */}
             <div className="hidden overflow-hidden rounded-2xl border border-black/5 bg-white shadow-sm lg:block">
               <table className="w-full text-left">
                 <thead>
@@ -276,45 +328,86 @@ export default function PrincipalIncidentsListPage() {
                     <th className="px-4 py-3 font-accent text-eyebrow font-bold uppercase tracking-wide text-brand-neutral-black/50">
                       Location
                     </th>
+                    <th className="px-4 py-3 font-accent text-eyebrow font-bold uppercase tracking-wide text-brand-neutral-black/50">
+                      <button
+                        type="button"
+                        onClick={() => toggleSort("class")}
+                        className="flex items-center gap-1 uppercase tracking-wide"
+                      >
+                        Class {sortKey === "class" ? (sortDirection === "asc" ? "↑" : "↓") : ""}
+                      </button>
+                    </th>
+                    <th className="px-4 py-3 font-accent text-eyebrow font-bold uppercase tracking-wide text-brand-neutral-black/50">
+                      <button
+                        type="button"
+                        onClick={() => toggleSort("loggedBy")}
+                        className="flex items-center gap-1 uppercase tracking-wide"
+                      >
+                        Logged By {sortKey === "loggedBy" ? (sortDirection === "asc" ? "↑" : "↓") : ""}
+                      </button>
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
-                  {visibleRows.map((r) => (
-                    <tr key={r.incident_id} className="border-b border-black/5 last:border-0">
-                      <td className="p-0">
-                        <Link
-                          href={`/teacher/incidents/${r.incident_id}`}
-                          className="block px-4 py-3 font-sans text-body text-brand-neutral-black hover:bg-brand-off-white/60"
-                        >
-                          {formatIncidentDate(r.occurred_at)}
-                        </Link>
-                      </td>
-                      <td className="p-0">
-                        <Link
-                          href={`/teacher/incidents/${r.incident_id}`}
-                          className="block px-4 py-3 font-heading text-h2 font-semibold text-brand-prussian-blue hover:bg-brand-off-white/60"
-                        >
-                          {(r.child_indices ?? []).join(", ") || "—"}
-                        </Link>
-                      </td>
-                      <td className="p-0">
-                        <Link
-                          href={`/teacher/incidents/${r.incident_id}`}
-                          className="block px-4 py-3 font-sans text-body text-brand-neutral-black hover:bg-brand-off-white/60"
-                        >
-                          {STATUS_LABEL[r.status] ?? r.status}
-                        </Link>
-                      </td>
-                      <td className="p-0">
-                        <Link
-                          href={`/teacher/incidents/${r.incident_id}`}
-                          className="block px-4 py-3 font-sans text-body text-brand-neutral-black hover:bg-brand-off-white/60"
-                        >
-                          {r.location}
-                        </Link>
-                      </td>
-                    </tr>
-                  ))}
+                  {sortedRows.map((r) => {
+                    const displayStatus = deriveIncidentDisplayStatus(r);
+                    return (
+                      <tr key={r.incident_id} className="border-b border-black/5 last:border-0">
+                        <td className="p-0">
+                          <Link
+                            href={`/teacher/incidents/${r.incident_id}`}
+                            className="block px-4 py-3 font-sans text-body text-brand-neutral-black hover:bg-brand-off-white/60"
+                          >
+                            {formatIncidentDate(r.occurred_at)}
+                          </Link>
+                        </td>
+                        <td className="p-0">
+                          <Link
+                            href={`/teacher/incidents/${r.incident_id}`}
+                            className="block px-4 py-3 font-heading text-h2 font-semibold text-brand-prussian-blue hover:bg-brand-off-white/60"
+                          >
+                            {(r.child_names ?? []).join(", ") || "—"}
+                          </Link>
+                        </td>
+                        <td className="p-0">
+                          <Link
+                            href={`/teacher/incidents/${r.incident_id}`}
+                            className="block px-4 py-3 hover:bg-brand-off-white/60"
+                          >
+                            <span
+                              className={`inline-block rounded-full px-2.5 py-1 font-sans text-eyebrow font-semibold ${INCIDENT_DISPLAY_STATUS_STYLE[displayStatus]}`}
+                            >
+                              {INCIDENT_DISPLAY_STATUS_LABEL[displayStatus]}
+                            </span>
+                          </Link>
+                        </td>
+                        <td className="p-0">
+                          <Link
+                            href={`/teacher/incidents/${r.incident_id}`}
+                            className="block px-4 py-3 font-sans text-body text-brand-neutral-black hover:bg-brand-off-white/60"
+                          >
+                            {r.location}
+                          </Link>
+                        </td>
+                        <td className="p-0">
+                          <Link
+                            href={`/teacher/incidents/${r.incident_id}`}
+                            className="block px-4 py-3 font-sans text-body text-brand-neutral-black hover:bg-brand-off-white/60"
+                          >
+                            {(r.class_names ?? []).join(", ") || "—"}
+                          </Link>
+                        </td>
+                        <td className="p-0">
+                          <Link
+                            href={`/teacher/incidents/${r.incident_id}`}
+                            className="block px-4 py-3 font-sans text-body text-brand-neutral-black hover:bg-brand-off-white/60"
+                          >
+                            {r.created_by_name ?? "—"}
+                          </Link>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

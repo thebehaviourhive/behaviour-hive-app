@@ -40,6 +40,15 @@ export interface InstitutionIncidentRow {
   status: string;
   owning_teacher_name: string | null;
   child_indices: string[] | null;
+  // Added migration 0150 -- real names/class-at-the-time/outstanding-
+  // issues signal, for principal/incidents/page.tsx's own table only
+  // so far. child_indices (above) is untouched and still what this
+  // card and the print route read -- see that page's own header
+  // comment for why the anonymisation was safe to lift there but
+  // hasn't been extended here yet.
+  child_names: string[] | null;
+  class_names: string[] | null;
+  has_blocking_issues: boolean;
   debrief_required: boolean;
   teacher_signed_at: string | null;
   countersigned_at: string | null;
