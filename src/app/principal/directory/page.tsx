@@ -214,6 +214,34 @@ export default function PrincipalDirectoryPage() {
               refreshToken={clinicianRefreshToken}
             />
           )}
+
+          {/* Below lg, the right pane (below) is hidden entirely --
+              Staff/Temporary Access solve this by rendering full detail
+              INLINE in their own list rows; Classes/Children solve it
+              with a real detail route. Clinicians has neither (the
+              coverage checklist is real interactive content, not a
+              route), so it renders here instead, directly under the
+              list, lg:hidden -- same component the desktop right pane
+              uses, just stacked instead of side-by-side. */}
+          {segment === "clinicians" && institutionId && isEngagingNewClinician && (
+            <div className="mt-4 lg:hidden">
+              <ClinicianCoverageDetail
+                institutionId={institutionId}
+                mode="new"
+                onCoverageChanged={() => setClinicianRefreshToken((n) => n + 1)}
+              />
+            </div>
+          )}
+          {segment === "clinicians" && institutionId && selectedClinician && (
+            <div className="mt-4 lg:hidden">
+              <ClinicianCoverageDetail
+                institutionId={institutionId}
+                mode="existing"
+                clinician={selectedClinician}
+                onCoverageChanged={() => setClinicianRefreshToken((n) => n + 1)}
+              />
+            </div>
+          )}
         </div>
 
         <div className="mt-6 hidden lg:col-span-8 lg:mt-0 lg:block">
