@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { House, Users, Mail, Menu } from "lucide-react";
 import { AppBottomNav, type NavTab } from "@/components/ui/AppBottomNav";
 import { useMessagesAwaitingActionCount } from "@/hooks/useMessagesAwaitingActionCount";
+import { useSupportButtonNavSlots } from "@/hooks/useSupportButtonNavSlots";
 import { createClient } from "@/lib/supabase/client";
 
 // Teacher track's tab list. "Students" owns the roster plus any
@@ -20,6 +21,7 @@ export function TeacherBottomNav() {
   // is just enough to feed the same RPC the dashboard stat already uses
   // ("one source, two surfaces").
   const [userId, setUserId] = useState<string | null>(null);
+  const [institutionId, setInstitutionId] = useState<string | null>(null);
   useEffect(() => {
     let isMounted = true;
     createClient()
@@ -31,7 +33,34 @@ export function TeacherBottomNav() {
       isMounted = false;
     };
   }, []);
+  // Support Button needs the teacher's own institution, same as
+  // userId above -- fetched here rather than threaded through every
+  // page that renders this nav, matching the "nav fetches its own"
+  // convention this component already establishes.
+  useEffect(() => {
+    if (!userId) return;
+    let isMounted = true;
+    createClient()
+      .from("institution_staff")
+      .select("institution_id")
+      .eq("user_id", userId)
+      .eq("role", "class_teacher")
+      .is("deactivated_at", null)
+      .not("approved_at", "is", null)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (isMounted) setInstitutionId(data?.institution_id ?? null);
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, [userId]);
   const messagesAwaitingCount = useMessagesAwaitingActionCount(userId);
+  const { extraSlot, alertSlot } = useSupportButtonNavSlots({
+    institutionId,
+    userId,
+    role: "class_teacher",
+  });
 
   const TABS: NavTab[] = [
     {
@@ -73,5 +102,5 @@ export function TeacherBottomNav() {
     },
   ];
 
-  return <AppBottomNav tabs={TABS} />;
+  return <AppBottomNav tabs={TABS} extraSlot={extraSlot} alertSlot={alertSlot} />;
 }

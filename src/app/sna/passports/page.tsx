@@ -9,7 +9,6 @@ import { useTeacherMorningCheckins, type MorningPupilStatus } from "@/hooks/useT
 import { getChildDisplayName } from "@/lib/childDisplayName";
 import { SnaBottomNav } from "@/components/sna/SnaBottomNav";
 import { TemporaryAccessBanner } from "@/components/shared/TemporaryAccessBanner";
-import { SupportButtonCard } from "@/components/shared/SupportButtonCard";
 import { AlertTriangleIcon, PeopleIcon } from "@/components/ui/icons";
 import { QuestionnairePromptCard } from "@/components/questionnaire/QuestionnairePromptCard";
 import { AttestationPromptCard } from "@/components/incident-log/AttestationPromptCard";
@@ -136,17 +135,6 @@ export default function SnaPassportsPage() {
           )}
         </div>
       </header>
-
-      {/* Support Button -- stage 2, this track's own raise/close/
-          acknowledge surface. Room resolution for an SNA is class_sna_
-          assignments only (room-tier) -- a child-assigned SNA with no
-          room-tier assignment correctly falls into the "none" case and
-          still raises, per Daniel's own instruction. */}
-      {user?.id && institutionId && (
-        <div className="px-4">
-          <SupportButtonCard institutionId={institutionId} userId={user.id} role="sna" />
-        </div>
-      )}
 
       {activeCoverage.length > 0 && (
         <div className="px-4">

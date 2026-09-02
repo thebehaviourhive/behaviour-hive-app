@@ -18,6 +18,15 @@
      pair stays scoped to Calm to avoid colliding with those meanings. */
   --color-calm-pill-raw: #f6cdc9;
   --color-calm-ink-raw: #c95f55;
+
+  /* The Support Button -- the one deliberate red in this product,
+     Daniel's own overrule of the no-semantic-red rule (see CLAUDE.md).
+     Its own token, used nowhere else -- deliberately not Golden Brown
+     (which reads as an outstanding task, not an emergency) and
+     deliberately not the Calm pair above (which signals a distressed
+     CHILD, not a call for adults; the two must read as different things
+     at a glance). */
+  --color-support-red-raw: #d7263d;
 }
 
 /* PRD 4, Stage 1 -- colour-to-state mapping. Not a new token layer,
@@ -36,7 +45,10 @@
                        only -- never a background.
      Off White      -- page and sidebar backgrounds.
    No semantic red/amber/green anywhere in the principal track; Calm's
-   pair above stays exclusive to Calm, same as always. */
+   pair above stays exclusive to Calm, same as always. The one deliberate
+   exception, app-wide, is the Support Button's own red -- see CLAUDE.md
+   ("THE SUPPORT BUTTON IS THE ONE DELIBERATE RED IN THIS PRODUCT") for
+   why it's the sole overrule of this rule and nothing else may reuse it. */
 
 @theme inline {
   --color-background: var(--background);
@@ -48,6 +60,7 @@
   --color-brand-safe-ivory: var(--color-safe-ivory);
   --color-brand-neutral-black: var(--color-neutral-black);
   --color-brand-off-white: var(--color-off-white);
+  --color-brand-support-red: var(--color-support-red-raw);
 
   --color-calm-pill: var(--color-calm-pill-raw);
   --color-calm-ink: var(--color-calm-ink-raw);

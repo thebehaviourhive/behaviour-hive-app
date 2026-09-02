@@ -13,7 +13,6 @@ import { MorningPupilCard, MorningPupilCardSkeleton } from "@/components/teacher
 import { MorningCheckinDetailSheet } from "@/components/teacher/MorningCheckinDetailSheet";
 import { TeacherQuickActions } from "@/components/teacher/TeacherQuickActions";
 import { TeacherActivityCard } from "@/components/teacher/TeacherActivityCard";
-import { SupportButtonCard } from "@/components/shared/SupportButtonCard";
 import { QuestionnairePromptCard } from "@/components/questionnaire/QuestionnairePromptCard";
 import { WorkQueueRow } from "@/components/shared/WorkQueueRow";
 import { formatWaitingSince } from "@/lib/workQueueFormatting";
@@ -252,16 +251,6 @@ export default function TeacherDashboardPage() {
       <h1 className="mt-6 px-4 font-heading text-h1 font-bold text-brand-prussian-blue">
         {getGreeting()}, {firstName}
       </h1>
-
-      {/* Support Button -- stage 2, this track's own raise/close/
-          acknowledge surface. Not yet wired into every track's nav
-          (stage 3, deliberately deferred); mounted here and on
-          /sna/passports, the two roles who can raise. */}
-      {user?.id && (
-        <div className="px-4">
-          <SupportButtonCard institutionId={institutionId} userId={user.id} role="class_teacher" />
-        </div>
-      )}
 
       {/* Unconditional -- a teacher can be named staff on an incident,
           own one, hold a cover grant, or teach a class with no SNA
