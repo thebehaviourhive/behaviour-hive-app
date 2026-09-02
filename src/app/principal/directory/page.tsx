@@ -15,6 +15,7 @@ import { TemporaryAccessList, type GrantRow } from "@/components/principal/direc
 import { TemporaryAccessDetail } from "@/components/principal/directory/TemporaryAccessDetail";
 import { ClinicianList, type ClinicianRow } from "@/components/principal/directory/ClinicianList";
 import { ClinicianCoverageDetail } from "@/components/principal/directory/ClinicianCoverageDetail";
+import { useIsDesktopWidth } from "@/hooks/useIsDesktopWidth";
 
 // PRD 4, Stage 4 -- the Directory split view. Replaces the old four-card
 // menu (Staff/Classes/Passports/Temporary Access, each its own standalone
@@ -73,6 +74,10 @@ const SEGMENTS: { key: Segment; label: string }[] = [
 
 export default function PrincipalDirectoryPage() {
   const { user, isReady } = useRequireRole("principal");
+  // Clinicians' detail has two render sites (mobile-stacked, desktop-
+  // beside) -- gates which one actually mounts, see the hook's own
+  // comment for why CSS-only hidden/lg:block isn't enough here.
+  const isDesktopWidth = useIsDesktopWidth();
   const searchParams = useSearchParams();
   const [segment, setSegment] = useState<Segment>(() => {
     const requested = searchParams.get("segment");
@@ -221,10 +226,18 @@ export default function PrincipalDirectoryPage() {
               with a real detail route. Clinicians has neither (the
               coverage checklist is real interactive content, not a
               route), so it renders here instead, directly under the
-              list, lg:hidden -- same component the desktop right pane
-              uses, just stacked instead of side-by-side. */}
-          {segment === "clinicians" && institutionId && isEngagingNewClinician && (
-            <div className="mt-4 lg:hidden">
+              list, stacked instead of side-by-side.
+              !isDesktopWidth gates this in JS, not just lg:hidden in
+              CSS -- ClinicianCoverageDetail has its own static element
+              ids (the select-all checkbox, one per row); CSS-hidden
+              still means MOUNTED, so at desktop width both this block
+              and the lg:block one below would render the same ids
+              twice in one DOM at once. Found live during browser
+              verification (a Playwright locator resolved two matches
+              for the same child's checkbox). useIsDesktopWidth() makes
+              sure exactly one copy is ever mounted. */}
+          {segment === "clinicians" && institutionId && isEngagingNewClinician && !isDesktopWidth && (
+            <div className="mt-4">
               <ClinicianCoverageDetail
                 institutionId={institutionId}
                 mode="new"
@@ -232,8 +245,8 @@ export default function PrincipalDirectoryPage() {
               />
             </div>
           )}
-          {segment === "clinicians" && institutionId && selectedClinician && (
-            <div className="mt-4 lg:hidden">
+          {segment === "clinicians" && institutionId && selectedClinician && !isDesktopWidth && (
+            <div className="mt-4">
               <ClinicianCoverageDetail
                 institutionId={institutionId}
                 mode="existing"
@@ -278,13 +291,13 @@ export default function PrincipalDirectoryPage() {
                 setTemporaryAccessRefreshToken((n) => n + 1);
               }}
             />
-          ) : segment === "clinicians" && institutionId && isEngagingNewClinician ? (
+          ) : segment === "clinicians" && institutionId && isEngagingNewClinician && isDesktopWidth ? (
             <ClinicianCoverageDetail
               institutionId={institutionId}
               mode="new"
               onCoverageChanged={() => setClinicianRefreshToken((n) => n + 1)}
             />
-          ) : segment === "clinicians" && institutionId && selectedClinician ? (
+          ) : segment === "clinicians" && institutionId && selectedClinician && isDesktopWidth ? (
             <ClinicianCoverageDetail
               institutionId={institutionId}
               mode="existing"
