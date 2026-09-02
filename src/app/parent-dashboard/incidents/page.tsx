@@ -13,6 +13,12 @@ import { InlineErrorState } from "@/components/ui/InlineErrorState";
 // -- their own child's slice only, never the staff narrative, never
 // another child's identity or fields, never a record before teacher
 // sign-off (that RPC's own gate, adversarially proven in CHECK T).
+//
+// CLICKABLE, added alongside IncidentNoticeCard's own fix -- a detail
+// page (/parent-dashboard/incidents/[incidentId]) now exists, and this
+// list dead-ending while the notice card leads somewhere would be the
+// same inconsistency the notice card just had. Not part of the literal
+// ask; a direct consequence of it.
 
 interface ParentIncidentRow {
   incident_id: string;
@@ -108,14 +114,18 @@ export default function ParentIncidentsPage() {
         ) : (
           <div className="flex flex-col gap-2">
             {rows.map((row) => (
-              <div key={row.incident_id} className="rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
+              <Link
+                key={row.incident_id}
+                href={`/parent-dashboard/incidents/${row.incident_id}`}
+                className="block rounded-2xl border border-black/5 bg-white p-4 shadow-sm"
+              >
                 <p className="text-xs font-semibold uppercase tracking-wide text-brand-neutral-black/40">
                   {formatDateTime(row.occurred_at)} · {row.location}
                 </p>
                 <p className="mt-1.5 text-sm text-brand-neutral-black">
                   {row.parent_summary || "The school has completed this record."}
                 </p>
-              </div>
+              </Link>
             ))}
           </div>
         )}

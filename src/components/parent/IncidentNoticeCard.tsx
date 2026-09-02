@@ -20,6 +20,18 @@ import { createClient } from "@/lib/supabase/client";
 // Grouped by incident_id, one card per incident, showing only the more
 // advanced of the two stages when both exist -- a stage-1 notice never
 // lingers next to its own stage-2 successor.
+//
+// CLICKABLE (was a dead end): links to /parent-dashboard/incidents/
+// [incidentId], which renders the full record via the exact same
+// get_parent_incidents() call this card already makes -- no widened
+// access, just a destination that finally exists. A stage-1 notice
+// links there too; the detail page's own empty state explains why
+// nothing shows yet (not signed off) rather than erroring.
+//
+// MORE PROMINENT: Golden Brown, not the plain white every other
+// dashboard card uses -- an incident notice is a different weight of
+// thing than routine activity, and needs to read as one at a glance,
+// not just via its text.
 
 interface NoticeRow {
   id: string;
@@ -129,24 +141,28 @@ export function IncidentNoticeCard({ passportId }: { passportId: string | null }
       </div>
       <div className="flex flex-col gap-2">
         {entries.map((entry) => (
-          <div key={entry.incidentId} className="rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
+          <Link
+            key={entry.incidentId}
+            href={`/parent-dashboard/incidents/${entry.incidentId}`}
+            className="block rounded-2xl border border-brand-golden-brown bg-brand-golden-brown/10 p-4 shadow-sm"
+          >
             {entry.stage === "incident_recorded" ? (
-              <p className="text-sm text-brand-neutral-black">
+              <p className="text-sm font-medium text-brand-neutral-black">
                 An incident involving your child was recorded at {formatTimeOnly(entry.recordedAt)} today. Their
                 teacher will share the details once the record is complete.
               </p>
             ) : (
               <>
-                <p className="text-xs font-semibold uppercase tracking-wide text-brand-neutral-black/40">
+                <p className="text-xs font-semibold uppercase tracking-wide text-brand-golden-brown">
                   {entry.fullDetail ? formatDateTime(entry.fullDetail.occurred_at) : formatDateTime(entry.recordedAt)}
                   {entry.fullDetail?.location ? ` · ${entry.fullDetail.location}` : ""}
                 </p>
-                <p className="mt-1.5 text-sm text-brand-neutral-black">
+                <p className="mt-1.5 text-sm font-medium text-brand-neutral-black">
                   {entry.fullDetail?.parent_summary || "The school has completed this record."}
                 </p>
               </>
             )}
-          </div>
+          </Link>
         ))}
       </div>
     </section>
