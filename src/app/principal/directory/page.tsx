@@ -13,6 +13,8 @@ import { ChildrenList } from "@/components/principal/directory/ChildrenList";
 import { ChildDetail } from "@/components/principal/directory/ChildDetail";
 import { TemporaryAccessList, type GrantRow } from "@/components/principal/directory/TemporaryAccessList";
 import { TemporaryAccessDetail } from "@/components/principal/directory/TemporaryAccessDetail";
+import { ClinicianList, type ClinicianRow } from "@/components/principal/directory/ClinicianList";
+import { ClinicianCoverageDetail } from "@/components/principal/directory/ClinicianCoverageDetail";
 
 // PRD 4, Stage 4 -- the Directory split view. Replaces the old four-card
 // menu (Staff/Classes/Passports/Temporary Access, each its own standalone
@@ -46,14 +48,27 @@ import { TemporaryAccessDetail } from "@/components/principal/directory/Temporar
 //
 // No SQL, no query changes -- every list/detail component here calls
 // exactly the RPC its old standalone page already called.
+//
+// Fifth segment, Clinicians (bulk clinician assignment): a caseload
+// view, not the child folder's own team view -- Daniel's own framing,
+// kept literal. Two ways into the same right pane: selecting an
+// already-engaged clinician from the left list (selectedClinician), or
+// "Engage a New Clinician" (isEngagingNewClinician, no clinician object
+// yet -- ClinicianCoverageDetail's own code-entry step resolves one).
+// Mutually exclusive, both cleared on segment switch same as every
+// other selection. The child folder's own Clinical Team section
+// (ChildDetail.tsx, Children segment) is untouched -- connect/revoke
+// stay there exactly as they were; both are legitimate views of the
+// same clinician_access rows, per Daniel's own call.
 
-type Segment = "staff" | "classes" | "children" | "temporary-access";
+type Segment = "staff" | "classes" | "children" | "temporary-access" | "clinicians";
 
 const SEGMENTS: { key: Segment; label: string }[] = [
   { key: "staff", label: "Staff" },
   { key: "classes", label: "Classes" },
   { key: "children", label: "Children" },
   { key: "temporary-access", label: "Temporary Access" },
+  { key: "clinicians", label: "Clinicians" },
 ];
 
 export default function PrincipalDirectoryPage() {
@@ -70,6 +85,9 @@ export default function PrincipalDirectoryPage() {
   const [selectedPassportId, setSelectedPassportId] = useState<string | null>(null);
   const [selectedGrant, setSelectedGrant] = useState<GrantRow | null>(null);
   const [cutoffTime, setCutoffTime] = useState<string>("15:00:00");
+  const [selectedClinician, setSelectedClinician] = useState<ClinicianRow | null>(null);
+  const [isEngagingNewClinician, setIsEngagingNewClinician] = useState(false);
+  const [clinicianRefreshToken, setClinicianRefreshToken] = useState(0);
 
   const [staffRefreshToken, setStaffRefreshToken] = useState(0);
   // ClassDetail/ChildDetail are both fully self-contained (own fetch,
@@ -111,6 +129,8 @@ export default function PrincipalDirectoryPage() {
     setSelectedClassId(null);
     setSelectedPassportId(null);
     setSelectedGrant(null);
+    setSelectedClinician(null);
+    setIsEngagingNewClinician(false);
   }
 
   if (!isReady) {
@@ -121,7 +141,8 @@ export default function PrincipalDirectoryPage() {
     (segment === "staff" && selectedStaff) ||
     (segment === "classes" && selectedClassId) ||
     (segment === "children" && selectedPassportId) ||
-    (segment === "temporary-access" && selectedGrant);
+    (segment === "temporary-access" && selectedGrant) ||
+    (segment === "clinicians" && (selectedClinician || isEngagingNewClinician));
 
   return (
     <div className="flex min-h-full flex-1 flex-col bg-brand-off-white/40 pb-24">
@@ -178,6 +199,21 @@ export default function PrincipalDirectoryPage() {
               refreshToken={temporaryAccessRefreshToken}
             />
           )}
+          {segment === "clinicians" && (
+            <ClinicianList
+              institutionId={institutionId}
+              selectedClinicianId={selectedClinician?.clinicianId ?? null}
+              onSelect={(c) => {
+                setSelectedClinician(c);
+                setIsEngagingNewClinician(false);
+              }}
+              onEngageNew={() => {
+                setSelectedClinician(null);
+                setIsEngagingNewClinician(true);
+              }}
+              refreshToken={clinicianRefreshToken}
+            />
+          )}
         </div>
 
         <div className="mt-6 hidden lg:col-span-8 lg:mt-0 lg:block">
@@ -213,6 +249,19 @@ export default function PrincipalDirectoryPage() {
                 setSelectedGrant(null);
                 setTemporaryAccessRefreshToken((n) => n + 1);
               }}
+            />
+          ) : segment === "clinicians" && institutionId && isEngagingNewClinician ? (
+            <ClinicianCoverageDetail
+              institutionId={institutionId}
+              mode="new"
+              onCoverageChanged={() => setClinicianRefreshToken((n) => n + 1)}
+            />
+          ) : segment === "clinicians" && institutionId && selectedClinician ? (
+            <ClinicianCoverageDetail
+              institutionId={institutionId}
+              mode="existing"
+              clinician={selectedClinician}
+              onCoverageChanged={() => setClinicianRefreshToken((n) => n + 1)}
             />
           ) : null}
         </div>
