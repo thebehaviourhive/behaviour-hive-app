@@ -130,6 +130,10 @@ interface ChildFormState {
   parentCalledBy: string | null;
   parentNotifiedAt: string | null;
   parentNotificationBlockedReason: string | null;
+  // Migration 0152 -- a parent's own record of having seen this, once
+  // signed off. Distinct fact from the two above (we sent it / we
+  // called them), never implying either when absent.
+  parentAcknowledgedAt: string | null;
 }
 
 interface StampSummary {
@@ -263,6 +267,12 @@ export default function IncidentRecordPage() {
   // hard-to-notice bug, not a hypothetical one.
   const [anyoneInjured, setAnyoneInjured] = useState<boolean | null>(null);
   const [anyoneInjuredSaveError, setAnyoneInjuredSaveError] = useState<string | null>(null);
+  // Migration 0153 -- "Was the Support Button pressed?" A plain
+  // boolean on the incident itself, not a link to a specific
+  // support_alerts row -- the ask was a yes/no record on the incident,
+  // not a structured cross-reference.
+  const [supportButtonPressed, setSupportButtonPressed] = useState<boolean>(false);
+  const [supportButtonSaveError, setSupportButtonSaveError] = useState<string | null>(null);
   const [parentCallSaveError, setParentCallSaveError] = useState<string | null>(null);
   const [markingCalledChildId, setMarkingCalledChildId] = useState<string | null>(null);
   // Institution staff roster name lookup -- built once during load
@@ -324,7 +334,7 @@ export default function IncidentRecordPage() {
       const { data: incident, error: incidentError } = await supabase
         .from("incidents")
         .select(
-          "institution_id, created_by, owning_teacher_id, teacher_signed_at, occurred_at, incident_locations(value), category, party, party_other, item_involved, narrative, parent_summary, staff_count_needed, staff_distressed, risk_reduction_future, other_information, debrief_required, anyone_injured, attestations_requested"
+          "institution_id, created_by, owning_teacher_id, teacher_signed_at, occurred_at, incident_locations(value), category, party, party_other, item_involved, narrative, parent_summary, staff_count_needed, staff_distressed, risk_reduction_future, other_information, debrief_required, anyone_injured, attestations_requested, support_button_pressed"
         )
         .eq("id", params.incidentId)
         .maybeSingle();
@@ -374,7 +384,7 @@ export default function IncidentRecordPage() {
         supabase
           .from("incident_children")
           .select(
-            "id, child_index, passport_id, distress_level, remained_on_site, remained_detail, recovery_methods, recovery_methods_other, parent_call_required, parent_called_at, parent_called_by, parent_notified_at, parent_notification_blocked_reason"
+            "id, child_index, passport_id, distress_level, remained_on_site, remained_detail, recovery_methods, recovery_methods_other, parent_call_required, parent_called_at, parent_called_by, parent_notified_at, parent_notification_blocked_reason, parent_acknowledged_at"
           )
           .eq("incident_id", params.incidentId)
           .order("child_index"),
@@ -491,6 +501,7 @@ export default function IncidentRecordPage() {
           parentCalledBy: row.parent_called_by,
           parentNotifiedAt: row.parent_notified_at,
           parentNotificationBlockedReason: row.parent_notification_blocked_reason,
+          parentAcknowledgedAt: row.parent_acknowledged_at,
         }))
       );
 
@@ -574,6 +585,7 @@ export default function IncidentRecordPage() {
       setStaffDistressed(incident.staff_distressed as StaffDistressed | null);
       setRiskReductionFuture(incident.risk_reduction_future ?? "");
       setOtherInformation(incident.other_information ?? "");
+      setSupportButtonPressed(Boolean(incident.support_button_pressed));
 
       setIsLocked(Boolean(incident.teacher_signed_at));
       setCanEdit(
@@ -914,6 +926,23 @@ export default function IncidentRecordPage() {
     if (updateError) {
       setAnyoneInjured(previous);
       setAnyoneInjuredSaveError(updateError.message);
+    }
+  }
+
+  async function setSupportButtonPressedAndSave(value: boolean) {
+    const previous = supportButtonPressed;
+    setSupportButtonPressed(value);
+    setSupportButtonSaveError(null);
+
+    const supabase = createClient();
+    const { error: updateError } = await supabase
+      .from("incidents")
+      .update({ support_button_pressed: value })
+      .eq("id", params.incidentId);
+
+    if (updateError) {
+      setSupportButtonPressed(previous);
+      setSupportButtonSaveError(updateError.message);
     }
   }
 
@@ -1459,10 +1488,59 @@ export default function IncidentRecordPage() {
                       )}
                     </div>
 
-                    {/* Parent contact -- per child (incident_children),
-                        Phase 4 piece 4. Golden Brown throughout, never
-                        Calm's red -- this flag is urgency-adjacent but
-                        not Calm's own escalation surface. */}
+                    {/* Parent contact facts -- ALWAYS visible, migration
+                        0152. Three separate evidential facts (we sent a
+                        notice / we telephoned them / they acknowledged
+                        having seen it), each its own line so none reads
+                        as standing in for another. Previously this
+                        entire section only rendered when
+                        parentCallRequired was true -- meaning a notice
+                        WAS sent (automatic, every incident) but a
+                        school had no way to see that in the common case
+                        (no call required). Found while scoping the
+                        acknowledge button, fixed alongside it. Golden
+                        Brown for the two facts that are the school's
+                        own completed actions; muted neutral for
+                        acknowledged-or-not -- its absence must never
+                        read as the school having failed to notify. */}
+                    <div className="border-t border-black/[0.06] pt-4">
+                      <span className="mb-2 block text-sm font-semibold text-brand-neutral-black">Parent contact</span>
+                      <div className="flex flex-col gap-1.5">
+                        {child.parentNotifiedAt ? (
+                          <p className="text-sm text-brand-golden-brown">
+                            Notice sent {formatDateTime(child.parentNotifiedAt)}.
+                          </p>
+                        ) : child.parentNotificationBlockedReason !== "dormant_account" ? (
+                          <p className="text-sm text-brand-neutral-black/50">No notice recorded.</p>
+                        ) : null}
+                        {child.parentCalledAt && (
+                          <p className="text-sm text-brand-golden-brown">
+                            Parent called {formatDateTime(child.parentCalledAt)}
+                            {child.parentCalledBy && ` by ${staffNameById.get(child.parentCalledBy) || "a staff member"}`}.
+                          </p>
+                        )}
+                        {child.parentAcknowledgedAt ? (
+                          <p className="text-sm text-brand-golden-brown">
+                            Acknowledged by parent {formatDateTime(child.parentAcknowledgedAt)}.
+                          </p>
+                        ) : (
+                          <p className="text-sm text-brand-neutral-black/50">Not yet acknowledged by parent.</p>
+                        )}
+                      </div>
+
+                      {child.parentNotificationBlockedReason === "dormant_account" && (
+                        <p className="mt-3 rounded-xl border border-brand-golden-brown/30 bg-brand-golden-brown/10 p-3 text-sm text-brand-neutral-black">
+                          This parent hasn&apos;t signed in and can&apos;t be notified in the app — contact them
+                          directly.
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Parent call required? -- the ACTION workflow,
+                        separate from the facts above. Unchanged except
+                        for the "already called" fact display moving up
+                        into the always-visible block -- this stays
+                        conditional because it's a task, not a fact. */}
                     <div className="border-t border-black/[0.06] pt-4">
                       <span className="mb-2 block text-sm font-semibold text-brand-neutral-black">Parent call required?</span>
                       {child.parentCallRequired ? (
@@ -1484,43 +1562,27 @@ export default function IncidentRecordPage() {
                         </div>
                       )}
 
-                      {child.parentCallRequired && (
+                      {child.parentCallRequired && !child.parentCalledAt && (
                         <div className="mt-3">
-                          {child.parentCalledAt ? (
-                            <p className="text-sm text-brand-neutral-black/70">
-                              Parent called {formatDateTime(child.parentCalledAt)}
-                              {child.parentCalledBy && ` by ${staffNameById.get(child.parentCalledBy) || "a staff member"}`}.
-                            </p>
-                          ) : (
-                            <>
-                              {/* Instruction, not an error -- the teacher is
-                                  being asked to do something away from the
-                                  app before this button is meaningful. Plain
-                                  copy, no Golden Brown alarm box (that
-                                  treatment is reserved for real inconsistency
-                                  warnings elsewhere on this page). */}
-                              <p className="mb-2 text-sm text-brand-neutral-black/70">
-                                Please get in contact with the child&apos;s parent, then return to continue with this
-                                report.
-                              </p>
-                              <Button
-                                type="button"
-                                onClick={() => markParentCalled(child.id)}
-                                disabled={markingCalledChildId === child.id}
-                                className="!w-auto !bg-brand-golden-brown !px-4 !py-2 !text-sm"
-                              >
-                                {markingCalledChildId === child.id ? "Recording…" : "Mark parent called"}
-                              </Button>
-                            </>
-                          )}
+                          {/* Instruction, not an error -- the teacher is
+                              being asked to do something away from the
+                              app before this button is meaningful. Plain
+                              copy, no Golden Brown alarm box (that
+                              treatment is reserved for real inconsistency
+                              warnings elsewhere on this page). */}
+                          <p className="mb-2 text-sm text-brand-neutral-black/70">
+                            Please get in contact with the child&apos;s parent, then return to continue with this
+                            report.
+                          </p>
+                          <Button
+                            type="button"
+                            onClick={() => markParentCalled(child.id)}
+                            disabled={markingCalledChildId === child.id}
+                            className="!w-auto !bg-brand-golden-brown !px-4 !py-2 !text-sm"
+                          >
+                            {markingCalledChildId === child.id ? "Recording…" : "Mark parent called"}
+                          </Button>
                         </div>
-                      )}
-
-                      {child.parentNotificationBlockedReason === "dormant_account" && (
-                        <p className="mt-3 rounded-xl border border-brand-golden-brown/30 bg-brand-golden-brown/10 p-3 text-sm text-brand-neutral-black">
-                          This parent hasn&apos;t signed in and can&apos;t be notified in the app — contact them
-                          directly.
-                        </p>
                       )}
 
                       {parentCallSaveError && (
@@ -1755,6 +1817,25 @@ export default function IncidentRecordPage() {
                     </section>
                   );
                 })}
+
+              <section>
+                <h2 className="mb-1 font-heading text-lg font-bold text-brand-prussian-blue">Support Button</h2>
+                <div className="mb-3">
+                  <span className="mb-2 block text-sm font-semibold text-brand-neutral-black">
+                    Was the Support Button pressed?
+                  </span>
+                  <PillSingleSelect
+                    options={REMAINED_ON_SITE_OPTIONS}
+                    value={supportButtonPressed ? "yes" : "no"}
+                    onChange={(v) => setSupportButtonPressedAndSave(v === "yes")}
+                  />
+                  {supportButtonSaveError && (
+                    <p role="alert" className="mt-2 text-sm font-medium text-red-600">
+                      {supportButtonSaveError}
+                    </p>
+                  )}
+                </div>
+              </section>
 
               <section>
                 <h2 className="mb-1 font-heading text-lg font-bold text-brand-prussian-blue">Injuries</h2>

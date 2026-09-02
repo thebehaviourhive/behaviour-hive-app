@@ -18,6 +18,8 @@ interface TeacherActivityEntry {
   event_description: string;
   created_at: string;
   child_name: string;
+  // Migration 0152 -- non-null only on event_type "incident".
+  incident_id: string | null;
 }
 
 function groupByDate(entries: TeacherActivityEntry[]) {
@@ -158,6 +160,7 @@ export default function TeacherActivityPage() {
                         event_description: `${getChildDisplayName(entry.child_name)} — ${entry.event_description}`,
                         created_at: entry.created_at,
                       }}
+                      href={entry.incident_id ? `/teacher/incidents/${entry.incident_id}` : undefined}
                     />
                   ))}
                 </div>

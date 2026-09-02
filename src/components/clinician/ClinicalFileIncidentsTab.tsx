@@ -4,10 +4,11 @@ import { useIncidents } from "@/hooks/useIncidents";
 import { IncidentSummaryCard } from "@/components/clinician/incidents/IncidentSummaryCard";
 import { InlineErrorState } from "@/components/ui/InlineErrorState";
 
-// The Clinical File's own Incident Log tab -- named distinctly from the
-// pre-existing "Incidents" tab on this same page (which is actually the
-// ABC log timeline, an unrelated feature; kept as-is, not touched here,
-// to avoid the naming collision rather than repurpose it).
+// The Clinical File's own Incident Log tab -- the OTHER tab on this
+// page, previously also labelled "Incidents", was the ABC log timeline
+// and has since been relabelled "ABC Logs" to remove the collision
+// (its key stays "incidents", unchanged -- see that tab list's own
+// comment).
 export function ClinicalFileIncidentsTab({ passportId }: { passportId: string }) {
   const { incidents, isLoading, loadError } = useIncidents(passportId);
 

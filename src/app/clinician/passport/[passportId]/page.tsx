@@ -35,11 +35,14 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: "behaviour", label: "Behaviour Signals" },
   { key: "communication", label: "Communication" },
   { key: "supports", label: "Supports" },
-  { key: "incidents", label: "Incidents" },
-  // Phase 5: distinct label/key from "Incidents" above on purpose --
-  // that tab is the ABC log timeline (an unrelated, pre-existing
-  // feature with an unfortunately overlapping name), this one is the
-  // formal School Incident Log via get_clinician_incidents().
+  // Label renamed from "Incidents" -- this tab is the ABC log timeline,
+  // not the incident log below, and having two tabs named "Incidents"/
+  // "Incident Log" for two different things was actively confusing
+  // (found during the activity-panel recon). The key stays "incidents"
+  // unchanged -- AbcLogReference.tsx deep-links here via
+  // ?tab=incidents&logId=..., and that's an internal identifier, not
+  // user-facing copy.
+  { key: "incidents", label: "ABC Logs" },
   { key: "incidentLog", label: "Incident Log" },
   { key: "clinicalTeam", label: "Clinical Team" },
   { key: "fba", label: "FBA" },

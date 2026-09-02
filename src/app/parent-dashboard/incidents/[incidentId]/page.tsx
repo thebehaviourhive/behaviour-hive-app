@@ -57,6 +57,8 @@ interface RestrictivePracticeRow {
 
 interface ParentIncidentDetail {
   incident_id: string;
+  // Migration 0152 -- needed to call acknowledge_incident().
+  incident_children_id: string;
   occurred_at: string;
   recorded_at: string;
   location: string;
@@ -69,6 +71,7 @@ interface ParentIncidentDetail {
   parent_call_required: boolean | null;
   parent_called_at: string | null;
   parent_notified_at: string | null;
+  parent_acknowledged_at: string | null;
   teacher_signed_at: string | null;
   countersigned_at: string | null;
   injuries: InjuryRow[];
@@ -94,6 +97,8 @@ export default function ParentIncidentDetailPage() {
   const [incident, setIncident] = useState<ParentIncidentDetail | null>(null);
   const [isLoadingIncident, setIsLoadingIncident] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [isAcknowledging, setIsAcknowledging] = useState(false);
+  const [acknowledgeError, setAcknowledgeError] = useState<string | null>(null);
 
   useEffect(() => {
     if (isLoadingPassport) return;
@@ -128,6 +133,22 @@ export default function ParentIncidentDetailPage() {
 
   const isLoading = isLoadingPassport || isLoadingIncident;
   const effectiveLoadError = passportLoadFailed ? "Couldn't load this incident." : loadError;
+
+  async function handleAcknowledge() {
+    if (!incident) return;
+    setIsAcknowledging(true);
+    setAcknowledgeError(null);
+    const supabase = createClient();
+    const { error } = await supabase.rpc("acknowledge_incident", {
+      p_incident_children_id: incident.incident_children_id,
+    });
+    setIsAcknowledging(false);
+    if (error) {
+      setAcknowledgeError(error.message);
+      return;
+    }
+    setIncident((prev) => (prev ? { ...prev, parent_acknowledged_at: new Date().toISOString() } : prev));
+  }
 
   if (!isReady) {
     return null;
@@ -259,6 +280,40 @@ export default function ParentIncidentDetailPage() {
                 )}
               </div>
             )}
+
+            {/* Acknowledge -- a parent's own record of having seen this,
+                distinct from "we sent a notice" / "we telephoned you"
+                above. Only reachable once this page can render the
+                incident at all, which already means teacher_signed_at
+                is set -- acknowledge_incident()'s own gate, so there's
+                no separate check needed here for "the full account,
+                not just the stamp". */}
+            <div className="rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
+              {incident.parent_acknowledged_at ? (
+                <p className="text-sm text-brand-neutral-black/70">
+                  You acknowledged this {formatDateTime(incident.parent_acknowledged_at)}.
+                </p>
+              ) : (
+                <>
+                  <p className="mb-3 text-sm text-brand-neutral-black/70">
+                    Let the school know you&apos;ve seen this record.
+                  </p>
+                  {acknowledgeError && (
+                    <p role="alert" className="mb-2 text-sm font-medium text-brand-golden-brown">
+                      {acknowledgeError}
+                    </p>
+                  )}
+                  <button
+                    type="button"
+                    onClick={handleAcknowledge}
+                    disabled={isAcknowledging}
+                    className="w-full rounded-xl bg-brand-prussian-blue py-2.5 text-center text-sm font-semibold text-white disabled:opacity-50"
+                  >
+                    {isAcknowledging ? "Acknowledging…" : "I've seen this"}
+                  </button>
+                </>
+              )}
+            </div>
           </div>
         )}
       </main>

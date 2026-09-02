@@ -17,6 +17,9 @@ interface ClinicianActivityEntry {
   event_description: string;
   created_at: string;
   child_name: string;
+  passport_id: string;
+  // Migration 0152 -- non-null only on event_type "incident".
+  incident_id: string | null;
 }
 
 function groupByDate(entries: ClinicianActivityEntry[]) {
@@ -159,6 +162,12 @@ export default function ClinicianActivityPage() {
                         event_description: `${entry.child_name}: ${entry.event_description}`,
                         created_at: entry.created_at,
                       }}
+                      // No standalone incident detail route on this
+                      // track -- the real destination is the Clinical
+                      // File's own "Incident Log" tab (key stays
+                      // "incidentLog", unchanged by the "Incidents" ->
+                      // "ABC Logs" rename on the OTHER tab).
+                      href={entry.incident_id ? `/clinician/passport/${entry.passport_id}?tab=incidentLog` : undefined}
                     />
                   ))}
                 </div>

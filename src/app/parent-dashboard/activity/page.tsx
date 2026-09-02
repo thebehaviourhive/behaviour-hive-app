@@ -56,13 +56,17 @@ export default function ActivityPage() {
     setIsLoadingActivity(true);
     setLoadError(null);
 
+    // Migration 0152 -- get_parent_activity_feed() UNIONs activity_log
+    // with incidents (occurred_at ordering, same gate get_parent_
+    // incidents() already uses), real LIMIT/OFFSET over the combined
+    // set so pagination stays correct across both sources -- was a raw
+    // .from("activity_log") query before this.
     const supabase = createClient();
-    const { data, error: activityError } = await supabase
-      .from("activity_log")
-      .select("id, event_type, event_description, created_at")
-      .eq("passport_id", passportId)
-      .order("created_at", { ascending: false })
-      .range(0, PAGE_SIZE - 1);
+    const { data, error: activityError } = await supabase.rpc("get_parent_activity_feed", {
+      p_passport_id: passportId,
+      p_limit: PAGE_SIZE,
+      p_offset: 0,
+    });
 
     if (activityError) {
       console.error("Failed to load activity log:", activityError);
@@ -95,12 +99,11 @@ export default function ActivityPage() {
     setLoadMoreError(null);
 
     const supabase = createClient();
-    const { data, error } = await supabase
-      .from("activity_log")
-      .select("id, event_type, event_description, created_at")
-      .eq("passport_id", passportId)
-      .order("created_at", { ascending: false })
-      .range(entries.length, entries.length + PAGE_SIZE - 1);
+    const { data, error } = await supabase.rpc("get_parent_activity_feed", {
+      p_passport_id: passportId,
+      p_limit: PAGE_SIZE,
+      p_offset: entries.length,
+    });
 
     if (error) {
       console.error("Failed to load more activity:", error);
@@ -161,7 +164,11 @@ export default function ActivityPage() {
                 </h2>
                 <div className="rounded-2xl bg-white p-4 shadow-sm">
                   {group.entries.map((entry) => (
-                    <ActivityRow key={entry.id} entry={entry} />
+                    <ActivityRow
+                      key={entry.id}
+                      entry={entry}
+                      href={entry.incident_id ? `/parent-dashboard/incidents/${entry.incident_id}` : undefined}
+                    />
                   ))}
                 </div>
               </section>

@@ -19,13 +19,17 @@ export function RecentUpdatesCard({ passportId }: { passportId: string | null })
   const load = useCallback(async () => {
     if (!passportId) return;
     setError(null);
+    // Migration 0152 -- same interleaved feed the full activity page
+    // reads, so this preview matches what "View all activity" leads
+    // to. Rows are NOT individually linked here (unlike the full page)
+    // -- this whole card is already one outer Link, and nesting a
+    // second <a> per incident row inside it is invalid HTML.
     const supabase = createClient();
-    const { data, error: fetchError } = await supabase
-      .from("activity_log")
-      .select("id, event_type, event_description, created_at")
-      .eq("passport_id", passportId)
-      .order("created_at", { ascending: false })
-      .limit(3);
+    const { data, error: fetchError } = await supabase.rpc("get_parent_activity_feed", {
+      p_passport_id: passportId,
+      p_limit: 3,
+      p_offset: 0,
+    });
 
     if (fetchError) {
       console.error("Failed to load recent activity:", fetchError);

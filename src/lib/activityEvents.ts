@@ -1,5 +1,6 @@
 import { differenceInHours, differenceInMinutes, format } from "date-fns";
 import {
+  AlertTriangleIcon,
   BellIcon,
   CheckIcon,
   ClinicalFileIcon,
@@ -26,13 +27,23 @@ export type ActivityEventType =
   | "clinical_content_added"
   | "questionnaire_sent"
   | "questionnaire_completed"
-  | "calm_escalation";
+  | "calm_escalation"
+  // Migration 0152 -- incidents interleaved into the parent, teacher,
+  // and clinician activity feeds (never activity_log itself; a
+  // synthetic event_type produced by the feed RPCs' own UNION). Not
+  // principal, not SNA -- see that migration's own header for why both
+  // are parked, not just not-yet-built.
+  | "incident";
 
 export interface ActivityLogEntry {
   id: string;
   event_type: ActivityEventType;
   event_description: string;
   created_at: string;
+  // Present (non-null) only on event_type "incident" -- the real
+  // incidents.id, for linking to that track's own incident detail
+  // surface. Every other event type leaves this null/undefined.
+  incident_id?: string | null;
 }
 
 export const ACTIVITY_EVENT_ICON: Record<
@@ -61,6 +72,10 @@ export const ACTIVITY_EVENT_ICON: Record<
   // NOT shown that the notice fired" applies to the ordinary feed too,
   // not just the dedicated red card (CalmEscalationNoticeList).
   calm_escalation: ClinicalFileIcon,
+  // Migration 0152 -- same icon the Incidents bottom-nav tab already
+  // uses, for visual consistency between "this is an incident" here and
+  // everywhere else it's marked that way in the app.
+  incident: AlertTriangleIcon,
 };
 
 export function formatActivityTimestamp(isoString: string): string {
