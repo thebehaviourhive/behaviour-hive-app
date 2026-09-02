@@ -301,9 +301,15 @@ export default function PrincipalIncidentsListPage() {
                 can_countersign_incident(), which is itself one of
                 can_view_incident()'s own OR-branches -- real names are
                 already one click away on every row's detail page today).
-                child_indices is untouched and still what IncidentCard
-                (below lg) and the print export read -- not extended
-                there yet, an open question, not an oversight.
+                Below lg, IncidentCard now shows the same real names too
+                (showRealNames prop) -- same screen at two widths, so a
+                principal on an iPad shouldn't see "A" while a laptop
+                shows the name. The print export still reads
+                child_indices, deliberately -- a document that leaves
+                the app is a different artefact from a screen a
+                principal scrolls; see CLAUDE.md's "REAL NAMES IN THE
+                PRINCIPAL'S PDF EXPORT" entry, open for Catherine, not
+                decided here.
                 Class and Logged By are new, and sortable -- CLAUDE.md now
                 records why this overrules PRD 4 Stage 3's old "no
                 sortable who-logged-this axis" rule: a principal seeing
@@ -414,7 +420,7 @@ export default function PrincipalIncidentsListPage() {
 
             <div className="flex flex-col gap-2 lg:hidden">
               {visibleRows.map((r) => (
-                <IncidentCard key={r.incident_id} incident={r} />
+                <IncidentCard key={r.incident_id} incident={r} showRealNames />
               ))}
             </div>
           </>

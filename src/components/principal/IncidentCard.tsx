@@ -39,13 +39,18 @@ export interface InstitutionIncidentRow {
   category: string | null;
   status: string;
   owning_teacher_name: string | null;
+  // child_indices stays the print export's own source (Daniel's own
+  // call: that document leaves the app -- printed, filed, emailed, put
+  // in front of a board -- a materially different artefact from a
+  // screen a principal scrolls, and every other export in this product
+  // still uses the anonymous code; see CLAUDE.md's "REAL NAMES IN THE
+  // PRINCIPAL'S PDF EXPORT" entry, open for Catherine). This card's own
+  // real-name rendering is opt-in via showRealNames below, used by
+  // principal/incidents only -- not principal/dashboard, a different
+  // screen this pass didn't touch.
   child_indices: string[] | null;
   // Added migration 0150 -- real names/class-at-the-time/outstanding-
-  // issues signal, for principal/incidents/page.tsx's own table only
-  // so far. child_indices (above) is untouched and still what this
-  // card and the print route read -- see that page's own header
-  // comment for why the anonymisation was safe to lift there but
-  // hasn't been extended here yet.
+  // issues signal.
   child_names: string[] | null;
   class_names: string[] | null;
   has_blocking_issues: boolean;
@@ -87,13 +92,24 @@ function formatIncidentDateTime(value: string): string {
 export function IncidentCard({
   incident,
   needsSignoff = false,
+  // Real names, not the anonymous per-incident letter code -- opt-in,
+  // default false, so principal/dashboard's own card usage (a different
+  // screen, not part of this pass) is untouched. principal/incidents
+  // passes true: same recon as that page's own table (its header
+  // comment has the full detail) -- the RPC is principal-only and names
+  // were already reachable on each row's detail page, so the table and
+  // this card showing different things for the same list, only at a
+  // different width, was the inconsistency, not the names themselves.
+  showRealNames = false,
 }: {
   incident: InstitutionIncidentRow;
   needsSignoff?: boolean;
+  showRealNames?: boolean;
 }) {
   const planningStatuses = incident.planning_status ?? [];
   const ncseIncomplete = (incident.ncse_report_complete ?? []).some((c) => c === false);
   const childCount = (incident.child_indices ?? []).length;
+  const realNames = incident.child_names ?? [];
 
   return (
     <div
@@ -117,7 +133,10 @@ export function IncidentCard({
         </div>
 
         <p className="mt-2 text-sm text-brand-neutral-black/80">
-          {incident.location} · {childCount} child{childCount === 1 ? "" : "ren"} named
+          {incident.location} ·{" "}
+          {showRealNames && realNames.length > 0
+            ? realNames.join(", ")
+            : `${childCount} child${childCount === 1 ? "" : "ren"} named`}
           {incident.owning_teacher_name ? ` · ${incident.owning_teacher_name}` : ""}
         </p>
 
