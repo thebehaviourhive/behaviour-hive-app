@@ -224,6 +224,20 @@ export default function IncidentRecordPage() {
   const [error, setError] = useState<string | null>(null);
   const [canEdit, setCanEdit] = useState(false);
   const [isLocked, setIsLocked] = useState(false);
+  // Bug report item 2 -- SignOffCard's own onSignedOff used to call
+  // window.location.reload(), a genuine full browser navigation. This
+  // codebase already has one documented case (CLAUDE.md, "verification
+  // environment") of Next.js's client Router Cache serving a stale
+  // payload for the SAME route across a hard reload in the SAME tab --
+  // sign-off changes what this exact URL renders (locked vs unlocked,
+  // several conditionally-rendered sections), so a stale/mismatched
+  // payload landing here is a real, precedented risk, not a hypothetical
+  // one, and matches every symptom reported (blank screen reading as a
+  // crash, resolves on a subsequent interaction). Bumping this key
+  // re-runs the load effect below in place -- a real refetch of
+  // everything derived from teacher_signed_at, with no navigation, no
+  // unmount, and nothing for a stale cached payload to ever serve.
+  const [reloadKey, setReloadKey] = useState(0);
 
   const [summary, setSummary] = useState<StampSummary | null>(null);
   const [children, setChildren] = useState<ChildFormState[]>([]);
@@ -669,7 +683,10 @@ export default function IncidentRecordPage() {
     return () => {
       isMounted = false;
     };
-  }, [user, params.incidentId]);
+    // reloadKey is intentionally in this array despite never being read
+    // in the body -- bumping it is the only reason to re-run this
+    // effect from scratch (see its own declaration for why).
+  }, [user, params.incidentId, reloadKey]);
 
   if (!isReady) {
     return null;
@@ -2436,7 +2453,10 @@ export default function IncidentRecordPage() {
             )}
 
             {!isLocked && owningTeacherId === user?.id && (
-              <SignOffCard incidentId={params.incidentId as string} onSignedOff={() => window.location.reload()} />
+              <SignOffCard
+                incidentId={params.incidentId as string}
+                onSignedOff={() => setReloadKey((k) => k + 1)}
+              />
             )}
 
             {/* Attestation is a DIFFERENT population from sign-off -- any
@@ -2473,7 +2493,7 @@ export default function IncidentRecordPage() {
                 <CountersignCard
                   incidentId={params.incidentId as string}
                   userId={user.id}
-                  onCountersigned={() => window.location.reload()}
+                  onCountersigned={() => setReloadKey((k) => k + 1)}
                 />
               )}
             </div>
