@@ -268,11 +268,21 @@ export default function IncidentRecordPage() {
   const [anyoneInjured, setAnyoneInjured] = useState<boolean | null>(null);
   const [anyoneInjuredSaveError, setAnyoneInjuredSaveError] = useState<string | null>(null);
   // Migration 0153 -- "Was the Support Button pressed?" A plain
-  // boolean on the incident itself, not a link to a specific
-  // support_alerts row -- the ask was a yes/no record on the incident,
-  // not a structured cross-reference.
+  // boolean on the incident itself. Migration 0156 added an optional
+  // support_alert_id alongside it -- item 7 needs to know WHICH alert
+  // an incident is about (a boolean can't disambiguate once two alerts
+  // are open at once, not hypothetical on a bad afternoon), so this is
+  // no longer "not a structured cross-reference" -- it can be one, when
+  // a matching alert exists to link.
   const [supportButtonPressed, setSupportButtonPressed] = useState<boolean>(false);
   const [supportButtonSaveError, setSupportButtonSaveError] = useState<string | null>(null);
+  const [supportAlertId, setSupportAlertId] = useState<string | null>(null);
+  const [supportAlertSaveError, setSupportAlertSaveError] = useState<string | null>(null);
+  const [candidateSupportAlerts, setCandidateSupportAlerts] = useState<
+    { id: string; room_names: string[]; raised_at: string }[] | null
+  >(null);
+  const [isLoadingCandidateAlerts, setIsLoadingCandidateAlerts] = useState(false);
+  const [institutionId, setInstitutionId] = useState<string | null>(null);
   const [parentCallSaveError, setParentCallSaveError] = useState<string | null>(null);
   const [markingCalledChildId, setMarkingCalledChildId] = useState<string | null>(null);
   // Institution staff roster name lookup -- built once during load
@@ -334,7 +344,7 @@ export default function IncidentRecordPage() {
       const { data: incident, error: incidentError } = await supabase
         .from("incidents")
         .select(
-          "institution_id, created_by, owning_teacher_id, teacher_signed_at, occurred_at, incident_locations(value), category, party, party_other, item_involved, narrative, parent_summary, staff_count_needed, staff_distressed, risk_reduction_future, other_information, debrief_required, anyone_injured, attestations_requested, support_button_pressed"
+          "institution_id, created_by, owning_teacher_id, teacher_signed_at, occurred_at, incident_locations(value), category, party, party_other, item_involved, narrative, parent_summary, staff_count_needed, staff_distressed, risk_reduction_future, other_information, debrief_required, anyone_injured, attestations_requested, support_button_pressed, support_alert_id"
         )
         .eq("id", params.incidentId)
         .maybeSingle();
@@ -586,6 +596,43 @@ export default function IncidentRecordPage() {
       setRiskReductionFuture(incident.risk_reduction_future ?? "");
       setOtherInformation(incident.other_information ?? "");
       setSupportButtonPressed(Boolean(incident.support_button_pressed));
+      setSupportAlertId(incident.support_alert_id ?? null);
+      setInstitutionId(incident.institution_id ?? null);
+
+      // Existing incident, already "yes" but never linked -- offer
+      // candidates on load too, not only on a fresh toggle (setSupport
+      // ButtonPressedAndSave's own fetch only fires for a change made
+      // this session).
+      if (incident.support_button_pressed && !incident.support_alert_id && incident.institution_id) {
+        setIsLoadingCandidateAlerts(true);
+        supabase
+          .from("support_alerts")
+          .select("id, room_names, raised_at")
+          .eq("institution_id", incident.institution_id)
+          .order("raised_at", { ascending: false })
+          .limit(10)
+          .then(({ data, error }) => {
+            if (!isMounted) return;
+            setIsLoadingCandidateAlerts(false);
+            if (!error) setCandidateSupportAlerts(data ?? []);
+          });
+      }
+
+      // Already linked from a previous session -- fetch just that one
+      // alert's room/time so the "Linked to..." line can say more than
+      // "a Support Button alert" (candidateSupportAlerts otherwise stays
+      // empty, since the fetch above only runs for the unlinked case).
+      if (incident.support_alert_id) {
+        supabase
+          .from("support_alerts")
+          .select("id, room_names, raised_at")
+          .eq("id", incident.support_alert_id)
+          .maybeSingle()
+          .then(({ data, error }) => {
+            if (!isMounted || error || !data) return;
+            setCandidateSupportAlerts((prev) => (prev ? prev : [data]));
+          });
+      }
 
       setIsLocked(Boolean(incident.teacher_signed_at));
       setCanEdit(
@@ -934,15 +981,59 @@ export default function IncidentRecordPage() {
     setSupportButtonPressed(value);
     setSupportButtonSaveError(null);
 
+    // Flipping back to "no" also clears any linked alert -- the check
+    // constraint (0156) refuses support_alert_id set alongside
+    // support_button_pressed = false, and a "no" answer shouldn't leave
+    // a stale link sitting underneath it.
+    const previousAlertId = supportAlertId;
+    if (!value) setSupportAlertId(null);
+
     const supabase = createClient();
     const { error: updateError } = await supabase
       .from("incidents")
-      .update({ support_button_pressed: value })
+      .update({ support_button_pressed: value, ...(value ? {} : { support_alert_id: null }) })
       .eq("id", params.incidentId);
 
     if (updateError) {
       setSupportButtonPressed(previous);
+      setSupportAlertId(previousAlertId);
       setSupportButtonSaveError(updateError.message);
+      return;
+    }
+
+    // Yes, and nothing linked yet -- offer candidate alerts to link.
+    // Migration 0153's own RLS on support_alerts already scopes this to
+    // the caller's own institution; no institution filter needed beyond
+    // eq() below since RLS enforces it anyway, but it's included for an
+    // index-friendly query, matching support_alerts_open_idx's own
+    // (institution_id) shape.
+    if (value && !previousAlertId && institutionId) {
+      setIsLoadingCandidateAlerts(true);
+      const { data, error } = await supabase
+        .from("support_alerts")
+        .select("id, room_names, raised_at")
+        .eq("institution_id", institutionId)
+        .order("raised_at", { ascending: false })
+        .limit(10);
+      setIsLoadingCandidateAlerts(false);
+      if (!error) setCandidateSupportAlerts(data ?? []);
+    }
+  }
+
+  async function setSupportAlertIdAndSave(alertId: string | null) {
+    const previous = supportAlertId;
+    setSupportAlertId(alertId);
+    setSupportAlertSaveError(null);
+
+    const supabase = createClient();
+    const { error: updateError } = await supabase
+      .from("incidents")
+      .update({ support_alert_id: alertId })
+      .eq("id", params.incidentId);
+
+    if (updateError) {
+      setSupportAlertId(previous);
+      setSupportAlertSaveError(updateError.message);
     }
   }
 
@@ -1835,6 +1926,80 @@ export default function IncidentRecordPage() {
                     </p>
                   )}
                 </div>
+
+                {/* Migration 0156, item 7's own dependency -- which
+                    specific alert this incident is about, so the
+                    principal's outstanding-actions bucket can auto-
+                    satisfy follow-up when this incident references it.
+                    Only offered once "yes" is answered; a genuine "yes,
+                    but I don't know/can't find which alert" is left
+                    unlinked rather than forced -- support_alert_id stays
+                    nullable for exactly that case. */}
+                {supportButtonPressed && (
+                  <div className="mb-3">
+                    {supportAlertId ? (
+                      <div className="flex items-center justify-between gap-3 rounded-xl border border-brand-support-red/30 bg-brand-support-red/5 px-3 py-2">
+                        <p className="font-sans text-sm text-brand-neutral-black">
+                          {(() => {
+                            const linked = candidateSupportAlerts?.find((a) => a.id === supportAlertId);
+                            if (!linked) return "Linked to a Support Button alert.";
+                            const room = linked.room_names.length > 0 ? linked.room_names.join(", ") : "no room named";
+                            const time = new Date(linked.raised_at).toLocaleTimeString([], {
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            });
+                            return `Linked to the alert raised at ${time} - ${room}`;
+                          })()}
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => setSupportAlertIdAndSave(null)}
+                          className="flex-shrink-0 font-sans text-sm font-semibold text-brand-prussian-blue"
+                        >
+                          Unlink
+                        </button>
+                      </div>
+                    ) : (
+                      <>
+                        <span className="mb-2 block text-sm font-semibold text-brand-neutral-black">
+                          Which alert? (optional)
+                        </span>
+                        {isLoadingCandidateAlerts ? (
+                          <p className="text-sm text-brand-neutral-black/60">Loading recent alerts…</p>
+                        ) : candidateSupportAlerts && candidateSupportAlerts.length > 0 ? (
+                          <div className="flex flex-col gap-2">
+                            {candidateSupportAlerts.map((alert) => {
+                              const room = alert.room_names.length > 0 ? alert.room_names.join(", ") : "No room named";
+                              const time = new Date(alert.raised_at).toLocaleTimeString([], {
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              });
+                              return (
+                                <button
+                                  key={alert.id}
+                                  type="button"
+                                  onClick={() => setSupportAlertIdAndSave(alert.id)}
+                                  className="rounded-xl border border-black/10 bg-white px-3 py-2 text-left font-sans text-sm text-brand-neutral-black"
+                                >
+                                  {time} - {room}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <p className="text-sm text-brand-neutral-black/60">
+                            No recent Support Button alerts found to link.
+                          </p>
+                        )}
+                        {supportAlertSaveError && (
+                          <p role="alert" className="mt-2 text-sm font-medium text-red-600">
+                            {supportAlertSaveError}
+                          </p>
+                        )}
+                      </>
+                    )}
+                  </div>
+                )}
               </section>
 
               <section>

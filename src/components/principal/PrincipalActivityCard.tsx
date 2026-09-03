@@ -8,29 +8,31 @@ import { ActivityRow, ActivityRowSkeleton } from "@/components/parent/ActivityRo
 import { InlineErrorState } from "@/components/ui/InlineErrorState";
 import type { ActivityEventType } from "@/lib/activityEvents";
 
-interface ClinicianActivityEntry {
+interface PrincipalActivityEntry {
   id: string;
   event_type: ActivityEventType;
   event_description: string;
   created_at: string;
-  child_name: string;
 }
 
-export function ClinicianActivityCard() {
+// Migration 0158, Support Button item 6's dashboard preview. Same
+// "3 rows, link to the full page" shape as TeacherActivityCard/
+// ClinicianActivityCard.
+export function PrincipalActivityCard() {
   const fetchPage = useCallback(async (limit: number, offset: number) => {
     const supabase = createClient();
-    return supabase.rpc("get_clinician_activity_feed", { p_limit: limit, p_offset: offset });
+    return supabase.rpc("get_principal_activity_feed", { p_limit: limit, p_offset: offset });
   }, []);
 
-  const { entries, isLoading, loadError, load } = useActivityFeed<ClinicianActivityEntry>({
+  const { entries, isLoading, loadError, load } = useActivityFeed<PrincipalActivityEntry>({
     fetchPage,
     pageSize: 3,
   });
 
   return (
     <Link
-      href="/clinician/activity"
-      className="mb-6 block rounded-2xl border border-brand-off-white/50 bg-white p-5 shadow-sm"
+      href="/principal/activity"
+      className="mx-4 mb-6 block rounded-2xl border border-brand-off-white bg-white p-5 shadow-sm"
     >
       <h2 className="mb-4 font-heading text-xl font-bold text-brand-prussian-blue">
         Recent Activity
@@ -54,7 +56,7 @@ export function ClinicianActivityCard() {
       ) : entries.length === 0 ? (
         <div className="rounded-xl border-2 border-dashed border-brand-pastel-blue bg-brand-off-white/30 p-4 text-center">
           <p className="font-sans text-sm text-brand-neutral-black/70">
-            Activity across your connected cases will appear here.
+            Institutional activity -- like Support Button alerts -- will appear here.
           </p>
         </div>
       ) : (
@@ -64,14 +66,14 @@ export function ClinicianActivityCard() {
             entry={{
               id: entry.id,
               event_type: entry.event_type,
-              event_description: `${entry.child_name}: ${entry.event_description}`,
+              event_description: entry.event_description,
               created_at: entry.created_at,
             }}
           />
         ))
       )}
 
-      <span className="mt-2 block w-full border-t border-brand-off-white/50 pt-2 text-center font-sans text-sm font-bold text-brand-prussian-blue">
+      <span className="mt-2 block w-full border-t border-brand-off-white pt-2 text-center font-sans text-sm font-bold text-brand-prussian-blue">
         View all activity
       </span>
     </Link>

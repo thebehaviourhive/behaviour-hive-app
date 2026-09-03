@@ -9,6 +9,8 @@ import { AlertTriangleIcon, CheckIcon } from "@/components/ui/icons";
 import { AttestationPromptCard } from "@/components/incident-log/AttestationPromptCard";
 import { PrincipalBottomNav } from "@/components/principal/PrincipalBottomNav";
 import { ReviewStaffJoinSheet } from "@/components/principal/ReviewStaffJoinSheet";
+import { MarkSupportAlertFollowedUpSheet } from "@/components/principal/MarkSupportAlertFollowedUpSheet";
+import { PrincipalActivityCard } from "@/components/principal/PrincipalActivityCard";
 import { IncidentCard, type InstitutionIncidentRow } from "@/components/principal/IncidentCard";
 import { WorkQueueRow } from "@/components/shared/WorkQueueRow";
 import { formatWaitingSince } from "@/lib/workQueueFormatting";
@@ -123,6 +125,20 @@ interface StaffRosterRow {
   is_pending: boolean;
 }
 
+// Migration 0157, Support Button item 7 -- the ninth bucket (PRD 3
+// Stage 3 already made this dashboard's eight, per that page's own
+// header comment; this correction is worth restating here so the count
+// doesn't quietly drift again). Only closed, non-mistap, not-yet-
+// followed-up alerts with no non-draft incident already referencing
+// them -- see get_institution_outstanding_support_alerts()'s own header
+// for why open and cancelled alerts never reach this bucket at all.
+interface OutstandingSupportAlertRow {
+  id: string;
+  raised_by_name: string | null;
+  room_names: string[];
+  raised_at: string;
+}
+
 function childCountLabel(childIndices: string[] | null): string {
   const count = (childIndices ?? []).length;
   return `${count} child${count === 1 ? "" : "ren"} named`;
@@ -139,9 +155,11 @@ export default function PrincipalDashboardPage() {
   const [withdrawnAttestations, setWithdrawnAttestations] = useState<WithdrawnAttestationRow[]>([]);
   const [unassignedChildren, setUnassignedChildren] = useState<ChildRosterRow[]>([]);
   const [passportCompletionsOutstanding, setPassportCompletionsOutstanding] = useState<PassportCompletionOutstandingRow[]>([]);
+  const [outstandingSupportAlerts, setOutstandingSupportAlerts] = useState<OutstandingSupportAlertRow[]>([]);
   const [markingCalledId, setMarkingCalledId] = useState<string | null>(null);
   const [markCalledError, setMarkCalledError] = useState<string | null>(null);
   const [reviewTarget, setReviewTarget] = useState<StaffRosterRow | null>(null);
+  const [followUpTarget, setFollowUpTarget] = useState<OutstandingSupportAlertRow | null>(null);
   const router = useRouter();
 
   const load = useCallback(async () => {
@@ -210,6 +228,7 @@ export default function PrincipalDashboardPage() {
       withdrawnAttestationResult,
       childRosterResult,
       passportCompletionsResult,
+      outstandingSupportAlertsResult,
     ] = await Promise.all([
       supabase.rpc("get_institution_incidents", { p_institution_id: staffRow.institution_id }),
       supabase.rpc("get_institution_staff_roster", {
@@ -221,6 +240,7 @@ export default function PrincipalDashboardPage() {
       supabase.rpc("get_institution_withdrawn_attestations", { p_institution_id: staffRow.institution_id }),
       supabase.rpc("get_institution_child_roster", { p_institution_id: staffRow.institution_id }),
       supabase.rpc("get_institution_passport_completions_outstanding", { p_institution_id: staffRow.institution_id }),
+      supabase.rpc("get_institution_outstanding_support_alerts", { p_institution_id: staffRow.institution_id }),
     ]);
 
     if (rpcError) {
@@ -247,6 +267,9 @@ export default function PrincipalDashboardPage() {
     }
     if (!passportCompletionsResult.error) {
       setPassportCompletionsOutstanding((passportCompletionsResult.data ?? []) as PassportCompletionOutstandingRow[]);
+    }
+    if (!outstandingSupportAlertsResult.error) {
+      setOutstandingSupportAlerts((outstandingSupportAlertsResult.data ?? []) as OutstandingSupportAlertRow[]);
     }
 
     setIncidents((rows ?? []) as InstitutionIncidentRow[]);
@@ -294,7 +317,8 @@ export default function PrincipalDashboardPage() {
   const outstandingDebriefs = incidents.filter((i) => i.debrief_required && !i.teacher_signed_at);
   const inherited = incidents.filter((i) => i.is_inherited);
 
-  const needsActionCount = parentCalls.length + withdrawnAttestations.length + inherited.length;
+  const needsActionCount =
+    parentCalls.length + withdrawnAttestations.length + inherited.length + outstandingSupportAlerts.length;
   const routineCount =
     awaitingSignoff.length +
     pendingStaff.length +
@@ -425,6 +449,20 @@ export default function PrincipalDashboardPage() {
                       href={`/teacher/incidents/${incident.incident_id}`}
                     />
                   ))}
+                  {outstandingSupportAlerts.map((alert) => (
+                    <WorkQueueRow
+                      key={alert.id}
+                      urgent
+                      entity={alert.raised_by_name ?? "A staff member"}
+                      exception={`Alert triggered at ${new Date(alert.raised_at).toLocaleTimeString([], {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}${alert.room_names.length > 0 ? ` - ${alert.room_names.join(", ")}` : ""}`}
+                      context={formatWaitingSince(alert.raised_at)}
+                      actionLabel="Mark Followed Up"
+                      onAction={() => setFollowUpTarget(alert)}
+                    />
+                  ))}
                   {markCalledError && (
                     <p role="alert" className="font-sans text-eyebrow font-medium text-brand-golden-brown">
                       {markCalledError}
@@ -518,6 +556,13 @@ export default function PrincipalDashboardPage() {
         )}
       </main>
 
+      {/* Migration 0158, item 6 -- institutional/operational activity,
+          support alerts only so far. Same "3 rows, link to the full
+          page" preview shape as the teacher/clinician dashboards' own
+          cards, placed at the same point in the page (after the work
+          queue, before the nav) for consistency. */}
+      {!isLoading && !error && <PrincipalActivityCard />}
+
       {reviewTarget && (
         <ReviewStaffJoinSheet
           member={reviewTarget}
@@ -525,6 +570,18 @@ export default function PrincipalDashboardPage() {
           onClose={() => setReviewTarget(null)}
           onResolved={() => {
             setReviewTarget(null);
+            load();
+          }}
+        />
+      )}
+
+      {followUpTarget && (
+        <MarkSupportAlertFollowedUpSheet
+          alert={followUpTarget}
+          isOpen={Boolean(followUpTarget)}
+          onClose={() => setFollowUpTarget(null)}
+          onResolved={() => {
+            setFollowUpTarget(null);
             load();
           }}
         />

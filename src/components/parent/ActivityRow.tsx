@@ -11,15 +11,24 @@ import {
 // incident detail surface (a different URL shape per track, so the
 // CALLER computes href, not this component). Non-incident rows pass no
 // href and render exactly as before -- a plain div, not a Link.
+// Migration 0155 -- a third accent, for support_alert rows: the
+// Support Button's own red token, distinct from both the incident
+// accent (Golden Brown) and the ordinary pastel-blue default. Never the
+// same colour as "attestation outstanding" for the one event type that
+// isn't paperwork.
+const ICON_ACCENT_CLASS: Partial<Record<string, string>> = {
+  incident: "bg-brand-golden-brown/20 text-brand-golden-brown",
+  support_alert: "bg-brand-support-red/20 text-brand-support-red",
+};
+
 export function ActivityRow({ entry, href }: { entry: ActivityLogEntry; href?: string }) {
   const Icon = ACTIVITY_EVENT_ICON[entry.event_type];
-  const isIncident = entry.event_type === "incident";
 
   const content: ReactNode = (
     <>
       <span
         className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full p-2 ${
-          isIncident ? "bg-brand-golden-brown/20 text-brand-golden-brown" : "bg-brand-pastel-blue/20 text-brand-prussian-blue"
+          ICON_ACCENT_CLASS[entry.event_type] ?? "bg-brand-pastel-blue/20 text-brand-prussian-blue"
         }`}
       >
         <Icon className="h-full w-full" />

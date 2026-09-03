@@ -3,11 +3,20 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 
-// Support Button, nav rework -- the poll loop. Every 20-30s while the
-// nav is mounted (which is everywhere except /calm's own full-screen
-// flow), backed by get_my_support_alert_status() (0154), a single-row
+// Support Button, nav rework -- the poll loop. Every 5s while the nav
+// is mounted (which is everywhere except /calm's own full-screen flow),
+// backed by get_my_support_alert_status() (0154), a single-row
 // purpose-built RPC riding the existing partial index -- close to free
 // when nothing is open, which is the overwhelmingly common case.
+//
+// 5s, not 20-30s: Daniel's own correction -- this is the one feature
+// where a delay IS the cost. "Support Requested" is a summons, not a
+// notification; a teacher who needs a room full of adults doesn't
+// benefit from an alert arriving 25 seconds late. At 5s, a trial
+// school of 15-30 staff polling simultaneously is 3-6 requests/second
+// peak (versus ~0.6-1.2/s at 25s) -- five times the traffic, still
+// trivial against a partial index that's empty the overwhelming
+// majority of the time.
 //
 // visibilitychange PAUSES the interval while hidden and re-polls
 // immediately on return, rather than inventing a new pattern --
@@ -17,7 +26,7 @@ import { createClient } from "@/lib/supabase/client";
 // phone-locked/app-closed gap -- nothing can, without real push -- it
 // only means the state is correct the instant someone looks, instead
 // of stale by up to a poll interval.
-const POLL_INTERVAL_MS = 25000;
+const POLL_INTERVAL_MS = 5000;
 
 export interface SupportAlertStatus {
   alertId: string;

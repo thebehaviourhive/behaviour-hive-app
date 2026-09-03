@@ -11,27 +11,36 @@ import type { ActivityEventType } from "@/lib/activityEvents";
 
 const PAGE_SIZE = 20;
 
-interface ClinicianActivityEntry {
+// Migration 0158, Support Button item 6. Institutional/operational
+// events only -- not whole-school-per-child (that's the teacher's own
+// job, and would break the privacy posture the incident work-queue
+// buckets already hold), not narrowly self-only (too thin to mean
+// anything for a role that isn't a participant in most school events
+// the way a parent or teacher is). Support alerts are the first, and
+// only, event type this feed carries so far -- see that migration's own
+// header for what's deliberately not built yet.
+//
+// Row shape is leaner than the teacher/clinician/parent feeds
+// (id/event_type/event_description/created_at only) -- no passport_id/
+// child_name/incident_id, because nothing in this feed is ever
+// per-child.
+interface PrincipalActivityEntry {
   id: string;
   event_type: ActivityEventType;
   event_description: string;
   created_at: string;
-  child_name: string;
-  passport_id: string;
-  // Migration 0152 -- non-null only on event_type "incident".
-  incident_id: string | null;
 }
 
-export default function ClinicianActivityPage() {
-  const { isReady } = useRequireRole("clinician");
+export default function PrincipalActivityPage() {
+  const { isReady } = useRequireRole("principal");
 
   const fetchPage = useCallback(async (limit: number, offset: number) => {
     const supabase = createClient();
-    return supabase.rpc("get_clinician_activity_feed", { p_limit: limit, p_offset: offset });
+    return supabase.rpc("get_principal_activity_feed", { p_limit: limit, p_offset: offset });
   }, []);
 
   const { groups, isLoading, isLoadingMore, hasMore, loadError, loadMoreError, load, loadMore } =
-    useActivityFeed<ClinicianActivityEntry>({ fetchPage, pageSize: PAGE_SIZE, enabled: isReady });
+    useActivityFeed<PrincipalActivityEntry>({ fetchPage, pageSize: PAGE_SIZE, enabled: isReady });
 
   if (!isReady) {
     return null;
@@ -41,15 +50,13 @@ export default function ClinicianActivityPage() {
     <div className="flex min-h-full flex-1 flex-col bg-brand-off-white/40">
       <header className="flex items-center gap-3 px-4 pt-6 pb-4">
         <Link
-          href="/clinician/dashboard"
+          href="/principal/dashboard"
           aria-label="Back"
           className="flex h-8 w-8 flex-shrink-0 items-center justify-center text-2xl leading-none text-brand-prussian-blue"
         >
           ‹
         </Link>
-        <h1 className="font-heading text-xl font-bold text-brand-prussian-blue">
-          Activity
-        </h1>
+        <h1 className="font-heading text-xl font-bold text-brand-prussian-blue">Activity</h1>
       </header>
 
       <main className="flex-1 px-4 pb-10">
@@ -64,7 +71,7 @@ export default function ClinicianActivityPage() {
         ) : groups.length === 0 ? (
           <div className="rounded-xl border-2 border-dashed border-brand-pastel-blue bg-white/60 p-6 text-center">
             <p className="font-sans text-sm text-brand-neutral-black/70">
-              Activity across your connected cases will appear here.
+              Institutional activity -- like Support Button alerts -- will appear here.
             </p>
           </div>
         ) : (
@@ -81,15 +88,9 @@ export default function ClinicianActivityPage() {
                       entry={{
                         id: entry.id,
                         event_type: entry.event_type,
-                        event_description: `${entry.child_name}: ${entry.event_description}`,
+                        event_description: entry.event_description,
                         created_at: entry.created_at,
                       }}
-                      // No standalone incident detail route on this
-                      // track -- the real destination is the Clinical
-                      // File's own "Incident Log" tab (key stays
-                      // "incidentLog", unchanged by the "Incidents" ->
-                      // "ABC Logs" rename on the OTHER tab).
-                      href={entry.incident_id ? `/clinician/passport/${entry.passport_id}?tab=incidentLog` : undefined}
                     />
                   ))}
                 </div>

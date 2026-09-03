@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { useActivityFeed } from "@/hooks/useActivityFeed";
 import { ActivityRow, ActivityRowSkeleton } from "@/components/parent/ActivityRow";
 import { InlineErrorState } from "@/components/ui/InlineErrorState";
 import { getChildDisplayName } from "@/lib/childDisplayName";
@@ -13,40 +14,21 @@ interface TeacherActivityEntry {
   event_type: ActivityEventType;
   event_description: string;
   created_at: string;
-  child_name: string;
+  // Migration 0155 -- null on support_alert rows (institution-wide,
+  // not per-child).
+  child_name: string | null;
 }
 
 export function TeacherActivityCard() {
-  const [entries, setEntries] = useState<TeacherActivityEntry[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const load = useCallback(async () => {
-    setError(null);
+  const fetchPage = useCallback(async (limit: number, offset: number) => {
     const supabase = createClient();
-    const { data, error: fetchError } = await supabase.rpc("get_teacher_activity_feed", {
-      p_limit: 3,
-      p_offset: 0,
-    });
-
-    if (fetchError) {
-      console.error("Failed to load teacher activity feed:", fetchError);
-      setError("Couldn't load recent activity.");
-      setIsLoading(false);
-      return;
-    }
-
-    setEntries((data ?? []) as TeacherActivityEntry[]);
-    setIsLoading(false);
+    return supabase.rpc("get_teacher_activity_feed", { p_limit: limit, p_offset: offset });
   }, []);
 
-  // Fetches on mount and whenever `load`'s identity changes -- a genuine
-  // effect for syncing with the external data source, not a synchronous
-  // state derivation.
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    load();
-  }, [load]);
+  const { entries, isLoading, loadError, load } = useActivityFeed<TeacherActivityEntry>({
+    fetchPage,
+    pageSize: 3,
+  });
 
   return (
     <Link
@@ -63,13 +45,12 @@ export function TeacherActivityCard() {
           <ActivityRowSkeleton />
           <ActivityRowSkeleton />
         </>
-      ) : error ? (
+      ) : loadError ? (
         <InlineErrorState
-          message={error}
+          message={loadError}
           onRetry={(event) => {
             event.preventDefault();
             event.stopPropagation();
-            setIsLoading(true);
             load();
           }}
         />
@@ -86,7 +67,12 @@ export function TeacherActivityCard() {
             entry={{
               id: entry.id,
               event_type: entry.event_type,
-              event_description: `${getChildDisplayName(entry.child_name)} — ${entry.event_description}`,
+              // Migration 0155 -- support_alert rows are institution-
+              // wide, not per-child (child_name null); only prefix
+              // rows that actually have one.
+              event_description: entry.child_name
+                ? `${getChildDisplayName(entry.child_name)} — ${entry.event_description}`
+                : entry.event_description,
               created_at: entry.created_at,
             }}
           />

@@ -1,4 +1,6 @@
 import { differenceInHours, differenceInMinutes, format } from "date-fns";
+import { HandHelping } from "lucide-react";
+import type { JSX } from "react";
 import {
   AlertTriangleIcon,
   BellIcon,
@@ -33,7 +35,13 @@ export type ActivityEventType =
   // synthetic event_type produced by the feed RPCs' own UNION). Not
   // principal, not SNA -- see that migration's own header for why both
   // are parked, not just not-yet-built.
-  | "incident";
+  | "incident"
+  // Migration 0155 -- Support Button presses, teacher track only for
+  // now (institution-wide audience, not per-child -- passport_id/
+  // child_name are null on these rows). Principal side deliberately
+  // not built here; depends on how that track's own activity container
+  // ends up scoped, reported separately.
+  | "support_alert";
 
 export interface ActivityLogEntry {
   id: string;
@@ -44,6 +52,14 @@ export interface ActivityLogEntry {
   // incidents.id, for linking to that track's own incident detail
   // surface. Every other event type leaves this null/undefined.
   incident_id?: string | null;
+}
+
+// Thin wrapper -- lucide-react's own component type returns ReactNode,
+// not the JSX.Element the rest of this Record's function signature
+// requires (icons.tsx's hand-drawn set all return one directly). Same
+// underlying icon, just typed to match.
+function SupportAlertIcon(props: { className?: string }): JSX.Element {
+  return <HandHelping {...props} aria-hidden />;
 }
 
 export const ACTIVITY_EVENT_ICON: Record<
@@ -76,6 +92,11 @@ export const ACTIVITY_EVENT_ICON: Record<
   // uses, for visual consistency between "this is an incident" here and
   // everywhere else it's marked that way in the app.
   incident: AlertTriangleIcon,
+  // Migration 0155 -- same icon the Support Button's own nav pill uses
+  // (useSupportButtonNavSlots.tsx), imported raw from lucide-react like
+  // that file already does -- this feature already deviates from the
+  // hand-drawn icons.tsx house style there, not a new inconsistency.
+  support_alert: SupportAlertIcon,
 };
 
 export function formatActivityTimestamp(isoString: string): string {

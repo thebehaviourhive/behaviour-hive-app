@@ -141,24 +141,29 @@ export function useSupportButtonNavSlots({
         <div className="min-w-0">
           {status.isOwn ? (
             <>
+              {/* No reach copy here -- they've already pressed it.
+                  Removed per Daniel's own instruction: it only ever
+                  belonged BEFORE the action, which for a raiser with
+                  2+ classes is the room-picker sheet (still shows it,
+                  reworded for 5s polling) -- not after. A raiser with
+                  0 or 1 classes, who never sees that sheet, now never
+                  sees this copy at all; flagged in the report rather
+                  than silently accepted. */}
               <p className="font-sans text-sm font-semibold text-white">
-                Support requested{roomSummary ? ` — ${roomSummary}` : ""}
+                Support Requested{roomSummary ? ` - ${roomSummary}` : ""}
               </p>
               <p className="font-sans text-xs text-white/80">
                 {status.acknowledgementCount} acknowledged{moreSuffix}
               </p>
-              {/* Honest, at the point of raising, for every raise --
-                  not just the multi-room picker (which shows it too,
-                  before they commit). This is the ONLY place a raiser
-                  with 0 or 1 classes ever sees it, since that path
-                  raises immediately with no interstitial step. Daniel's
-                  own requirement, whatever the polling turns out to be. */}
-              <p className="font-sans text-[11px] text-white/70">
-                Seen when staff next open or move around the app.
-              </p>
             </>
           ) : (
             <p className="font-sans text-sm font-semibold text-white">
+              {/* The name stays -- kept deliberately, not dropped.
+                  Daniel's own stated reasoning for questioning it is
+                  the reasoning for keeping it: the name is what tells
+                  a colleague whether it's their own class teacher
+                  asking, which is exactly the information they need
+                  to decide whether to go. See the report. */}
               {status.raisedByName ?? "A colleague"} needs assistance{roomSummary ? ` in ${roomSummary}` : ""}
               {moreSuffix}
             </p>
@@ -189,20 +194,39 @@ export function useSupportButtonNavSlots({
           <HandHelping aria-hidden size={24} strokeWidth={2} className="text-brand-support-red" />
           <span className="font-sans text-[10px] font-semibold leading-none text-brand-support-red">Support</span>
         </button>
-        {raiseError && (
-          <p role="alert" className="absolute bottom-full mb-1 w-40 text-center font-sans text-[10px] font-medium text-brand-support-red">
+        {/* Item 3's own honest-reach copy for a 0/1-class raiser -- they
+            never see the room-picker sheet (only 2+ classes does), which
+            is now the only OTHER place this copy survives. Without this,
+            a 0/1-class raiser would see the reach caveat nowhere at all,
+            ever. Standing text next to the control, not a confirmation
+            step -- shown every time the idle button is, for every raiser
+            regardless of class count (2+-class raisers see it twice,
+            here and in the sheet -- repetition isn't the problem the
+            original gap was). Yields to raiseError when one is present;
+            there isn't room above the button for both at once. */}
+        {raiseError ? (
+          <p role="alert" className="absolute bottom-full mb-1 w-36 text-center font-sans text-[10px] font-medium text-brand-support-red">
             {raiseError}
+          </p>
+        ) : (
+          <p className="absolute bottom-full mb-1 w-36 text-center font-sans text-[10px] leading-tight text-brand-neutral-black/50">
+            Reaches staff with the app open - not a locked phone
           </p>
         )}
 
         {isRoomPickerOpen && (
           <BottomSheet isOpen={isRoomPickerOpen} onClose={() => setIsRoomPickerOpen(false)}>
             <h2 className="font-heading text-lg font-bold text-brand-neutral-black">Which room?</h2>
-            {/* Honest, at the point of raising -- Daniel's own
-                requirement, whatever the polling turns out to be: a
-                teacher pressing this should know what it actually does. */}
+            {/* Honest, at the point of raising, before they commit --
+                the only place this copy survives now that item 3
+                removed it from the raiser's own post-raise alert
+                (2+-class raisers see it here; 0/1-class raisers, who
+                never see this sheet, now see it nowhere -- flagged in
+                the report). Reworded for 5s polling: reach is close to
+                immediate now, but "app open and unlocked" is still a
+                real, honest limit, not closed by a faster interval. */}
             <p className="mt-1 font-sans text-sm text-brand-neutral-black/60">
-              Staff will see this when they next open or move around the app.
+              Staff with the app open see this within seconds. It won&apos;t reach a locked phone or a closed app.
             </p>
             <div className="mt-4 flex flex-col gap-2">
               {myRooms.map((room) => (

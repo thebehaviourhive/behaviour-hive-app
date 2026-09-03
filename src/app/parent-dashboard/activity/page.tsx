@@ -1,38 +1,16 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
-import { format, isToday, isYesterday } from "date-fns";
+import { useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { useMyPassport } from "@/hooks/useMyPassport";
+import { useActivityFeed } from "@/hooks/useActivityFeed";
 import { ActivityRow, ActivityRowSkeleton } from "@/components/parent/ActivityRow";
 import { InlineErrorState } from "@/components/ui/InlineErrorState";
 import type { ActivityLogEntry } from "@/lib/activityEvents";
 
 const PAGE_SIZE = 20;
-
-function groupByDate(entries: ActivityLogEntry[]) {
-  const groups: { header: string; entries: ActivityLogEntry[] }[] = [];
-
-  for (const entry of entries) {
-    const date = new Date(entry.created_at);
-    const header = isToday(date)
-      ? "Today"
-      : isYesterday(date)
-        ? "Yesterday"
-        : format(date, "d MMMM");
-
-    const lastGroup = groups[groups.length - 1];
-    if (lastGroup && lastGroup.header === header) {
-      lastGroup.entries.push(entry);
-    } else {
-      groups.push({ header, entries: [entry] });
-    }
-  }
-
-  return groups;
-}
 
 export default function ActivityPage() {
   const { user, isReady } = useRequireRole("parent");
@@ -41,88 +19,45 @@ export default function ActivityPage() {
     isLoading: isLoadingPassport,
     error: passportLoadFailed,
   } = useMyPassport(user?.id);
-  const [entries, setEntries] = useState<ActivityLogEntry[]>([]);
-  const [isLoadingActivity, setIsLoadingActivity] = useState(true);
-  const [isLoadingMore, setIsLoadingMore] = useState(false);
-  const [hasMore, setHasMore] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    if (!passportId) {
-      setIsLoadingActivity(false);
-      return;
-    }
-    setIsLoadingActivity(true);
-    setLoadError(null);
+  // Migration 0152 -- get_parent_activity_feed() UNIONs activity_log
+  // with incidents (occurred_at ordering, same gate get_parent_
+  // incidents() already uses), real LIMIT/OFFSET over the combined set
+  // so pagination stays correct across both sources.
+  const fetchPage = useCallback(
+    async (limit: number, offset: number) => {
+      if (!passportId) return { data: [], error: null };
+      const supabase = createClient();
+      return supabase.rpc("get_parent_activity_feed", {
+        p_passport_id: passportId,
+        p_limit: limit,
+        p_offset: offset,
+      });
+    },
+    [passportId]
+  );
 
-    // Migration 0152 -- get_parent_activity_feed() UNIONs activity_log
-    // with incidents (occurred_at ordering, same gate get_parent_
-    // incidents() already uses), real LIMIT/OFFSET over the combined
-    // set so pagination stays correct across both sources -- was a raw
-    // .from("activity_log") query before this.
-    const supabase = createClient();
-    const { data, error: activityError } = await supabase.rpc("get_parent_activity_feed", {
-      p_passport_id: passportId,
-      p_limit: PAGE_SIZE,
-      p_offset: 0,
-    });
-
-    if (activityError) {
-      console.error("Failed to load activity log:", activityError);
-      setLoadError("Couldn't load your activity.");
-      setIsLoadingActivity(false);
-      return;
-    }
-
-    const rows = (data ?? []) as ActivityLogEntry[];
-    setEntries(rows);
-    setHasMore(rows.length === PAGE_SIZE);
-    setIsLoadingActivity(false);
-  }, [passportId]);
-
-  // Fetches once the passport is resolved, and whenever `load`'s
-  // identity changes -- a genuine effect for syncing with the external
-  // data source, not a synchronous state derivation.
-  useEffect(() => {
-    if (isLoadingPassport) return;
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    load();
-  }, [load, isLoadingPassport]);
+  const {
+    groups,
+    isLoading: isLoadingActivity,
+    isLoadingMore,
+    hasMore,
+    loadError,
+    loadMoreError,
+    load,
+    loadMore,
+  } = useActivityFeed<ActivityLogEntry>({
+    fetchPage,
+    pageSize: PAGE_SIZE,
+    enabled: !isLoadingPassport && Boolean(passportId),
+  });
 
   const isLoading = isLoadingPassport || isLoadingActivity;
   const effectiveLoadError = passportLoadFailed ? "Couldn't load your activity." : loadError;
 
-  async function loadMore() {
-    if (!passportId || isLoadingMore) return;
-    setIsLoadingMore(true);
-    setLoadMoreError(null);
-
-    const supabase = createClient();
-    const { data, error } = await supabase.rpc("get_parent_activity_feed", {
-      p_passport_id: passportId,
-      p_limit: PAGE_SIZE,
-      p_offset: entries.length,
-    });
-
-    if (error) {
-      console.error("Failed to load more activity:", error);
-      setLoadMoreError("Couldn't load more activity.");
-      setIsLoadingMore(false);
-      return;
-    }
-
-    const rows = (data ?? []) as ActivityLogEntry[];
-    setEntries((prev) => [...prev, ...rows]);
-    setHasMore(rows.length === PAGE_SIZE);
-    setIsLoadingMore(false);
-  }
-
   if (!isReady) {
     return null;
   }
-
-  const groups = groupByDate(entries);
 
   return (
     <div className="flex min-h-full flex-1 flex-col bg-brand-safe-ivory">
@@ -148,7 +83,7 @@ export default function ActivityPage() {
           </div>
         ) : effectiveLoadError ? (
           <InlineErrorState message={effectiveLoadError} onRetry={load} />
-        ) : entries.length === 0 ? (
+        ) : groups.length === 0 ? (
           <div className="rounded-xl border-2 border-dashed border-brand-pastel-blue bg-white/60 p-6 text-center">
             <p className="font-sans text-sm text-brand-neutral-black/70">
               Activity will appear here once you and your team start using
