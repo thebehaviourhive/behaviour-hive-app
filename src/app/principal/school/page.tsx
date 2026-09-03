@@ -11,6 +11,8 @@ import { SetCutoffSheet } from "@/components/principal/SetCutoffSheet";
 import { SetStartTimeSheet } from "@/components/principal/SetStartTimeSheet";
 import { IncidentLocationsCard } from "@/components/principal/IncidentLocationsCard";
 import { formatTimeOfDay } from "@/lib/temporaryAccessTime";
+import { BottomSheet } from "@/components/ui/BottomSheet";
+import { Button } from "@/components/ui/Button";
 
 // PRD 2, Stage 1. New top-level tab -- "School" owns settings and
 // account administration, per the design's own instruction: handover
@@ -70,6 +72,17 @@ export default function PrincipalSchoolPage() {
   const [isStartTimeOpen, setIsStartTimeOpen] = useState(false);
   const [isCutoffOpen, setIsCutoffOpen] = useState(false);
   const [institutionId, setInstitutionId] = useState<string | null>(null);
+  // Bug sweep item 3 -- the principal track had no sign-out anywhere,
+  // on either PrincipalBottomNav or PrincipalSidebar, and no route
+  // reaches it (the shared /more page the other four tracks use has no
+  // principal branch in its own role-conditional bottom nav either).
+  // Placed here, under Account Administration -- Daniel's own default:
+  // account-level, same isolation Transfer Principal Role already gets,
+  // not bolted onto routine School settings above it. Same confirm-
+  // sheet idiom and copy as /more's own "Log out" (the other four
+  // tracks' shared pattern), not a fifth one invented for this track.
+  const [isLogOutOpen, setIsLogOutOpen] = useState(false);
+  const [isSigningOut, setIsSigningOut] = useState(false);
 
   const load = useCallback(async () => {
     if (!user) return;
@@ -122,6 +135,18 @@ export default function PrincipalSchoolPage() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
   }, [load]);
+
+  // Same shape as /more's own handleLogout -- signOut(), clear both
+  // storages, replace to /login (never push, so Back can't return to a
+  // signed-out principal screen).
+  async function handleLogOut() {
+    setIsSigningOut(true);
+    const supabase = createClient();
+    await supabase.auth.signOut();
+    window.localStorage.clear();
+    window.sessionStorage.clear();
+    router.replace("/login");
+  }
 
   if (!isReady) {
     return null;
@@ -203,11 +228,45 @@ export default function PrincipalSchoolPage() {
                     Promotes another active staff member. This cannot be undone from your own account.
                   </p>
                 </button>
+
+                <button
+                  type="button"
+                  onClick={() => setIsLogOutOpen(true)}
+                  className="mt-2 block w-full rounded-2xl border border-black/5 bg-white p-4 text-left shadow-sm"
+                >
+                  <p className="font-sans text-body font-semibold text-brand-neutral-black">Log out</p>
+                </button>
               </section>
             </>
           )}
         </div>
       </main>
+
+      <BottomSheet isOpen={isLogOutOpen} onClose={() => !isSigningOut && setIsLogOutOpen(false)}>
+        <h2 className="font-heading text-lg font-semibold text-brand-neutral-black">
+          Are you sure you want to log out?
+        </h2>
+
+        <div className="mt-5 flex gap-3">
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => setIsLogOutOpen(false)}
+            disabled={isSigningOut}
+            className="flex-1"
+          >
+            Cancel
+          </Button>
+          <button
+            type="button"
+            onClick={handleLogOut}
+            disabled={isSigningOut}
+            className="flex-1 rounded-2xl bg-red-600 px-5 py-3.5 text-base font-semibold text-white transition-colors disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {isSigningOut ? "Logging out…" : "Log out"}
+          </button>
+        </div>
+      </BottomSheet>
 
       <HandOverPrincipalSheet
         isOpen={isHandOverOpen}
