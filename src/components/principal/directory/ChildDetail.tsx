@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { useSearchParams } from "next/navigation";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { createClient } from "@/lib/supabase/client";
@@ -135,12 +135,59 @@ interface ClinicianHistoryRow {
   revocationReason: string | null;
 }
 
-type TabKey = "enrolment" | "access" | "clinical";
+// Migration 0160. "Full view of institution facing material, same
+// level of permissions as a class_teacher role" -- Daniel's own
+// instruction. Deliberately the SAME field set a class_teacher's own
+// passport page selects (src/app/teacher/passport/[passportId]/
+// page.tsx), column for column, via get_child_passport_profile_for_
+// principal() -- not a broader "full passport" dump invented here.
+interface PassportProfile {
+  diagnoses: string[];
+  diagnosisOther: string | null;
+  sectionAComplete: boolean;
+  hardSignals: string[];
+  hardSignalsOther: string | null;
+  hardTriggers: string[];
+  hardTriggersOther: string | null;
+  communicationMethods: string[];
+  communicationMethodsOther: string | null;
+  showsHappy: string | null;
+  showsAnxious: string | null;
+  phrasesToAvoid: string | null;
+  beforeBehaviour: string[];
+  beforeBehaviourOther: string | null;
+  duringDistress: string[];
+  duringDistressOther: string | null;
+  afterDistress: string[];
+  afterDistressOther: string | null;
+  sensorySeeks: string[];
+  sensorySeeksOther: string | null;
+  sensoryAvoids: string[];
+  sensoryAvoidsOther: string | null;
+}
+
+// Same shape usePassportClinicalContent.ts already establishes for
+// parent/teacher/clinician -- get_passport_clinical_content() (0160)
+// gained a principal branch rather than a new RPC, since it was already
+// the shared, role-aware read path for this content.
+interface ClinicalContentItem {
+  id: string;
+  itemType: string;
+  title: string;
+  description: string;
+  authorRole: string;
+  authorName: string | null;
+  authorSpecialty: string | null;
+  createdAt: string;
+}
+
+type TabKey = "enrolment" | "access" | "clinical" | "passport";
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: "enrolment", label: "Enrolment" },
   { key: "access", label: "Access" },
   { key: "clinical", label: "Clinical" },
+  { key: "passport", label: "Passport" },
 ];
 
 const ROLE_LABEL: Record<string, string> = {
@@ -224,6 +271,11 @@ export function ChildDetail({
   // Stage 4 -- Previous Clinicians (get_passport_clinician_history, 0128).
   const [clinicianHistory, setClinicianHistory] = useState<ClinicianHistoryRow[]>([]);
   const [clinicianHistoryError, setClinicianHistoryError] = useState<string | null>(null);
+
+  const [passportProfile, setPassportProfile] = useState<PassportProfile | null>(null);
+  const [passportProfileError, setPassportProfileError] = useState<string | null>(null);
+  const [clinicalContent, setClinicalContent] = useState<ClinicalContentItem[]>([]);
+  const [clinicalContentError, setClinicalContentError] = useState<string | null>(null);
   const [showClinicianHistory, setShowClinicianHistory] = useState(false);
 
   const load = useCallback(async () => {
@@ -269,23 +321,34 @@ export function ChildDetail({
     }
     setChildName(rosterMatch.child_name);
 
-    const [accessResult, staffRosterResult, guardiansResult, claimCodeResult, enrolmentResult, cliniciansResult, clinicianHistoryResult] =
-      await Promise.all([
-        supabase.rpc("get_passport_access_for_child", { p_passport_id: passportId, p_institution_id: staffRow.institution_id }),
-        supabase.rpc("get_institution_staff_roster", { p_institution_id: staffRow.institution_id, p_include_inactive: false, p_include_pending: false }),
-        supabase.rpc("get_passport_guardians_for_child", { p_institution_id: staffRow.institution_id, p_passport_id: passportId }),
-        supabase.rpc("get_passport_claim_code_status", { p_institution_id: staffRow.institution_id, p_passport_id: passportId }),
-        supabase
-          .from("enrolments")
-          .select("id, ended_at, end_reason")
-          .eq("passport_id", passportId)
-          .eq("institution_id", staffRow.institution_id)
-          .order("started_at", { ascending: false })
-          .limit(1)
-          .maybeSingle(),
-        supabase.rpc("get_passport_clinicians", { p_passport_id: passportId }),
-        supabase.rpc("get_passport_clinician_history", { p_passport_id: passportId, p_institution_id: staffRow.institution_id }),
-      ]);
+    const [
+      accessResult,
+      staffRosterResult,
+      guardiansResult,
+      claimCodeResult,
+      enrolmentResult,
+      cliniciansResult,
+      clinicianHistoryResult,
+      passportProfileResult,
+      clinicalContentResult,
+    ] = await Promise.all([
+      supabase.rpc("get_passport_access_for_child", { p_passport_id: passportId, p_institution_id: staffRow.institution_id }),
+      supabase.rpc("get_institution_staff_roster", { p_institution_id: staffRow.institution_id, p_include_inactive: false, p_include_pending: false }),
+      supabase.rpc("get_passport_guardians_for_child", { p_institution_id: staffRow.institution_id, p_passport_id: passportId }),
+      supabase.rpc("get_passport_claim_code_status", { p_institution_id: staffRow.institution_id, p_passport_id: passportId }),
+      supabase
+        .from("enrolments")
+        .select("id, ended_at, end_reason")
+        .eq("passport_id", passportId)
+        .eq("institution_id", staffRow.institution_id)
+        .order("started_at", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+      supabase.rpc("get_passport_clinicians", { p_passport_id: passportId }),
+      supabase.rpc("get_passport_clinician_history", { p_passport_id: passportId, p_institution_id: staffRow.institution_id }),
+      supabase.rpc("get_child_passport_profile_for_principal", { p_passport_id: passportId }),
+      supabase.rpc("get_passport_clinical_content", { p_passport_id: passportId }),
+    ]);
 
     if (cliniciansResult.error) {
       console.error("Failed to load connected clinicians:", cliniciansResult.error);
@@ -410,6 +473,100 @@ export function ChildDetail({
         .filter((s) => s.is_active && !activeUserIds.has(s.user_id))
         .map((s) => ({ userId: s.user_id, fullName: s.full_name }))
     );
+
+    // Same secondary-read posture as clinicians/clinician history above
+    // -- a failure here doesn't block the rest of the page, logged and
+    // left empty rather than replacing the whole page with an error.
+    if (passportProfileResult.error) {
+      console.error("Failed to load passport profile:", passportProfileResult.error);
+      setPassportProfileError("Couldn't load this child's passport.");
+      setPassportProfile(null);
+    } else {
+      setPassportProfileError(null);
+      const row = (passportProfileResult.data ?? [])[0] as
+        | {
+            diagnoses: string[] | null;
+            diagnosis_other: string | null;
+            section_a_complete: boolean;
+            hard_signals: string[] | null;
+            hard_signals_other: string | null;
+            hard_triggers: string[] | null;
+            hard_triggers_other: string | null;
+            communication_methods: string[] | null;
+            communication_methods_other: string | null;
+            shows_happy: string | null;
+            shows_anxious: string | null;
+            phrases_to_avoid: string | null;
+            before_behaviour: string[] | null;
+            before_behaviour_other: string | null;
+            during_distress: string[] | null;
+            during_distress_other: string | null;
+            after_distress: string[] | null;
+            after_distress_other: string | null;
+            sensory_seeks: string[] | null;
+            sensory_seeks_other: string | null;
+            sensory_avoids: string[] | null;
+            sensory_avoids_other: string | null;
+          }
+        | undefined;
+      setPassportProfile(
+        row
+          ? {
+              diagnoses: row.diagnoses ?? [],
+              diagnosisOther: row.diagnosis_other,
+              sectionAComplete: row.section_a_complete,
+              hardSignals: row.hard_signals ?? [],
+              hardSignalsOther: row.hard_signals_other,
+              hardTriggers: row.hard_triggers ?? [],
+              hardTriggersOther: row.hard_triggers_other,
+              communicationMethods: row.communication_methods ?? [],
+              communicationMethodsOther: row.communication_methods_other,
+              showsHappy: row.shows_happy,
+              showsAnxious: row.shows_anxious,
+              phrasesToAvoid: row.phrases_to_avoid,
+              beforeBehaviour: row.before_behaviour ?? [],
+              beforeBehaviourOther: row.before_behaviour_other,
+              duringDistress: row.during_distress ?? [],
+              duringDistressOther: row.during_distress_other,
+              afterDistress: row.after_distress ?? [],
+              afterDistressOther: row.after_distress_other,
+              sensorySeeks: row.sensory_seeks ?? [],
+              sensorySeeksOther: row.sensory_seeks_other,
+              sensoryAvoids: row.sensory_avoids ?? [],
+              sensoryAvoidsOther: row.sensory_avoids_other,
+            }
+          : null
+      );
+    }
+
+    if (clinicalContentResult.error) {
+      console.error("Failed to load clinical content:", clinicalContentResult.error);
+      setClinicalContentError("Couldn't load clinical team updates.");
+    } else {
+      setClinicalContentError(null);
+      setClinicalContent(
+        (
+          (clinicalContentResult.data ?? []) as {
+            id: string;
+            item_type: string;
+            content: { title?: string; description?: string } | null;
+            author_role: string;
+            author_name: string | null;
+            author_specialty: string | null;
+            created_at: string;
+          }[]
+        ).map((row) => ({
+          id: row.id,
+          itemType: row.item_type,
+          title: row.content?.title ?? "",
+          description: row.content?.description ?? "",
+          authorRole: row.author_role,
+          authorName: row.author_name,
+          authorSpecialty: row.author_specialty,
+          createdAt: row.created_at,
+        }))
+      );
+    }
 
     setIsLoading(false);
   }, [passportId, user]);
@@ -901,6 +1058,116 @@ export function ChildDetail({
               </section>
             </>
           )}
+
+          {activeTab === "passport" && (
+            <>
+              {passportProfileError ? (
+                <p className="rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-center text-sm text-brand-neutral-black/60">
+                  {passportProfileError}
+                </p>
+              ) : !passportProfile ? (
+                <p className="rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-center text-sm text-brand-neutral-black/60">
+                  No passport exists for this child yet.
+                </p>
+              ) : (
+                <>
+                  {!passportProfile.sectionAComplete && (
+                    <p className="mb-6 rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-center text-sm text-brand-neutral-black/60">
+                      This family hasn&apos;t completed their passport yet -- what&apos;s shown below is whatever has
+                      been saved so far.
+                    </p>
+                  )}
+
+                  <PassportProfileSection title="Diagnoses">
+                    <PassportPillGroup items={passportProfile.diagnoses} other={passportProfile.diagnosisOther} emptyText="None recorded." />
+                  </PassportProfileSection>
+
+                  <PassportProfileSection title="Hard Signals & Triggers">
+                    <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-brand-neutral-black/40">Signals</p>
+                    <PassportPillGroup items={passportProfile.hardSignals} other={passportProfile.hardSignalsOther} emptyText="None recorded." />
+                    <p className="mt-3 mb-1 text-xs font-semibold uppercase tracking-wide text-brand-neutral-black/40">Triggers</p>
+                    <PassportPillGroup items={passportProfile.hardTriggers} other={passportProfile.hardTriggersOther} emptyText="None recorded." />
+                  </PassportProfileSection>
+
+                  <PassportProfileSection title="Communication">
+                    <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-brand-neutral-black/40">Methods</p>
+                    <PassportPillGroup
+                      items={passportProfile.communicationMethods}
+                      other={passportProfile.communicationMethodsOther}
+                      emptyText="None recorded."
+                    />
+                    {passportProfile.showsHappy && (
+                      <p className="mt-3 text-sm text-brand-neutral-black">
+                        <span className="font-semibold">Shows happy: </span>
+                        {passportProfile.showsHappy}
+                      </p>
+                    )}
+                    {passportProfile.showsAnxious && (
+                      <p className="mt-2 text-sm text-brand-neutral-black">
+                        <span className="font-semibold">Shows anxious: </span>
+                        {passportProfile.showsAnxious}
+                      </p>
+                    )}
+                    {passportProfile.phrasesToAvoid && (
+                      <p className="mt-2 text-sm text-brand-neutral-black">
+                        <span className="font-semibold">Phrases to avoid: </span>
+                        {passportProfile.phrasesToAvoid}
+                      </p>
+                    )}
+                  </PassportProfileSection>
+
+                  <PassportProfileSection title="Behaviour & Sensory">
+                    <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-brand-neutral-black/40">Before behaviour</p>
+                    <PassportPillGroup items={passportProfile.beforeBehaviour} other={passportProfile.beforeBehaviourOther} emptyText="None recorded." />
+                    <p className="mt-3 mb-1 text-xs font-semibold uppercase tracking-wide text-brand-neutral-black/40">During distress</p>
+                    <PassportPillGroup items={passportProfile.duringDistress} other={passportProfile.duringDistressOther} emptyText="None recorded." />
+                    <p className="mt-3 mb-1 text-xs font-semibold uppercase tracking-wide text-brand-neutral-black/40">After distress</p>
+                    <PassportPillGroup items={passportProfile.afterDistress} other={passportProfile.afterDistressOther} emptyText="None recorded." />
+                    <p className="mt-3 mb-1 text-xs font-semibold uppercase tracking-wide text-brand-neutral-black/40">Sensory seeks</p>
+                    <PassportPillGroup items={passportProfile.sensorySeeks} other={passportProfile.sensorySeeksOther} emptyText="None recorded." />
+                    <p className="mt-3 mb-1 text-xs font-semibold uppercase tracking-wide text-brand-neutral-black/40">Sensory avoids</p>
+                    <PassportPillGroup items={passportProfile.sensoryAvoids} other={passportProfile.sensoryAvoidsOther} emptyText="None recorded." />
+                  </PassportProfileSection>
+
+                  {/* Institution-facing only (strategy_school/strategy_shared/
+                      trigger/setting_event) -- get_passport_clinical_content()'s
+                      own item_type filter, same restriction a class_teacher's
+                      own view already has. strategy_home never reaches here --
+                      CLAUDE.md's own "home logs reach the classroom by design,
+                      via the clinician" rule, unchanged. */}
+                  <section>
+                    <h2 className="mb-2 font-heading text-sm font-bold uppercase tracking-wide text-brand-neutral-black/60">
+                      From the Clinical Team
+                    </h2>
+                    {clinicalContentError ? (
+                      <p className="rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-center text-sm text-brand-neutral-black/60">
+                        {clinicalContentError}
+                      </p>
+                    ) : clinicalContent.length === 0 ? (
+                      <p className="rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-center text-sm text-brand-neutral-black/60">
+                        Nothing shared with the school yet.
+                      </p>
+                    ) : (
+                      <div className="flex flex-col gap-2">
+                        {clinicalContent.map((item) => (
+                          <div key={item.id} className="rounded-2xl border border-black/5 bg-white/60 p-4">
+                            {item.title && <p className="text-sm font-semibold text-brand-neutral-black">{item.title}</p>}
+                            {item.description && (
+                              <p className="mt-1 text-sm text-brand-neutral-black/70">{item.description}</p>
+                            )}
+                            <p className="mt-2 text-xs text-brand-neutral-black/50">
+                              {item.authorName ?? "Clinical team"}
+                              {item.authorSpecialty ? ` · ${item.authorSpecialty}` : ""} · {formatDate(item.createdAt)}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </section>
+                </>
+              )}
+            </>
+          )}
         </>
       )}
       </div>
@@ -1014,5 +1281,39 @@ export function ChildDetail({
         />
       )}
     </>
+  );
+}
+
+// Migration 0160's own tab -- small local helpers, same shape as the
+// teacher passport page's own PillRow (src/app/teacher/passport/
+// [passportId]/page.tsx), not shared, since neither is exported there
+// either.
+function PassportProfileSection({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className="mb-6">
+      <h2 className="mb-2 font-heading text-sm font-bold uppercase tracking-wide text-brand-neutral-black/60">
+        {title}
+      </h2>
+      <div className="rounded-2xl border border-black/5 bg-white/60 p-4">{children}</div>
+    </section>
+  );
+}
+
+function PassportPillGroup({ items, other, emptyText }: { items: string[]; other?: string | null; emptyText: string }) {
+  const tags = items.includes("Other") && other ? [...items.filter((i) => i !== "Other"), other] : items;
+  if (tags.length === 0) {
+    return <p className="text-sm text-brand-neutral-black/50">{emptyText}</p>;
+  }
+  return (
+    <div className="flex flex-wrap gap-2">
+      {tags.map((item) => (
+        <span
+          key={item}
+          className="rounded-full bg-brand-pastel-blue/20 px-3 py-1.5 text-xs font-semibold text-brand-prussian-blue"
+        >
+          {item}
+        </span>
+      ))}
+    </div>
   );
 }
