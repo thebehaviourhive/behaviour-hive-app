@@ -4,6 +4,7 @@ import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/Button";
 import { BottomSheet } from "@/components/ui/BottomSheet";
+import { friendlyAccessLapsedMessage } from "@/lib/temporaryAccessTime";
 
 // Phase 4, piece 2. The explicit, reversible teacher action that moves
 // an incident from draft to awaiting_signoff (0089) -- deliberately NOT
@@ -37,13 +38,23 @@ export function RequestAttestationsCard({ incidentId, requested, onChange }: Req
     setIsSaving(true);
     setError(null);
     const supabase = createClient();
-    const { error: updateError } = await supabase
+    // Bug report follow-up -- rows-affected check, single known row by
+    // id. This is the gate that moves an incident from draft to
+    // awaiting_signoff -- a silent no-op here means staff are never
+    // shown the record to attest to at all, with nothing telling the
+    // teacher who toggled it that nothing happened.
+    const { data, error: updateError } = await supabase
       .from("incidents")
       .update({ attestations_requested: value })
-      .eq("id", incidentId);
+      .eq("id", incidentId)
+      .select("id");
     setIsSaving(false);
     if (updateError) {
       setError(updateError.message);
+      return;
+    }
+    if (!data || data.length === 0) {
+      setError(friendlyAccessLapsedMessage("This"));
       return;
     }
     onChange(value);

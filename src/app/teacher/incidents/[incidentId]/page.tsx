@@ -273,6 +273,13 @@ export default function IncidentRecordPage() {
   >(null);
   const [newInjuryStaffFreeText, setNewInjuryStaffFreeText] = useState("");
   const [addInjuryError, setAddInjuryError] = useState<string | null>(null);
+  // Bug report follow-up -- saveInjuryField() used to discard its own
+  // result entirely (no error check, let alone rows-affected). Every
+  // injury field on this page (remained on site, first aider, doctor/
+  // ambulance, treatments, notes -- nine call sites) shares this one
+  // error slot rather than nine new per-field ones; the point is
+  // surfacing a genuinely failed save at all, not per-field placement.
+  const [injurySaveError, setInjurySaveError] = useState<string | null>(null);
 
   // "Was a student or staff member injured?" -- the form's own gate,
   // one answer for the whole incident. Immediate-write, not batched --
@@ -649,14 +656,25 @@ export default function IncidentRecordPage() {
       }
 
       setIsLocked(Boolean(incident.teacher_signed_at));
-      setCanEdit(
-        !incident.teacher_signed_at && (incident.created_by === user!.id || incident.owning_teacher_id === user!.id)
-      );
+      // Bug report item 1's own root cause, fixed here: this used to be
+      // created_by === user.id OR owning_teacher_id === user.id, matching
+      // 0068's ORIGINAL "Creator or owning teacher can edit before
+      // teacher sign-off" policy -- but 0069 dropped the creator branch
+      // from every one of these policies (base incidents row AND every
+      // child table) and replaced it with owning-teacher-only. This
+      // client check never followed that change. The result: a fully-
+      // enabled form over a row the creator could no longer actually
+      // write to -- exactly how an SNA-created incident's own creator
+      // could fill in the whole form, see no error on any single save,
+      // and have none of it persist. owning_teacher_id === user.id is
+      // now the ONLY condition, matching the live RLS policy exactly --
+      // the same condition the debrief-specific comment below already
+      // used, correctly, the whole time.
+      setCanEdit(!incident.teacher_signed_at && incident.owning_teacher_id === user!.id);
 
-      // The debrief is owning-teacher-only, not creator-or-owning-teacher
-      // -- matches incident_debriefs' own RLS exactly
-      // ("i.owning_teacher_id = auth.uid()", no created_by branch at
-      // all), not the broader canEdit used everywhere else on this page.
+      // The debrief was already owning-teacher-only, matching incident_
+      // debriefs' own RLS exactly ("i.owning_teacher_id = auth.uid()") --
+      // canEdit above now matches it, not the other way around.
       setOwningTeacherId(incident.owning_teacher_id);
       setOwningTeacherName(incident.owning_teacher_id ? nameByUserId.get(incident.owning_teacher_id) ?? "the owning teacher" : null);
       setCanEditDebrief(!incident.teacher_signed_at && incident.owning_teacher_id === user!.id);
@@ -723,12 +741,21 @@ export default function IncidentRecordPage() {
       isSelected ? current.filter((id) => id !== actionTypeId) : [...current, actionTypeId]
     );
 
-    const { error: toggleError } = isSelected
-      ? await supabase.from("incident_actions").delete().eq("incident_id", params.incidentId).eq("action_type_id", actionTypeId)
+    // Bug report follow-up -- DELETE carries the identical silent-no-op
+    // risk UPDATE does: a row that fails the policy's USING clause is
+    // simply not deleted, {data: [], error: null}, no thrown error
+    // (CLAUDE.md's own gotcha, which names UPDATE explicitly but applies
+    // to DELETE by the same mechanism). INSERT doesn't need the same
+    // .select()+rows check -- a WITH CHECK violation on INSERT raises a
+    // real Postgres error, it doesn't just filter silently.
+    const { error: toggleError, data: toggleData } = isSelected
+      ? await supabase.from("incident_actions").delete().eq("incident_id", params.incidentId).eq("action_type_id", actionTypeId).select("incident_id")
       : await supabase.from("incident_actions").insert({ incident_id: params.incidentId, action_type_id: actionTypeId });
 
-    if (toggleError) {
-      setActionsError(toggleError.message);
+    const rowsAffectedMismatch = isSelected && (!toggleData || toggleData.length === 0);
+
+    if (toggleError || rowsAffectedMismatch) {
+      setActionsError(toggleError ? toggleError.message : friendlyAccessLapsedMessage("This action"));
       setSelectedActionTypeIds((current) =>
         isSelected ? [...current, actionTypeId] : current.filter((id) => id !== actionTypeId)
       );
@@ -737,11 +764,26 @@ export default function IncidentRecordPage() {
 
   async function saveOtherActionDetail(otherActionTypeId: string) {
     const supabase = createClient();
-    await supabase
+    // Bug report follow-up -- this used to await the call and discard
+    // the result entirely, not even checking error, let alone rows
+    // affected. A .update() whose target fails the policy's USING
+    // clause returns {data: [], error: null} (CLAUDE.md's own first
+    // documented gotcha) -- silently, forever, with nothing here to
+    // ever notice. Matches handleSave()'s own established pattern now.
+    const { data, error } = await supabase
       .from("incident_actions")
       .update({ other_detail: otherActionDetail.trim() || null })
       .eq("incident_id", params.incidentId)
-      .eq("action_type_id", otherActionTypeId);
+      .eq("action_type_id", otherActionTypeId)
+      .select("id");
+
+    if (error) {
+      setActionsError(error.message);
+      return;
+    }
+    if (!data || data.length === 0) {
+      setActionsError(friendlyAccessLapsedMessage("This detail"));
+    }
   }
 
   function addRestrictivePracticeRecord(passportId: string) {
@@ -825,9 +867,24 @@ export default function IncidentRecordPage() {
     let rpId = record.id;
 
     if (rpId) {
-      const { error: updateError } = await supabase.from("restrictive_practices").update(payload).eq("id", rpId);
+      // Bug report follow-up -- rows-affected check, same reason as
+      // handleSave()'s own incidents update: a single known row by id,
+      // unambiguous (0 rows back means RLS filtered it, never "nothing
+      // to update").
+      const { data: rpRows, error: updateError } = await supabase
+        .from("restrictive_practices")
+        .update(payload)
+        .eq("id", rpId)
+        .select("id");
       if (updateError) {
         updateRestrictivePracticeRecord(passportId, index, { isSaving: false, saveError: updateError.message });
+        return;
+      }
+      if (!rpRows || rpRows.length === 0) {
+        updateRestrictivePracticeRecord(passportId, index, {
+          isSaving: false,
+          saveError: friendlyAccessLapsedMessage("This restrictive practice record"),
+        });
         return;
       }
     } else {
@@ -847,6 +904,18 @@ export default function IncidentRecordPage() {
     // diffing against what was originally loaded, and correct either
     // way -- this is a plain "who's linked right now" selection, not an
     // append-only history like attestations.
+    //
+    // NO rows-affected check here, deliberately, unlike the rest of this
+    // bug-report pass -- zero rows deleted is genuinely ambiguous for
+    // this one: a brand-new record with no prior links produces the
+    // identical {data: [], error: null} an RLS-blocked delete would.
+    // Nothing in local state distinguishes "nothing to delete" from
+    // "blocked" without tracking what was originally loaded separately
+    // from the current selection, which this function's own comment
+    // above already chose not to do. The re-insert just below still
+    // gets a real error on an actual RLS violation (INSERT's WITH CHECK
+    // raises, it doesn't filter), so a genuinely blocked save is still
+    // caught one step later, just not at this exact line.
     const { error: unlinkError } = await supabase.from("restrictive_practice_staff").delete().eq("restrictive_practice_id", rpId);
     if (unlinkError) {
       updateRestrictivePracticeRecord(passportId, index, { isSaving: false, saveError: unlinkError.message, id: rpId });
@@ -935,7 +1004,16 @@ export default function IncidentRecordPage() {
 
   async function saveInjuryField(injuryId: string, patch: Record<string, unknown>) {
     const supabase = createClient();
-    await supabase.from("incident_injuries").update(patch).eq("id", injuryId);
+    // Bug report follow-up -- this used to discard the result entirely,
+    // not even checking error. Single known row by id, unambiguous.
+    const { data, error } = await supabase.from("incident_injuries").update(patch).eq("id", injuryId).select("id");
+    if (error) {
+      setInjurySaveError(error.message);
+    } else if (!data || data.length === 0) {
+      setInjurySaveError(friendlyAccessLapsedMessage("This injury detail"));
+    } else {
+      setInjurySaveError(null);
+    }
   }
 
   // injury_types (the per-person multi-select) is deliberately no
@@ -945,8 +1023,20 @@ export default function IncidentRecordPage() {
 
   async function handleRemoveInjury(injuryId: string) {
     const supabase = createClient();
-    const { error: deleteError } = await supabase.from("incident_injuries").delete().eq("id", injuryId);
-    if (!deleteError) {
+    // Bug report follow-up -- rows-affected check: a delete targeting a
+    // specific known id is unambiguous (unlike the restrictive-practice
+    // staff-links delete above, which has no fixed expected count).
+    const { data: deletedRows, error: deleteError } = await supabase
+      .from("incident_injuries")
+      .delete()
+      .eq("id", injuryId)
+      .select("id");
+    if (deleteError) {
+      setInjurySaveError(deleteError.message);
+    } else if (!deletedRows || deletedRows.length === 0) {
+      setInjurySaveError(friendlyAccessLapsedMessage("This injury record"));
+    } else {
+      setInjurySaveError(null);
       setInjuries((current) => current.filter((inj) => inj.id !== injuryId));
     }
   }
@@ -965,14 +1055,21 @@ export default function IncidentRecordPage() {
     setDebriefSaveError(null);
 
     const supabase = createClient();
-    const { error: updateError } = await supabase
+    // Bug report follow-up -- rows-affected check, single known row by
+    // id, unambiguous. This is the exact field CLAUDE.md's own gotcha
+    // entry is about ("debrief_required taught this module...").
+    const { data, error: updateError } = await supabase
       .from("incidents")
       .update({ debrief_required: value })
-      .eq("id", params.incidentId);
+      .eq("id", params.incidentId)
+      .select("id");
 
     if (updateError) {
       setDebriefRequired(previous);
       setDebriefSaveError(updateError.message);
+    } else if (!data || data.length === 0) {
+      setDebriefRequired(previous);
+      setDebriefSaveError(friendlyAccessLapsedMessage("This incident"));
     }
   }
 
@@ -982,14 +1079,21 @@ export default function IncidentRecordPage() {
     setAnyoneInjuredSaveError(null);
 
     const supabase = createClient();
-    const { error: updateError } = await supabase
+    // Bug report item 1's own field -- the reported "not recorded" on an
+    // answered question was this exact write silently no-op'ing for an
+    // SNA-created incident. Rows-affected check, single known row by id.
+    const { data, error: updateError } = await supabase
       .from("incidents")
       .update({ anyone_injured: value })
-      .eq("id", params.incidentId);
+      .eq("id", params.incidentId)
+      .select("id");
 
     if (updateError) {
       setAnyoneInjured(previous);
       setAnyoneInjuredSaveError(updateError.message);
+    } else if (!data || data.length === 0) {
+      setAnyoneInjured(previous);
+      setAnyoneInjuredSaveError(friendlyAccessLapsedMessage("This answer"));
     }
   }
 
@@ -1006,15 +1110,23 @@ export default function IncidentRecordPage() {
     if (!value) setSupportAlertId(null);
 
     const supabase = createClient();
-    const { error: updateError } = await supabase
+    // Bug report follow-up -- rows-affected check, single known row.
+    const { data, error: updateError } = await supabase
       .from("incidents")
       .update({ support_button_pressed: value, ...(value ? {} : { support_alert_id: null }) })
-      .eq("id", params.incidentId);
+      .eq("id", params.incidentId)
+      .select("id");
 
     if (updateError) {
       setSupportButtonPressed(previous);
       setSupportAlertId(previousAlertId);
       setSupportButtonSaveError(updateError.message);
+      return;
+    }
+    if (!data || data.length === 0) {
+      setSupportButtonPressed(previous);
+      setSupportAlertId(previousAlertId);
+      setSupportButtonSaveError(friendlyAccessLapsedMessage("This answer"));
       return;
     }
 
@@ -1043,14 +1155,19 @@ export default function IncidentRecordPage() {
     setSupportAlertSaveError(null);
 
     const supabase = createClient();
-    const { error: updateError } = await supabase
+    // Bug report follow-up -- rows-affected check, single known row.
+    const { data, error: updateError } = await supabase
       .from("incidents")
       .update({ support_alert_id: alertId })
-      .eq("id", params.incidentId);
+      .eq("id", params.incidentId)
+      .select("id");
 
     if (updateError) {
       setSupportAlertId(previous);
       setSupportAlertSaveError(updateError.message);
+    } else if (!data || data.length === 0) {
+      setSupportAlertId(previous);
+      setSupportAlertSaveError(friendlyAccessLapsedMessage("This link"));
     }
   }
 
@@ -1068,14 +1185,19 @@ export default function IncidentRecordPage() {
     updateChild(childId, { parentCallRequired: true });
 
     const supabase = createClient();
-    const { error: updateError } = await supabase
+    // Bug report follow-up -- rows-affected check, single known row.
+    const { data, error: updateError } = await supabase
       .from("incident_children")
       .update({ parent_call_required: true })
-      .eq("id", childId);
+      .eq("id", childId)
+      .select("id");
 
     if (updateError) {
       updateChild(childId, { parentCallRequired: false });
       setParentCallSaveError(updateError.message);
+    } else if (!data || data.length === 0) {
+      updateChild(childId, { parentCallRequired: false });
+      setParentCallSaveError(friendlyAccessLapsedMessage("This flag"));
     }
   }
 
@@ -1138,10 +1260,19 @@ export default function IncidentRecordPage() {
     };
 
     if (debriefId) {
-      const { error: updateError } = await supabase.from("incident_debriefs").update(payload).eq("id", debriefId);
+      // Bug report follow-up -- rows-affected check, single known row.
+      const { data, error: updateError } = await supabase
+        .from("incident_debriefs")
+        .update(payload)
+        .eq("id", debriefId)
+        .select("id");
       setIsSavingDebrief(false);
       if (updateError) {
         setDebriefSaveError(updateError.message);
+        return;
+      }
+      if (!data || data.length === 0) {
+        setDebriefSaveError(friendlyAccessLapsedMessage("This debrief"));
         return;
       }
       setDebriefSavedAt(Date.now());
@@ -1175,14 +1306,20 @@ export default function IncidentRecordPage() {
 
     const supabase = createClient();
     const now = new Date().toISOString();
-    const { error: completeError } = await supabase
+    // Bug report follow-up -- rows-affected check, single known row.
+    const { data, error: completeError } = await supabase
       .from("incident_debriefs")
       .update({ completed_at: now, completed_by: owningTeacherId })
-      .eq("id", debriefId);
+      .eq("id", debriefId)
+      .select("id");
 
     setIsCompletingDebrief(false);
     if (completeError) {
       setDebriefSaveError(completeError.message);
+      return;
+    }
+    if (!data || data.length === 0) {
+      setDebriefSaveError(friendlyAccessLapsedMessage("This debrief"));
       return;
     }
     setDebriefCompletedAt(now);
@@ -1357,8 +1494,8 @@ export default function IncidentRecordPage() {
 
             {!canEdit && !isLocked && (
               <p className="rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-center text-sm text-brand-neutral-black/60">
-                Only the incident&apos;s creator or owning teacher can complete this record. You can view the stamp
-                above but not edit the record below.
+                Only the incident&apos;s owning teacher can complete this record. You can view the stamp above but
+                not edit the record below.
               </p>
             )}
 
@@ -2025,6 +2162,11 @@ export default function IncidentRecordPage() {
                   Each injured person gets their own record -- one person, one record. Add a separate one for every
                   person affected.
                 </p>
+                {injurySaveError && (
+                  <p role="alert" className="mb-3 text-sm font-medium text-red-600">
+                    {injurySaveError}
+                  </p>
+                )}
 
                 <div className="mb-3">
                   <span className="mb-2 block text-sm font-semibold text-brand-neutral-black">

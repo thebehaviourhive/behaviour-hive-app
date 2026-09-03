@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/Button";
 import { BodyFigureSvg, type RegionTapInfo } from "./BodyFigureSvg";
 import { BodyMapMarker } from "./BodyMapMarker";
 import { regionWithSideLabel, type BodyView, type Side } from "./bodyMapRegions";
+import { friendlyAccessLapsedMessage } from "@/lib/temporaryAccessTime";
 
 // Body map for one injury record. Region and side are the fact --
 // captured from the tapped SVG path's own data-region/data-side, never
@@ -211,14 +212,20 @@ export function BodyMapCard({ injuryId, partyName, canEdit, injuryTypeOptions, r
     // catching the inconsistency at the point of change, not just
     // waiting for 0083's sign-off check to name it later.
     const skinBrokenValue = pendingIsBite ? pendingSkinBroken : null;
-    const { error: updateError } = await supabase
+    // Bug report follow-up -- rows-affected check, single known row.
+    const { data, error: updateError } = await supabase
       .from("incident_body_marks")
       .update({ injury_type_id: pendingTypeId, skin_broken: skinBrokenValue })
-      .eq("id", selectedMarkId);
+      .eq("id", selectedMarkId)
+      .select("id");
 
     setIsSaving(false);
     if (updateError) {
       setError(updateError.message);
+      return;
+    }
+    if (!data || data.length === 0) {
+      setError(friendlyAccessLapsedMessage("This change"));
       return;
     }
     setMarks((current) =>
@@ -236,10 +243,19 @@ export function BodyMapCard({ injuryId, partyName, canEdit, injuryTypeOptions, r
     setIsSaving(true);
     setError(null);
     const supabase = createClient();
-    const { error: deleteError } = await supabase.from("incident_body_marks").delete().eq("id", selectedMarkId);
+    // Bug report follow-up -- rows-affected check, single known row.
+    const { data, error: deleteError } = await supabase
+      .from("incident_body_marks")
+      .delete()
+      .eq("id", selectedMarkId)
+      .select("id");
     setIsSaving(false);
     if (deleteError) {
       setError(deleteError.message);
+      return;
+    }
+    if (!data || data.length === 0) {
+      setError(friendlyAccessLapsedMessage("This removal"));
       return;
     }
     setMarks((current) => current.filter((m) => m.id !== selectedMarkId));

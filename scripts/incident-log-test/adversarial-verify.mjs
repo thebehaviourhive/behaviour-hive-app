@@ -20,7 +20,7 @@
 // stage development. Every check from V onward is independently
 // self-contained (own institution, own accounts, own cleanup) and
 // individually selectable: V, W, X, Y, Z, AA, BB, CC, DD, EE, FF, GG,
-// HH, II, JJ, KK, LL, MM, NN, OO, PP, QQ, RR, SS, TT, UU, VV, WW, XX, YY, ZZ, AAA, BBB, CCC. Selecting none of these (ONLY_CHECKS unset) is the full run --
+// HH, II, JJ, KK, LL, MM, NN, OO, PP, QQ, RR, SS, TT, UU, VV, WW, XX, YY, ZZ, AAA, BBB, CCC, DDD. Selecting none of these (ONLY_CHECKS unset) is the full run --
 // the one that gates deploys -- and its behavior is unchanged: same
 // checks, same order, same pass/fail counts. The only observable
 // difference is where the top-level fixture's own cleanup log line
@@ -480,7 +480,7 @@ async function main() {
     await admin.from("institutions").delete().eq("id", otherInstForRoster.id);
   }
 
-  console.log(`\n== CHECK C: SNA can stamp but cannot complete stage two or sign off ==`);
+  console.log(`\n== CHECK C: SNA can stamp but cannot complete stage two or sign off (rewritten for migration 0159 -- see that migration's own header, and the report it shipped with, for why this check used to encode the bug as correct behavior: "SNA-created stamp has NO owning teacher" and "SNA CANNOT complete stage two" were both true, and both were the defect -- an incident nobody could ever write to again, silently, forever. child1 has no class in this fixture, so the principal fallback is what's actually being proven here now. claim_incident() itself is effectively dead code post-0159 (zero client callers even before this migration, confirmed by grep; its own precondition -- owning_teacher_id is null -- is no longer reachable via the normal creation path at all) -- kept minimally covered below for its own refusal logic, not as a real recovery path anyone still needs.) ==`);
   {
     const { data: snaIncidentId, error: snaStampErr } = await sna.rpc("create_incident_stamp", {
       p_institution_id: institutionId, p_occurred_at: new Date().toISOString(), p_location_id: loc.id,
@@ -489,25 +489,32 @@ async function main() {
     record("SNA CAN create a stamp", !snaStampErr, snaStampErr?.message);
 
     const { data: snaOwning } = await admin.from("incidents").select("owning_teacher_id").eq("id", snaIncidentId).single();
-    record("SNA-created stamp has NO owning teacher auto-assigned (only class_teacher gets that)", snaOwning.owning_teacher_id === null, snaOwning.owning_teacher_id);
+    record("C1 (0159) an SNA-created stamp for a child with no class falls back to the principal -- never left null, never left for the SNA themselves", snaOwning.owning_teacher_id === principalId, snaOwning.owning_teacher_id);
 
     await sna.from("incidents").update({ narrative: "SNA tried to write stage two" }).eq("id", snaIncidentId);
     const { data: afterSnaEdit } = await admin.from("incidents").select("narrative").eq("id", snaIncidentId).single();
-    record("SNA CANNOT complete stage two (edit did not persist)", afterSnaEdit.narrative === null, `narrative now: ${afterSnaEdit.narrative}`);
+    record("SNA CANNOT complete stage two -- unchanged by 0159, the SNA is never the owner regardless of who is", afterSnaEdit.narrative === null, `narrative now: ${afterSnaEdit.narrative}`);
 
     await sna.from("incidents").update({ teacher_signed_at: new Date().toISOString(), teacher_signed_by: snaId }).eq("id", snaIncidentId);
     const { data: afterSnaSign } = await admin.from("incidents").select("teacher_signed_at").eq("id", snaIncidentId).single();
-    record("SNA CANNOT sign off (did not persist)", afterSnaSign.teacher_signed_at === null, afterSnaSign.teacher_signed_at);
+    record("SNA CANNOT sign off -- unchanged by 0159", afterSnaSign.teacher_signed_at === null, afterSnaSign.teacher_signed_at);
 
-    const { error: snaClaimErr } = await sna.rpc("claim_incident", { p_incident_id: snaIncidentId });
-    record("SNA CANNOT claim_incident either (class_teacher only)", Boolean(snaClaimErr), snaClaimErr?.message);
+    // The principal -- the AUTO-ASSIGNED owner, not someone who had to
+    // claim anything -- can genuinely complete stage two directly. This
+    // replaces the old "teacherB claims, then edits" narrative: nobody
+    // has to claim it any more, ownership already landed correctly at
+    // the stamp itself.
+    const principalForSnaIncident = await signedInClient("incverify.principal@thebehaviourhive.com");
+    await principalForSnaIncident.from("incidents").update({ narrative: "Principal completed stage two, auto-assigned at creation" }).eq("id", snaIncidentId);
+    const { data: afterPrincipalEdit } = await admin.from("incidents").select("narrative, owning_teacher_id").eq("id", snaIncidentId).single();
+    record("C2 (0159) the auto-assigned owner (principal) can complete stage two directly -- no claim step needed", afterPrincipalEdit.narrative === "Principal completed stage two, auto-assigned at creation" && afterPrincipalEdit.owning_teacher_id === principalId, JSON.stringify(afterPrincipalEdit));
 
+    // claim_incident()'s own remaining logic: it still correctly refuses
+    // once an incident already has an owner (its own first check, "it
+    // may already have an owning teacher") -- proven here as the
+    // ordinary, now-permanent case post-0159, not the exceptional one.
     const { error: teacherBClaimErr } = await teacherB.rpc("claim_incident", { p_incident_id: snaIncidentId });
-    record("A real class teacher CAN claim the SNA-created stamp", !teacherBClaimErr, teacherBClaimErr?.message);
-
-    await teacherB.from("incidents").update({ narrative: "Teacher B completed stage two after claiming" }).eq("id", snaIncidentId);
-    const { data: afterClaim } = await admin.from("incidents").select("narrative, owning_teacher_id").eq("id", snaIncidentId).single();
-    record("Once claimed, the claiming teacher CAN complete stage two", afterClaim.narrative === "Teacher B completed stage two after claiming" && afterClaim.owning_teacher_id === teacherBId, JSON.stringify(afterClaim));
+    record("C3 claim_incident() refuses -- this incident already has an owner, the ordinary case now", Boolean(teacherBClaimErr) && /already have an owning teacher/i.test(teacherBClaimErr.message), teacherBClaimErr?.message);
 
     await admin.from("incidents").delete().eq("id", snaIncidentId);
   }
@@ -3236,13 +3243,13 @@ async function main() {
     const { error: grantHolderCountersignErr } = await grantHolder.rpc("countersign_incident", { p_incident_id: incident3Id });
     record("Setup: grantHolder countersigns incident3 (via grant, not role) while still active", !grantHolderCountersignErr, grantHolderCountersignErr?.message);
 
-    console.log(`-- building incidentUnowned (sna stamp, no owning teacher, for the claim_incident refusal) --`);
+    console.log(`-- building incidentUnowned (sna stamp -- post-0159 this auto-owns to principalV1, childV1 has no class in this fixture; kept the same variable name even though it's no longer unowned, so the diff against the rest of this check stays small) --`);
     const { data: incidentUnownedId } = await snaV.rpc("create_incident_stamp", {
       p_institution_id: institutionVId, p_occurred_at: new Date().toISOString(), p_location_id: globalLoc.id,
       p_child_passport_ids: [childV1], p_staff: [],
     });
     const { data: unownedCheck } = await admin.from("incidents").select("owning_teacher_id").eq("id", incidentUnownedId).single();
-    record("Setup: sna-created stamp has no owning teacher (sna cannot own)", unownedCheck.owning_teacher_id === null, unownedCheck.owning_teacher_id);
+    record("Setup (0159): sna-created stamp auto-owns to the principal -- childV1 has no class, so the fallback is what's proven here, not left null", unownedCheck.owning_teacher_id === principalV1Id, unownedCheck.owning_teacher_id);
 
     console.log(`-- item 6 & the structural exhibit: one finding, one exhibit, covering all four principal-only gates --`);
     const { data: activePrincipalsBefore } = await admin
@@ -3319,8 +3326,24 @@ async function main() {
     });
     record("V2k: create_incident_stamp() -- deactivated staff refused, 'not registered as school staff'", Boolean(createErr) && /not registered as school staff/i.test(createErr.message), createErr?.message);
 
-    const { error: claimErr } = await teacherVTarget.rpc("claim_incident", { p_incident_id: incidentUnownedId });
+    // claim_incident()'s own role-check refusal needs a genuinely
+    // unowned incident to exercise -- post-0159, create_incident_stamp()
+    // no longer produces one via any normal path (this is the same
+    // childV1-has-no-class case as incidentUnownedId above, which now
+    // auto-owns to principalV1). Constructed directly via service role
+    // for this one narrow, defensive purpose: claim_incident() itself
+    // still ships with this precondition check, still worth proving it
+    // works, even though nothing in real operation reaches it any more
+    // (see this check's own header, and migration 0159, for why).
+    const { data: incidentForClaimTestId } = await snaV.rpc("create_incident_stamp", {
+      p_institution_id: institutionVId, p_occurred_at: new Date().toISOString(), p_location_id: globalLoc.id,
+      p_child_passport_ids: [childV1], p_staff: [],
+    });
+    await admin.from("incidents").update({ owning_teacher_id: null }).eq("id", incidentForClaimTestId);
+
+    const { error: claimErr } = await teacherVTarget.rpc("claim_incident", { p_incident_id: incidentForClaimTestId });
     record("V2l: claim_incident() -- deactivated class_teacher refused", Boolean(claimErr) && /only a class teacher/i.test(claimErr.message), claimErr?.message);
+    await admin.from("incidents").delete().eq("id", incidentForClaimTestId);
 
     // V2m (mark_parent_called, principal branch) is not live-fired here --
     // see the V6 structural exhibit above. incident2ChildRow stays unused
@@ -3881,12 +3904,14 @@ async function main() {
     // -- item 13, half one: an incident awaiting countersign, BEFORE the --
     // handover, so its later refusal (old principal) / success (new
     // principal) is provably about WHO is asking, not about the
-    // incident's own state. create_incident_stamp() only auto-assigns
-    // owning_teacher_id when the CALLER's own role is class_teacher
-    // (0069) -- a principal-created stamp stays unowned, needing
-    // claim_incident() -- so this must be created by a real class
-    // teacher (extraTeacherLeaving), not principalA1, or sign_off_
-    // incident() has no owning row to act on and silently does nothing.
+    // incident's own state. Created by a real class teacher
+    // (extraTeacherLeaving), not principalA1 -- harmless either way by
+    // now (0107 made a principal creator auto-own too, correcting this
+    // comment's own stale 0069-era claim that only class_teacher did;
+    // 0159 would also resolve a principal-created stamp to that same
+    // principal via the "creator, if eligible" branch), kept as a class
+    // teacher regardless since that's the ordinary case this half of
+    // the check is actually about.
     // Found live, running this check, not assumed from the RPC's name.
     // Signed in once here and reused below (as `extraTeacherLeaving`)
     // rather than a second signedInClient() call for the same account --
@@ -5172,14 +5197,24 @@ async function main() {
       record("AA-6a THE WIDENING: an sna-role creator with a currently-active temporary grant auto-owns the incident they start", supplyIncidentRow?.owning_teacher_id === newSupplyAAId, JSON.stringify(supplyIncidentRow));
 
       // snaAA1Id, an ORDINARY permanent SNA with no temporary grant at
-      // all right now -- must NOT auto-own (regression: the widening
-      // must not have accidentally handed every SNA auto-ownership).
+      // all right now -- must NOT auto-own THEMSELVES (regression: the
+      // widening in AA-6a must not have accidentally handed every SNA
+      // auto-ownership). Migration 0159 changes what happens NEXT,
+      // though: childAA1 is in classAA1Id, and teacherAA1Id is that
+      // class's own active class teacher (added just above) -- so the
+      // incident now correctly auto-owns to teacherAA1Id, not left null.
+      // This was "does NOT auto-own" before 0159; it is now "does not
+      // auto-own to the SNA, but does resolve to the child's own class
+      // teacher" -- a real behavior change this check needed to follow,
+      // not a regression in the AA6a widening this block is actually
+      // guarding.
       await admin.from("temporary_access").update({ revoked_at: new Date().toISOString(), revoked_by: principalAAId, revocation_reason: "AA6 setup: clearing snaAA1's active grant for the regression check." }).eq("granted_to", snaAA1Id).is("revoked_at", null);
       const { data: ordinarySnaIncidentId } = await snaAA1.rpc("create_incident_stamp", {
         p_institution_id: institutionAAId, p_occurred_at: new Date().toISOString(), p_location_id: locAA.id, p_child_passport_ids: [childAA1], p_staff: [],
       });
       const { data: ordinarySnaIncidentRow } = await admin.from("incidents").select("owning_teacher_id").eq("id", ordinarySnaIncidentId).single();
-      record("AA-6b REGRESSION: an ordinary permanent SNA with no active temporary grant still does NOT auto-own (unchanged from before this migration)", ordinarySnaIncidentRow?.owning_teacher_id === null, JSON.stringify(ordinarySnaIncidentRow));
+      record("AA-6b an ordinary permanent SNA with no active temporary grant does NOT auto-own the incident THEMSELVES -- the AA6a widening didn't leak to every SNA", ordinarySnaIncidentRow?.owning_teacher_id !== snaAA1Id, JSON.stringify(ordinarySnaIncidentRow));
+      record("AA-6b2 (0159) instead it resolves to childAA1's own class teacher (teacherAA1), not left null", ordinarySnaIncidentRow?.owning_teacher_id === teacherAA1Id, JSON.stringify(ordinarySnaIncidentRow));
       await admin.from("incidents").delete().eq("id", ordinarySnaIncidentId);
 
       // teacherAA1, an ordinary permanent class_teacher -- unaffected,
@@ -11440,6 +11475,171 @@ async function main() {
     await admin.from("passports").delete().in("id", [child1CCCId, child2CCCId, child3CCCId, child4CCCId]);
     await admin.from("institutions").delete().in("id", [institutionCCCId, otherInstitutionCCCId]);
     for (const id of [principalCCCId, teacherCCCId, outsiderCCCId, otherPrincipalCCCId]) {
+      await admin.auth.admin.deleteUser(id);
+    }
+  }
+
+  console.log(`\n== CHECK DDD: SQL for migration 0159 -- incident owner auto-assignment. The bug this is coverage for: an SNA is not eligible to own an incident (can_own_incident(), 0107), and create_incident_stamp() used to only ever assign ownership to the CREATOR -- an SNA-created incident got owning_teacher_id = null, permanently, and nothing (not even resolve_lapsed_incident_ownership(), which only reassigns an incident that HAD an eligible owner) ever claimed it. Every write to it and everything attached silently failed forever, for anyone, with no client-visible error. This check proves the actual fix, not just that a column got set: an SNA stamps an incident for a child with two active class teachers (position 1 and 2) -- the auto-assigned owner is the FIRST-position teacher, not the SNA, not null; that teacher can then genuinely write to EVERY part of the record a real teacher needs to (the main narrative/category update, anyone_injured, debrief_required, a child-level field, an action, and a restrictive practice record), each asserted by rows actually coming back, not absence of a client error; and the incident can be signed off end to end. The SNA who created it is confirmed to STILL be unable to edit it -- this fix does not widen who may act as owner, only who ends up assigned as one. A second incident, for a child with no class assignment at all, proves the principal fallback. A third, created by a class teacher for themselves, is the unchanged regression case -- still auto-owns themselves, exactly as before this migration. ==`);
+  if (shouldRun("DDD")) {
+    const { data: locDDD } = await admin.from("incident_locations").select("id").eq("value", "Classroom").is("institution_id", null).single();
+    const { data: restraintActionDDD } = await admin.from("incident_action_types").select("id").eq("value", "Physical restraint (CPI)").is("institution_id", null).single();
+
+    const { data: instDDD, error: instDDDErr } = await admin
+      .from("institutions")
+      .insert({ name: "DDD Institution", institution_code: CODE + "DDD", status: "verified" })
+      .select()
+      .single();
+    if (instDDDErr) throw instDDDErr;
+    const institutionDDDId = instDDD.id;
+
+    const principalDDDId = await createUser("ddd.principal@thebehaviourhive.com", "DDD Principal", "principal");
+    const eligibleDDDId = await createUser("ddd.eligible@thebehaviourhive.com", "DDD Eligible Teacher", "class_teacher");
+    const coDDDId = await createUser("ddd.co@thebehaviourhive.com", "DDD Co Teacher", "class_teacher");
+    const snaDDDId = await createUser("ddd.sna@thebehaviourhive.com", "DDD SNA", "sna");
+    const regularDDDId = await createUser("ddd.regular@thebehaviourhive.com", "DDD Regular Teacher", "class_teacher");
+
+    await admin.from("institution_staff").insert({ institution_id: institutionDDDId, user_id: principalDDDId, role: "principal" });
+    const { data: eligibleDDDStaffRow } = await admin.from("institution_staff").insert({ institution_id: institutionDDDId, user_id: eligibleDDDId, role: "class_teacher" }).select().single();
+    const { data: coDDDStaffRow } = await admin.from("institution_staff").insert({ institution_id: institutionDDDId, user_id: coDDDId, role: "class_teacher" }).select().single();
+    const { data: snaDDDStaffRow } = await admin.from("institution_staff").insert({ institution_id: institutionDDDId, user_id: snaDDDId, role: "sna" }).select().single();
+    const { data: regularDDDStaffRow } = await admin.from("institution_staff").insert({ institution_id: institutionDDDId, user_id: regularDDDId, role: "class_teacher" }).select().single();
+
+    const principalDDD = await signedInClient("ddd.principal@thebehaviourhive.com");
+    const eligibleDDD = await signedInClient("ddd.eligible@thebehaviourhive.com");
+    const snaDDD = await signedInClient("ddd.sna@thebehaviourhive.com");
+    const regularDDD = await signedInClient("ddd.regular@thebehaviourhive.com");
+
+    for (const row of [eligibleDDDStaffRow, coDDDStaffRow, snaDDDStaffRow, regularDDDStaffRow]) {
+      const { error } = await principalDDD.rpc("approve_staff_join", { p_institution_staff_id: row.id });
+      if (error) throw error;
+    }
+
+    const { data: classADDDId } = await principalDDD.rpc("create_class", { p_institution_id: institutionDDDId, p_name: "DDD Class A" });
+    // Eligible added first -> position 1; Co added second -> position 2
+    // (add_class_teacher's own free-position logic, unchanged, not
+    // re-tested here -- just relied on for a real ordering to assert
+    // against).
+    await principalDDD.rpc("add_class_teacher", { p_class_id: classADDDId, p_user_id: eligibleDDDId });
+    await principalDDD.rpc("add_class_teacher", { p_class_id: classADDDId, p_user_id: coDDDId });
+
+    const { data: child1DDDId } = await principalDDD.rpc("create_school_passport", { p_institution_id: institutionDDDId, p_child_name: "DDD Child One (in Class A)" });
+    const { data: child2DDDId } = await principalDDD.rpc("create_school_passport", { p_institution_id: institutionDDDId, p_child_name: "DDD Child Two (no class)" });
+    await principalDDD.rpc("add_class_child", { p_class_id: classADDDId, p_passport_id: child1DDDId });
+
+    // ---- DDD1: the SNA stamps an incident for child1 (Class A, two
+    // eligible teachers). ----
+    const { data: incidentADDDId, error: stampAErr } = await snaDDD.rpc("create_incident_stamp", {
+      p_institution_id: institutionDDDId,
+      p_occurred_at: new Date().toISOString(),
+      p_location_id: locDDD.id,
+      p_child_passport_ids: [child1DDDId],
+      p_staff: [],
+    });
+    if (stampAErr) throw stampAErr;
+
+    const { data: incidentARow } = await admin.from("incidents").select("owning_teacher_id, created_by").eq("id", incidentADDDId).single();
+    record("DDD1a owning_teacher_id is the FIRST-position class teacher (Eligible), not null", incidentARow.owning_teacher_id === eligibleDDDId, incidentARow.owning_teacher_id);
+    record("DDD1b owning_teacher_id is NOT the second-position co-teacher", incidentARow.owning_teacher_id !== coDDDId, incidentARow.owning_teacher_id);
+    record("DDD1c created_by is still the SNA who actually stamped it -- ownership and authorship are separate facts", incidentARow.created_by === snaDDDId, incidentARow.created_by);
+
+    // ---- DDD2: the SNA who created it still cannot edit it -- THE
+    // NEGATIVE, confirming this fix does not widen who may act as
+    // owner. Re-read via service role, not absence of a client error. ----
+    const { data: snaEditAttempt } = await snaDDD.from("incidents").update({ anyone_injured: true }).eq("id", incidentADDDId).select("id");
+    record("DDD2 the SNA's own write is still silently filtered by RLS -- 0 rows back, matching can_own_incident() correctly excluding sna", !snaEditAttempt || snaEditAttempt.length === 0, JSON.stringify(snaEditAttempt));
+    const { data: reReadAfterSnaAttempt } = await admin.from("incidents").select("anyone_injured").eq("id", incidentADDDId).single();
+    record("DDD2b confirmed via service role: anyone_injured is genuinely still null, not silently written", reReadAfterSnaAttempt.anyone_injured === null, reReadAfterSnaAttempt.anyone_injured);
+
+    // ---- DDD3: the auto-assigned owner (Eligible) can genuinely write
+    // to EVERY part of the record, each asserted by rows actually
+    // coming back. ----
+    const { data: mainUpdateRows, error: mainUpdateErr } = await eligibleDDD
+      .from("incidents")
+      .update({ category: "one_party_incident", narrative: "DDD test narrative.", parent_summary: "DDD parent summary." })
+      .eq("id", incidentADDDId)
+      .select("id");
+    record("DDD3a the auto-assigned owner can save the main narrative/category", !mainUpdateErr && mainUpdateRows?.length === 1, mainUpdateErr?.message ?? JSON.stringify(mainUpdateRows));
+
+    const { data: injuredRows, error: injuredErr } = await eligibleDDD.from("incidents").update({ anyone_injured: false }).eq("id", incidentADDDId).select("id");
+    record("DDD3b the auto-assigned owner can save anyone_injured -- item 1's own field", !injuredErr && injuredRows?.length === 1, injuredErr?.message ?? JSON.stringify(injuredRows));
+
+    const { data: debriefFlagRows, error: debriefFlagErr } = await eligibleDDD.from("incidents").update({ debrief_required: true }).eq("id", incidentADDDId).select("id");
+    record("DDD3c the auto-assigned owner can save debrief_required", !debriefFlagErr && debriefFlagRows?.length === 1, debriefFlagErr?.message ?? JSON.stringify(debriefFlagRows));
+    // Reset immediately -- DDD3c only needs to prove the WRITE succeeds,
+    // not actually require a completed debrief for DDD3g's sign-off
+    // below (incident_signoff_issues()'s own rule 1, unrelated to
+    // anything this migration touches).
+    await eligibleDDD.from("incidents").update({ debrief_required: false }).eq("id", incidentADDDId);
+
+    const { data: childRowDDD } = await admin.from("incident_children").select("id").eq("incident_id", incidentADDDId).eq("passport_id", child1DDDId).single();
+    const { data: childUpdateRows, error: childUpdateErr } = await eligibleDDD
+      .from("incident_children")
+      .update({ distress_level: "slightly" })
+      .eq("id", childRowDDD.id)
+      .select("id");
+    record("DDD3d the auto-assigned owner can save a child-level field (incident_children, the table 0069 narrowed the same way as the base row)", !childUpdateErr && childUpdateRows?.length === 1, childUpdateErr?.message ?? JSON.stringify(childUpdateRows));
+
+    const { error: actionInsertErr } = await eligibleDDD.from("incident_actions").insert({ incident_id: incidentADDDId, action_type_id: restraintActionDDD.id });
+    record("DDD3e the auto-assigned owner can insert an action", !actionInsertErr, actionInsertErr?.message);
+
+    const { data: rpInsertData, error: rpInsertErr } = await eligibleDDD
+      .from("restrictive_practices")
+      .insert({ incident_id: incidentADDDId, passport_id: child1DDDId, planning_status: "not_planned", hold_type: "childrens", hold_position: "standing", hold_level: "low" })
+      .select("id")
+      .single();
+    record("DDD3f the auto-assigned owner can insert a restrictive practice record", !rpInsertErr && Boolean(rpInsertData), rpInsertErr?.message);
+
+    const { error: signOffDDDErr } = await eligibleDDD.rpc("sign_off_incident", { p_incident_id: incidentADDDId });
+    record("DDD3g the auto-assigned owner can sign the incident off end to end -- the whole flow is genuinely unblocked, not just one field", !signOffDDDErr, signOffDDDErr?.message);
+
+    // ---- DDD4: a second incident, for a child with NO class
+    // assignment at all -- the principal fallback. ----
+    const { data: incidentBDDDId, error: stampBErr } = await snaDDD.rpc("create_incident_stamp", {
+      p_institution_id: institutionDDDId,
+      p_occurred_at: new Date().toISOString(),
+      p_location_id: locDDD.id,
+      p_child_passport_ids: [child2DDDId],
+      p_staff: [],
+    });
+    if (stampBErr) throw stampBErr;
+
+    const { data: incidentBRow } = await admin.from("incidents").select("owning_teacher_id").eq("id", incidentBDDDId).single();
+    record("DDD4a a child with no class assignment falls back to the principal", incidentBRow.owning_teacher_id === principalDDDId, incidentBRow.owning_teacher_id);
+
+    const { data: principalEditRows, error: principalEditErr } = await principalDDD
+      .from("incidents")
+      .update({ category: "one_party_incident", narrative: "DDD fallback-case narrative." })
+      .eq("id", incidentBDDDId)
+      .select("id");
+    record("DDD4b the fallback owner (principal) can genuinely write to it, not just hold the id", !principalEditErr && principalEditRows?.length === 1, principalEditErr?.message ?? JSON.stringify(principalEditRows));
+
+    // ---- DDD5: regression -- a class teacher creating their own
+    // incident still auto-owns themselves, exactly as before this
+    // migration. ----
+    const { data: incidentCDDDId, error: stampCErr } = await regularDDD.rpc("create_incident_stamp", {
+      p_institution_id: institutionDDDId,
+      p_occurred_at: new Date().toISOString(),
+      p_location_id: locDDD.id,
+      p_child_passport_ids: [child2DDDId],
+      p_staff: [],
+    });
+    if (stampCErr) throw stampCErr;
+    const { data: incidentCRow } = await admin.from("incidents").select("owning_teacher_id").eq("id", incidentCDDDId).single();
+    record("DDD5 regression: a class teacher creating their own incident still auto-owns themselves, unchanged", incidentCRow.owning_teacher_id === regularDDDId, incidentCRow.owning_teacher_id);
+
+    console.log("DDD summary complete.");
+
+    await admin.from("restrictive_practices").delete().eq("incident_id", incidentADDDId);
+    await admin.from("incident_actions").delete().eq("incident_id", incidentADDDId);
+    await admin.from("incident_children").delete().in("incident_id", [incidentADDDId, incidentBDDDId, incidentCDDDId]);
+    await admin.from("incidents").delete().in("id", [incidentADDDId, incidentBDDDId, incidentCDDDId]);
+    await admin.from("class_children").delete().eq("passport_id", child1DDDId);
+    await admin.from("class_teachers").delete().eq("class_id", classADDDId);
+    await admin.from("classes").delete().eq("id", classADDDId);
+    await admin.from("passport_guardians").delete().in("passport_id", [child1DDDId, child2DDDId]);
+    await admin.from("passports").delete().in("id", [child1DDDId, child2DDDId]);
+    await admin.from("institutions").delete().eq("id", institutionDDDId);
+    for (const id of [principalDDDId, eligibleDDDId, coDDDId, snaDDDId, regularDDDId]) {
       await admin.auth.admin.deleteUser(id);
     }
   }
