@@ -141,7 +141,7 @@ export function useSupportButtonNavSlots({
         <div className="min-w-0">
           {status.isOwn ? (
             <>
-              <p className="truncate font-sans text-sm font-semibold text-white">
+              <p className="font-sans text-sm font-semibold text-white">
                 Support requested{roomSummary ? ` — ${roomSummary}` : ""}
               </p>
               <p className="font-sans text-xs text-white/80">
@@ -158,7 +158,7 @@ export function useSupportButtonNavSlots({
               </p>
             </>
           ) : (
-            <p className="truncate font-sans text-sm font-semibold text-white">
+            <p className="font-sans text-sm font-semibold text-white">
               {status.raisedByName ?? "A colleague"} needs assistance{roomSummary ? ` in ${roomSummary}` : ""}
               {moreSuffix}
             </p>

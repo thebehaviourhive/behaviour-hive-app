@@ -71,10 +71,15 @@ export function AppBottomNav({
 
   return (
     <nav className="fixed inset-x-0 bottom-0 z-10 border-t border-black/5 bg-white pb-[env(safe-area-inset-bottom)]">
+      {/* The alert strip deliberately does NOT take maxWidthClassName --
+          that constraint exists to keep the tab ROW's icons visually
+          centred at a comfortable width, not to cap an alert message's
+          own text. Found live: at maxWidthClassName's default (max-w-sm,
+          384px) a raiser's name plus a room name genuinely didn't fit
+          and got cut off mid-word behind an ellipsis on a 1280px screen
+          with room to spare. Full width instead. */}
       {alertSlot && (
-        <div className={`mx-auto ${maxWidthClassName} border-b border-white/20 bg-brand-support-red px-4 py-2.5`}>
-          {alertSlot}
-        </div>
+        <div className="border-b border-white/20 bg-brand-support-red px-4 py-2.5">{alertSlot}</div>
       )}
       <div className={`mx-auto flex ${maxWidthClassName} items-center justify-around px-2 py-1.5`}>
         {tabs.map((tab) => {
