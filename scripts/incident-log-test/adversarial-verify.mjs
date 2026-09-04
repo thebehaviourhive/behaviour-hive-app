@@ -12812,6 +12812,92 @@ async function main() {
     }
   }
 
+  console.log(`\n== CHECK MMM: SQL for migration 0167 -- teacher_updates.marked_absent. Proves the column's own guarantee, not RLS (the INSERT policy is untouched by this migration -- auth.uid() = teacher_id, unconditional on any other column -- and is already covered by CHECK Y-8): a genuine absence marker (marked_absent = true, every wellbeing field left null) succeeds (MMM1); the constraint refuses marked_absent = true paired with EITHER a non-null settled_state (MMM2a) OR a non-null energy_level (MMM2b) -- checked as two separate violations, not one, to prove the constraint inspects more than a single field -- "never a confused mix of both", enforced, not just documented; an ordinary EOD row (marked_absent defaulted to false, real wellbeing content) is entirely unaffected by the new constraint (MMM3, the regression control); and the literal client query shape hasSubmittedEodToday/resolveTeacherEodQueue both use -- select id .eq(passport_id) .eq(teacher_id) .gte(submitted_at, startOfToday) -- returns the marked_absent row, proving "counts as handled, for free" is a real, observed fact about this exact query, not an inference from the schema (MMM4). ==`);
+  if (shouldRun("MMM")) {
+    const { data: instMMM, error: instMMMErr } = await admin
+      .from("institutions")
+      .insert({ name: "MMM Institution", institution_code: CODE + "MMM", status: "verified" })
+      .select()
+      .single();
+    if (instMMMErr) throw instMMMErr;
+    const institutionMMMId = instMMM.id;
+
+    const principalMMMId = await createUser("mmm.principal@thebehaviourhive.com", "MMM Principal", "principal");
+    const teacherMMMId = await createUser("mmm.teacher@thebehaviourhive.com", "MMM Teacher", "class_teacher");
+
+    await admin.from("institution_staff").insert({ institution_id: institutionMMMId, user_id: principalMMMId, role: "principal" });
+    const { data: teacherMMMStaffRow } = await admin.from("institution_staff").insert({ institution_id: institutionMMMId, user_id: teacherMMMId, role: "class_teacher" }).select().single();
+
+    const principalMMM = await signedInClient("mmm.principal@thebehaviourhive.com");
+    const teacherMMM = await signedInClient("mmm.teacher@thebehaviourhive.com");
+
+    const { error: approveMMMErr } = await principalMMM.rpc("approve_staff_join", { p_institution_staff_id: teacherMMMStaffRow.id });
+    if (approveMMMErr) throw approveMMMErr;
+
+    const { data: classMMMId } = await principalMMM.rpc("create_class", { p_institution_id: institutionMMMId, p_name: "MMM Room" });
+    await principalMMM.rpc("add_class_teacher", { p_class_id: classMMMId, p_user_id: teacherMMMId });
+
+    const { data: childAMMMId } = await principalMMM.rpc("create_school_passport", { p_institution_id: institutionMMMId, p_child_name: "MMM Child A -- absent" });
+    const { data: childBMMMId } = await principalMMM.rpc("create_school_passport", { p_institution_id: institutionMMMId, p_child_name: "MMM Child B -- ordinary EOD" });
+    await principalMMM.rpc("add_class_child", { p_class_id: classMMMId, p_passport_id: childAMMMId });
+    await principalMMM.rpc("add_class_child", { p_class_id: classMMMId, p_passport_id: childBMMMId });
+
+    const { data: mmm1Row, error: mmm1Err } = await teacherMMM
+      .from("teacher_updates")
+      .insert({ passport_id: childAMMMId, teacher_id: teacherMMMId, marked_absent: true })
+      .select()
+      .single();
+    record("MMM1 a genuine absence marker (marked_absent = true, every wellbeing field left null) succeeds", !mmm1Err && mmm1Row?.marked_absent === true, mmm1Err?.message ?? JSON.stringify(mmm1Row));
+
+    const { error: mmm2aErr } = await teacherMMM
+      .from("teacher_updates")
+      .insert({ passport_id: childAMMMId, teacher_id: teacherMMMId, marked_absent: true, settled_state: "settled" });
+    record("MMM2a the constraint refuses marked_absent = true paired with a non-null settled_state", Boolean(mmm2aErr), mmm2aErr?.message);
+
+    const { error: mmm2bErr } = await teacherMMM
+      .from("teacher_updates")
+      .insert({ passport_id: childAMMMId, teacher_id: teacherMMMId, marked_absent: true, energy_level: 3 });
+    record("MMM2b the constraint refuses marked_absent = true paired with a non-null energy_level -- a second field, not just the first one checked", Boolean(mmm2bErr), mmm2bErr?.message);
+
+    const { data: mmm3Row, error: mmm3Err } = await teacherMMM
+      .from("teacher_updates")
+      .insert({ passport_id: childBMMMId, teacher_id: teacherMMMId, settled_state: "unsettled", energy_level: 4, flags: ["Fatigued"] })
+      .select()
+      .single();
+    record("MMM3 REGRESSION: an ordinary EOD row (marked_absent defaulted false, real wellbeing content) is unaffected by the new constraint", !mmm3Err && mmm3Row?.marked_absent === false && mmm3Row?.settled_state === "unsettled", mmm3Err?.message ?? JSON.stringify(mmm3Row));
+
+    // MMM4 -- the literal query shape, not a proxy for it. Matches
+    // hasSubmittedEodToday (teacher/passport/[passportId]/page.tsx) and
+    // resolveTeacherEodQueue() (lib/teacherEodQueue.ts) field-for-field.
+    const startOfTodayMMM = new Date();
+    startOfTodayMMM.setHours(0, 0, 0, 0);
+    const { data: mmm4Row, error: mmm4Err } = await teacherMMM
+      .from("teacher_updates")
+      .select("id")
+      .eq("passport_id", childAMMMId)
+      .eq("teacher_id", teacherMMMId)
+      .gte("submitted_at", startOfTodayMMM.toISOString())
+      .limit(1)
+      .maybeSingle();
+    record(
+      "MMM4 THE CLIENT'S OWN QUERY SHAPE: a marked_absent row satisfies the 'already handled today' existence check, for free -- proven on the literal query, not assumed from the schema",
+      !mmm4Err && Boolean(mmm4Row),
+      mmm4Err?.message ?? JSON.stringify(mmm4Row)
+    );
+
+    console.log("MMM summary complete.");
+
+    await admin.from("teacher_updates").delete().in("passport_id", [childAMMMId, childBMMMId]);
+    await admin.from("class_children").delete().eq("class_id", classMMMId);
+    await admin.from("class_teachers").delete().eq("class_id", classMMMId);
+    await admin.from("classes").delete().eq("id", classMMMId);
+    await admin.from("passports").delete().in("id", [childAMMMId, childBMMMId]);
+    await admin.from("institutions").delete().eq("id", institutionMMMId);
+    for (const id of [principalMMMId, teacherMMMId]) {
+      await admin.auth.admin.deleteUser(id);
+    }
+  }
+
   console.log(`\n== Summary ==`);
   const failed = results.filter((r) => !r.pass);
   console.log(`${results.length - failed.length}/${results.length} passed.`);

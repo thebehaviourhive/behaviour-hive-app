@@ -26,6 +26,11 @@ interface TeacherUpdateData {
   energyLevel: number;
   flags: string[];
   headsUp: string | null;
+  // 0167 -- an absence marker, not a real end-of-day account. Kept in
+  // the same TeacherUpdateData shape rather than a parallel bit of
+  // state, since it's the same row and the two are mutually exclusive
+  // by the table's own check constraint.
+  markedAbsent: boolean;
 }
 
 // PRD 3, Stage 5 -- get_todays_checkin()'s own return shape. isMine
@@ -229,7 +234,7 @@ export default function ParentDashboardPage() {
 
       const { data: todaysUpdate } = await supabase
         .from("teacher_updates")
-        .select("settled_state, energy_level, flags, heads_up, teacher_id")
+        .select("settled_state, energy_level, flags, heads_up, teacher_id, marked_absent")
         .eq("passport_id", passportId)
         .gte("submitted_at", startOfToday.toISOString())
         .order("submitted_at", { ascending: false })
@@ -257,6 +262,7 @@ export default function ParentDashboardPage() {
           energyLevel: todaysUpdate.energy_level ?? 0,
           flags: todaysUpdate.flags ?? [],
           headsUp: todaysUpdate.heads_up,
+          markedAbsent: Boolean(todaysUpdate.marked_absent),
         });
       }
       setResumeHref(
@@ -603,6 +609,28 @@ function CheckInCard({
           <p className="text-xs text-black/50">
             Your teacher&apos;s end-of-day update will appear here
           </p>
+        </div>
+      </div>
+    );
+  }
+
+  // 0167 -- an absence marker, not a wellbeing account. A distinct
+  // state deliberately: the settled/energy/flags fields are all null on
+  // this row (the table's own check constraint), so rendering the usual
+  // card would show an empty, misleading wellbeing summary instead of
+  // the actual fact -- the child wasn't in today.
+  if (teacherUpdate.markedAbsent) {
+    return (
+      <div className="flex items-center gap-3 rounded-2xl border border-black/5 bg-white p-3.5 shadow-sm">
+        <span
+          aria-hidden
+          className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-black/5 text-lg"
+        >
+          🏠
+        </span>
+        <div className="flex-1">
+          <p className="text-sm font-semibold text-brand-neutral-black">Marked absent today</p>
+          <p className="text-xs text-black/50">Recorded by {teacherUpdate.teacherName}</p>
         </div>
       </div>
     );

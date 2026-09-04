@@ -17,6 +17,7 @@ import { QuestionnairePromptCard } from "@/components/questionnaire/Questionnair
 import { WorkQueueRow } from "@/components/shared/WorkQueueRow";
 import { formatWaitingSince } from "@/lib/workQueueFormatting";
 import { formatTimeOfDay } from "@/lib/temporaryAccessTime";
+import { resolveTeacherEodQueue } from "@/lib/teacherEodQueue";
 import { CheckIcon } from "@/components/ui/icons";
 
 const GRID_CAP = 6;
@@ -165,6 +166,13 @@ export default function TeacherDashboardPage() {
   const [snaGaps, setSnaGaps] = useState<SnaGapRow[]>([]);
   const [cutoffTime, setCutoffTime] = useState<string | null>(null);
   const [snaNotRequiredPendingId, setSnaNotRequiredPendingId] = useState<string | null>(null);
+  // Item 3 -- bulk EOD update. Same >=13:00 device-clock rule as the
+  // existing single-child "Complete EOD Update" button (confirmed live
+  // at teacher/passport/[passportId]/page.tsx:327), not a second rule.
+  // Queue resolution shared with /teacher/eod/bulk itself
+  // (teacherEodQueue.ts) so this count and what the bulk flow actually
+  // finds a moment later can never disagree.
+  const [eodRemainingCount, setEodRemainingCount] = useState<number | null>(null);
 
   // Migration 0165 -- "No SNA required" is a persisted fact
   // (child_sna_not_required), not a per-viewer dismissal: it clears the
@@ -237,6 +245,28 @@ export default function TeacherDashboardPage() {
 
   useEffect(() => {
     if (!user) return;
+    // Only fetched in the afternoon window this card can even show in --
+    // matches the single-child button's own gate rather than querying
+    // year-round for a count that would never render before 13:00.
+    // eodRemainingCount starts (and stays) null before 13:00 -- no
+    // reset needed here, nothing sets it otherwise.
+    const isAfternoon = new Date().getHours() >= 13;
+    if (!isAfternoon) return;
+    let isMounted = true;
+    async function loadEodRemaining() {
+      const supabase = createClient();
+      const remaining = await resolveTeacherEodQueue(supabase, user!.id);
+      if (!isMounted) return;
+      setEodRemainingCount(remaining.length);
+    }
+    loadEodRemaining();
+    return () => {
+      isMounted = false;
+    };
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) return;
     let isMounted = true;
     async function loadUnopenedCount() {
       const supabase = createClient();
@@ -289,7 +319,8 @@ export default function TeacherDashboardPage() {
     debriefOwed.length === 0 &&
     attestationIssues.length === 0 &&
     coverGrants.length === 0 &&
-    snaGaps.length === 0;
+    snaGaps.length === 0 &&
+    !eodRemainingCount;
 
   return (
     <div className="flex min-h-full flex-1 flex-col bg-brand-off-white/40 pb-24">
@@ -324,6 +355,24 @@ export default function TeacherDashboardPage() {
           </div>
         ) : (
           <div className="flex flex-col gap-2">
+            {/* Item 3 -- time-sensitive, same as the afternoon-only gate
+                it shares with the single-child button, so it's only
+                ever non-null (and only ever rendered) after 13:00.
+                Disappears the moment the count reaches 0, same as every
+                other bucket here -- it isn't tracked separately, it's
+                just what eodRemainingCount becomes once
+                resolveTeacherEodQueue() next resolves nothing left. */}
+            {eodRemainingCount !== null && eodRemainingCount > 0 && (
+              <WorkQueueRow
+                key="eod-bulk"
+                urgent
+                entity="End of day updates"
+                exception={`${eodRemainingCount} ${eodRemainingCount === 1 ? "child" : "children"} remaining`}
+                actionLabel="Start"
+                href="/teacher/eod/bulk"
+              />
+            )}
+
             {owed.map((row) => (
               <WorkQueueRow
                 key={row.incident_staff_id}

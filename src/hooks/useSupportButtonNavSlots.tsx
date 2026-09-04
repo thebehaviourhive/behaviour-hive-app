@@ -194,40 +194,25 @@ export function useSupportButtonNavSlots({
           <HandHelping aria-hidden size={24} strokeWidth={2} className="text-brand-support-red" />
           <span className="font-sans text-[10px] font-semibold leading-none text-brand-support-red">Support</span>
         </button>
-        {/* Item 3's own honest-reach copy for a 0/1-class raiser -- they
-            never see the room-picker sheet (only 2+ classes does), which
-            is now the only OTHER place this copy survives. Without this,
-            a 0/1-class raiser would see the reach caveat nowhere at all,
-            ever. Standing text next to the control, not a confirmation
-            step -- shown every time the idle button is, for every raiser
-            regardless of class count (2+-class raisers see it twice,
-            here and in the sheet -- repetition isn't the problem the
-            original gap was). Yields to raiseError when one is present;
-            there isn't room above the button for both at once. */}
-        {raiseError ? (
+        {/* Daniel's own instruction, reversed: the "reaches staff with
+            the app open, not a locked phone" caption was asked for when
+            the alert reached people unpredictably; 5s polling (item 3,
+            an earlier pass) brought that under three seconds and the
+            copy was never revisited. Standing text under a crisis
+            button explaining a technical limitation isn't read
+            mid-crisis, and it makes the button read as unreliable
+            exactly when a teacher needs to trust it. raiseError still
+            renders here when a raise genuinely fails -- that's a real
+            error, not the removed standing caption. */}
+        {raiseError && (
           <p role="alert" className="absolute bottom-full mb-1 w-36 text-center font-sans text-[10px] font-medium text-brand-support-red">
             {raiseError}
-          </p>
-        ) : (
-          <p className="absolute bottom-full mb-1 w-36 text-center font-sans text-[10px] leading-tight text-brand-neutral-black/50">
-            Reaches staff with the app open - not a locked phone
           </p>
         )}
 
         {isRoomPickerOpen && (
           <BottomSheet isOpen={isRoomPickerOpen} onClose={() => setIsRoomPickerOpen(false)}>
             <h2 className="font-heading text-lg font-bold text-brand-neutral-black">Which room?</h2>
-            {/* Honest, at the point of raising, before they commit --
-                the only place this copy survives now that item 3
-                removed it from the raiser's own post-raise alert
-                (2+-class raisers see it here; 0/1-class raisers, who
-                never see this sheet, now see it nowhere -- flagged in
-                the report). Reworded for 5s polling: reach is close to
-                immediate now, but "app open and unlocked" is still a
-                real, honest limit, not closed by a faster interval. */}
-            <p className="mt-1 font-sans text-sm text-brand-neutral-black/60">
-              Staff with the app open see this within seconds. It won&apos;t reach a locked phone or a closed app.
-            </p>
             <div className="mt-4 flex flex-col gap-2">
               {myRooms.map((room) => (
                 <button

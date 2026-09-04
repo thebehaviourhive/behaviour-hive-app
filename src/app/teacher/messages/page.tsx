@@ -91,7 +91,7 @@ export default function TeacherMessagesPage() {
       {/* Plain child picker -- composing needs exactly one passport, so
           [New] resolves that first, then hands off to the shared sheet. */}
       <BottomSheet isOpen={isPickerOpen} onClose={() => setIsPickerOpen(false)}>
-        <h2 className="font-heading text-xl font-semibold text-brand-neutral-black">Message which student?</h2>
+        <h2 className="font-heading text-xl font-semibold text-brand-neutral-black">Message about which student?</h2>
         <div className="mt-4 flex flex-col gap-2">
           {passports.map((passport) => (
             <button
