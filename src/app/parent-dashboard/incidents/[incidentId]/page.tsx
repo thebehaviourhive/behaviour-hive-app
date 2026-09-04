@@ -92,13 +92,17 @@ export default function ParentIncidentDetailPage() {
   const { user, isReady } = useRequireRole("parent");
   const params = useParams<{ incidentId: string }>();
   const incidentId = params.incidentId;
-  const { passportId, isLoading: isLoadingPassport, error: passportLoadFailed } = useMyPassport(user?.id);
+  const { passportId, isLoading: isLoadingPassport, error: passportLoadFailed, refresh: refreshPassport } = useMyPassport(user?.id);
 
   const [incident, setIncident] = useState<ParentIncidentDetail | null>(null);
   const [isLoadingIncident, setIsLoadingIncident] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [isAcknowledging, setIsAcknowledging] = useState(false);
   const [acknowledgeError, setAcknowledgeError] = useState<string | null>(null);
+  // Background pass, "the ~17 window.location.reload() sites" -- a
+  // reloadKey re-runs this same load effect in place instead of a hard
+  // browser reload, matching the incident page's own fix.
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     if (isLoadingPassport) return;
@@ -108,6 +112,8 @@ export default function ParentIncidentDetailPage() {
       return;
     }
     let isMounted = true;
+    setIsLoadingIncident(true);
+    setLoadError(null);
 
     async function load() {
       const supabase = createClient();
@@ -129,7 +135,7 @@ export default function ParentIncidentDetailPage() {
     return () => {
       isMounted = false;
     };
-  }, [passportId, isLoadingPassport, incidentId]);
+  }, [passportId, isLoadingPassport, incidentId, reloadKey]);
 
   const isLoading = isLoadingPassport || isLoadingIncident;
   const effectiveLoadError = passportLoadFailed ? "Couldn't load this incident." : loadError;
@@ -174,7 +180,13 @@ export default function ParentIncidentDetailPage() {
             <div className="h-32 animate-pulse rounded-2xl bg-white" />
           </div>
         ) : effectiveLoadError ? (
-          <InlineErrorState message={effectiveLoadError} onRetry={() => window.location.reload()} />
+          <InlineErrorState
+            message={effectiveLoadError}
+            onRetry={() => {
+              refreshPassport();
+              setReloadKey((k) => k + 1);
+            }}
+          />
         ) : !incident ? (
           // A wrong/stale id, or -- structurally, not a bug -- the
           // stage-1 "recorded" notice's own incident, not yet visible

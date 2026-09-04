@@ -43,7 +43,7 @@ interface ClinicianRow {
 export default function FbaPrintPage() {
   const { fbaId } = useParams<{ fbaId: string }>();
   const router = useRouter();
-  const { report, isLoading, loadError } = useFbaReport(fbaId);
+  const { report, isLoading, loadError, reload } = useFbaReport(fbaId);
 
   const [authChecked, setAuthChecked] = useState(false);
   const [childName, setChildName] = useState<string | null>(null);
@@ -115,7 +115,7 @@ export default function FbaPrintPage() {
   if (loadError) {
     return (
       <div className="p-6">
-        <InlineErrorState message={loadError} onRetry={() => window.location.reload()} />
+        <InlineErrorState message={loadError} onRetry={() => reload()} />
       </div>
     );
   }

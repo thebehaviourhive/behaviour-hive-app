@@ -82,7 +82,7 @@ export function ProgressSurface({
   childFullName: string | null;
   role: ProgressViewerRole;
 }) {
-  const { checkins, updates, isLoading, loadError } = useDailyPatterns(passportId);
+  const { checkins, updates, isLoading, loadError, refresh: refreshDailyPatterns } = useDailyPatterns(passportId);
   const { entries: abcEntries } = useAbcTrendData(passportId);
   const { items: clinicalContentItems } = usePassportClinicalContent(passportId);
   const [rangeKey, setRangeKey] = useState<ProgressRangeKey>("7");
@@ -199,7 +199,7 @@ export function ProgressSurface({
       </div>
 
       {loadError ? (
-        <InlineErrorState message={loadError} onRetry={() => window.location.reload()} />
+        <InlineErrorState message={loadError} onRetry={() => refreshDailyPatterns()} />
       ) : isLoading ? (
         <ChartSkeleton />
       ) : !hasAnyDataEver ? (

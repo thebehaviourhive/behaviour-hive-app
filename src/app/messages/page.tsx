@@ -26,6 +26,7 @@ export default function MessagesPage() {
     childName,
     isLoading: isLoadingPassport,
     error: passportLoadFailed,
+    refresh: refreshPassport,
   } = useMyPassport(user?.id);
   const [institutionPhone, setInstitutionPhone] = useState<string | null>(null);
   const [isComposeOpen, setIsComposeOpen] = useState(false);
@@ -77,7 +78,7 @@ export default function MessagesPage() {
 
       <main className="flex-1 px-4 py-2">
         {passportLoadError ? (
-          <InlineErrorState message={passportLoadError} onRetry={() => window.location.reload()} />
+          <InlineErrorState message={passportLoadError} onRetry={() => refreshPassport()} />
         ) : !passportId ? (
           <div className="flex flex-col items-center gap-3 py-12 text-center">
             <p className="text-sm text-brand-neutral-black/70">

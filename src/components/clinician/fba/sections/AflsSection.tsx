@@ -171,8 +171,8 @@ function DomainCard({
 }
 
 export function AflsSection({ fbaId }: { fbaId: string }) {
-  const { itemsByDomain, loadError: itemBankError } = useAflsItemBank();
-  const { assessments, loadError, createAssessment, updateAssessment, deleteAssessment } =
+  const { itemsByDomain, loadError: itemBankError, refresh: refreshItemBank } = useAflsItemBank();
+  const { assessments, loadError, reload, createAssessment, updateAssessment, deleteAssessment } =
     useAflsAssessmentsForFba(fbaId);
   const [openAssessmentId, setOpenAssessmentId] = useState<string | null>(null);
   const [draftScores, setDraftScores] = useState<AflsScores>({});
@@ -323,7 +323,10 @@ export function AflsSection({ fbaId }: { fbaId: string }) {
     return (
       <InlineErrorState
         message={itemBankError ? "Couldn't load the AFLS item bank." : "Couldn't load AFLS assessments."}
-        onRetry={() => window.location.reload()}
+        onRetry={() => {
+          refreshItemBank();
+          reload();
+        }}
       />
     );
   }

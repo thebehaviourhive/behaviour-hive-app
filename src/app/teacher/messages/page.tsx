@@ -22,7 +22,7 @@ import { BottomSheet } from "@/components/ui/BottomSheet";
 // sheet every track uses.
 export default function TeacherMessagesPage() {
   const { user, isReady: isRoleReady } = useRequireRole("class_teacher");
-  const { isLoading: isLoadingPassports, institutionId, passports, error } = useTeacherPassports(
+  const { isLoading: isLoadingPassports, institutionId, passports, error, refresh: refreshPassports } = useTeacherPassports(
     user?.id ?? null
   );
   const { groups, nameById, isLoading, loadError, refresh } = useMessageTriage(passports);
@@ -71,7 +71,7 @@ export default function TeacherMessagesPage() {
 
       <main className="flex-1 px-4 py-2">
         {error ? (
-          <InlineErrorState message="Couldn't load your students." onRetry={() => window.location.reload()} />
+          <InlineErrorState message="Couldn't load your students." onRetry={() => refreshPassports()} />
         ) : passports.length === 0 ? (
           <p className="py-12 text-center text-sm text-brand-neutral-black/50">No students linked yet.</p>
         ) : loadError ? (

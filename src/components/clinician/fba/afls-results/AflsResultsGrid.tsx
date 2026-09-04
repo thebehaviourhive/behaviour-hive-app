@@ -156,7 +156,7 @@ function AflsDomainCard({
 }
 
 export function AflsResultsGrid({ assessments, isPrint = false }: { assessments: AflsAssessment[]; isPrint?: boolean }) {
-  const { itemsByDomain, loadError } = useAflsItemBank();
+  const { itemsByDomain, loadError, refresh } = useAflsItemBank();
   // Most recent first (the hook's own sort) -- index 0 is the default,
   // matching "defaults to the most recent assessment" exactly.
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -165,7 +165,7 @@ export function AflsResultsGrid({ assessments, isPrint = false }: { assessments:
   );
 
   if (loadError) {
-    return <InlineErrorState message="Couldn't load the AFLS item bank." onRetry={() => window.location.reload()} />;
+    return <InlineErrorState message="Couldn't load the AFLS item bank." onRetry={() => refresh()} />;
   }
 
   if (assessments.length === 0 || isAflsResultsEmpty(assessments)) {

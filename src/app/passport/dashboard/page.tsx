@@ -128,6 +128,10 @@ export default function PassportDashboardPage() {
   const { passportId, isLoading: isLoadingPassportId } = useMyPassport(user?.id);
   const [summary, setSummary] = useState<PassportSummaryData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  // Background pass, "the ~17 window.location.reload() sites" -- a
+  // reloadKey re-runs this same load effect in place instead of a hard
+  // browser reload, matching the incident page's own fix.
+  const [reloadKey, setReloadKey] = useState(0);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [approvedInstitutions, setApprovedInstitutions] = useState<ApprovedInstitution[]>([]);
   const [connectedClinicians, setConnectedClinicians] = useState<ConnectedClinician[]>([]);
@@ -340,6 +344,9 @@ export default function PassportDashboardPage() {
   useEffect(() => {
     if (!user || isLoadingPassportId) return;
     let isMounted = true;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setIsLoading(true);
+    setLoadError(null);
 
     async function load() {
       try {
@@ -519,7 +526,7 @@ export default function PassportDashboardPage() {
     // Re-fetches fresh on every mount — this page is always reached via a
     // real navigation (bottom nav / edit-and-return), never kept alive
     // across visits, so there is no stale-data path to guard against here.
-  }, [user, router, passportId, isLoadingPassportId]);
+  }, [user, router, passportId, isLoadingPassportId, reloadKey]);
 
   // Lets the dashboard's "ABC Log" quick action jump straight into the
   // logger instead of just landing here and requiring an extra tap on the
@@ -561,7 +568,7 @@ export default function PassportDashboardPage() {
         <p className="text-sm text-brand-neutral-black/70">{loadError}</p>
         <button
           type="button"
-          onClick={() => window.location.reload()}
+          onClick={() => setReloadKey((k) => k + 1)}
           className="rounded-full bg-brand-prussian-blue px-5 py-2.5 text-sm font-semibold text-white"
         >
           Try again

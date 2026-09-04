@@ -57,6 +57,10 @@ export function useDailyPatterns(passportId: string) {
   const [updates, setUpdates] = useState<TeacherUpdateEntry[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  // Background pass, "the ~17 window.location.reload() sites" -- lets a
+  // caller's own error-retry button re-run this hook's load effect in
+  // place instead of a hard browser reload.
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     let isMounted = true;
@@ -107,7 +111,7 @@ export function useDailyPatterns(passportId: string) {
     return () => {
       isMounted = false;
     };
-  }, [passportId]);
+  }, [passportId, reloadKey]);
 
-  return { checkins, updates, isLoading, loadError };
+  return { checkins, updates, isLoading, loadError, refresh: () => setReloadKey((k) => k + 1) };
 }

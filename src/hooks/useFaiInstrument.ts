@@ -16,9 +16,15 @@ export function useFaiInstrument() {
   const [items, setItems] = useState<InstrumentItem[] | null>(null);
   const [attribution, setAttribution] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  // Background pass, "the ~17 window.location.reload() sites" -- lets a
+  // caller's own error-retry button re-run this hook's load effect in
+  // place instead of a hard browser reload.
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     let isMounted = true;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setLoadError(null);
     const supabase = createClient();
     supabase
       .from("fba_instruments")
@@ -39,7 +45,7 @@ export function useFaiInstrument() {
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [reloadKey]);
 
-  return { items, attribution, loadError };
+  return { items, attribution, loadError, refresh: () => setReloadKey((k) => k + 1) };
 }

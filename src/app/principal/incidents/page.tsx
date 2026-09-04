@@ -92,6 +92,10 @@ export default function PrincipalIncidentsListPage() {
   // other client-side derivation on this page -- no new RPC param.
   const [sortKey, setSortKey] = useState<"class" | "loggedBy" | null>(null);
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
+  // Background pass, "the ~17 window.location.reload() sites" -- a
+  // reloadKey re-runs the load effect below in place instead of a hard
+  // browser reload, matching the incident page's own fix.
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     if (!user) return;
@@ -159,7 +163,7 @@ export default function PrincipalIncidentsListPage() {
     return () => {
       isMounted = false;
     };
-  }, [institutionId, start, end, planningSubFilter, isNcsePending]);
+  }, [institutionId, start, end, planningSubFilter, isNcsePending, reloadKey]);
 
   // Client-side only for the one combination the RPC's own params can't
   // express (restraint used, any planning status) -- see header comment.
@@ -283,7 +287,7 @@ export default function PrincipalIncidentsListPage() {
             ))}
           </div>
         ) : loadError ? (
-          <InlineErrorState message={loadError} onRetry={() => window.location.reload()} />
+          <InlineErrorState message={loadError} onRetry={() => setReloadKey((k) => k + 1)} />
         ) : visibleRows.length === 0 ? (
           <p className="rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-center font-sans text-body text-brand-neutral-black/60">
             No incidents match these filters.

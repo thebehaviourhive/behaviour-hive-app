@@ -17,7 +17,7 @@ import { ProgressSurface } from "@/components/progress/ProgressSurface";
 // clinician tracks.
 export default function ParentProgressPage() {
   const { user, isReady: isRoleReady } = useRequireRole("parent");
-  const { passportId, childName, isLoading, error } = useMyPassport(user?.id);
+  const { passportId, childName, isLoading, error, refresh } = useMyPassport(user?.id);
   const loadError = error ? "Couldn't load your child's Progress page." : null;
 
   if (!isRoleReady || isLoading) {
@@ -38,7 +38,7 @@ export default function ParentProgressPage() {
 
       <main className="flex-1 px-4 py-2">
         {loadError ? (
-          <InlineErrorState message={loadError} onRetry={() => window.location.reload()} />
+          <InlineErrorState message={loadError} onRetry={() => refresh()} />
         ) : !passportId ? (
           <div className="flex flex-col items-center gap-3 py-12 text-center">
             <p className="text-sm text-brand-neutral-black/70">

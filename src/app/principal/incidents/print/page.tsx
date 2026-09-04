@@ -70,10 +70,17 @@ export default function PrincipalIncidentsPrintPage() {
   const [rows, setRows] = useState<InstitutionIncidentRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  // Background pass, "the ~17 window.location.reload() sites" -- a
+  // reloadKey re-runs this same load effect in place instead of a hard
+  // browser reload, matching the incident page's own fix.
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     if (!user) return;
     let isMounted = true;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setIsLoading(true);
+    setLoadError(null);
     async function load() {
       const supabase = createClient();
       const { data: staffRow, error: staffError } = await supabase
@@ -115,7 +122,7 @@ export default function PrincipalIncidentsPrintPage() {
     return () => {
       isMounted = false;
     };
-  }, [user, start, end, planningSubFilter, isNcsePending, isRestraintUsed]);
+  }, [user, start, end, planningSubFilter, isNcsePending, isRestraintUsed, reloadKey]);
 
   if (!isReady) {
     return null;
@@ -133,7 +140,7 @@ export default function PrincipalIncidentsPrintPage() {
   if (loadError) {
     return (
       <div className="p-6">
-        <InlineErrorState message={loadError} onRetry={() => window.location.reload()} />
+        <InlineErrorState message={loadError} onRetry={() => setReloadKey((k) => k + 1)} />
       </div>
     );
   }

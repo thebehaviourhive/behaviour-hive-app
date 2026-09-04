@@ -26,7 +26,7 @@ import { BottomSheet } from "@/components/ui/BottomSheet";
 // Clinical File tab, just aggregated here across every case at once.
 export default function ClinicianMessagesPage() {
   const { user, isReady: isRoleReady } = useRequireRole("clinician");
-  const { isLoading: isLoadingPassports, passports, error } = useClinicianPassports(user?.id ?? null);
+  const { isLoading: isLoadingPassports, passports, error, refresh: refreshPassports } = useClinicianPassports(user?.id ?? null);
   const { groups, nameById, isLoading, loadError, refresh } = useMessageTriage(passports);
 
   const [isPickerOpen, setIsPickerOpen] = useState(false);
@@ -77,7 +77,7 @@ export default function ClinicianMessagesPage() {
 
       <main className="flex-1 px-4 py-2">
         {error ? (
-          <InlineErrorState message="Couldn't load your caseload." onRetry={() => window.location.reload()} />
+          <InlineErrorState message="Couldn't load your caseload." onRetry={() => refreshPassports()} />
         ) : passports.length === 0 ? (
           <p className="py-12 text-center text-sm text-brand-neutral-black/50">No cases linked yet.</p>
         ) : loadError ? (

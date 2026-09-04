@@ -43,10 +43,17 @@ export default function ParentIncidentsPage() {
     passportId,
     isLoading: isLoadingPassport,
     error: passportLoadFailed,
+    refresh: refreshPassport,
   } = useMyPassport(user?.id);
   const [rows, setRows] = useState<ParentIncidentRow[]>([]);
   const [isLoadingIncidents, setIsLoadingIncidents] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  // Background pass, "the ~17 window.location.reload() sites" -- a
+  // reloadKey re-runs this same load effect in place instead of a hard
+  // browser reload, matching the incident page's own fix. Retrying also
+  // calls refreshPassport() since effectiveLoadError below can come from
+  // either failure.
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     if (isLoadingPassport) return;
@@ -56,6 +63,8 @@ export default function ParentIncidentsPage() {
       return;
     }
     let isMounted = true;
+    setIsLoadingIncidents(true);
+    setLoadError(null);
 
     async function load() {
       const supabase = createClient();
@@ -77,7 +86,7 @@ export default function ParentIncidentsPage() {
     return () => {
       isMounted = false;
     };
-  }, [passportId, isLoadingPassport]);
+  }, [passportId, isLoadingPassport, reloadKey]);
 
   const isLoading = isLoadingPassport || isLoadingIncidents;
   const effectiveLoadError = passportLoadFailed ? "Couldn't load your incidents." : loadError;
@@ -106,7 +115,13 @@ export default function ParentIncidentsPage() {
             <div className="h-20 animate-pulse rounded-2xl bg-white" />
           </div>
         ) : effectiveLoadError ? (
-          <InlineErrorState message={effectiveLoadError} onRetry={() => window.location.reload()} />
+          <InlineErrorState
+            message={effectiveLoadError}
+            onRetry={() => {
+              refreshPassport();
+              setReloadKey((k) => k + 1);
+            }}
+          />
         ) : rows.length === 0 ? (
           <div className="rounded-2xl border-2 border-dashed border-brand-pastel-blue bg-white/60 p-6 text-center">
             <p className="text-sm text-brand-neutral-black/70">Nothing recorded yet.</p>

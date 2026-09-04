@@ -10,7 +10,7 @@ import { InlineErrorState } from "@/components/ui/InlineErrorState";
 // (its key stays "incidents", unchanged -- see that tab list's own
 // comment).
 export function ClinicalFileIncidentsTab({ passportId }: { passportId: string }) {
-  const { incidents, isLoading, loadError } = useIncidents(passportId);
+  const { incidents, isLoading, loadError, refresh } = useIncidents(passportId);
 
   if (isLoading) {
     return (
@@ -22,7 +22,7 @@ export function ClinicalFileIncidentsTab({ passportId }: { passportId: string })
   }
 
   if (loadError) {
-    return <InlineErrorState message={loadError} onRetry={() => window.location.reload()} />;
+    return <InlineErrorState message={loadError} onRetry={() => refresh()} />;
   }
 
   if (incidents.length === 0) {

@@ -9,6 +9,11 @@ export interface MyPassportSummary {
   hasMultiple: boolean;
   isLoading: boolean;
   error: boolean;
+  // Background pass, "the ~17 window.location.reload() sites" -- lets a
+  // caller's own error-retry button re-run this hook's load effect in
+  // place instead of a hard browser reload. Purely additive: existing
+  // consumers that never destructure it are unaffected.
+  refresh: () => void;
 }
 
 // PRD 1, Stage 5, Step 3 -- the single canonical resolver for "the
@@ -44,10 +49,14 @@ export function useMyPassport(userId: string | null | undefined): MyPassportSumm
   const [hasMultiple, setHasMultiple] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     if (!userId) return;
     let isMounted = true;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setIsLoading(true);
+    setError(false);
 
     async function load() {
       const supabase = createClient();
@@ -73,7 +82,7 @@ export function useMyPassport(userId: string | null | undefined): MyPassportSumm
     return () => {
       isMounted = false;
     };
-  }, [userId]);
+  }, [userId, reloadKey]);
 
-  return { passportId, childName, hasMultiple, isLoading, error };
+  return { passportId, childName, hasMultiple, isLoading, error, refresh: () => setReloadKey((k) => k + 1) };
 }

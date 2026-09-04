@@ -15,9 +15,15 @@ import type { InstrumentItem } from "@/lib/fba/types";
 export function useAflsItemBank() {
   const [itemsByDomain, setItemsByDomain] = useState<Record<string, InstrumentItem[]> | null>(null);
   const [loadError, setLoadError] = useState(false);
+  // Background pass, "the ~17 window.location.reload() sites" -- lets a
+  // caller's own error-retry button re-run this hook's load effect in
+  // place instead of a hard browser reload.
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     let isMounted = true;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setLoadError(false);
     const supabase = createClient();
     supabase
       .from("fba_instruments")
@@ -50,7 +56,7 @@ export function useAflsItemBank() {
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [reloadKey]);
 
-  return { itemsByDomain, loadError };
+  return { itemsByDomain, loadError, refresh: () => setReloadKey((k) => k + 1) };
 }

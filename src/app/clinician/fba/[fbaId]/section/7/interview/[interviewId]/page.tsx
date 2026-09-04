@@ -35,8 +35,8 @@ export default function FaiInterviewPage() {
   const { fbaId, interviewId } = useParams<{ fbaId: string; interviewId: string }>();
   const router = useRouter();
   const { isReady } = useRequireRole("clinician");
-  const { report, isLoading, loadError, saveContent, saveStatus, saveError } = useFbaReport(fbaId);
-  const { items, loadError: itemsError } = useFaiInstrument();
+  const { report, isLoading, loadError, saveContent, saveStatus, saveError, reload } = useFbaReport(fbaId);
+  const { items, loadError: itemsError, refresh: refreshItems } = useFaiInstrument();
 
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const abortRef = useRef<AbortController | null>(null);
@@ -177,9 +177,15 @@ export default function FaiInterviewPage() {
           <div className="h-16 animate-pulse rounded-2xl bg-white" />
         </div>
       ) : loadError || itemsError ? (
-        <InlineErrorState message={loadError ?? itemsError ?? "Something went wrong."} onRetry={() => window.location.reload()} />
+        <InlineErrorState
+          message={loadError ?? itemsError ?? "Something went wrong."}
+          onRetry={() => {
+            reload();
+            refreshItems();
+          }}
+        />
       ) : !report ? (
-        <InlineErrorState message="This FBA couldn't be found." onRetry={() => window.location.reload()} />
+        <InlineErrorState message="This FBA couldn't be found." onRetry={() => reload()} />
       ) : !(report.contentData.faiInterviews ?? []).some((iv) => iv.id === interviewId) ? (
         <div className="flex flex-col items-center gap-3 py-12 text-center">
           <p className="text-sm text-brand-neutral-black/70">This interview doesn&apos;t exist.</p>

@@ -222,6 +222,10 @@ export default function IncidentPrintPage() {
   const [data, setData] = useState<IncidentExport | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  // Background pass, "the ~17 window.location.reload() sites" -- a
+  // reloadKey re-runs this same load effect in place instead of a hard
+  // browser reload, matching the incident page's own fix.
+  const [reloadKey, setReloadKey] = useState(0);
   const [isStandalone, setIsStandalone] = useState(false);
 
   useEffect(() => {
@@ -249,6 +253,9 @@ export default function IncidentPrintPage() {
   useEffect(() => {
     if (!authChecked) return;
     let isMounted = true;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setIsLoading(true);
+    setLoadError(null);
     async function load() {
       const supabase = createClient();
       const { data: result, error } = await supabase.rpc("get_incident_export", { p_incident_id: incidentId });
@@ -265,7 +272,7 @@ export default function IncidentPrintPage() {
     return () => {
       isMounted = false;
     };
-  }, [authChecked, incidentId]);
+  }, [authChecked, incidentId, reloadKey]);
 
   if (!authChecked || isLoading) {
     return (
@@ -279,7 +286,7 @@ export default function IncidentPrintPage() {
   if (loadError || !data) {
     return (
       <div className="p-6">
-        <InlineErrorState message={loadError ?? "Couldn't load this incident."} onRetry={() => window.location.reload()} />
+        <InlineErrorState message={loadError ?? "Couldn't load this incident."} onRetry={() => setReloadKey((k) => k + 1)} />
       </div>
     );
   }

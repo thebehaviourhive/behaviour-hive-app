@@ -24,13 +24,19 @@ export function DirectAssessmentSection({
   onStructuralChange,
   readOnly,
 }: FbaSectionBodyProps & { passportId: string }) {
-  const { logs, isLoading, loadError } = useAbcLogs(passportId);
-  const { incidents, isLoading: isLoadingIncidents, loadError: incidentsLoadError } = useIncidents(passportId);
+  const { logs, isLoading, loadError, refresh: refreshLogs } = useAbcLogs(passportId);
+  const {
+    incidents,
+    isLoading: isLoadingIncidents,
+    loadError: incidentsLoadError,
+    refresh: refreshIncidents,
+  } = useIncidents(passportId);
   const {
     checkins: dailyCheckins,
     updates: dailyUpdates,
     isLoading: isLoadingDailyPatterns,
     loadError: dailyPatternsError,
+    refresh: refreshDailyPatterns,
   } = useDailyPatterns(passportId);
 
   const hasRange = Boolean(content.abcRangeStart && content.abcRangeEnd);
@@ -158,7 +164,7 @@ export function DirectAssessmentSection({
             <div className="h-16 animate-pulse rounded-2xl bg-brand-off-white" />
           </div>
         ) : loadError ? (
-          <InlineErrorState message={loadError} onRetry={() => window.location.reload()} />
+          <InlineErrorState message={loadError} onRetry={() => refreshLogs()} />
         ) : filteredLogs.length === 0 ? (
           <div className="rounded-2xl border-2 border-dashed border-brand-pastel-blue bg-white/60 p-6 text-center">
             <p className="text-sm text-brand-neutral-black/70">No incidents logged in this range.</p>
@@ -253,7 +259,7 @@ export function DirectAssessmentSection({
             <div className="h-16 animate-pulse rounded-2xl bg-brand-off-white" />
           </div>
         ) : incidentsLoadError ? (
-          <InlineErrorState message={incidentsLoadError} onRetry={() => window.location.reload()} />
+          <InlineErrorState message={incidentsLoadError} onRetry={() => refreshIncidents()} />
         ) : filteredIncidents.length === 0 ? (
           <div className="rounded-2xl border-2 border-dashed border-brand-pastel-blue bg-white/60 p-6 text-center">
             <p className="text-sm text-brand-neutral-black/70">No incident log records in this range.</p>
@@ -283,7 +289,7 @@ export function DirectAssessmentSection({
             <div className="h-16 animate-pulse rounded-2xl bg-brand-off-white" />
           </div>
         ) : dailyPatternsError ? (
-          <InlineErrorState message={dailyPatternsError} onRetry={() => window.location.reload()} />
+          <InlineErrorState message={dailyPatternsError} onRetry={() => refreshDailyPatterns()} />
         ) : (
           <DailyPatternsPanel
             checkins={dailyCheckins}
