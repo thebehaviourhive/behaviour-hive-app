@@ -3,10 +3,16 @@
 import type { IncidentSummary } from "@/hooks/useIncidents";
 
 // Read-only by construction, same posture as AbcIncidentCard -- a
-// clinician's view of the School Incident Log never edits it. Shows the
-// clinical content get_clinician_incidents() carries (narrative
-// included); status/sign-off shown as plain fact, not an action --
-// there's nothing for a clinician to do here.
+// viewer's Incidents tab never edits the record itself. Shows the full
+// content get_clinician_incidents()/get_child_incidents_for_staff()
+// both carry (same shape, narrative included -- see useIncidents.ts's
+// own header for why one row-mapper serves both); status/sign-off
+// shown as plain fact, not an action -- there's nothing to DO here on
+// either track, only on the incident's own detail page.
+//
+// Moved out of components/clinician/ (migration 0166, passport
+// Incidents tabs) -- shared by the clinician, teacher, and SNA tracks
+// now, not clinician-only.
 
 const DISTRESS_LABEL: Record<string, string> = {
   yes_definitely: "Yes, definitely",

@@ -48,9 +48,27 @@ interface SignoffSummary {
 interface SignOffCardProps {
   incidentId: string;
   onSignedOff: () => void;
+  // The stale-snapshot bug (CLAUDE.md, "a stale snapshot looks exactly
+  // like a failed write"): this card used to fetch
+  // get_incident_signoff_summary() once, keyed on incidentId, which
+  // never changes for the lifetime of this page. A teacher answering
+  // "Was anyone injured?" wrote successfully, but this card kept
+  // showing "not recorded" from before the answer -- a display bug
+  // wearing the exact symptom of the write-layer bug item 1 was
+  // originally about, diagnosed as the same thing once, wrongly.
+  //
+  // refreshSignal is a plain counter the PARENT page bumps after every
+  // write that touches anything incident_signoff_issues(),
+  // build_staff_attestations_summary(), or compute_incident_content_
+  // hash() reads -- see that page's own bumpSignoffSummary() call
+  // sites for the full, named list. Included in the load effect's own
+  // dependency array below so a bump forces a genuine refetch, the
+  // same shape as the incident page's own reloadKey, just scoped to
+  // this one card instead of the whole page.
+  refreshSignal: number;
 }
 
-export function SignOffCard({ incidentId, onSignedOff }: SignOffCardProps) {
+export function SignOffCard({ incidentId, onSignedOff, refreshSignal }: SignOffCardProps) {
   const [summary, setSummary] = useState<SignoffSummary | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -79,7 +97,7 @@ export function SignOffCard({ incidentId, onSignedOff }: SignOffCardProps) {
     return () => {
       isMounted = false;
     };
-  }, [incidentId]);
+  }, [incidentId, refreshSignal]);
 
   async function handleConfirmSignOff() {
     setIsSigning(true);

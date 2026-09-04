@@ -11,23 +11,34 @@ import { usePassportClinicalContent } from "@/hooks/usePassportClinicalContent";
 import { ClinicalTeamSection } from "@/components/passport/clinical-team/ClinicalTeamSection";
 import { PassportCompletionSection } from "@/components/passport/PassportCompletionSection";
 import { InlineErrorState } from "@/components/ui/InlineErrorState";
+import { ChildIncidentsTab } from "@/components/shared/ChildIncidentsTab";
 
 // SNA's scoped passport view -- a deliberately narrower sibling of
 // /teacher/passport/[passportId], not that page reused wholesale. Same
-// six read-only tabs (Summary/Behaviour/Communication/Supports/
-// Incidents/Clinical Team, all backed by role-blind queries/RPCs that
-// already correctly include SNA per migration 0065), but no Messages
-// tab, no Progress tab, no EOD, and no "+ Add to Ledger" -- all
-// explicitly excluded from the SNA v1 grant list. The footer is just
-// "+ Log ABC Incident".
-type TabKey = "summary" | "behaviour" | "communication" | "supports" | "incidents" | "clinicalTeam";
+// tabs (Summary/Behaviour/Communication/Supports/ABC Logs/Incidents/
+// Clinical Team, all backed by role-blind queries/RPCs that already
+// correctly include SNA per migration 0065), but no Messages tab, no
+// Progress tab, no EOD, and no "+ Add to Ledger" -- all explicitly
+// excluded from the SNA v1 grant list. The footer is just "+ Log ABC
+// Incident".
+//
+// Passport Incidents tabs (migration 0166) -- same mislabelling the
+// teacher track had (an "Incidents" tab that was actually the ABC
+// timeline), same fix: "incidents" stays what it was, relabelled "ABC
+// Logs"; a genuinely separate "incidentLog" tab, labelled "Incidents",
+// added for the real thing, via get_child_incidents_for_staff()
+// (has_child_access() gated, same as the teacher track -- has_sna_
+// access() is one of that function's own OR-branches, nothing new
+// granted).
+type TabKey = "summary" | "behaviour" | "communication" | "supports" | "incidents" | "incidentLog" | "clinicalTeam";
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: "summary", label: "Summary" },
   { key: "behaviour", label: "Behaviour Signals" },
   { key: "communication", label: "Communication" },
   { key: "supports", label: "Supports" },
-  { key: "incidents", label: "Incidents" },
+  { key: "incidents", label: "ABC Logs" },
+  { key: "incidentLog", label: "Incidents" },
   { key: "clinicalTeam", label: "Clinical Team" },
 ];
 
@@ -445,6 +456,8 @@ export default function SnaPassportPage() {
         {activeTab === "incidents" && (
           <ABCTimeline key={timelineRefreshKey} passportId={passportId} viewerRole="sna" />
         )}
+
+        {activeTab === "incidentLog" && <ChildIncidentsTab passportId={passportId} />}
 
         {activeTab === "clinicalTeam" && (
           <>

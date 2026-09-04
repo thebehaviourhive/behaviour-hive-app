@@ -20,7 +20,7 @@
 // stage development. Every check from V onward is independently
 // self-contained (own institution, own accounts, own cleanup) and
 // individually selectable: V, W, X, Y, Z, AA, BB, CC, DD, EE, FF, GG,
-// HH, II, JJ, KK, LL, MM, NN, OO, PP, QQ, RR, SS, TT, UU, VV, WW, XX, YY, ZZ, AAA, BBB, CCC, DDD, EEE, FFF, GGG, HHH, III, JJJ. Selecting none of these (ONLY_CHECKS unset) is the full run --
+// HH, II, JJ, KK, LL, MM, NN, OO, PP, QQ, RR, SS, TT, UU, VV, WW, XX, YY, ZZ, AAA, BBB, CCC, DDD, EEE, FFF, GGG, HHH, III, JJJ, KKK, LLL. Selecting none of these (ONLY_CHECKS unset) is the full run --
 // the one that gates deploys -- and its behavior is unchanged: same
 // checks, same order, same pass/fail counts. The only observable
 // difference is where the top-level fixture's own cleanup log line
@@ -12616,6 +12616,198 @@ async function main() {
     await admin.from("passports").delete().in("id", [childJJJId, outsiderChildJJJId]);
     await admin.from("institutions").delete().eq("id", institutionJJJId);
     for (const id of [teacherJJJId, teacherBJJJId, principalJJJId, outsiderTeacherJJJId]) {
+      await admin.auth.admin.deleteUser(id);
+    }
+  }
+
+  console.log(`\n== CHECK KKK: SQL for migration 0166 -- get_child_incidents_for_staff(), the passport Incidents tab for teacher/SNA. Identical shape to get_clinician_incidents() (0095) by construction, authorised by has_child_access() (0104) instead of clinician_access -- the exact same predicate can_view_incident()'s own general child-access branch already uses, so nothing new is granted. Proves: a class teacher with has_child_access() sees a non-draft incident naming their child, full content included (KKK1); an SNA sees the same via has_sna_access(), the OTHER has_child_access() branch (KKK2); a still-draft incident is excluded, matching can_view_incident()'s own gate (KKK3); a teacher with NO relationship to this child sees nothing -- not an error, an empty result (KKK4); a teacher merely NAMED as staff on the incident but without has_child_access() to the child ALSO sees nothing here -- a narrower relationship this RPC deliberately doesn't cover, per its own migration comment (KKK5); and two-child scoping -- the injuries/restrictive_practice sub-selects stay scoped to p_passport_id, not leaking the other child's records, same construction get_clinician_incidents() already had proven (KKK6). ==`);
+  if (shouldRun("KKK")) {
+    const { data: locKKK } = await admin.from("incident_locations").select("id").eq("value", "Classroom").is("institution_id", null).single();
+
+    const { data: instKKK, error: instKKKErr } = await admin
+      .from("institutions")
+      .insert({ name: "KKK Institution", institution_code: CODE + "KKK", status: "verified" })
+      .select()
+      .single();
+    if (instKKKErr) throw instKKKErr;
+    const institutionKKKId = instKKK.id;
+
+    const principalKKKId = await createUser("kkk.principal@thebehaviourhive.com", "KKK Principal", "principal");
+    const teacherKKKId = await createUser("kkk.teacher@thebehaviourhive.com", "KKK Teacher", "class_teacher");
+    const snaKKKId = await createUser("kkk.sna@thebehaviourhive.com", "KKK SNA", "sna");
+    const outsiderTeacherKKKId = await createUser("kkk.outsider@thebehaviourhive.com", "KKK Outsider Teacher", "class_teacher");
+    const namedOnlyTeacherKKKId = await createUser("kkk.namedonly@thebehaviourhive.com", "KKK Named-Only Teacher", "class_teacher");
+
+    await admin.from("institution_staff").insert({ institution_id: institutionKKKId, user_id: principalKKKId, role: "principal" });
+    const { data: teacherKKKStaffRow } = await admin.from("institution_staff").insert({ institution_id: institutionKKKId, user_id: teacherKKKId, role: "class_teacher" }).select().single();
+    const { data: snaKKKStaffRow } = await admin.from("institution_staff").insert({ institution_id: institutionKKKId, user_id: snaKKKId, role: "sna" }).select().single();
+    const { data: outsiderKKKStaffRow } = await admin.from("institution_staff").insert({ institution_id: institutionKKKId, user_id: outsiderTeacherKKKId, role: "class_teacher" }).select().single();
+    const { data: namedOnlyKKKStaffRow } = await admin.from("institution_staff").insert({ institution_id: institutionKKKId, user_id: namedOnlyTeacherKKKId, role: "class_teacher" }).select().single();
+
+    const principalKKK = await signedInClient("kkk.principal@thebehaviourhive.com");
+    const teacherKKK = await signedInClient("kkk.teacher@thebehaviourhive.com");
+    const snaKKK = await signedInClient("kkk.sna@thebehaviourhive.com");
+    const outsiderKKK = await signedInClient("kkk.outsider@thebehaviourhive.com");
+    const namedOnlyKKK = await signedInClient("kkk.namedonly@thebehaviourhive.com");
+
+    for (const row of [teacherKKKStaffRow, snaKKKStaffRow, outsiderKKKStaffRow, namedOnlyKKKStaffRow]) {
+      const { error } = await principalKKK.rpc("approve_staff_join", { p_institution_staff_id: row.id });
+      if (error) throw error;
+    }
+
+    const { data: classKKKId } = await principalKKK.rpc("create_class", { p_institution_id: institutionKKKId, p_name: "KKK Room" });
+    await principalKKK.rpc("add_class_teacher", { p_class_id: classKKKId, p_user_id: teacherKKKId });
+    await principalKKK.rpc("assign_class_sna", { p_user_id: snaKKKId, p_class_id: classKKKId });
+
+    const { data: childAKKKId } = await principalKKK.rpc("create_school_passport", { p_institution_id: institutionKKKId, p_child_name: "KKK Child A" });
+    const { data: childBKKKId } = await principalKKK.rpc("create_school_passport", { p_institution_id: institutionKKKId, p_child_name: "KKK Child B" });
+    await principalKKK.rpc("add_class_child", { p_class_id: classKKKId, p_passport_id: childAKKKId });
+    await principalKKK.rpc("add_class_child", { p_class_id: classKKKId, p_passport_id: childBKKKId });
+
+    // Draft incident, self-owned by teacherKKK -- must NOT appear.
+    const { data: draftKKKId } = await teacherKKK.rpc("create_incident_stamp", {
+      p_institution_id: institutionKKKId, p_occurred_at: new Date().toISOString(), p_location_id: locKKK.id,
+      p_child_passport_ids: [childAKKKId], p_staff: [],
+    });
+
+    // Real, signed-off, two-child incident -- namedOnlyKKK named as
+    // staff but NOT has_child_access() (not in this class at all).
+    const { data: signedKKKId } = await teacherKKK.rpc("create_incident_stamp", {
+      p_institution_id: institutionKKKId, p_occurred_at: new Date().toISOString(), p_location_id: locKKK.id,
+      p_child_passport_ids: [childAKKKId, childBKKKId], p_staff: [{ user_id: namedOnlyTeacherKKKId, involvement: "witnessed" }],
+    });
+    await teacherKKK.from("incidents").update({ category: "one_party_incident", narrative: "KKK narrative." }).eq("id", signedKKKId);
+    const { data: kkkChildRows } = await admin.from("incident_children").select("id, passport_id").eq("incident_id", signedKKKId);
+    await teacherKKK.from("incident_children").update({ distress_level: "yes_definitely" }).eq("id", kkkChildRows.find((r) => r.passport_id === childAKKKId).id);
+    await teacherKKK.from("incident_children").update({ distress_level: "not_distressed" }).eq("id", kkkChildRows.find((r) => r.passport_id === childBKKKId).id);
+    const { data: kkkInjuryRow } = await teacherKKK.from("incident_injuries").insert({ incident_id: signedKKKId, injured_party_type: "student", passport_id: childBKKKId, injury_types: ["Bruising"] }).select().single();
+    await teacherKKK.rpc("sign_off_incident", { p_incident_id: signedKKKId });
+    record("KKK0 setup: sign-off itself succeeds", Boolean(kkkInjuryRow), signedKKKId);
+
+    const { data: kkk1Rows, error: kkk1Err } = await teacherKKK.rpc("get_child_incidents_for_staff", { p_passport_id: childAKKKId });
+    record("KKK1 a class teacher with has_child_access() sees the signed-off incident, full content", !kkk1Err && (kkk1Rows ?? []).some((r) => r.incident_id === signedKKKId && r.narrative === "KKK narrative."), kkk1Err?.message ?? JSON.stringify(kkk1Rows));
+    record("KKK3 the still-draft incident does NOT appear", !(kkk1Rows ?? []).some((r) => r.incident_id === draftKKKId), JSON.stringify(kkk1Rows));
+
+    const { data: kkk2Rows, error: kkk2Err } = await snaKKK.rpc("get_child_incidents_for_staff", { p_passport_id: childAKKKId });
+    record("KKK2 an SNA with has_sna_access() (class-wide) sees the same incident, via the OTHER has_child_access() branch", !kkk2Err && (kkk2Rows ?? []).some((r) => r.incident_id === signedKKKId), kkk2Err?.message ?? JSON.stringify(kkk2Rows));
+
+    const { data: kkk4Rows, error: kkk4Err } = await outsiderKKK.rpc("get_child_incidents_for_staff", { p_passport_id: childAKKKId });
+    record("KKK4 a teacher with no relationship to this child sees nothing -- empty, not an error", !kkk4Err && (kkk4Rows ?? []).length === 0, kkk4Err?.message ?? JSON.stringify(kkk4Rows));
+
+    const { data: kkk5Rows, error: kkk5Err } = await namedOnlyKKK.rpc("get_child_incidents_for_staff", { p_passport_id: childAKKKId });
+    record("KKK5 a teacher merely NAMED as staff, without has_child_access() to the child, sees nothing via this RPC -- a narrower relationship this tab deliberately doesn't cover", !kkk5Err && (kkk5Rows ?? []).length === 0, kkk5Err?.message ?? JSON.stringify(kkk5Rows));
+
+    const kkk1Row = (kkk1Rows ?? []).find((r) => r.incident_id === signedKKKId);
+    const { data: kkk6Rows } = await teacherKKK.rpc("get_child_incidents_for_staff", { p_passport_id: childBKKKId });
+    const kkk6Row = (kkk6Rows ?? []).find((r) => r.incident_id === signedKKKId);
+    record(
+      "KKK6 two-child scoping: child A's own row carries only child A's distress_level, and its injuries array is empty -- child B's injury doesn't leak across",
+      kkk1Row?.distress_level === "yes_definitely" && (kkk1Row?.injuries ?? []).length === 0,
+      JSON.stringify(kkk1Row)
+    );
+    record(
+      "KKK6b and child B's own row (same incident, queried via childBKKKId) carries ITS OWN distress_level and the injury actually attributed to it",
+      kkk6Row?.distress_level === "not_distressed" && (kkk6Row?.injuries ?? []).length === 1,
+      JSON.stringify(kkk6Row)
+    );
+
+    console.log("KKK summary complete.");
+
+    await admin.from("incident_injuries").delete().eq("incident_id", signedKKKId);
+    await admin.from("incident_staff").delete().in("incident_id", [draftKKKId, signedKKKId]);
+    await admin.from("incident_children").delete().in("incident_id", [draftKKKId, signedKKKId]);
+    await admin.from("incidents").delete().in("id", [draftKKKId, signedKKKId]);
+    await admin.from("class_sna_assignments").delete().eq("class_id", classKKKId);
+    await admin.from("class_children").delete().eq("class_id", classKKKId);
+    await admin.from("class_teachers").delete().eq("class_id", classKKKId);
+    await admin.from("classes").delete().eq("id", classKKKId);
+    await admin.from("passports").delete().in("id", [childAKKKId, childBKKKId]);
+    await admin.from("institutions").delete().eq("id", institutionKKKId);
+    for (const id of [principalKKKId, teacherKKKId, snaKKKId, outsiderTeacherKKKId, namedOnlyTeacherKKKId]) {
+      await admin.auth.admin.deleteUser(id);
+    }
+  }
+
+  console.log(`\n== CHECK LLL: SQL for migration 0166 -- get_institution_incidents()'s new p_passport_id filter, a DROP + CREATE (not CREATE OR REPLACE, since adding a parameter changes the argument-type signature -- see that migration's own header). Proves: filtering by p_passport_id returns only incidents naming that child (LLL1); omitting the param entirely -- the exact call shape every existing caller (principal/dashboard, principal/incidents, principal/incidents/print) already uses -- still returns the full institution-wide set, unaffected by the DROP + CREATE (LLL2, the regression this whole migration's own risk was about); can_countersign_incident() authorisation is unchanged with the new param present -- a non-principal is still refused (LLL3); and filtering by a child with zero incidents returns empty, not an error (LLL4). ==`);
+  if (shouldRun("LLL")) {
+    const { data: locLLL } = await admin.from("incident_locations").select("id").eq("value", "Classroom").is("institution_id", null).single();
+
+    const { data: instLLL, error: instLLLErr } = await admin
+      .from("institutions")
+      .insert({ name: "LLL Institution", institution_code: CODE + "LLL", status: "verified" })
+      .select()
+      .single();
+    if (instLLLErr) throw instLLLErr;
+    const institutionLLLId = instLLL.id;
+
+    const principalLLLId = await createUser("lll.principal@thebehaviourhive.com", "LLL Principal", "principal");
+    const teacherLLLId = await createUser("lll.teacher@thebehaviourhive.com", "LLL Teacher", "class_teacher");
+
+    await admin.from("institution_staff").insert({ institution_id: institutionLLLId, user_id: principalLLLId, role: "principal" });
+    const { data: teacherLLLStaffRow } = await admin.from("institution_staff").insert({ institution_id: institutionLLLId, user_id: teacherLLLId, role: "class_teacher" }).select().single();
+
+    const principalLLL = await signedInClient("lll.principal@thebehaviourhive.com");
+    const teacherLLL = await signedInClient("lll.teacher@thebehaviourhive.com");
+
+    const { error: approveLLLErr } = await principalLLL.rpc("approve_staff_join", { p_institution_staff_id: teacherLLLStaffRow.id });
+    if (approveLLLErr) throw approveLLLErr;
+
+    const { data: childALLLId } = await principalLLL.rpc("create_school_passport", { p_institution_id: institutionLLLId, p_child_name: "LLL Child A" });
+    const { data: childBLLLId } = await principalLLL.rpc("create_school_passport", { p_institution_id: institutionLLLId, p_child_name: "LLL Child B" });
+    const { data: childCLLLId } = await principalLLL.rpc("create_school_passport", { p_institution_id: institutionLLLId, p_child_name: "LLL Child C -- no incidents" });
+
+    const { data: incidentALLLId } = await teacherLLL.rpc("create_incident_stamp", {
+      p_institution_id: institutionLLLId, p_occurred_at: new Date().toISOString(), p_location_id: locLLL.id,
+      p_child_passport_ids: [childALLLId], p_staff: [],
+    });
+    const { data: incidentBLLLId } = await teacherLLL.rpc("create_incident_stamp", {
+      p_institution_id: institutionLLLId, p_occurred_at: new Date().toISOString(), p_location_id: locLLL.id,
+      p_child_passport_ids: [childBLLLId], p_staff: [],
+    });
+
+    const { data: lll1Rows, error: lll1Err } = await principalLLL.rpc("get_institution_incidents", {
+      p_institution_id: institutionLLLId, p_passport_id: childALLLId,
+    });
+    record(
+      "LLL1 THE FILTER ITSELF: p_passport_id returns only the incident naming that child, not the other one",
+      !lll1Err && (lll1Rows ?? []).length === 1 && lll1Rows[0].incident_id === incidentALLLId,
+      lll1Err?.message ?? JSON.stringify(lll1Rows)
+    );
+
+    const { data: lll2Rows, error: lll2Err } = await principalLLL.rpc("get_institution_incidents", {
+      p_institution_id: institutionLLLId,
+    });
+    record(
+      "LLL2 REGRESSION: the exact call shape every existing caller uses (no p_passport_id at all) still returns the full institution-wide set -- both incidents",
+      !lll2Err && (lll2Rows ?? []).length === 2,
+      lll2Err?.message ?? JSON.stringify(lll2Rows)
+    );
+
+    // This function never raises for an unauthorised caller -- its own
+    // can_countersign_incident() check lives in the WHERE clause, not a
+    // guard at the top, so a non-principal simply gets zero rows back,
+    // not an error. Asserting on the RESULT, not an error object.
+    const { data: lll3Rows, error: lll3Err } = await teacherLLL.rpc("get_institution_incidents", {
+      p_institution_id: institutionLLLId, p_passport_id: childALLLId,
+    });
+    record(
+      "LLL3 can_countersign_incident() authorisation unchanged -- a non-principal gets zero rows back with the new param present, exactly as before it existed",
+      !lll3Err && (lll3Rows ?? []).length === 0,
+      lll3Err?.message ?? JSON.stringify(lll3Rows)
+    );
+
+    const { data: lll4Rows, error: lll4Err } = await principalLLL.rpc("get_institution_incidents", {
+      p_institution_id: institutionLLLId, p_passport_id: childCLLLId,
+    });
+    record("LLL4 filtering by a child with zero incidents returns empty, not an error", !lll4Err && (lll4Rows ?? []).length === 0, lll4Err?.message ?? JSON.stringify(lll4Rows));
+
+    console.log("LLL summary complete.");
+
+    await admin.from("incident_children").delete().in("incident_id", [incidentALLLId, incidentBLLLId]);
+    await admin.from("incidents").delete().in("id", [incidentALLLId, incidentBLLLId]);
+    await admin.from("passports").delete().in("id", [childALLLId, childBLLLId, childCLLLId]);
+    await admin.from("institutions").delete().eq("id", institutionLLLId);
+    for (const id of [principalLLLId, teacherLLLId]) {
       await admin.auth.admin.deleteUser(id);
     }
   }

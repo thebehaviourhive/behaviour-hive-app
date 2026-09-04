@@ -18,13 +18,25 @@ import { useMessageRecipientCandidates } from "@/hooks/useMessageRecipientCandid
 import { useMessageCategories } from "@/hooks/useMessageCategories";
 import { fetchApprovedInstitutionPhone } from "@/lib/messages/institutionPhone";
 import { ComposeMessageSheet } from "@/components/messages/ComposeMessageSheet";
+import { ChildIncidentsTab } from "@/components/shared/ChildIncidentsTab";
 
+// Passport Incidents tabs (migration 0166) -- the label collision this
+// page had (an "Incidents" tab that actually showed the ABC timeline)
+// wasn't unique to the clinician track, which had already been fixed;
+// teacher and SNA had the identical mislabelling, unfixed until now.
+// Same shape as that earlier fix: the "incidents" KEY stays exactly as
+// it is, relabelled "ABC Logs" -- AbcLogReference.tsx deep-links here
+// (?tab=incidents&logId=...) from message references, and changing the
+// key would break those links for no reason the label change needs. A
+// genuinely separate "incidentLog" tab, labelled "Incidents", is added
+// alongside it for the real thing.
 type TabKey =
   | "summary"
   | "behaviour"
   | "communication"
   | "supports"
   | "incidents"
+  | "incidentLog"
   | "clinicalTeam"
   | "messages"
   | "progress";
@@ -34,7 +46,8 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: "behaviour", label: "Behaviour Signals" },
   { key: "communication", label: "Communication" },
   { key: "supports", label: "Supports" },
-  { key: "incidents", label: "Incidents" },
+  { key: "incidents", label: "ABC Logs" },
+  { key: "incidentLog", label: "Incidents" },
   { key: "clinicalTeam", label: "Clinical Team" },
   { key: "messages", label: "Messages" },
   { key: "progress", label: "Progress" },
@@ -503,6 +516,8 @@ export default function TeacherPassportPage() {
             highlightLogId={highlightAbcLogId}
           />
         )}
+
+        {activeTab === "incidentLog" && <ChildIncidentsTab passportId={passportId} />}
 
         {activeTab === "clinicalTeam" && (
           <>

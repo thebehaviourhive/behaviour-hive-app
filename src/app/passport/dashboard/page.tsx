@@ -31,6 +31,7 @@ import { useMessageCategories } from "@/hooks/useMessageCategories";
 import { fetchApprovedInstitutionPhone } from "@/lib/messages/institutionPhone";
 import { ComposeMessageSheet } from "@/components/messages/ComposeMessageSheet";
 import { IMPORTANT_PEOPLE_TITLE } from "@/lib/passportCopy";
+import { PassportIncidentsSection } from "@/components/parent/PassportIncidentsSection";
 
 interface ApprovedInstitution {
   institutionId: string;
@@ -1123,7 +1124,12 @@ export default function PassportDashboardPage() {
 
         <ErrorBoundary fallback={fallbackCard}>
           <section className="mt-2 mb-6">
-            <h2 className="mb-4 font-heading text-xl font-bold text-brand-prussian-blue">Incident Timeline</h2>
+            {/* Passport Incidents tabs (migration 0166) -- this section
+                was labelled "Incident Timeline" but only ever rendered
+                the ABC timeline, the same mislabelling every
+                non-clinician track had. Relabelled; the real incident
+                log is the new section directly below it. */}
+            <h2 className="mb-4 font-heading text-xl font-bold text-brand-prussian-blue">ABC Logs</h2>
             <ABCTimeline
               key={timelineRefreshKey}
               passportId={summary.passportId}
@@ -1131,6 +1137,10 @@ export default function PassportDashboardPage() {
               highlightLogId={highlightAbcLogId}
             />
           </section>
+        </ErrorBoundary>
+
+        <ErrorBoundary fallback={fallbackCard}>
+          <PassportIncidentsSection passportId={summary.passportId} />
         </ErrorBoundary>
       </main>
 

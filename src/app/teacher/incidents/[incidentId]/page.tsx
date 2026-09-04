@@ -239,6 +239,59 @@ export default function IncidentRecordPage() {
   // unmount, and nothing for a stale cached payload to ever serve.
   const [reloadKey, setReloadKey] = useState(0);
 
+  // The stale-snapshot bug (CLAUDE.md, "a stale snapshot looks exactly
+  // like a failed write") -- SignOffCard used to fetch
+  // get_incident_signoff_summary() once, keyed on incidentId, which
+  // never changes. A teacher answered "Was anyone injured?", the write
+  // persisted correctly, and the card kept reporting "not recorded"
+  // from before the answer -- diagnosed as a write bug once, wrongly.
+  //
+  // signoffRefreshSignal is a plain counter, bumped by
+  // bumpSignoffSummary() below, passed to SignOffCard as refreshSignal
+  // and included in ITS OWN load effect's dependency array -- a
+  // narrower version of reloadKey above, scoped to one card instead of
+  // the whole page (bumping reloadKey itself would remount everything
+  // on every small field save, not just refetch the one summary).
+  //
+  // Called after every write that touches anything
+  // incident_signoff_issues(), build_staff_attestations_summary(), or
+  // compute_incident_content_hash() reads. Deliberately broader than a
+  // precise trace of those three functions' own current field lists --
+  // that list has already changed three times (0071/0072/0076 each
+  // widened the hash), so bumping on every write to the tables those
+  // functions read from is the version that stays correct the next
+  // time it changes too, not just today. The named exceptions below are
+  // fields no plausible version of the summary reads at all -- a
+  // genuinely different domain (support-button/parent-contact
+  // metadata), not a narrower reading of the same one.
+  //
+  // EVERY CALLER of bumpSignoffSummary(), for the record:
+  //   toggleAction, saveOtherActionDetail (incident_actions),
+  //   saveRestrictivePracticeRecord (restrictive_practices +
+  //   restrictive_practice_staff), handleAddInjury, saveInjuryField,
+  //   handleRemoveInjury (incident_injuries), BodyMapCard's own three
+  //   writes via onContentChanged (incident_body_marks),
+  //   setDebriefRequiredAndSave, setAnyoneInjuredAndSave, handleSave
+  //   (incidents: debrief_required/anyone_injured/narrative/category/
+  //   the rest, and incident_children's distress_level/
+  //   remained_on_site/etc in the same call), handleSaveDebrief,
+  //   handleMarkDebriefComplete (incident_debriefs), and
+  //   RequestAttestationsCard's onChange (attestations_requested,
+  //   which get_attestation_status() itself compares attested_at
+  //   against to decide 'current' vs 'stale').
+  //
+  // NOT bumped, named rather than silently omitted:
+  //   setSupportButtonPressedAndSave, setSupportAlertIdAndSave
+  //   (support-button metadata -- not part of the record's own content,
+  //   not read by any sign-off check), setParentCallRequiredAndSave,
+  //   markParentCalled (the parent-contact workflow -- same reasoning,
+  //   and this page's own "Parent contact" block already documents
+  //   that split as "the ACTION workflow, separate from the facts").
+  const [signoffRefreshSignal, setSignoffRefreshSignal] = useState(0);
+  function bumpSignoffSummary() {
+    setSignoffRefreshSignal((v) => v + 1);
+  }
+
   const [summary, setSummary] = useState<StampSummary | null>(null);
   const [children, setChildren] = useState<ChildFormState[]>([]);
   const [recoveryOptions, setRecoveryOptions] = useState<string[]>([]);
@@ -759,7 +812,9 @@ export default function IncidentRecordPage() {
       setSelectedActionTypeIds((current) =>
         isSelected ? [...current, actionTypeId] : current.filter((id) => id !== actionTypeId)
       );
+      return;
     }
+    bumpSignoffSummary();
   }
 
   async function saveOtherActionDetail(otherActionTypeId: string) {
@@ -783,7 +838,9 @@ export default function IncidentRecordPage() {
     }
     if (!data || data.length === 0) {
       setActionsError(friendlyAccessLapsedMessage("This detail"));
+      return;
     }
+    bumpSignoffSummary();
   }
 
   function addRestrictivePracticeRecord(passportId: string) {
@@ -932,6 +989,7 @@ export default function IncidentRecordPage() {
     }
 
     updateRestrictivePracticeRecord(passportId, index, { isSaving: false, savedAt: Date.now(), id: rpId });
+    bumpSignoffSummary();
   }
 
   async function handleAddInjury() {
@@ -996,6 +1054,7 @@ export default function IncidentRecordPage() {
     setIsAddingInjury(false);
     setNewInjuryParty(null);
     setNewInjuryStaffFreeText("");
+    bumpSignoffSummary();
   }
 
   function updateInjuryLocal(injuryId: string, patch: Partial<InjuryRecordState>) {
@@ -1013,6 +1072,7 @@ export default function IncidentRecordPage() {
       setInjurySaveError(friendlyAccessLapsedMessage("This injury detail"));
     } else {
       setInjurySaveError(null);
+      bumpSignoffSummary();
     }
   }
 
@@ -1038,6 +1098,7 @@ export default function IncidentRecordPage() {
     } else {
       setInjurySaveError(null);
       setInjuries((current) => current.filter((inj) => inj.id !== injuryId));
+      bumpSignoffSummary();
     }
   }
 
@@ -1067,10 +1128,14 @@ export default function IncidentRecordPage() {
     if (updateError) {
       setDebriefRequired(previous);
       setDebriefSaveError(updateError.message);
-    } else if (!data || data.length === 0) {
+      return;
+    }
+    if (!data || data.length === 0) {
       setDebriefRequired(previous);
       setDebriefSaveError(friendlyAccessLapsedMessage("This incident"));
+      return;
     }
+    bumpSignoffSummary();
   }
 
   async function setAnyoneInjuredAndSave(value: boolean) {
@@ -1091,10 +1156,14 @@ export default function IncidentRecordPage() {
     if (updateError) {
       setAnyoneInjured(previous);
       setAnyoneInjuredSaveError(updateError.message);
-    } else if (!data || data.length === 0) {
+      return;
+    }
+    if (!data || data.length === 0) {
       setAnyoneInjured(previous);
       setAnyoneInjuredSaveError(friendlyAccessLapsedMessage("This answer"));
+      return;
     }
+    bumpSignoffSummary();
   }
 
   async function setSupportButtonPressedAndSave(value: boolean) {
@@ -1276,6 +1345,7 @@ export default function IncidentRecordPage() {
         return;
       }
       setDebriefSavedAt(Date.now());
+      bumpSignoffSummary();
     } else {
       const { data: inserted, error: insertError } = await supabase
         .from("incident_debriefs")
@@ -1289,6 +1359,7 @@ export default function IncidentRecordPage() {
       }
       setDebriefId(inserted.id);
       setDebriefSavedAt(Date.now());
+      bumpSignoffSummary();
     }
   }
 
@@ -1324,6 +1395,7 @@ export default function IncidentRecordPage() {
     }
     setDebriefCompletedAt(now);
     setDebriefCompletedByName(owningTeacherName);
+    bumpSignoffSummary();
   }
 
   async function handleSave() {
@@ -1401,6 +1473,7 @@ export default function IncidentRecordPage() {
 
     setIsSaving(false);
     setSavedAt(Date.now());
+    bumpSignoffSummary();
   }
 
   const staffRole = user?.app_metadata?.role as string | undefined;
@@ -2217,6 +2290,7 @@ export default function IncidentRecordPage() {
                         canEdit={canEdit}
                         injuryTypeOptions={injuryTypeOptions}
                         regionOptions={regionOptions}
+                        onContentChanged={bumpSignoffSummary}
                       />
 
                       <div className="rounded-2xl border border-black/5 bg-white p-4">
@@ -2592,7 +2666,10 @@ export default function IncidentRecordPage() {
               <RequestAttestationsCard
                 incidentId={params.incidentId as string}
                 requested={attestationsRequested}
-                onChange={setAttestationsRequested}
+                onChange={(next) => {
+                  setAttestationsRequested(next);
+                  bumpSignoffSummary();
+                }}
               />
             )}
 
@@ -2600,6 +2677,7 @@ export default function IncidentRecordPage() {
               <SignOffCard
                 incidentId={params.incidentId as string}
                 onSignedOff={() => setReloadKey((k) => k + 1)}
+                refreshSignal={signoffRefreshSignal}
               />
             )}
 

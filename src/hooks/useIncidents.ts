@@ -12,6 +12,16 @@ import { createClient } from "@/lib/supabase/client";
 // exactly, including its set-state-in-effect suppression (this hook's
 // only setState calls happen inside a .then() after the fetch, same
 // established shape as that file).
+//
+// Migration 0166 (passport Incidents tabs) widened this hook to also
+// serve the teacher/SNA track, via get_child_incidents_for_staff() --
+// IDENTICAL return shape to get_clinician_incidents() by construction
+// (that RPC's own migration comment says so: copied deliberately, not
+// reinvented), so one row-mapper genuinely serves both without
+// duplicating it. The only thing that differs between the two RPCs is
+// WHO is authorised (clinician_access vs has_child_access()), not what
+// shape comes back -- audience picks which RPC this hook calls, that's
+// the whole difference.
 
 export interface IncidentSummary {
   incidentId: string;
@@ -35,7 +45,7 @@ export interface IncidentSummary {
   restrictivePractice: { planning_status: string; ncse_report_complete: boolean }[];
 }
 
-interface RawClinicianIncidentRow {
+interface RawIncidentRow {
   incident_id: string;
   occurred_at: string;
   recorded_at: string;
@@ -57,7 +67,12 @@ interface RawClinicianIncidentRow {
   restrictive_practice: { planning_status: string; ncse_report_complete: boolean }[];
 }
 
-export function useIncidents(passportId: string) {
+// "clinician" (default, unchanged for every existing caller) ->
+// get_clinician_incidents(); "staff" -> get_child_incidents_for_staff()
+// (has_child_access() gated -- teacher/SNA).
+export type IncidentAudience = "clinician" | "staff";
+
+export function useIncidents(passportId: string, audience: IncidentAudience = "clinician") {
   const [incidents, setIncidents] = useState<IncidentSummary[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -72,8 +87,9 @@ export function useIncidents(passportId: string) {
     setIsLoading(true);
     setLoadError(null);
     const supabase = createClient();
+    const rpcName = audience === "staff" ? "get_child_incidents_for_staff" : "get_clinician_incidents";
     supabase
-      .rpc("get_clinician_incidents", { p_passport_id: passportId })
+      .rpc(rpcName, { p_passport_id: passportId })
       .then(({ data, error }) => {
         if (!isMounted) return;
         if (error) {
@@ -83,7 +99,7 @@ export function useIncidents(passportId: string) {
           return;
         }
         setIncidents(
-          ((data ?? []) as RawClinicianIncidentRow[]).map((row) => ({
+          ((data ?? []) as RawIncidentRow[]).map((row) => ({
             incidentId: row.incident_id,
             occurredAt: row.occurred_at,
             recordedAt: row.recorded_at,
@@ -110,7 +126,7 @@ export function useIncidents(passportId: string) {
     return () => {
       isMounted = false;
     };
-  }, [passportId, reloadKey]);
+  }, [passportId, audience, reloadKey]);
 
   return { incidents, isLoading, loadError, refresh: () => setReloadKey((k) => k + 1) };
 }

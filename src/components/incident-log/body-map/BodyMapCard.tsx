@@ -53,9 +53,16 @@ interface BodyMapCardProps {
   canEdit: boolean;
   injuryTypeOptions: InjuryTypeOption[];
   regionOptions: RegionOption[];
+  // Stale-snapshot fix (CLAUDE.md) -- body marks feed both
+  // compute_incident_content_hash() (view/x/y/injury_type_id -- staff
+  // attestations can go stale off this) and incident_signoff_issues()'s
+  // own skin_broken-vs-type check directly. Optional: only the teacher
+  // incident page's own SignOffCard needs to know; nothing else that
+  // renders this card cares.
+  onContentChanged?: () => void;
 }
 
-export function BodyMapCard({ injuryId, partyName, canEdit, injuryTypeOptions, regionOptions }: BodyMapCardProps) {
+export function BodyMapCard({ injuryId, partyName, canEdit, injuryTypeOptions, regionOptions, onContentChanged }: BodyMapCardProps) {
   const [marks, setMarks] = useState<BodyMark[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -200,6 +207,7 @@ export function BodyMapCard({ injuryId, partyName, canEdit, injuryTypeOptions, r
         skinBroken: pendingIsBite ? pendingSkinBroken : null,
       },
     ]);
+    onContentChanged?.();
     closeSheet();
   }
 
@@ -235,6 +243,7 @@ export function BodyMapCard({ injuryId, partyName, canEdit, injuryTypeOptions, r
           : m
       )
     );
+    onContentChanged?.();
     closeSheet();
   }
 
@@ -259,6 +268,7 @@ export function BodyMapCard({ injuryId, partyName, canEdit, injuryTypeOptions, r
       return;
     }
     setMarks((current) => current.filter((m) => m.id !== selectedMarkId));
+    onContentChanged?.();
     closeSheet();
   }
 

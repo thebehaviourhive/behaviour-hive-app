@@ -4,13 +4,18 @@ import { useIncidents } from "@/hooks/useIncidents";
 import { IncidentSummaryCard } from "@/components/incident-log/IncidentSummaryCard";
 import { InlineErrorState } from "@/components/ui/InlineErrorState";
 
-// The Clinical File's own Incident Log tab -- the OTHER tab on this
-// page, previously also labelled "Incidents", was the ABC log timeline
-// and has since been relabelled "ABC Logs" to remove the collision
-// (its key stays "incidents", unchanged -- see that tab list's own
-// comment).
-export function ClinicalFileIncidentsTab({ passportId }: { passportId: string }) {
-  const { incidents, isLoading, loadError, refresh } = useIncidents(passportId);
+// Passport Incidents tabs (migration 0166) -- the teacher/SNA track's
+// own real incident log, shared between both since has_child_access()
+// is itself already shared (has_class_teacher_access() OR
+// has_sna_access()). Mirrors ClinicalFileIncidentsTab exactly --
+// audience="staff" is the only difference passed down to useIncidents,
+// which is what actually selects get_child_incidents_for_staff() over
+// get_clinician_incidents(). No new access: has_child_access() already
+// lets either role open any of these incidents directly today; this
+// only gives a child's own passport page something to call for the
+// list shape.
+export function ChildIncidentsTab({ passportId }: { passportId: string }) {
+  const { incidents, isLoading, loadError, refresh } = useIncidents(passportId, "staff");
 
   if (isLoading) {
     return (

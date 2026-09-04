@@ -12,7 +12,7 @@ import { HorizontalBarChart } from "../charts/HorizontalBarChart";
 import { PieChart } from "../charts/PieChart";
 import { AbcIncidentCard } from "./direct/AbcIncidentCard";
 import { DailyPatternsPanel } from "./direct/DailyPatternsPanel";
-import { IncidentSummaryCard } from "@/components/clinician/incidents/IncidentSummaryCard";
+import { IncidentSummaryCard } from "@/components/incident-log/IncidentSummaryCard";
 import type { AbcHypothesisedFunction } from "@/lib/fba/types";
 import type { FbaSectionBodyProps } from "./types";
 

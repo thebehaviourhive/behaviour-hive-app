@@ -9,6 +9,7 @@ import { GrantPassportAccessSheet } from "@/components/principal/GrantPassportAc
 import { EndEnrolmentSheet } from "@/components/principal/EndEnrolmentSheet";
 import { GrantClinicianAccessSheet } from "@/components/principal/GrantClinicianAccessSheet";
 import { CLINICIAN_SPECIALTY_LABEL, type ClinicianSpecialty } from "@/lib/clinicianSpecialties";
+import { IncidentCard, type InstitutionIncidentRow } from "@/components/principal/IncidentCard";
 
 // PRD 1, Stage 4, Step 3. Principal's passport detail. PRD 2, Stage 3:
 // rewritten into three tabs (Enrolment / Access / Clinical), reusing
@@ -181,13 +182,20 @@ interface ClinicalContentItem {
   createdAt: string;
 }
 
-type TabKey = "enrolment" | "access" | "clinical" | "passport";
+// Passport Incidents tabs (migration 0166) -- this page had no
+// Incidents tab at all before this, the only track missing one
+// entirely rather than mislabelled. get_institution_incidents()
+// already grants a principal every incident at their institution
+// (can_countersign_incident()); p_passport_id is a new filter on that
+// same, already-granted set, not new access.
+type TabKey = "enrolment" | "access" | "clinical" | "passport" | "incidents";
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: "enrolment", label: "Enrolment" },
   { key: "access", label: "Access" },
   { key: "clinical", label: "Clinical" },
   { key: "passport", label: "Passport" },
+  { key: "incidents", label: "Incidents" },
 ];
 
 const ROLE_LABEL: Record<string, string> = {
@@ -278,6 +286,11 @@ export function ChildDetail({
   const [clinicalContentError, setClinicalContentError] = useState<string | null>(null);
   const [showClinicianHistory, setShowClinicianHistory] = useState(false);
 
+  // Passport Incidents tab (migration 0166) -- get_institution_incidents()
+  // filtered to this one child via its new p_passport_id param.
+  const [institutionIncidents, setInstitutionIncidents] = useState<InstitutionIncidentRow[]>([]);
+  const [institutionIncidentsError, setInstitutionIncidentsError] = useState<string | null>(null);
+
   const load = useCallback(async () => {
     if (!user) return;
     setIsLoading(true);
@@ -331,6 +344,7 @@ export function ChildDetail({
       clinicianHistoryResult,
       passportProfileResult,
       clinicalContentResult,
+      institutionIncidentsResult,
     ] = await Promise.all([
       supabase.rpc("get_passport_access_for_child", { p_passport_id: passportId, p_institution_id: staffRow.institution_id }),
       supabase.rpc("get_institution_staff_roster", { p_institution_id: staffRow.institution_id, p_include_inactive: false, p_include_pending: false }),
@@ -348,7 +362,17 @@ export function ChildDetail({
       supabase.rpc("get_passport_clinician_history", { p_passport_id: passportId, p_institution_id: staffRow.institution_id }),
       supabase.rpc("get_child_passport_profile_for_principal", { p_passport_id: passportId }),
       supabase.rpc("get_passport_clinical_content", { p_passport_id: passportId }),
+      supabase.rpc("get_institution_incidents", { p_institution_id: staffRow.institution_id, p_passport_id: passportId }),
     ]);
+
+    if (institutionIncidentsResult.error) {
+      console.error("Failed to load this child's incidents:", institutionIncidentsResult.error);
+      setInstitutionIncidentsError("Couldn't load this child's incidents.");
+      setInstitutionIncidents([]);
+    } else {
+      setInstitutionIncidentsError(null);
+      setInstitutionIncidents((institutionIncidentsResult.data ?? []) as InstitutionIncidentRow[]);
+    }
 
     if (cliniciansResult.error) {
       console.error("Failed to load connected clinicians:", cliniciansResult.error);
@@ -1165,6 +1189,26 @@ export function ChildDetail({
                     )}
                   </section>
                 </>
+              )}
+            </>
+          )}
+
+          {activeTab === "incidents" && (
+            <>
+              {institutionIncidentsError ? (
+                <p className="rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-center text-sm text-brand-neutral-black/60">
+                  {institutionIncidentsError}
+                </p>
+              ) : institutionIncidents.length === 0 ? (
+                <p className="rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-center text-sm text-brand-neutral-black/60">
+                  No incidents recorded for this child yet.
+                </p>
+              ) : (
+                <div className="flex flex-col gap-2">
+                  {institutionIncidents.map((incident) => (
+                    <IncidentCard key={incident.incident_id} incident={incident} showRealNames />
+                  ))}
+                </div>
               )}
             </>
           )}
