@@ -121,9 +121,24 @@ interface CountersignCardProps {
   incidentId: string;
   userId: string;
   onCountersigned: () => void;
+  // What's being signed, named in the confirm sheet -- straight from
+  // the parent page's own already-loaded state, no new fetch. Same
+  // reasoning as SignOffCard's own identical props: generic permanence
+  // copy in front of a button labelled the same as the one that opened
+  // it is not a decision point.
+  childNames: string[];
+  occurredAtLabel: string;
+  restraintUsed: boolean;
 }
 
-export function CountersignCard({ incidentId, userId, onCountersigned }: CountersignCardProps) {
+export function CountersignCard({
+  incidentId,
+  userId,
+  onCountersigned,
+  childNames,
+  occurredAtLabel,
+  restraintUsed,
+}: CountersignCardProps) {
   const [isLoading, setIsLoading] = useState(true);
   const [summary, setSummary] = useState<CountersignSummary | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -213,6 +228,11 @@ export function CountersignCard({ incidentId, userId, onCountersigned }: Counter
   }
 
   const notAttested = summary.staff_attestations.filter((s) => !s.attested_at && !s.withdrawn_at);
+  // Ever-withdrawn, regardless of current status -- StaffHistory already
+  // shows this per person on the main card; restated here so it can't be
+  // missed at the confirmation moment itself, not just somewhere above
+  // it on a page the principal may have scrolled past.
+  const everWithdrawn = summary.staff_attestations.filter((s) => s.withdrawn_at);
 
   return (
     <div className="flex flex-col gap-4 rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
@@ -267,31 +287,27 @@ export function CountersignCard({ incidentId, userId, onCountersigned }: Counter
             Countersigning is still required either way.
           </p>
 
-          {/* PRD 4, Stage 3 -- both buttons now read as equally legitimate
-              outcomes, not just equal size. Golden Brown on "Add an
-              amendment" (this card's original, pre-PRD-4 treatment) cast
-              disagreement as the urgent/problem option under this app's
-              now-explicit colour-to-state mapping (Golden Brown = urgent
-              action required, missing information, withdrawn attestations)
-              -- exactly the asymmetry Daniel's own instruction warns
-              against. Both solid Prussian Blue treatments (primary/
-              secondary), stacked -- a narrow sticky rail at 1280px and a
-              375px sticky footer are both too narrow for the full labels
-              side by side without wrapping awkwardly, so this stacks at
-              every width rather than only below a breakpoint.
+          {/* Both buttons read as equally legitimate outcomes, not just
+              equal size (PRD 4, Stage 3) -- Golden Brown on "Add an
+              amendment" would cast disagreement as the urgent/problem
+              option under this app's colour-to-state mapping, the exact
+              asymmetry Daniel's own instruction warns against. Both
+              solid Prussian Blue (primary/secondary), stacked at every
+              width -- the labels don't fit side by side without wrapping
+              awkwardly even at 1280px.
 
-              A real fixed-to-viewport footer below lg, not just
-              sticky-in-card -- "the report scrolls, a sticky footer
-              docks the two buttons" only holds if the footer stays
-              pinned regardless of how far into a long report the reader
-              has scrolled. Measured live before building this (PRD 4
-              Stage 3 recon): 133px tall with this exact copy, un-wrapped
-              even at 320px -- 16% of a 375x812 viewport, 23% of a
-              320x568 one. At lg+ this un-fixes entirely (lg:static) and
-              sits inside the parent's own lg:sticky rail instead --
-              fixed positioning would otherwise pin it to the browser
-              viewport rather than the 4-column action panel. */}
-          <div className="fixed inset-x-0 bottom-0 z-20 flex flex-col gap-2 border-t border-black/5 bg-white px-4 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] lg:static lg:border-0 lg:bg-transparent lg:p-0">
+              NO fixed-to-viewport footer, on any width -- reversed
+              deliberately. PRD 4 Stage 3 built one below lg specifically
+              so the buttons stayed reachable without scrolling back down
+              a long report; Daniel's own correction: that solved a real
+              touch-target/equal-weight problem but created the same
+              "reachable without passing the account" issue the desktop
+              sticky sidebar had, just via fixed positioning instead of
+              sticky. Same fix on every width now: this renders in normal
+              document flow, after the report, after AttestationCard,
+              after everything above it in this card -- the action lives
+              after the thing it acts on, full stop, not just at lg+. */}
+          <div className="flex flex-col gap-2 pt-1">
             <Button type="button" onClick={() => setIsAmendOpen(true)} variant="secondary">
               Add amendment and countersign
             </Button>
@@ -304,7 +320,29 @@ export function CountersignCard({ incidentId, userId, onCountersigned }: Counter
 
       <BottomSheet isOpen={isConfirmOpen} onClose={() => !isSigning && setIsConfirmOpen(false)}>
         <h2 className="font-heading text-xl font-semibold text-brand-neutral-black">Countersign this incident?</h2>
-        <p className="mt-2 text-sm text-brand-neutral-black/70">
+
+        {/* What's being signed -- named, not implied. */}
+        <div className="mt-3 rounded-2xl border border-black/5 bg-black/[0.02] p-3.5">
+          <p className="text-sm font-semibold text-brand-neutral-black">
+            {childNames.length > 0 ? childNames.join(", ") : "This incident"}
+          </p>
+          <p className="mt-0.5 text-xs text-brand-neutral-black/60">{occurredAtLabel}</p>
+          <p className={`mt-1.5 text-xs font-semibold ${restraintUsed ? "text-brand-golden-brown" : "text-brand-neutral-black/50"}`}>
+            {restraintUsed ? "Restraint (CPI) was used" : "No restraint used"}
+          </p>
+        </div>
+
+        {everWithdrawn.length > 0 && (
+          <div className="mt-3 rounded-xl border border-brand-golden-brown/30 bg-brand-golden-brown/10 p-3">
+            <p className="text-xs font-semibold text-brand-golden-brown">
+              {everWithdrawn.map((s) => s.name).join(", ")} withdrew {everWithdrawn.length === 1 ? "an attestation" : "attestations"}{" "}
+              on this record{everWithdrawn.every((s) => s.status !== "withdrawn") ? " and later re-attested" : ""}. The account was
+              disputed at some point, not just currently clean.
+            </p>
+          </div>
+        )}
+
+        <p className="mt-3 text-sm text-brand-neutral-black/70">
           This is permanent and cannot be undone. The record is closed and can never be edited again. Amendments can
           still be added afterwards.
         </p>

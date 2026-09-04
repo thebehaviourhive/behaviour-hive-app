@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import { BrandMark } from "@/components/ui/BrandMark";
 import { useSupportButtonNavSlots } from "@/hooks/useSupportButtonNavSlots";
 import { useMessagesAwaitingActionCount } from "@/hooks/useMessagesAwaitingActionCount";
+import { useHasUnreadMessages } from "@/hooks/useHasUnreadMessages";
 import { createClient } from "@/lib/supabase/client";
 import { CountBadge } from "@/components/ui/CountBadge";
 import { PRINCIPAL_NAV_TABS } from "./principalNavTabs";
@@ -75,6 +76,7 @@ export function PrincipalSidebar() {
   // uses; kept in sync by sharing that same self-scoped RPC, not by
   // being the same component, matching the alertSlot comment above.
   const messagesAwaitingCount = useMessagesAwaitingActionCount(userId);
+  const hasUnreadMessages = useHasUnreadMessages(userId);
 
   return (
     <aside className="hidden lg:fixed lg:inset-y-0 lg:left-0 lg:z-10 lg:flex lg:w-64 lg:flex-col lg:border-r lg:border-black/5 lg:bg-brand-off-white lg:px-4 lg:py-6">
@@ -107,7 +109,17 @@ export function PrincipalSidebar() {
             >
               <span className="relative flex">
                 <Icon aria-hidden size={20} strokeWidth={2} />
-                {tab.key === "messages" && <CountBadge count={messagesAwaitingCount} size="small" />}
+                {tab.key === "messages" && (
+                  <>
+                    <CountBadge count={messagesAwaitingCount} size="small" />
+                    {hasUnreadMessages && (
+                      <span
+                        aria-label="New messages"
+                        className="absolute -left-1 -top-1 h-2 w-2 rounded-full bg-brand-golden-brown shadow-sm"
+                      />
+                    )}
+                  </>
+                )}
               </span>
               {tab.label}
             </Link>

@@ -53,6 +53,11 @@ export interface MessageRecipient {
   recipientId: string;
   recipientRole: MessageRole;
   acknowledgedAt: string | null;
+  // migration 0170 -- a genuinely new column, not a repurposing of
+  // acknowledgedAt. "Seen it" and "dealt with it" are different claims:
+  // stamped by mark_message_read() the moment a recipient opens a
+  // message, independent of whether they ever acknowledge or reply.
+  readAt: string | null;
 }
 
 export interface MessageReply {

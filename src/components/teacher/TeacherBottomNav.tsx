@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { House, Users, Mail, Menu } from "lucide-react";
 import { AppBottomNav, type NavTab } from "@/components/ui/AppBottomNav";
 import { useMessagesAwaitingActionCount } from "@/hooks/useMessagesAwaitingActionCount";
+import { useHasUnreadMessages } from "@/hooks/useHasUnreadMessages";
 import { useSupportButtonNavSlots } from "@/hooks/useSupportButtonNavSlots";
 import { createClient } from "@/lib/supabase/client";
 
@@ -56,6 +57,7 @@ export function TeacherBottomNav() {
     };
   }, [userId]);
   const messagesAwaitingCount = useMessagesAwaitingActionCount(userId);
+  const hasUnreadMessages = useHasUnreadMessages(userId);
   const { extraSlot, alertSlot } = useSupportButtonNavSlots({
     institutionId,
     userId,
@@ -92,6 +94,7 @@ export function TeacherBottomNav() {
       href: "/teacher/messages",
       isActive: (pathname) => pathname.startsWith("/teacher/messages"),
       badgeCount: messagesAwaitingCount,
+      showUnreadDot: hasUnreadMessages,
     },
     {
       key: "more",

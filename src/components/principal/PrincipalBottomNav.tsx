@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { AppBottomNav } from "@/components/ui/AppBottomNav";
 import { useSupportButtonNavSlots } from "@/hooks/useSupportButtonNavSlots";
 import { useMessagesAwaitingActionCount } from "@/hooks/useMessagesAwaitingActionCount";
+import { useHasUnreadMessages } from "@/hooks/useHasUnreadMessages";
 import { createClient } from "@/lib/supabase/client";
 import { PRINCIPAL_NAV_TABS } from "./principalNavTabs";
 
@@ -75,8 +76,9 @@ export function PrincipalBottomNav() {
   // comment -- confirmed true for a principal too, no RPC change required
   // for this specific count.
   const messagesAwaitingCount = useMessagesAwaitingActionCount(userId);
+  const hasUnreadMessages = useHasUnreadMessages(userId);
   const tabs = PRINCIPAL_NAV_TABS.map((tab) =>
-    tab.key === "messages" ? { ...tab, badgeCount: messagesAwaitingCount } : tab
+    tab.key === "messages" ? { ...tab, badgeCount: messagesAwaitingCount, showUnreadDot: hasUnreadMessages } : tab
   );
 
   // Widened past AppBottomNav's own max-w-sm default -- measured live at

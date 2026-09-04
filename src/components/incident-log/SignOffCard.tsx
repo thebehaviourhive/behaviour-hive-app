@@ -23,6 +23,32 @@ import { BottomSheet } from "@/components/ui/BottomSheet";
 // here first, and should never be scared off by something that isn't
 // actually stopping them -- hence two clearly labelled boxes, not one
 // undifferentiated list.
+//
+// CONFIRM-SHEET REWORK (Daniel's own finding: "generic permanence copy
+// in front of a button labelled the same as the one that opened it is
+// not a decision point"). Two changes:
+//
+// 1. The sheet now names what's actually being signed -- child(ren),
+//    date, whether restraint was used -- passed down from the parent
+//    page's own already-loaded state (childNames/occurredAtLabel/
+//    restraintUsed props). No new RPC: the parent already has all
+//    three for the report itself.
+//
+// 2. WITHDRAWN ATTESTATIONS get their own, more prominent block,
+//    separate from the generic "Blocking sign-off" list -- Daniel's own
+//    framing: "someone present does not stand over this account" is not
+//    the same class of problem as a missing debrief. A currently-
+//    withdrawn one can never coexist with this confirm sheet being open
+//    (withdraw_attestation() itself requires teacher_signed_at is null,
+//    same gate as attest_to_incident() -- confirmed reading both bodies
+//    before writing this, not assumed) -- so what CAN reach this screen
+//    is WITHDRAWAL HISTORY: someone who withdrew and later re-attested.
+//    build_staff_attestations_summary() has always returned
+//    withdrawn_at/withdrawal_reason for every row regardless of current
+//    status (0149); SignOffCard's own StaffAttestation interface just
+//    never declared those fields. Restated in the confirm sheet too --
+//    a teacher signing off should know an account was disputed and
+//    resolved, not just that it currently reads clean.
 
 interface BlockingIssue {
   code: string;
@@ -36,6 +62,8 @@ interface StaffAttestation {
   status: string;
   status_label: string;
   blocks_signoff: boolean;
+  withdrawn_at: string | null;
+  withdrawal_reason: string | null;
 }
 
 interface SignoffSummary {
@@ -66,9 +94,21 @@ interface SignOffCardProps {
   // same shape as the incident page's own reloadKey, just scoped to
   // this one card instead of the whole page.
   refreshSignal: number;
+  // What's being signed, straight from the parent page's own already-
+  // loaded state -- no new fetch.
+  childNames: string[];
+  occurredAtLabel: string;
+  restraintUsed: boolean;
 }
 
-export function SignOffCard({ incidentId, onSignedOff, refreshSignal }: SignOffCardProps) {
+export function SignOffCard({
+  incidentId,
+  onSignedOff,
+  refreshSignal,
+  childNames,
+  occurredAtLabel,
+  restraintUsed,
+}: SignOffCardProps) {
   const [summary, setSummary] = useState<SignoffSummary | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -139,12 +179,24 @@ export function SignOffCard({ incidentId, onSignedOff, refreshSignal }: SignOffC
 
   const notYetAttested = summary.staff_attestations.filter((s) => s.status === "not_attested");
   const blockingStaff = summary.staff_attestations.filter((s) => s.blocks_signoff);
+  // Withdrawn is its own class of blocking issue, not a variant of
+  // "stale" or a missing debrief -- see this file's own header comment.
+  const withdrawnBlockingStaff = blockingStaff.filter((s) => s.status === "withdrawn");
+  const otherBlockingStaff = blockingStaff.filter((s) => s.status !== "withdrawn");
+  // Ever-withdrawn, regardless of current status -- can only be
+  // non-blocking (i.e. re-attested) if this screen is reachable at all,
+  // since a live withdrawal blocks the button outright. Still worth
+  // knowing: the record was disputed at some point, not just that it
+  // currently reads clean.
+  const resolvedWithdrawalHistory = summary.staff_attestations.filter(
+    (s) => s.withdrawn_at && s.status !== "withdrawn"
+  );
   // The aggregate stale/withdrawn count from blocking_issues is dropped
   // in favour of naming the actual people below -- more actionable than
   // "1 staff member(s)" when the summary already knows exactly who.
   const nonStaffBlockingIssues = summary.blocking_issues.filter((i) => i.code !== "stale_or_withdrawn_attestation");
   const hasNonBlockingNotes = notYetAttested.length > 0 || summary.anyone_injured.note !== null;
-  const hasBlockingContent = nonStaffBlockingIssues.length > 0 || blockingStaff.length > 0;
+  const hasBlockingContent = nonStaffBlockingIssues.length > 0 || otherBlockingStaff.length > 0;
 
   return (
     <div className="flex flex-col gap-4 rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
@@ -168,6 +220,26 @@ export function SignOffCard({ incidentId, onSignedOff, refreshSignal }: SignOffC
         </div>
       )}
 
+      {/* Withdrawn attestations -- its own block, heavier weight than
+          the generic blocking box below it. Can only ever be reached
+          while a withdrawal is genuinely outstanding (blocks_signoff),
+          which is exactly when it matters most. */}
+      {withdrawnBlockingStaff.length > 0 && (
+        <div className="rounded-2xl border-2 border-brand-golden-brown bg-brand-golden-brown/15 p-4">
+          <p className="text-xs font-bold uppercase tracking-wide text-brand-golden-brown">
+            Withdrawn attestation -- not currently stood over
+          </p>
+          <ul className="mt-2 flex flex-col gap-2 text-sm text-brand-neutral-black">
+            {withdrawnBlockingStaff.map((s) => (
+              <li key={s.incident_staff_id}>
+                <span className="font-semibold">{s.name}</span> withdrew their attestation
+                {s.withdrawal_reason && <span className="italic"> -- &quot;{s.withdrawal_reason}&quot;</span>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {hasBlockingContent && (
         <div className="rounded-2xl border border-brand-golden-brown/30 bg-brand-golden-brown/10 p-4">
           <p className="text-xs font-bold uppercase tracking-wide text-brand-golden-brown">Blocking sign-off</p>
@@ -175,7 +247,7 @@ export function SignOffCard({ incidentId, onSignedOff, refreshSignal }: SignOffC
             {nonStaffBlockingIssues.map((issue) => (
               <li key={issue.code}>{issue.message.replace(/^Cannot sign off -- /, "")}</li>
             ))}
-            {blockingStaff.map((s) => (
+            {otherBlockingStaff.map((s) => (
               <li key={s.incident_staff_id}>
                 {s.name} -- {s.status_label} attestation
               </li>
@@ -199,7 +271,29 @@ export function SignOffCard({ incidentId, onSignedOff, refreshSignal }: SignOffC
 
       <BottomSheet isOpen={isConfirmOpen} onClose={() => !isSigning && setIsConfirmOpen(false)}>
         <h2 className="font-heading text-xl font-semibold text-brand-neutral-black">Sign off?</h2>
-        <p className="mt-2 text-sm text-brand-neutral-black/70">
+
+        {/* What's being signed -- named, not implied. */}
+        <div className="mt-3 rounded-2xl border border-black/5 bg-black/[0.02] p-3.5">
+          <p className="text-sm font-semibold text-brand-neutral-black">
+            {childNames.length > 0 ? childNames.join(", ") : "This incident"}
+          </p>
+          <p className="mt-0.5 text-xs text-brand-neutral-black/60">{occurredAtLabel}</p>
+          <p className={`mt-1.5 text-xs font-semibold ${restraintUsed ? "text-brand-golden-brown" : "text-brand-neutral-black/50"}`}>
+            {restraintUsed ? "Restraint (CPI) was used" : "No restraint used"}
+          </p>
+        </div>
+
+        {resolvedWithdrawalHistory.length > 0 && (
+          <div className="mt-3 rounded-xl border border-brand-golden-brown/30 bg-brand-golden-brown/10 p-3">
+            <p className="text-xs font-semibold text-brand-golden-brown">
+              {resolvedWithdrawalHistory.map((s) => s.name).join(", ")} withdrew{" "}
+              {resolvedWithdrawalHistory.length === 1 ? "an attestation" : "attestations"} on this record, then
+              re-attested. Resolved, not currently blocking -- worth knowing before you sign.
+            </p>
+          </div>
+        )}
+
+        <p className="mt-3 text-sm text-brand-neutral-black/70">
           This is permanent. Once signed off, this incident becomes read-only and can never be edited again --
           any correction from here goes through an append-only amendment, never an edit. A principal
           countersign is required next.

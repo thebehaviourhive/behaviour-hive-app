@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { House, FolderOpen, Mail, Menu } from "lucide-react";
 import { AppBottomNav, type NavTab } from "@/components/ui/AppBottomNav";
 import { useMessagesAwaitingActionCount } from "@/hooks/useMessagesAwaitingActionCount";
+import { useHasUnreadMessages } from "@/hooks/useHasUnreadMessages";
 import { createClient } from "@/lib/supabase/client";
 
 // Clinician track's tab list. "Passports" owns the caseload list plus any
@@ -30,6 +31,7 @@ export function ClinicianBottomNav() {
     };
   }, []);
   const messagesAwaitingCount = useMessagesAwaitingActionCount(userId);
+  const hasUnreadMessages = useHasUnreadMessages(userId);
 
   const TABS: NavTab[] = [
     {
@@ -58,6 +60,7 @@ export function ClinicianBottomNav() {
       href: "/clinician/messages",
       isActive: (pathname) => pathname.startsWith("/clinician/messages"),
       badgeCount: messagesAwaitingCount,
+      showUnreadDot: hasUnreadMessages,
     },
     {
       key: "more",

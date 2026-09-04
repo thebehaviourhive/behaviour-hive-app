@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { House, Mail, Menu } from "lucide-react";
 import { AppBottomNav, type NavTab } from "@/components/ui/AppBottomNav";
 import { useMessagesAwaitingActionCount } from "@/hooks/useMessagesAwaitingActionCount";
+import { useHasUnreadMessages } from "@/hooks/useHasUnreadMessages";
 import { useSupportButtonNavSlots } from "@/hooks/useSupportButtonNavSlots";
 import { createClient } from "@/lib/supabase/client";
 
@@ -57,6 +58,7 @@ export function SnaBottomNav() {
     };
   }, [userId]);
   const messagesAwaitingCount = useMessagesAwaitingActionCount(userId);
+  const hasUnreadMessages = useHasUnreadMessages(userId);
   const { extraSlot, alertSlot } = useSupportButtonNavSlots({
     institutionId,
     userId,
@@ -78,6 +80,7 @@ export function SnaBottomNav() {
       href: "/sna/messages",
       isActive: (pathname) => pathname.startsWith("/sna/messages"),
       badgeCount: messagesAwaitingCount,
+      showUnreadDot: hasUnreadMessages,
     },
     {
       key: "more",

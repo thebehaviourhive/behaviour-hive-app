@@ -15,7 +15,7 @@ import { MessageTriage } from "@/components/messages/MessageTriage";
 import { StaffMessageList } from "@/components/messages/StaffMessageList";
 import { ComposeMessageSheet } from "@/components/messages/ComposeMessageSheet";
 import { ComposeKindPickerSheet } from "@/components/messages/ComposeKindPickerSheet";
-import { BottomSheet } from "@/components/ui/BottomSheet";
+import { MessageChildPickerSheet } from "@/components/messages/MessageChildPickerSheet";
 
 // Teacher's Messages home -- Stage 2: the triage view. Open messages
 // across every linked pupil in one list, grouped by child, one tap to
@@ -144,26 +144,21 @@ export default function TeacherMessagesPage() {
       />
 
       {/* Plain child picker -- composing needs exactly one passport, so
-          this resolves that first, then hands off to the shared sheet. */}
-      <BottomSheet isOpen={pickerStep === "student"} onClose={() => setPickerStep("closed")}>
-        <h2 className="font-heading text-xl font-semibold text-brand-neutral-black">Message about which student?</h2>
-        <div className="mt-4 flex flex-col gap-2">
-          {passports.map((passport) => (
-            <button
-              key={passport.passportId}
-              type="button"
-              onClick={() => {
-                setComposePassportId(passport.passportId);
-                setPickerStep("closed");
-              }}
-              className="flex items-center justify-between rounded-2xl border border-black/5 bg-white px-4 py-3.5 text-left shadow-sm"
-            >
-              <span className="text-sm font-semibold text-brand-neutral-black">{passport.displayName}</span>
-              <span className="text-lg text-brand-neutral-black/30">›</span>
-            </button>
-          ))}
-        </div>
-      </BottomSheet>
+          this resolves that first, then hands off to the shared sheet.
+          Alphabetical, and search+collapse above 7 -- see that
+          component's own header for why this replaced a bare
+          passports.map(). */}
+      <MessageChildPickerSheet
+        isOpen={pickerStep === "student"}
+        onClose={() => setPickerStep("closed")}
+        title="Message about which student?"
+        candidates={passports}
+        emptyMessage="No students linked yet."
+        onSelect={(passportId) => {
+          setComposePassportId(passportId);
+          setPickerStep("closed");
+        }}
+      />
 
       {composePassport && user && (
         <ComposeMessageSheet

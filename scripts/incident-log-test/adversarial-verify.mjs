@@ -13166,6 +13166,96 @@ async function main() {
     }
   }
 
+  console.log(`\n== CHECK OOO: SQL for migration 0170 -- message read state. mark_message_read() stamps read_at for a genuine recipient (OOO1), is idempotent -- a second call is a safe no-op, the original timestamp survives untouched (OOO2) -- and is a safe no-op for someone who isn't a recipient of this message at all, no row created, no error (OOO3). reply_to_message()'s own new fix: replying stamps BOTH acknowledged_at and read_at for the replying user in the same call, proving "someone who replies has plainly dealt with it" no longer leaves them stuck in the awaiting-action count (OOO4) -- and scoped correctly: a SECOND recipient on the same message, who never replied, has neither field touched by the first recipient's own reply (OOO5). ==`);
+  if (shouldRun("OOO")) {
+    const { data: instOOO, error: instOOOErr } = await admin
+      .from("institutions")
+      .insert({ name: "OOO Institution", institution_code: CODE + "OOO", status: "verified" })
+      .select()
+      .single();
+    if (instOOOErr) throw instOOOErr;
+    const institutionOOOId = instOOO.id;
+
+    const principalOOOId = await createUser("ooo.principal@thebehaviourhive.com", "OOO Principal", "principal");
+    const teacherOOOId = await createUser("ooo.teacher@thebehaviourhive.com", "OOO Teacher", "class_teacher");
+    const snaOOOId = await createUser("ooo.sna@thebehaviourhive.com", "OOO SNA", "sna");
+    const teacherOtherOOOId = await createUser("ooo.teacherother@thebehaviourhive.com", "OOO Other Teacher", "class_teacher");
+
+    await admin.from("institution_staff").insert({ institution_id: institutionOOOId, user_id: principalOOOId, role: "principal" });
+
+    const principalOOO = await signedInClient("ooo.principal@thebehaviourhive.com");
+    const teacherOOO = await signedInClient("ooo.teacher@thebehaviourhive.com");
+    const snaOOO = await signedInClient("ooo.sna@thebehaviourhive.com");
+    const teacherOtherOOO = await signedInClient("ooo.teacherother@thebehaviourhive.com");
+
+    for (const [row, client] of [
+      [{ institution_id: institutionOOOId, user_id: teacherOOOId, role: "class_teacher" }, teacherOOO],
+      [{ institution_id: institutionOOOId, user_id: snaOOOId, role: "sna" }, snaOOO],
+    ]) {
+      const { error } = await client.from("institution_staff").insert(row);
+      if (error) throw error;
+    }
+    for (const staffId of [teacherOOOId, snaOOOId]) {
+      const { data: row } = await admin.from("institution_staff").select("id").eq("institution_id", institutionOOOId).eq("user_id", staffId).single();
+      const { error } = await principalOOO.rpc("approve_staff_join", { p_institution_staff_id: row.id });
+      if (error) throw error;
+    }
+
+    const { data: staffCategoryOOO } = await admin.from("message_categories").select("id").eq("label", "General").eq("applies_to", "staff").single();
+
+    // Two recipients (sna + principal), response_required -- so OOO4/
+    // OOO5 can prove reply_to_message()'s own new stamp is scoped to the
+    // replying user alone, not every recipient on the thread.
+    const { data: ooo1MsgId, error: ooo1SendErr } = await teacherOOO.rpc("send_message", {
+      p_passport_id: null, p_category_id: staffCategoryOOO.id, p_body: "OOO read-state message.", p_response_required: true,
+      p_recipient_ids: [snaOOOId, principalOOOId], p_institution_id: institutionOOOId,
+    });
+    if (ooo1SendErr) throw ooo1SendErr;
+
+    // OOO1 -- mark_message_read() stamps a genuine recipient's own row.
+    const { error: ooo1MarkErr } = await snaOOO.rpc("mark_message_read", { p_message_id: ooo1MsgId });
+    record("OOO1a mark_message_read() succeeds for a genuine recipient", !ooo1MarkErr, ooo1MarkErr?.message);
+    const { data: ooo1Row } = await admin.from("message_recipients").select("read_at").eq("message_id", ooo1MsgId).eq("recipient_id", snaOOOId).single();
+    record("OOO1b the recipient's own read_at is genuinely stamped -- re-read via service role, not inferred from absence of a client error", Boolean(ooo1Row?.read_at), JSON.stringify(ooo1Row));
+
+    // OOO2 -- idempotent, original timestamp survives.
+    const firstReadAt = ooo1Row.read_at;
+    const { error: ooo2Err } = await snaOOO.rpc("mark_message_read", { p_message_id: ooo1MsgId });
+    const { data: ooo2Row } = await admin.from("message_recipients").select("read_at").eq("message_id", ooo1MsgId).eq("recipient_id", snaOOOId).single();
+    record("OOO2 a second mark_message_read() call is a safe no-op -- no error, the original read_at timestamp is untouched", !ooo2Err && ooo2Row.read_at === firstReadAt, JSON.stringify({ ooo2Err: ooo2Err?.message, firstReadAt, secondReadAt: ooo2Row.read_at }));
+
+    // OOO3 -- not a recipient at all: safe no-op, no row created.
+    const { error: ooo3Err } = await teacherOtherOOO.rpc("mark_message_read", { p_message_id: ooo1MsgId });
+    const { data: ooo3Row } = await admin.from("message_recipients").select("id").eq("message_id", ooo1MsgId).eq("recipient_id", teacherOtherOOOId).maybeSingle();
+    record("OOO3 mark_message_read() is a safe no-op for someone who isn't a recipient of this message -- no error, no row created", !ooo3Err && !ooo3Row, JSON.stringify({ ooo3Err: ooo3Err?.message, ooo3Row }));
+
+    // OOO4/OOO5 -- reply_to_message()'s own new fix.
+    const { error: ooo4ReplyErr } = await principalOOO.rpc("reply_to_message", { p_message_id: ooo1MsgId, p_body: "OOO principal reply." });
+    if (ooo4ReplyErr) throw ooo4ReplyErr;
+    const { data: ooo4Row } = await admin.from("message_recipients").select("acknowledged_at, read_at").eq("message_id", ooo1MsgId).eq("recipient_id", principalOOOId).single();
+    record(
+      "OOO4 reply_to_message() stamps BOTH acknowledged_at and read_at for the replying user, even though they never called acknowledge_message() or mark_message_read() themselves",
+      Boolean(ooo4Row?.acknowledged_at) && Boolean(ooo4Row?.read_at),
+      JSON.stringify(ooo4Row)
+    );
+    const { data: ooo5Row } = await admin.from("message_recipients").select("acknowledged_at").eq("message_id", ooo1MsgId).eq("recipient_id", snaOOOId).single();
+    record(
+      "OOO5 SCOPING: the OTHER recipient (sna), who never replied, has their own acknowledged_at left null -- the principal's reply didn't touch it",
+      ooo5Row?.acknowledged_at === null,
+      JSON.stringify(ooo5Row)
+    );
+
+    console.log("OOO summary complete.");
+
+    await admin.from("message_recipients").delete().eq("message_id", ooo1MsgId);
+    await admin.from("message_replies").delete().eq("message_id", ooo1MsgId);
+    await admin.from("messages").delete().eq("id", ooo1MsgId);
+    await admin.from("institutions").delete().eq("id", institutionOOOId);
+    for (const id of [principalOOOId, teacherOOOId, snaOOOId, teacherOtherOOOId]) {
+      await admin.auth.admin.deleteUser(id);
+    }
+  }
+
   console.log(`\n== Summary ==`);
   const failed = results.filter((r) => !r.pass);
   console.log(`${results.length - failed.length}/${results.length} passed.`);

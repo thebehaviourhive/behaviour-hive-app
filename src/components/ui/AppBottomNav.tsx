@@ -21,6 +21,13 @@ export interface NavTab {
   // dashboard stat: Prussian Blue, absent at 0, never red. Omit for tabs
   // that never carry one.
   badgeCount?: number | null;
+  // migration 0170 -- a separate "something new" signal, deliberately
+  // not folded into badgeCount. "Awaiting your action" (the number) and
+  // "unread" (this dot) answer different questions and can both be true
+  // at once -- a message can be read and still awaiting your reply.
+  // Golden Brown, positioned at the opposite corner from the numbered
+  // badge so the two never collide when both are present.
+  showUnreadDot?: boolean;
 }
 
 // The single shared bottom-nav renderer for all three tracks (parent,
@@ -100,6 +107,12 @@ export function AppBottomNav({
                   className={isActive ? "text-brand-prussian-blue" : "text-brand-neutral-black/40"}
                 />
                 <CountBadge count={tab.badgeCount} size="small" />
+                {tab.showUnreadDot && (
+                  <span
+                    aria-label="New messages"
+                    className="absolute -left-1 -top-1 h-2 w-2 rounded-full bg-brand-golden-brown shadow-sm"
+                  />
+                )}
               </span>
               <span
                 className={`font-sans text-[10px] leading-none ${

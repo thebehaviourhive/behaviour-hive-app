@@ -13,7 +13,7 @@ import { ClinicianBottomNav } from "@/components/clinician/ClinicianBottomNav";
 import { InlineErrorState } from "@/components/ui/InlineErrorState";
 import { MessageTriage } from "@/components/messages/MessageTriage";
 import { ComposeMessageSheet } from "@/components/messages/ComposeMessageSheet";
-import { BottomSheet } from "@/components/ui/BottomSheet";
+import { MessageChildPickerSheet } from "@/components/messages/MessageChildPickerSheet";
 
 // Clinician's Messages home -- the cross-caseload layer above the
 // per-case Clinical File tab. Same triage model as the teacher track
@@ -95,26 +95,21 @@ export default function ClinicianMessagesPage() {
       </main>
 
       {/* Plain child picker -- composing needs exactly one passport, so
-          [New] resolves that first, then hands off to the shared sheet. */}
-      <BottomSheet isOpen={isPickerOpen} onClose={() => setIsPickerOpen(false)}>
-        <h2 className="font-heading text-xl font-semibold text-brand-neutral-black">Message about which case?</h2>
-        <div className="mt-4 flex flex-col gap-2">
-          {passports.map((passport) => (
-            <button
-              key={passport.passportId}
-              type="button"
-              onClick={() => {
-                setComposePassportId(passport.passportId);
-                setIsPickerOpen(false);
-              }}
-              className="flex items-center justify-between rounded-2xl border border-black/5 bg-white px-4 py-3.5 text-left shadow-sm"
-            >
-              <span className="text-sm font-semibold text-brand-neutral-black">{passport.displayName}</span>
-              <span className="text-lg text-brand-neutral-black/30">›</span>
-            </button>
-          ))}
-        </div>
-      </BottomSheet>
+          [New] resolves that first, then hands off to the shared sheet.
+          The clinician case this was flagged for: a caseload after bulk
+          assignment can be the whole school. Search+collapse above 7,
+          alphabetical always. */}
+      <MessageChildPickerSheet
+        isOpen={isPickerOpen}
+        onClose={() => setIsPickerOpen(false)}
+        title="Message about which case?"
+        candidates={passports}
+        emptyMessage="No cases linked yet."
+        onSelect={(passportId) => {
+          setComposePassportId(passportId);
+          setIsPickerOpen(false);
+        }}
+      />
 
       {composePassport && user && (
         <ComposeMessageSheet

@@ -14,7 +14,7 @@ import { MessageTriage } from "@/components/messages/MessageTriage";
 import { StaffMessageList } from "@/components/messages/StaffMessageList";
 import { ComposeMessageSheet } from "@/components/messages/ComposeMessageSheet";
 import { ComposeKindPickerSheet } from "@/components/messages/ComposeKindPickerSheet";
-import { BottomSheet } from "@/components/ui/BottomSheet";
+import { MessageChildPickerSheet } from "@/components/messages/MessageChildPickerSheet";
 
 // Migration 0161. "Threads they are addressed on, nothing else" governs
 // READING here -- there is deliberately no institution-wide "every
@@ -186,29 +186,21 @@ export default function PrincipalMessagesPage() {
       {/* Same plain-picker-then-shared-sheet pattern every other track
           uses -- composing needs exactly one passport first. The roster
           here, not a "linked children" list -- a principal's own reason
-          to write isn't bounded by an existing relationship. */}
-      <BottomSheet isOpen={pickerStep === "student"} onClose={() => setPickerStep("closed")}>
-        <h2 className="font-heading text-xl font-semibold text-brand-neutral-black">Message about which child?</h2>
-        <div className="mt-4 flex max-h-96 flex-col gap-2 overflow-y-auto">
-          {passports
-            .slice()
-            .sort((a, b) => a.displayName.localeCompare(b.displayName))
-            .map((passport) => (
-              <button
-                key={passport.passportId}
-                type="button"
-                onClick={() => {
-                  setComposePassportId(passport.passportId);
-                  setPickerStep("closed");
-                }}
-                className="flex items-center justify-between rounded-2xl border border-black/5 bg-white px-4 py-3.5 text-left shadow-sm"
-              >
-                <span className="text-sm font-semibold text-brand-neutral-black">{passport.displayName}</span>
-                <span className="text-lg text-brand-neutral-black/30">›</span>
-              </button>
-            ))}
-        </div>
-      </BottomSheet>
+          to write isn't bounded by an existing relationship. This is
+          the picker that started the "at scale" report -- a full
+          institution roster, 30+ in a real school -- now search+collapse
+          above 7, alphabetical always. */}
+      <MessageChildPickerSheet
+        isOpen={pickerStep === "student"}
+        onClose={() => setPickerStep("closed")}
+        title="Message about which child?"
+        candidates={passports}
+        emptyMessage="No children enrolled yet."
+        onSelect={(passportId) => {
+          setComposePassportId(passportId);
+          setPickerStep("closed");
+        }}
+      />
 
       {composePassport && user && (
         <ComposeMessageSheet

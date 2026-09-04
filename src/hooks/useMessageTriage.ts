@@ -28,6 +28,7 @@ interface RawMessageRow {
     recipient_id: string;
     recipient_role: MessageRole;
     acknowledged_at: string | null;
+    read_at: string | null;
   }[];
   replies: { id: string; author_id: string; body: string; created_at: string }[];
 }
@@ -75,7 +76,7 @@ export function useMessageTriage(passports: { passportId: string; displayName: s
           `id, passport_id, sender_id, sender_role, category_id, body, response_required, status, created_at,
            abc_log_id, strategy_update,
            category:message_categories(label),
-           recipients:message_recipients(id, recipient_id, recipient_role, acknowledged_at),
+           recipients:message_recipients(id, recipient_id, recipient_role, acknowledged_at, read_at),
            replies:message_replies(id, author_id, body, created_at)`
         )
         .in("passport_id", ids)
@@ -122,6 +123,7 @@ export function useMessageTriage(passports: { passportId: string; displayName: s
           recipientId: r.recipient_id,
           recipientRole: r.recipient_role,
           acknowledgedAt: r.acknowledged_at,
+          readAt: r.read_at,
         })),
         replies: (row.replies ?? [])
           .slice()

@@ -109,6 +109,16 @@ export function MessageCard({
 
   const [optimisticAcked, setOptimisticAcked] = useState(false);
   const [ackPhase, setAckPhase] = useState<AckPhase>("idle");
+  // migration 0170 -- read is a genuinely new signal, not a repurposing
+  // of acknowledged. Only ever meaningful for a real recipient -- a
+  // sender's own sent message, or a "Viewing only" reader with no
+  // message_recipients row at all, is never marked unread in the first
+  // place (isUnread below is false by construction for both). Local,
+  // optimistic, fire-and-forget on open -- same posture as the strategy-
+  // rating precedent elsewhere in this app: worst case on a dropped
+  // network call is the row reads unread again next real reload, never
+  // a wrong permission or a lost write.
+  const [locallyMarkedRead, setLocallyMarkedRead] = useState(false);
 
   const [replyBody, setReplyBody] = useState("");
   const [isReplying, setIsReplying] = useState(false);
@@ -120,6 +130,22 @@ export function MessageCard({
   const senderLabel = isSender ? "You" : (nameById.get(message.senderId) ?? ROLE_LABEL[message.senderRole]);
   const status = STATUS_META[message.status];
   const bodyPreview = previewBody(message.body ? renderMessageBody(message.body, childName) : null);
+  const isUnread = isRecipient && !ownRecipient?.readAt && !locallyMarkedRead;
+
+  async function handleRowClick() {
+    const isOpening = !isExpanded;
+    onToggleExpand();
+    if (isOpening && isUnread) {
+      // Optimistic first -- the row's own "unread" weight/dot clears the
+      // instant it's opened, not after a round-trip. Fire-and-forget:
+      // read_at is a freshness signal for this viewer only, not
+      // something anyone else's view depends on being correct
+      // immediately.
+      setLocallyMarkedRead(true);
+      const supabase = createClient();
+      await supabase.rpc("mark_message_read", { p_message_id: message.id });
+    }
+  }
 
   async function handleAcknowledge() {
     // Optimistic: the button disappears instantly, before the network
@@ -178,28 +204,52 @@ export function MessageCard({
   const acked = Boolean(ownRecipient?.acknowledgedAt) || optimisticAcked;
 
   return (
-    <div className="rounded-2xl border border-black/5 bg-white shadow-sm">
+    <div className={`rounded-2xl border shadow-sm ${isUnread ? "border-brand-golden-brown/20 bg-brand-golden-brown/[0.06]" : "border-black/5 bg-white"}`}>
       {/* Compact summary row -- always visible, the entire card's tap
           target for expand/collapse. Deliberately just text + a status
           dot, no nested interactive elements, so it can safely be a
-          single <button>. */}
+          single <button>.
+
+          READ STATE (migration 0170) -- three states, not two: unread,
+          read, and awaiting-your-action (status/acked below) are
+          independent axes -- a message can be read AND still awaiting
+          your reply at once, "awaiting" is not a subset of "unread".
+          Weight and structure carry the distinction, not a tint alone:
+          an unread row gets its own dot (distinct from the status dot,
+          which keeps meaning open/in_discussion/acknowledged/closed),
+          bold sender text, and the whole-card background wash above --
+          three simultaneous signals. Read is deliberately the quiet
+          default (font-medium, muted colour, plain white) since most
+          messages will be read most of the time; unread is what should
+          stand out, not the other way round. Golden Brown per Daniel's
+          own instruction -- never red, that's the Support Button's
+          alone. */}
       <button
         type="button"
-        onClick={onToggleExpand}
+        onClick={handleRowClick}
         aria-expanded={isExpanded}
         className="flex w-full items-center gap-2 px-4 py-3 text-left"
       >
+        {isUnread && (
+          <span aria-hidden className="h-2 w-2 flex-shrink-0 rounded-full bg-brand-golden-brown" />
+        )}
         <span aria-hidden className={`h-2 w-2 flex-shrink-0 rounded-full ${status.dotClassName}`} />
         <span className="flex-shrink-0 rounded-full bg-brand-off-white px-2 py-0.5 text-[10px] font-semibold text-brand-neutral-black/70">
           {message.categoryLabel}
         </span>
         <span className="min-w-0 flex-1 truncate text-xs text-brand-neutral-black/70">
-          <span className="font-semibold text-brand-neutral-black">{senderLabel}</span>
+          <span className={isUnread ? "font-bold text-brand-neutral-black" : "font-medium text-brand-neutral-black/70"}>
+            {senderLabel}
+          </span>
           <span className="text-brand-neutral-black/40"> · {ROLE_LABEL[message.senderRole]}</span>
           {bodyPreview && <span className="text-brand-neutral-black/50"> — {bodyPreview}</span>}
         </span>
         <span className="flex-shrink-0 text-[10px] text-brand-neutral-black/40">{formatTime(message.createdAt)}</span>
-        <span className="sr-only">{status.label}{!isParticipant ? ", viewing only" : ""}</span>
+        <span className="sr-only">
+          {isUnread ? "Unread, " : ""}
+          {status.label}
+          {!isParticipant ? ", viewing only" : ""}
+        </span>
       </button>
 
       {isExpanded && (
