@@ -19,6 +19,7 @@ export function ComposeMessageSheet({
   isOpen,
   onClose,
   passportId,
+  institutionId,
   childName,
   candidates,
   categories,
@@ -33,10 +34,18 @@ export function ComposeMessageSheet({
 }: {
   isOpen: boolean;
   onClose: () => void;
-  passportId: string;
+  // Exactly one of passportId/institutionId, matching send_message()'s
+  // own "exactly one" rule (migration 0168) -- a child message or a
+  // staff message, never both, never neither. When institutionId is
+  // set this is a staff conversation: childName is ignored, the
+  // ABC-log/strategy-update integrations don't apply (send_message()
+  // refuses them there anyway), and the header/empty-state copy below
+  // reads accordingly.
+  passportId?: string | null;
+  institutionId?: string | null;
   // Categories are pre-filtered by the caller (useMessageCategories(role))
   // -- this sheet doesn't need to know the sender's role itself.
-  childName: string;
+  childName?: string;
   candidates: MessageRecipientCandidate[];
   categories: MessageCategory[];
   institutionPhone: string | null;
@@ -100,13 +109,14 @@ export function ComposeMessageSheet({
     setSendError(null);
     const supabase = createClient();
     const { error } = await supabase.rpc("send_message", {
-      p_passport_id: passportId,
+      p_passport_id: passportId ?? null,
       p_category_id: selectedCategoryId,
       p_body: body.trim() ? body.trim() : null,
       p_response_required: responseRequired,
       p_recipient_ids: selectedRecipientIds,
       p_abc_log_id: abcLogId ?? null,
       p_strategy_update: strategyUpdate ?? false,
+      p_institution_id: institutionId ?? null,
     });
 
     setIsSending(false);
@@ -120,17 +130,20 @@ export function ComposeMessageSheet({
   }
 
   const canSend = Boolean(selectedCategoryId) && selectedRecipientIds.length > 0 && !isSending;
+  const isStaffMode = Boolean(institutionId);
 
   return (
     <BottomSheet isOpen={isOpen} onClose={onClose}>
       <h2 className="font-heading text-xl font-semibold text-brand-neutral-black">
-        Message about {childName}
+        {isStaffMode ? "Message staff" : `Message about ${childName}`}
       </h2>
 
       <p className="mt-4 text-sm font-semibold text-brand-neutral-black">To</p>
       {candidates.length === 0 ? (
         <p className="mt-1.5 text-sm text-brand-neutral-black/60">
-          No one else is linked to {childName}&apos;s passport yet.
+          {isStaffMode
+            ? "No other active staff at your school yet."
+            : `No one else is linked to ${childName}'s passport yet.`}
         </p>
       ) : (
         <div className="mt-1.5 flex flex-wrap gap-2">

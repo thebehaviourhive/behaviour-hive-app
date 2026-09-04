@@ -8,7 +8,13 @@
 // enrolled at their own institution). "Threads they are addressed on,
 // nothing else" was the rule for READING -- can_view_message() -- not
 // for who may send; Daniel's own correction, see migration 0161.
-export type MessageRole = "parent" | "class_teacher" | "clinician" | "principal";
+//
+// "sna" added -- migration 0168, staff-to-staff messaging (small
+// version). An SNA can now send/receive a STAFF thread only -- SNA on
+// CHILD threads is a separate, deliberately deferred piece (see
+// CLAUDE.md). MessageRole doesn't distinguish the two; can_view_message()
+// and send_message() do, server-side, via messages.institution_id.
+export type MessageRole = "parent" | "class_teacher" | "clinician" | "principal" | "sna";
 
 export type MessageStatus = "open" | "acknowledged" | "in_discussion" | "closed";
 
@@ -17,6 +23,7 @@ export const ROLE_LABEL: Record<MessageRole, string> = {
   class_teacher: "Class Teacher",
   clinician: "Clinician",
   principal: "Principal",
+  sna: "SNA",
 };
 
 export interface MessageCategory {
@@ -25,6 +32,10 @@ export interface MessageCategory {
   description: string | null;
   allowedSenderRoles: MessageRole[];
   sortOrder: number;
+  // migration 0168 -- ties a category to which kind of message it's
+  // valid on. send_message() enforces this server-side; the client
+  // filters by it too so a picker never offers a mismatched category.
+  appliesTo: "child" | "staff";
 }
 
 // A candidate returned by get_message_recipient_candidates -- who a
@@ -53,7 +64,11 @@ export interface MessageReply {
 
 export interface ThreadMessage {
   id: string;
-  passportId: string;
+  // migration 0168 -- exactly one of passportId/institutionId is ever
+  // set (messages_exactly_one_scope, enforced at the DB). A staff
+  // thread carries institutionId and a null passportId.
+  passportId: string | null;
+  institutionId: string | null;
   senderId: string;
   senderRole: MessageRole;
   categoryId: string;

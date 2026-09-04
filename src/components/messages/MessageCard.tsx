@@ -239,13 +239,19 @@ export function MessageCard({
           <p className="mt-1.5 text-xs text-brand-neutral-black/40">{formatTime(message.createdAt)}</p>
 
           {/* Stage 3A: reuses the viewer's own existing scoped log view --
-              never renders any log content itself. */}
-          {message.abcLogId && (
+              never renders any log content itself. message.passportId
+              guard is belt-and-suspenders here, not load-bearing --
+              send_message() (0168) refuses abcLogId on a staff thread
+              outright, so a null passportId and a set abcLogId can
+              never actually co-occur. */}
+          {message.abcLogId && message.passportId && (
             <AbcLogReference passportId={message.passportId} abcLogId={message.abcLogId} viewerRole={viewerRole} />
           )}
           {/* Stage 3B: same principle -- links to the viewer's own scoped
-              Clinical Team surface, never a wider view, never the FBA. */}
-          {message.strategyUpdate && (
+              Clinical Team surface, never a wider view, never the FBA.
+              Same belt-and-suspenders note as above -- strategyUpdate
+              can't be true on a staff thread either. */}
+          {message.strategyUpdate && message.passportId && (
             <Link
               href={buildStrategyHref(viewerRole, message.passportId)}
               className="mt-2 inline-block text-xs font-semibold text-brand-prussian-blue underline underline-offset-2"

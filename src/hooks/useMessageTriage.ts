@@ -103,6 +103,10 @@ export function useMessageTriage(passports: { passportId: string; displayName: s
       const message: ThreadMessage = {
         id: row.id,
         passportId: row.passport_id,
+        // Always null here -- .in("passport_id", ids) against a real
+        // child-id list, a real child thread by construction. See
+        // useStaffMessageThread.ts for the staff-thread sibling.
+        institutionId: null,
         senderId: row.sender_id,
         senderRole: row.sender_role,
         categoryId: row.category_id,

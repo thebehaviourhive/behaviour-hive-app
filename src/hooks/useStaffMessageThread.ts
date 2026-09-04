@@ -12,7 +12,8 @@ interface RawCandidateRow {
 
 interface RawMessageRow {
   id: string;
-  passport_id: string;
+  passport_id: string | null;
+  institution_id: string | null;
   sender_id: string;
   sender_role: MessageRole;
   category_id: string;
@@ -32,20 +33,23 @@ interface RawMessageRow {
   replies: { id: string; author_id: string; body: string; created_at: string }[];
 }
 
-// PostgREST embeds a to-one FK relationship as an object normally, but the
-// generated client types sometimes widen it to an array -- handle both
-// rather than assuming one shape.
 function firstOrSelf<T>(value: T | T[] | null): T | null {
   if (Array.isArray(value)) return value[0] ?? null;
   return value;
 }
 
-// The single data source for a passport's message thread + who's
-// currently eligible to receive one -- shared by the parent and teacher
-// (Stage 1) surfaces. Everything here is a straight read/RPC call; RLS
-// (can_view_message, the RPCs' own participant checks) is the real
-// authorization boundary, not this hook.
-export function useMessageThread(passportId: string | null) {
+// Migration 0168's staff-to-staff messaging, small version -- the
+// institution-scoped sibling of useMessageThread.ts. Deliberately a
+// SEPARATE hook, not a passportId-accepts-null variant of that one:
+// the query itself is fundamentally different (.is("passport_id", null)
+// .eq("institution_id", ...) instead of .eq("passport_id", ...)), and
+// candidates come from get_institution_staff_candidates(), not
+// get_message_recipient_candidates() -- there's no passport to
+// authorize a candidate list against. Flat, ungrouped by design (the
+// small version's own scope decision) -- a school's staff list is a
+// handful of people, not the dozens of children the per-child triage
+// view groups by.
+export function useStaffMessageThread(institutionId: string | null) {
   const [messages, setMessages] = useState<ThreadMessage[]>([]);
   const [candidates, setCandidates] = useState<MessageRecipientCandidate[]>([]);
   const [nameById, setNameById] = useState<Map<string, string>>(new Map());
@@ -53,7 +57,7 @@ export function useMessageThread(passportId: string | null) {
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
-    if (!passportId) {
+    if (!institutionId) {
       setIsLoading(false);
       return;
     }
@@ -64,20 +68,21 @@ export function useMessageThread(passportId: string | null) {
       supabase
         .from("messages")
         .select(
-          `id, passport_id, sender_id, sender_role, category_id, body, response_required, status, created_at,
+          `id, passport_id, institution_id, sender_id, sender_role, category_id, body, response_required, status, created_at,
            abc_log_id, strategy_update,
            category:message_categories(label),
            recipients:message_recipients(id, recipient_id, recipient_role, acknowledged_at),
            replies:message_replies(id, author_id, body, created_at)`
         )
-        .eq("passport_id", passportId)
+        .is("passport_id", null)
+        .eq("institution_id", institutionId)
         .order("created_at", { ascending: true }),
-      supabase.rpc("get_message_recipient_candidates", { p_passport_id: passportId }),
+      supabase.rpc("get_institution_staff_candidates", { p_institution_id: institutionId }),
     ]);
 
     if (messagesResult.error || candidatesResult.error) {
       console.error(
-        "Failed to load message thread:",
+        "Failed to load staff message thread:",
         messagesResult.error ?? candidatesResult.error
       );
       setLoadError("Couldn't load messages. Please try again.");
@@ -106,10 +111,7 @@ export function useMessageThread(passportId: string | null) {
       messageRows.map((row) => ({
         id: row.id,
         passportId: row.passport_id,
-        // Always null on this hook's own rows -- it only ever queries
-        // .eq("passport_id", passportId), a real child thread by
-        // construction. See useStaffMessageThread.ts for the sibling.
-        institutionId: null,
+        institutionId: row.institution_id,
         senderId: row.sender_id,
         senderRole: row.sender_role,
         categoryId: row.category_id,
@@ -133,7 +135,7 @@ export function useMessageThread(passportId: string | null) {
       }))
     );
     setIsLoading(false);
-  }, [passportId]);
+  }, [institutionId]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect

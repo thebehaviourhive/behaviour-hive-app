@@ -12898,6 +12898,274 @@ async function main() {
     }
   }
 
+  console.log(`\n== CHECK NNN: SQL for migration 0168 -- staff-to-staff messaging, small version. Proves the new surface end to end and, just as importantly, that it stays inside its own decided boundary. get_institution_staff_candidates(): a real class_teacher sees the active sna/principal at their own institution, excludes self, excludes a PENDING (never-approved) join and a DEACTIVATED former staff member (NNN1). send_message() with p_institution_id: a class_teacher sends a real staff message to the sna and principal, the row lands with institution_id set / passport_id null / sender_role='class_teacher' (NNN2), and the sna's own message_recipients row resolves recipient_role='sna' -- the constraint widening proven end to end, not just that the INSERT didn't throw (NNN3). can_view_message(): both real recipients see it (NNN4), a class_teacher at a DIFFERENT institution sees nothing -- RLS-filtered to zero rows, not an error (NNN5) -- and that same different-institution teacher's own candidate list is entirely disjoint (NNN6). AUTHORIZATION BOUNDARY: a parent (NNN7) and a clinician (NNN8) -- neither ever an institution_staff row -- are both refused sending a staff message outright. THE CONSTRAINT ITSELF: a raw service-role insert with BOTH passport_id and institution_id set, and one with NEITHER, are both refused by messages_exactly_one_scope directly, independent of send_message()'s own application-level check (NNN9). CATEGORIES: a CHILD category ('Wellbeing note') refused on a staff conversation, and a STAFF category ('Cover / Rota') refused on a child conversation, both server-side (NNN10). THE ABC/STRATEGY GUARD: p_abc_log_id and p_strategy_update are each independently refused on a staff conversation (NNN11). get_messages_awaiting_action_count() needed zero code change for this feature (confirmed by reading its body before writing 0168) -- proven empirically here, not just asserted, and delta-based (NNN2's own earlier unacknowledged staff message already sits in this count, so nothing here assumes a baseline of 0): rises by exactly one on the response-required staff send, and drops back to the same baseline once the sna calls acknowledge_message() -- reply_to_message() deliberately NOT used for the drop, since a message with zero replies never enters the RPC's own rr_needs_my_action CTE at all (its inner join to message_replies drops it); acknowledged_at, not the reply, is what actually clears my_recipient_unacked (NNN12). THE DEFERRED HALF, proven still deferred: the sna from this same fixture, holding a REAL 1:1 assignment to a real child (assign_sna_to_child(), the actual production path, principal's own session), is STILL refused sending a CHILD message about that exact child -- the same refusal text as before this migration, proving SNA-on-staff-threads was not accidentally widened into SNA-on-child-threads (NNN13). REGRESSION: an ordinary CHILD message -- send and view -- entirely unaffected by any of the above (NNN14). ==`);
+  if (shouldRun("NNN")) {
+    const { data: instNNN, error: instNNNErr } = await admin
+      .from("institutions")
+      .insert({ name: "NNN Institution", institution_code: CODE + "NNN", status: "verified" })
+      .select()
+      .single();
+    if (instNNNErr) throw instNNNErr;
+    const institutionNNNId = instNNN.id;
+
+    const { data: instNNN2, error: instNNN2Err } = await admin
+      .from("institutions")
+      .insert({ name: "NNN Institution 2", institution_code: CODE + "NNN2", status: "verified" })
+      .select()
+      .single();
+    if (instNNN2Err) throw instNNN2Err;
+    const institutionNNN2Id = instNNN2.id;
+
+    const principalNNNId = await createUser("nnn.principal@thebehaviourhive.com", "NNN Principal", "principal");
+    const teacherANNNId = await createUser("nnn.teachera@thebehaviourhive.com", "NNN Teacher A", "class_teacher");
+    const snaANNNId = await createUser("nnn.snaa@thebehaviourhive.com", "NNN SNA A", "sna");
+    const teacherPendingNNNId = await createUser("nnn.pending@thebehaviourhive.com", "NNN Pending Teacher", "class_teacher");
+    const teacherDeactivatedNNNId = await createUser("nnn.deactivated@thebehaviourhive.com", "NNN Deactivated Teacher", "class_teacher");
+    const parentNNNId = await createUser("nnn.parent@thebehaviourhive.com", "NNN Parent", "parent");
+    const clinicianNNNId = await createUser("nnn.clinician@thebehaviourhive.com", "NNN Clinician", "clinician");
+
+    const principalOtherId = await createUser("nnn.principalother@thebehaviourhive.com", "NNN Other Principal", "principal");
+    const teacherOtherId = await createUser("nnn.teacherother@thebehaviourhive.com", "NNN Other Teacher", "class_teacher");
+
+    await admin.from("institution_staff").insert({ institution_id: institutionNNNId, user_id: principalNNNId, role: "principal" });
+    await admin.from("institution_staff").insert({ institution_id: institutionNNN2Id, user_id: principalOtherId, role: "principal" });
+
+    const principalNNN = await signedInClient("nnn.principal@thebehaviourhive.com");
+    const teacherANNN = await signedInClient("nnn.teachera@thebehaviourhive.com");
+    const snaANNN = await signedInClient("nnn.snaa@thebehaviourhive.com");
+    const teacherPendingNNN = await signedInClient("nnn.pending@thebehaviourhive.com");
+    const teacherDeactivatedNNN = await signedInClient("nnn.deactivated@thebehaviourhive.com");
+    const parentNNN = await signedInClient("nnn.parent@thebehaviourhive.com");
+    const clinicianNNN = await signedInClient("nnn.clinician@thebehaviourhive.com");
+    const principalOther = await signedInClient("nnn.principalother@thebehaviourhive.com");
+    const teacherOther = await signedInClient("nnn.teacherother@thebehaviourhive.com");
+
+    for (const [row, client] of [
+      [{ institution_id: institutionNNNId, user_id: teacherANNNId, role: "class_teacher" }, teacherANNN],
+      [{ institution_id: institutionNNNId, user_id: snaANNNId, role: "sna" }, snaANNN],
+      [{ institution_id: institutionNNNId, user_id: teacherDeactivatedNNNId, role: "class_teacher" }, teacherDeactivatedNNN],
+      [{ institution_id: institutionNNN2Id, user_id: teacherOtherId, role: "class_teacher" }, teacherOther],
+    ]) {
+      const { error } = await client.from("institution_staff").insert(row);
+      if (error) throw error;
+    }
+    // Pending -- joined, deliberately never approved.
+    const { error: pendingJoinErr } = await teacherPendingNNN.from("institution_staff").insert({
+      institution_id: institutionNNNId, user_id: teacherPendingNNNId, role: "class_teacher",
+    });
+    if (pendingJoinErr) throw pendingJoinErr;
+
+    for (const staffId of [teacherANNNId, snaANNNId, teacherDeactivatedNNNId]) {
+      const { data: row } = await admin.from("institution_staff").select("id").eq("institution_id", institutionNNNId).eq("user_id", staffId).single();
+      const { error } = await principalNNN.rpc("approve_staff_join", { p_institution_staff_id: row.id });
+      if (error) throw error;
+    }
+    {
+      const { data: row } = await admin.from("institution_staff").select("id").eq("institution_id", institutionNNN2Id).eq("user_id", teacherOtherId).single();
+      await principalOther.rpc("approve_staff_join", { p_institution_staff_id: row.id });
+    }
+    // Deactivate teacherDeactivatedNNN AFTER approving, so it's a real
+    // former-staff row, not merely a pending one. The REAL RPC
+    // (principal's own session), not a raw column update -- caught by
+    // this check's own first real run: institution_staff_deactivation_
+    // paired_check (0097) requires deactivated_at/deactivated_by/
+    // deactivation_reason set together, and a bare `update({
+    // deactivated_at })` violates it outright. CLAUDE.md's own
+    // "fixtures and new lifecycle state" rule, re-confirmed by hitting
+    // it directly rather than remembering it.
+    const { data: nnnDeactivateTargetRow } = await admin
+      .from("institution_staff")
+      .select("id")
+      .eq("institution_id", institutionNNNId)
+      .eq("user_id", teacherDeactivatedNNNId)
+      .single();
+    const { error: nnnDeactivateErr } = await principalNNN.rpc("deactivate_institution_staff", {
+      p_institution_staff_id: nnnDeactivateTargetRow.id,
+      p_reason: "NNN fixture -- testing candidate exclusion of a departed staff member.",
+    });
+    if (nnnDeactivateErr) throw nnnDeactivateErr;
+
+    const { data: staffCategoryNNN } = await admin.from("message_categories").select("id").eq("label", "Cover / Rota").eq("applies_to", "staff").single();
+    const { data: childCategoryNNN } = await admin.from("message_categories").select("id").eq("label", "Wellbeing note").eq("applies_to", "child").single();
+
+    // A real child + class standing for teacherANNN, built up front --
+    // needed by NNN9 (a genuine passport_id for the constraint test),
+    // NNN10b, NNN13 and NNN14.
+    const { data: classNNNId } = await principalNNN.rpc("create_class", { p_institution_id: institutionNNNId, p_name: "NNN Room" });
+    await principalNNN.rpc("add_class_teacher", { p_class_id: classNNNId, p_user_id: teacherANNNId });
+    const { data: childNNNId } = await principalNNN.rpc("create_school_passport", { p_institution_id: institutionNNNId, p_child_name: "NNN Child" });
+    await principalNNN.rpc("add_class_child", { p_class_id: classNNNId, p_passport_id: childNNNId });
+
+    // NNN1 -- candidates.
+    const { data: nnn1Rows, error: nnn1Err } = await teacherANNN.rpc("get_institution_staff_candidates", { p_institution_id: institutionNNNId });
+    const nnn1Ids = (nnn1Rows ?? []).map((r) => r.recipient_id);
+    record(
+      "NNN1 candidates: includes active sna + principal, excludes self, excludes pending, excludes deactivated",
+      !nnn1Err && nnn1Ids.includes(snaANNNId) && nnn1Ids.includes(principalNNNId) && !nnn1Ids.includes(teacherANNNId) && !nnn1Ids.includes(teacherPendingNNNId) && !nnn1Ids.includes(teacherDeactivatedNNNId),
+      nnn1Err?.message ?? JSON.stringify(nnn1Rows)
+    );
+
+    // NNN2/NNN3 -- send + shape.
+    const { data: nnn2MessageId, error: nnn2Err } = await teacherANNN.rpc("send_message", {
+      p_passport_id: null,
+      p_category_id: staffCategoryNNN.id,
+      p_body: "NNN staff message.",
+      p_response_required: true,
+      p_recipient_ids: [snaANNNId, principalNNNId],
+      p_institution_id: institutionNNNId,
+    });
+    record("NNN2 send_message() with p_institution_id succeeds for a real class_teacher", !nnn2Err, nnn2Err?.message);
+
+    const { data: nnn2Row } = await admin.from("messages").select("institution_id, passport_id, sender_role").eq("id", nnn2MessageId).single();
+    record(
+      "NNN2b the row lands with institution_id set, passport_id null, sender_role class_teacher",
+      nnn2Row?.institution_id === institutionNNNId && nnn2Row?.passport_id === null && nnn2Row?.sender_role === "class_teacher",
+      JSON.stringify(nnn2Row)
+    );
+
+    const { data: nnn3Row } = await admin.from("message_recipients").select("recipient_role").eq("message_id", nnn2MessageId).eq("recipient_id", snaANNNId).single();
+    record("NNN3 the sna's own message_recipients row resolves recipient_role = 'sna' -- the constraint widening, end to end", nnn3Row?.recipient_role === "sna", JSON.stringify(nnn3Row));
+
+    // NNN4/NNN5/NNN6 -- visibility.
+    const { data: nnn4aRows } = await snaANNN.from("messages").select("id").eq("id", nnn2MessageId);
+    const { data: nnn4bRows } = await principalNNN.from("messages").select("id").eq("id", nnn2MessageId);
+    record("NNN4 both real recipients (sna, principal) can view the message", (nnn4aRows ?? []).length === 1 && (nnn4bRows ?? []).length === 1, JSON.stringify({ nnn4aRows, nnn4bRows }));
+
+    const { data: nnn5Rows } = await teacherOther.from("messages").select("id").eq("id", nnn2MessageId);
+    record("NNN5 a class_teacher at a DIFFERENT institution sees nothing -- RLS-filtered to zero rows, not an error", (nnn5Rows ?? []).length === 0, JSON.stringify(nnn5Rows));
+
+    const { data: nnn6Rows } = await teacherOther.rpc("get_institution_staff_candidates", { p_institution_id: institutionNNN2Id });
+    const nnn6Ids = (nnn6Rows ?? []).map((r) => r.recipient_id);
+    record("NNN6 that different-institution teacher's own candidate list is entirely disjoint from institution NNN's", !nnn6Ids.includes(snaANNNId) && !nnn6Ids.includes(teacherANNNId) && !nnn6Ids.includes(principalNNNId), JSON.stringify(nnn6Rows));
+
+    // NNN7/NNN8 -- non-staff senders refused outright.
+    const { error: nnn7Err } = await parentNNN.rpc("send_message", {
+      p_passport_id: null, p_category_id: staffCategoryNNN.id, p_body: "should fail", p_response_required: false,
+      p_recipient_ids: [snaANNNId], p_institution_id: institutionNNNId,
+    });
+    record("NNN7 a parent (never institution_staff) is refused sending a staff message", Boolean(nnn7Err), nnn7Err?.message);
+
+    const { error: nnn8Err } = await clinicianNNN.rpc("send_message", {
+      p_passport_id: null, p_category_id: staffCategoryNNN.id, p_body: "should fail", p_response_required: false,
+      p_recipient_ids: [snaANNNId], p_institution_id: institutionNNNId,
+    });
+    record("NNN8 a verified clinician (never institution_staff) is refused sending a staff message", Boolean(nnn8Err), nnn8Err?.message);
+
+    // NNN9 -- the CHECK constraint itself, bypassing send_message() entirely.
+    const { error: nnn9aErr } = await admin.from("messages").insert({
+      passport_id: childNNNId,
+      institution_id: institutionNNNId, sender_id: teacherANNNId, sender_role: "class_teacher", category_id: staffCategoryNNN.id,
+    });
+    record("NNN9a messages_exactly_one_scope refuses BOTH passport_id and institution_id set, even via a raw insert", Boolean(nnn9aErr), nnn9aErr?.message);
+
+    const { error: nnn9bErr } = await admin.from("messages").insert({
+      passport_id: null, institution_id: null, sender_id: teacherANNNId, sender_role: "class_teacher", category_id: staffCategoryNNN.id,
+    });
+    record("NNN9b messages_exactly_one_scope refuses NEITHER set, even via a raw insert", Boolean(nnn9bErr), nnn9bErr?.message);
+
+    // NNN10 -- category applies_to enforcement.
+    const { error: nnn10aErr } = await teacherANNN.rpc("send_message", {
+      p_passport_id: null, p_category_id: childCategoryNNN.id, p_body: "should fail", p_response_required: false,
+      p_recipient_ids: [snaANNNId], p_institution_id: institutionNNNId,
+    });
+    record("NNN10a a CHILD category ('Wellbeing note') is refused on a staff conversation", Boolean(nnn10aErr) && /staff conversation/.test(nnn10aErr?.message ?? ""), nnn10aErr?.message);
+
+    const { error: nnn10bErr } = await teacherANNN.rpc("send_message", {
+      p_passport_id: childNNNId, p_category_id: staffCategoryNNN.id, p_body: "should fail", p_response_required: false,
+      p_recipient_ids: [principalNNNId],
+    });
+    record("NNN10b a STAFF category ('Cover / Rota') is refused on a child conversation", Boolean(nnn10bErr) && /child conversation/.test(nnn10bErr?.message ?? ""), nnn10bErr?.message);
+
+    // NNN11 -- abc_log_id / strategy_update guard on a staff conversation.
+    const { error: nnn11aErr } = await teacherANNN.rpc("send_message", {
+      p_passport_id: null, p_category_id: staffCategoryNNN.id, p_body: "should fail", p_response_required: false,
+      p_recipient_ids: [snaANNNId], p_institution_id: institutionNNNId, p_abc_log_id: childNNNId,
+    });
+    record("NNN11a p_abc_log_id is refused on a staff conversation", Boolean(nnn11aErr), nnn11aErr?.message);
+
+    const { error: nnn11bErr } = await teacherANNN.rpc("send_message", {
+      p_passport_id: null, p_category_id: staffCategoryNNN.id, p_body: "should fail", p_response_required: false,
+      p_recipient_ids: [snaANNNId], p_institution_id: institutionNNNId, p_strategy_update: true,
+    });
+    record("NNN11b p_strategy_update is refused on a staff conversation", Boolean(nnn11bErr), nnn11bErr?.message);
+
+    // NNN12 -- get_messages_awaiting_action_count(), zero code change,
+    // proven empirically (delta-based, not an assumed absolute baseline
+    // -- NNN2 already left an earlier unacknowledged staff message
+    // sitting in snaANNN's own count). acknowledge_message(), not
+    // reply_to_message() -- a message with zero replies never enters
+    // rr_needs_my_action (its own inner join to message_replies drops
+    // it), so it's my_recipient_unacked alone doing the counting here;
+    // acknowledged_at is what clears that, confirmed by reading
+    // acknowledge_message()'s own body (it stamps acknowledged_at even
+    // on a response_required row, it just skips the STATUS flip).
+    const { data: nnn12BeforeCount } = await snaANNN.rpc("get_messages_awaiting_action_count");
+    const { data: nnn12MsgId, error: nnn12SendErr } = await teacherANNN.rpc("send_message", {
+      p_passport_id: null, p_category_id: staffCategoryNNN.id, p_body: "needs acknowledging", p_response_required: true,
+      p_recipient_ids: [snaANNNId], p_institution_id: institutionNNNId,
+    });
+    if (nnn12SendErr) throw nnn12SendErr;
+    const { data: nnn12AfterCount } = await snaANNN.rpc("get_messages_awaiting_action_count");
+    const { error: nnn12AckErr } = await snaANNN.rpc("acknowledge_message", { p_message_id: nnn12MsgId });
+    if (nnn12AckErr) throw nnn12AckErr;
+    const { data: nnn12FinalCount } = await snaANNN.rpc("get_messages_awaiting_action_count");
+    record(
+      "NNN12 get_messages_awaiting_action_count() counts a staff thread with zero code change -- rises by one on send, drops back to the same baseline after acknowledge",
+      typeof nnn12BeforeCount === "number" && nnn12AfterCount === nnn12BeforeCount + 1 && nnn12FinalCount === nnn12BeforeCount,
+      JSON.stringify({ nnn12BeforeCount, nnn12AfterCount, nnn12FinalCount })
+    );
+
+    // NNN13 -- THE DEFERRED HALF, proven still deferred. Real production
+    // path (assign_sna_to_child(), via the principal's own session) --
+    // never a hand-set row (CLAUDE.md's own "fixtures and new lifecycle
+    // state" rule).
+    const { error: nnn13AssignErr } = await principalNNN.rpc("assign_sna_to_child", {
+      p_passport_id: childNNNId, p_user_id: snaANNNId, p_institution_id: institutionNNNId,
+    });
+    if (nnn13AssignErr) throw nnn13AssignErr;
+
+    const { error: nnn13Err } = await snaANNN.rpc("send_message", {
+      p_passport_id: childNNNId, p_category_id: childCategoryNNN.id, p_body: "should still fail", p_response_required: false,
+      p_recipient_ids: [principalNNNId],
+    });
+    record(
+      "NNN13 THE DEFERRED HALF: an sna with a REAL 1:1 assignment to this child is STILL refused sending a CHILD message about them -- SNA-on-staff-threads was not accidentally widened into SNA-on-child-threads",
+      Boolean(nnn13Err) && /not authorized to message about this child/.test(nnn13Err?.message ?? ""),
+      nnn13Err?.message
+    );
+
+    // NNN14 -- REGRESSION: an ordinary CHILD message, entirely
+    // unaffected by any of the above. teacherANNN (class-derived access)
+    // to principalNNN, using the CHILD category -- the exact shape
+    // every existing child-thread send already used before 0168.
+    const { data: nnn14MsgId, error: nnn14SendErr } = await teacherANNN.rpc("send_message", {
+      p_passport_id: childNNNId, p_category_id: childCategoryNNN.id, p_body: "NNN ordinary child message.", p_response_required: false,
+      p_recipient_ids: [principalNNNId],
+    });
+    const { data: nnn14ViewRows } = await principalNNN.from("messages").select("id").eq("id", nnn14MsgId);
+    record(
+      "NNN14 REGRESSION: an ordinary CHILD message -- send and view -- is entirely unaffected",
+      !nnn14SendErr && (nnn14ViewRows ?? []).length === 1,
+      nnn14SendErr?.message ?? JSON.stringify(nnn14ViewRows)
+    );
+
+    console.log("NNN summary complete.");
+
+    const nnnMessageIds = [nnn2MessageId, nnn12MsgId, nnn14MsgId].filter(Boolean);
+    await admin.from("child_assignments").delete().eq("passport_id", childNNNId);
+    await admin.from("message_recipients").delete().in("message_id", nnnMessageIds);
+    await admin.from("message_replies").delete().in("message_id", nnnMessageIds);
+    await admin.from("messages").delete().in("id", nnnMessageIds);
+    await admin.from("class_children").delete().eq("class_id", classNNNId);
+    await admin.from("class_teachers").delete().eq("class_id", classNNNId);
+    await admin.from("classes").delete().eq("id", classNNNId);
+    await admin.from("passports").delete().eq("id", childNNNId);
+    await admin.from("institutions").delete().in("id", [institutionNNNId, institutionNNN2Id]);
+    for (const id of [principalNNNId, teacherANNNId, snaANNNId, teacherPendingNNNId, teacherDeactivatedNNNId, parentNNNId, clinicianNNNId, principalOtherId, teacherOtherId]) {
+      await admin.auth.admin.deleteUser(id);
+    }
+  }
+
   console.log(`\n== Summary ==`);
   const failed = results.filter((r) => !r.pass);
   console.log(`${results.length - failed.length}/${results.length} passed.`);

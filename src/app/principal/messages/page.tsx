@@ -6,11 +6,14 @@ import { createClient } from "@/lib/supabase/client";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { useMessageTriage } from "@/hooks/useMessageTriage";
 import { useMessageThread } from "@/hooks/useMessageThread";
+import { useStaffMessageThread } from "@/hooks/useStaffMessageThread";
 import { useMessageCategories } from "@/hooks/useMessageCategories";
 import { PrincipalBottomNav } from "@/components/principal/PrincipalBottomNav";
 import { InlineErrorState } from "@/components/ui/InlineErrorState";
 import { MessageTriage } from "@/components/messages/MessageTriage";
+import { StaffMessageList } from "@/components/messages/StaffMessageList";
 import { ComposeMessageSheet } from "@/components/messages/ComposeMessageSheet";
+import { ComposeKindPickerSheet } from "@/components/messages/ComposeKindPickerSheet";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 
 // Migration 0161. "Threads they are addressed on, nothing else" governs
@@ -33,9 +36,17 @@ import { BottomSheet } from "@/components/ui/BottomSheet";
 // below is the same roster, not a "my children" list, since a
 // principal's own reason to write isn't bounded by an existing
 // relationship the way a class teacher's or clinician's is.
+//
+// Migration 0168 -- staff-to-staff, same shape teacher/messages just
+// got: ComposeKindPickerSheet above the child picker, a flat "Staff"
+// section below the roster triage. Institution-wide reach here is
+// genuinely the same predicate every child-thread principal branch
+// already uses (institution_staff_has_current_standing), not a
+// widening specific to this section.
 export default function PrincipalMessagesPage() {
   const { user, isReady: isRoleReady } = useRequireRole("principal");
   const [passports, setPassports] = useState<{ passportId: string; displayName: string }[]>([]);
+  const [institutionId, setInstitutionId] = useState<string | null>(null);
   const [isLoadingRoster, setIsLoadingRoster] = useState(true);
   const [rosterError, setRosterError] = useState<string | null>(null);
 
@@ -59,6 +70,7 @@ export default function PrincipalMessagesPage() {
       setIsLoadingRoster(false);
       return;
     }
+    setInstitutionId(staffRow.institution_id);
 
     const { data: rosterRows, error: rosterErr } = await supabase.rpc("get_institution_child_roster", {
       p_institution_id: staffRow.institution_id,
@@ -83,13 +95,23 @@ export default function PrincipalMessagesPage() {
   }, [loadRoster]);
 
   const { groups, nameById, isLoading, loadError, refresh } = useMessageTriage(passports);
+  const {
+    messages: staffMessages,
+    nameById: staffNameById,
+    candidates: staffCandidates,
+    isLoading: isLoadingStaff,
+    loadError: staffLoadError,
+    refresh: refreshStaff,
+  } = useStaffMessageThread(institutionId);
 
-  const [isPickerOpen, setIsPickerOpen] = useState(false);
+  const [pickerStep, setPickerStep] = useState<"closed" | "kind" | "student">("closed");
   const [composePassportId, setComposePassportId] = useState<string | null>(null);
+  const [isStaffComposeOpen, setIsStaffComposeOpen] = useState(false);
 
   const composePassport = passports.find((p) => p.passportId === composePassportId) ?? null;
   const { candidates } = useMessageThread(composePassport ? composePassportId : null);
   const { categories } = useMessageCategories("principal");
+  const { categories: staffCategories } = useMessageCategories("principal", "staff");
 
   if (!isRoleReady || isLoadingRoster) {
     return null;
@@ -99,10 +121,10 @@ export default function PrincipalMessagesPage() {
     <div className="flex min-h-full flex-1 flex-col bg-brand-off-white/40 pb-24 lg:pb-10">
       <header className="flex items-center justify-between gap-3 px-4 pt-6 pb-2">
         <h1 className="font-heading text-2xl font-semibold text-brand-prussian-blue">Messages</h1>
-        {passports.length > 0 && (
+        {institutionId && (
           <button
             type="button"
-            onClick={() => setIsPickerOpen(true)}
+            onClick={() => setPickerStep("kind")}
             className="flex items-center gap-1.5 rounded-full bg-brand-prussian-blue py-2 pl-3 pr-3.5 text-sm font-semibold text-white"
           >
             <Plus size={16} strokeWidth={2.5} aria-hidden />
@@ -128,13 +150,44 @@ export default function PrincipalMessagesPage() {
             viewerRole="principal"
           />
         ) : null}
+
+        {institutionId && (
+          <section className="mt-6">
+            <h2 className="mb-2 font-heading text-sm font-bold uppercase tracking-wide text-brand-neutral-black/60">
+              Staff
+            </h2>
+            {staffLoadError ? (
+              <InlineErrorState message={staffLoadError} onRetry={() => refreshStaff()} />
+            ) : user ? (
+              <StaffMessageList
+                messages={staffMessages}
+                currentUserId={user.id}
+                nameById={staffNameById}
+                isLoading={isLoadingStaff}
+                onChanged={refreshStaff}
+                viewerRole="principal"
+              />
+            ) : null}
+          </section>
+        )}
       </main>
+
+      <ComposeKindPickerSheet
+        isOpen={pickerStep === "kind"}
+        onClose={() => setPickerStep("closed")}
+        studentLabel="child"
+        onChooseStudent={() => setPickerStep("student")}
+        onChooseStaff={() => {
+          setPickerStep("closed");
+          setIsStaffComposeOpen(true);
+        }}
+      />
 
       {/* Same plain-picker-then-shared-sheet pattern every other track
           uses -- composing needs exactly one passport first. The roster
           here, not a "linked children" list -- a principal's own reason
           to write isn't bounded by an existing relationship. */}
-      <BottomSheet isOpen={isPickerOpen} onClose={() => setIsPickerOpen(false)}>
+      <BottomSheet isOpen={pickerStep === "student"} onClose={() => setPickerStep("closed")}>
         <h2 className="font-heading text-xl font-semibold text-brand-neutral-black">Message about which child?</h2>
         <div className="mt-4 flex max-h-96 flex-col gap-2 overflow-y-auto">
           {passports
@@ -146,7 +199,7 @@ export default function PrincipalMessagesPage() {
                 type="button"
                 onClick={() => {
                   setComposePassportId(passport.passportId);
-                  setIsPickerOpen(false);
+                  setPickerStep("closed");
                 }}
                 className="flex items-center justify-between rounded-2xl border border-black/5 bg-white px-4 py-3.5 text-left shadow-sm"
               >
@@ -167,6 +220,18 @@ export default function PrincipalMessagesPage() {
           categories={categories}
           institutionPhone={null}
           onSent={refresh}
+        />
+      )}
+
+      {institutionId && user && (
+        <ComposeMessageSheet
+          isOpen={isStaffComposeOpen}
+          onClose={() => setIsStaffComposeOpen(false)}
+          institutionId={institutionId}
+          candidates={staffCandidates}
+          categories={staffCategories}
+          institutionPhone={null}
+          onSent={refreshStaff}
         />
       )}
 

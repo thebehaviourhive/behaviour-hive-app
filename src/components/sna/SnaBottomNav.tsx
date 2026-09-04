@@ -1,16 +1,26 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { House, Menu } from "lucide-react";
+import { House, Mail, Menu } from "lucide-react";
 import { AppBottomNav, type NavTab } from "@/components/ui/AppBottomNav";
+import { useMessagesAwaitingActionCount } from "@/hooks/useMessagesAwaitingActionCount";
 import { useSupportButtonNavSlots } from "@/hooks/useSupportButtonNavSlots";
 import { createClient } from "@/lib/supabase/client";
 
-// SNA track's tab list -- deliberately just 2 tabs, per the brief.
-// "Passports" owns the child list plus any individual child's scoped
-// passport view; "More" owns /more. There is no Messages tab (Messages
-// is fully excluded for SNA in v1 -- see migration 0065 §11) and no
-// separate Students-style roster page -- Passports home IS the roster.
+// SNA track's tab list -- 3 tabs. "Passports" owns the child list plus
+// any individual child's scoped passport view; "Messages" owns
+// /sna/messages (migration 0168, added here); "More" owns /more. There
+// is still no separate Students-style roster page -- Passports home IS
+// the roster.
+//
+// "Messages" here is STAFF-ONLY -- SNA-on-CHILD-threads is a separate,
+// deliberately deferred piece (see CLAUDE.md's deferred-work entry;
+// this was 0065's own original parked decision, not new scope this
+// migration created). get_messages_awaiting_action_count() is already
+// entirely role-blind (keyed on sender_id/recipient_id, no passport_id
+// reference at all -- confirmed reading its body before relying on it
+// here), so the badge count below correctly includes SNA's own staff
+// threads with no change to that RPC.
 export function SnaBottomNav() {
   // Self-contained, matching TeacherBottomNav's own established
   // convention -- the nav fetches its own userId/institutionId rather
@@ -46,6 +56,7 @@ export function SnaBottomNav() {
       isMounted = false;
     };
   }, [userId]);
+  const messagesAwaitingCount = useMessagesAwaitingActionCount(userId);
   const { extraSlot, alertSlot } = useSupportButtonNavSlots({
     institutionId,
     userId,
@@ -59,6 +70,14 @@ export function SnaBottomNav() {
       icon: House,
       href: "/sna/passports",
       isActive: (pathname) => pathname.startsWith("/sna/passport"),
+    },
+    {
+      key: "messages",
+      label: "Messages",
+      icon: Mail,
+      href: "/sna/messages",
+      isActive: (pathname) => pathname.startsWith("/sna/messages"),
+      badgeCount: messagesAwaitingCount,
     },
     {
       key: "more",

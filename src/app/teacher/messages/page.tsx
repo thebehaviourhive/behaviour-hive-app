@@ -7,11 +7,14 @@ import { useRequireRole } from "@/hooks/useRequireRole";
 import { useTeacherPassports } from "@/hooks/useTeacherPassports";
 import { useMessageTriage } from "@/hooks/useMessageTriage";
 import { useMessageThread } from "@/hooks/useMessageThread";
+import { useStaffMessageThread } from "@/hooks/useStaffMessageThread";
 import { useMessageCategories } from "@/hooks/useMessageCategories";
 import { TeacherBottomNav } from "@/components/teacher/TeacherBottomNav";
 import { InlineErrorState } from "@/components/ui/InlineErrorState";
 import { MessageTriage } from "@/components/messages/MessageTriage";
+import { StaffMessageList } from "@/components/messages/StaffMessageList";
 import { ComposeMessageSheet } from "@/components/messages/ComposeMessageSheet";
+import { ComposeKindPickerSheet } from "@/components/messages/ComposeKindPickerSheet";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 
 // Teacher's Messages home -- Stage 2: the triage view. Open messages
@@ -20,16 +23,36 @@ import { BottomSheet } from "@/components/ui/BottomSheet";
 // specific child first (a message can only ever be about one passport),
 // so [New] opens a plain child picker, then the same shared compose
 // sheet every track uses.
+//
+// Migration 0168 -- staff-to-staff messaging, small version. [New] now
+// opens a first-level choice (ComposeKindPickerSheet, Daniel's own
+// spec, verbatim): "about a student" keeps the exact flow above, "staff"
+// skips straight to the compose sheet in staff mode (no second picker --
+// recipients are chosen as chips inside that sheet, same as it already
+// works for a child thread). A "Staff" section renders below the
+// per-child triage, flat and ungrouped (useStaffMessageThread/
+// StaffMessageList) -- the small version's own scope decision, not a
+// second triage screen. [New] is no longer gated on passports.length >
+// 0 -- a teacher with zero linked children can still message staff.
 export default function TeacherMessagesPage() {
   const { user, isReady: isRoleReady } = useRequireRole("class_teacher");
   const { isLoading: isLoadingPassports, institutionId, passports, error, refresh: refreshPassports } = useTeacherPassports(
     user?.id ?? null
   );
   const { groups, nameById, isLoading, loadError, refresh } = useMessageTriage(passports);
+  const {
+    messages: staffMessages,
+    nameById: staffNameById,
+    candidates: staffCandidates,
+    isLoading: isLoadingStaff,
+    loadError: staffLoadError,
+    refresh: refreshStaff,
+  } = useStaffMessageThread(institutionId);
 
   const [institutionPhone, setInstitutionPhone] = useState<string | null>(null);
-  const [isPickerOpen, setIsPickerOpen] = useState(false);
+  const [pickerStep, setPickerStep] = useState<"closed" | "kind" | "student">("closed");
   const [composePassportId, setComposePassportId] = useState<string | null>(null);
+  const [isStaffComposeOpen, setIsStaffComposeOpen] = useState(false);
 
   useEffect(() => {
     if (!institutionId) return;
@@ -48,6 +71,7 @@ export default function TeacherMessagesPage() {
   const composePassport = passports.find((p) => p.passportId === composePassportId) ?? null;
   const { candidates } = useMessageThread(composePassport ? composePassportId : null);
   const { categories } = useMessageCategories("class_teacher");
+  const { categories: staffCategories } = useMessageCategories("class_teacher", "staff");
 
   if (!isRoleReady || isLoadingPassports) {
     return null;
@@ -57,10 +81,10 @@ export default function TeacherMessagesPage() {
     <div className="flex min-h-full flex-1 flex-col bg-brand-off-white/40 pb-24">
       <header className="flex items-center justify-between gap-3 px-4 pt-6 pb-2">
         <h1 className="font-heading text-2xl font-semibold text-brand-prussian-blue">Messages</h1>
-        {passports.length > 0 && (
+        {institutionId && (
           <button
             type="button"
-            onClick={() => setIsPickerOpen(true)}
+            onClick={() => setPickerStep("kind")}
             className="flex items-center gap-1.5 rounded-full bg-brand-prussian-blue py-2 pl-3 pr-3.5 text-sm font-semibold text-white"
           >
             <Plus size={16} strokeWidth={2.5} aria-hidden />
@@ -86,11 +110,42 @@ export default function TeacherMessagesPage() {
             viewerRole="class_teacher"
           />
         ) : null}
+
+        {institutionId && (
+          <section className="mt-6">
+            <h2 className="mb-2 font-heading text-sm font-bold uppercase tracking-wide text-brand-neutral-black/60">
+              Staff
+            </h2>
+            {staffLoadError ? (
+              <InlineErrorState message={staffLoadError} onRetry={() => refreshStaff()} />
+            ) : user ? (
+              <StaffMessageList
+                messages={staffMessages}
+                currentUserId={user.id}
+                nameById={staffNameById}
+                isLoading={isLoadingStaff}
+                onChanged={refreshStaff}
+                viewerRole="class_teacher"
+              />
+            ) : null}
+          </section>
+        )}
       </main>
 
+      <ComposeKindPickerSheet
+        isOpen={pickerStep === "kind"}
+        onClose={() => setPickerStep("closed")}
+        studentLabel="student"
+        onChooseStudent={() => setPickerStep("student")}
+        onChooseStaff={() => {
+          setPickerStep("closed");
+          setIsStaffComposeOpen(true);
+        }}
+      />
+
       {/* Plain child picker -- composing needs exactly one passport, so
-          [New] resolves that first, then hands off to the shared sheet. */}
-      <BottomSheet isOpen={isPickerOpen} onClose={() => setIsPickerOpen(false)}>
+          this resolves that first, then hands off to the shared sheet. */}
+      <BottomSheet isOpen={pickerStep === "student"} onClose={() => setPickerStep("closed")}>
         <h2 className="font-heading text-xl font-semibold text-brand-neutral-black">Message about which student?</h2>
         <div className="mt-4 flex flex-col gap-2">
           {passports.map((passport) => (
@@ -99,7 +154,7 @@ export default function TeacherMessagesPage() {
               type="button"
               onClick={() => {
                 setComposePassportId(passport.passportId);
-                setIsPickerOpen(false);
+                setPickerStep("closed");
               }}
               className="flex items-center justify-between rounded-2xl border border-black/5 bg-white px-4 py-3.5 text-left shadow-sm"
             >
@@ -120,6 +175,18 @@ export default function TeacherMessagesPage() {
           categories={categories}
           institutionPhone={institutionPhone}
           onSent={refresh}
+        />
+      )}
+
+      {institutionId && user && (
+        <ComposeMessageSheet
+          isOpen={isStaffComposeOpen}
+          onClose={() => setIsStaffComposeOpen(false)}
+          institutionId={institutionId}
+          candidates={staffCandidates}
+          categories={staffCategories}
+          institutionPhone={institutionPhone}
+          onSent={refreshStaff}
         />
       )}
 
