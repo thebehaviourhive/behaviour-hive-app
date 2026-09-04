@@ -1758,12 +1758,14 @@ export default function IncidentRecordPage() {
                         ) : child.parentNotificationBlockedReason !== "dormant_account" ? (
                           <p className="text-sm text-brand-neutral-black/50">No notice recorded.</p>
                         ) : null}
-                        {child.parentCalledAt && (
+                        {child.parentCalledAt ? (
                           <p className="text-sm text-brand-golden-brown">
                             Parent called {formatDateTime(child.parentCalledAt)}
                             {child.parentCalledBy && ` by ${staffNameById.get(child.parentCalledBy) || "a staff member"}`}.
                           </p>
-                        )}
+                        ) : !child.parentCallRequired ? (
+                          <p className="text-sm text-brand-neutral-black/50">Parent call not required.</p>
+                        ) : null}
                         {child.parentAcknowledgedAt ? (
                           <p className="text-sm text-brand-golden-brown">
                             Acknowledged by parent {formatDateTime(child.parentAcknowledgedAt)}.

@@ -20,7 +20,7 @@
 // stage development. Every check from V onward is independently
 // self-contained (own institution, own accounts, own cleanup) and
 // individually selectable: V, W, X, Y, Z, AA, BB, CC, DD, EE, FF, GG,
-// HH, II, JJ, KK, LL, MM, NN, OO, PP, QQ, RR, SS, TT, UU, VV, WW, XX, YY, ZZ, AAA, BBB, CCC, DDD, EEE, FFF, GGG. Selecting none of these (ONLY_CHECKS unset) is the full run --
+// HH, II, JJ, KK, LL, MM, NN, OO, PP, QQ, RR, SS, TT, UU, VV, WW, XX, YY, ZZ, AAA, BBB, CCC, DDD, EEE, FFF, GGG, HHH. Selecting none of these (ONLY_CHECKS unset) is the full run --
 // the one that gates deploys -- and its behavior is unchanged: same
 // checks, same order, same pass/fail counts. The only observable
 // difference is where the top-level fixture's own cleanup log line
@@ -12116,6 +12116,134 @@ async function main() {
     await admin.from("passports").delete().in("id", [child1GGGId, child2GGGId]);
     await admin.from("institutions").delete().eq("id", institutionGGGId);
     for (const id of [principalGGGId, teacherGGGId, snaGGGId, outsiderGGGId]) {
+      await admin.auth.admin.deleteUser(id);
+    }
+  }
+
+  console.log(`\n== CHECK HHH: SQL for migration 0152 -- acknowledge_incident(), a genuine COVERAGE GAP found while scoping the parent-incident-notice work: the function, its two columns (parent_acknowledged_at/by), and get_parent_incidents()'s own widened shape have been live since 0152 with zero adversarial checks on any of it -- exercised only as a side effect of nothing, since no other check in this suite ever calls it. Per CLAUDE.md's own rule ("what asserts its REFUSALS"), not just "does the happy path work": refused before sign-off (HHH1, the found/raise pattern this function explicitly matches -- not mark_parent_called()'s silent no-op), refused for an outsider with no guardian relationship to this child (HHH2), succeeds for the real claimed guardian and is genuinely persisted -- re-read via service role, not inferred from absence of a client error (HHH3), refused a second time on the same row -- append-only in effect even without a table-level constraint (HHH4), and get_parent_incidents()'s own widened columns (incident_children_id, parent_acknowledged_at) resolve correctly for the real guardian (HHH5). ==`);
+  if (shouldRun("HHH")) {
+    const { data: locHHH } = await admin.from("incident_locations").select("id").eq("value", "Classroom").is("institution_id", null).single();
+
+    const { data: instHHH, error: instHHHErr } = await admin
+      .from("institutions")
+      .insert({ name: "HHH Institution", institution_code: CODE + "HHH", status: "verified" })
+      .select()
+      .single();
+    if (instHHHErr) throw instHHHErr;
+    const institutionHHHId = instHHH.id;
+
+    const principalHHHId = await createUser("hhh.principal@thebehaviourhive.com", "HHH Principal", "principal");
+    const teacherHHHId = await createUser("hhh.teacher@thebehaviourhive.com", "HHH Teacher", "class_teacher");
+    await createUser("hhh.parent@thebehaviourhive.com", "HHH Parent", "parent");
+    await createUser("hhh.outsiderparent@thebehaviourhive.com", "HHH Outsider Parent", "parent");
+
+    await admin.from("institution_staff").insert({ institution_id: institutionHHHId, user_id: principalHHHId, role: "principal" });
+    const { data: teacherHHHStaffRow } = await admin.from("institution_staff").insert({ institution_id: institutionHHHId, user_id: teacherHHHId, role: "class_teacher" }).select().single();
+
+    const principalHHH = await signedInClient("hhh.principal@thebehaviourhive.com");
+    const teacherHHH = await signedInClient("hhh.teacher@thebehaviourhive.com");
+    const parentHHH = await signedInClient("hhh.parent@thebehaviourhive.com");
+    const outsiderParentHHH = await signedInClient("hhh.outsiderparent@thebehaviourhive.com");
+
+    const { error: approveHHHErr } = await principalHHH.rpc("approve_staff_join", { p_institution_staff_id: teacherHHHStaffRow.id });
+    if (approveHHHErr) throw approveHHHErr;
+
+    const { data: childHHHId } = await principalHHH.rpc("create_school_passport", { p_institution_id: institutionHHHId, p_child_name: "HHH Child" });
+
+    // Real claimed guardian -- generate_passport_claim_code() ->
+    // redeem_passport_claim_code(), never a hand-set passport_guardians
+    // row (CHECK II's own rule, followed throughout this session).
+    const { data: claimCodeHHH } = await principalHHH.rpc("generate_passport_claim_code", { p_institution_id: institutionHHHId, p_passport_id: childHHHId });
+    const { error: redeemHHHErr } = await parentHHH.rpc("redeem_passport_claim_code", { p_code: claimCodeHHH });
+    if (redeemHHHErr) throw redeemHHHErr;
+
+    // ---- HHH1: refused before sign-off -- the found/raise pattern,
+    // not a silent no-op. ----
+    const { data: incidentHHHId, error: stampHHHErr } = await teacherHHH.rpc("create_incident_stamp", {
+      p_institution_id: institutionHHHId,
+      p_occurred_at: new Date().toISOString(),
+      p_location_id: locHHH.id,
+      p_child_passport_ids: [childHHHId],
+      p_staff: [],
+    });
+    if (stampHHHErr) throw stampHHHErr;
+    const { data: icHHHRow } = await admin.from("incident_children").select("id").eq("incident_id", incidentHHHId).single();
+
+    const { error: hhh1Err } = await parentHHH.rpc("acknowledge_incident", { p_incident_children_id: icHHHRow.id });
+    record(
+      "HHH1 acknowledge_incident() refuses before sign-off -- the parent has a time-only stage-1 notice, not the full record yet",
+      Boolean(hhh1Err) && /isn't ready yet/i.test(hhh1Err.message),
+      hhh1Err?.message
+    );
+
+    // Write enough for a real sign-off, then sign off -- the same
+    // minimal shape used by this session's own live-verification
+    // fixture (category/narrative/parent_summary/anyone_injured/
+    // debrief_required/distress_level).
+    await teacherHHH.from("incidents").update({
+      category: "one_party_incident",
+      narrative: "HHH fixture narrative.",
+      parent_summary: "HHH fixture parent summary.",
+      anyone_injured: false,
+      debrief_required: false,
+    }).eq("id", incidentHHHId);
+    await teacherHHH.from("incident_children").update({ distress_level: "not_distressed" }).eq("id", icHHHRow.id);
+    const { error: signOffHHHErr } = await teacherHHH.rpc("sign_off_incident", { p_incident_id: incidentHHHId });
+    if (signOffHHHErr) throw signOffHHHErr;
+
+    // ---- HHH2: refused for an outsider with no guardian relationship
+    // to this child. ----
+    const { error: hhh2Err } = await outsiderParentHHH.rpc("acknowledge_incident", { p_incident_children_id: icHHHRow.id });
+    record(
+      "HHH2 acknowledge_incident() refuses a parent with no guardian relationship to this child",
+      Boolean(hhh2Err) && /only this child's own parent/i.test(hhh2Err.message),
+      hhh2Err?.message
+    );
+
+    // ---- HHH3: succeeds for the real claimed guardian, genuinely
+    // persisted -- re-read via service role, not inferred from the
+    // absence of a client error. ----
+    const { error: hhh3Err } = await parentHHH.rpc("acknowledge_incident", { p_incident_children_id: icHHHRow.id });
+    record("HHH3a acknowledge_incident() succeeds for the real claimed guardian, post-sign-off", !hhh3Err, hhh3Err?.message);
+
+    const { data: hhh3Reread } = await admin.from("incident_children").select("parent_acknowledged_at, parent_acknowledged_by").eq("id", icHHHRow.id).single();
+    record(
+      "HHH3b THE STAKE: parent_acknowledged_at/by are genuinely persisted, confirmed via a direct service-role re-read",
+      hhh3Reread.parent_acknowledged_at !== null && hhh3Reread.parent_acknowledged_by !== null,
+      JSON.stringify(hhh3Reread)
+    );
+
+    // ---- HHH4: refused a second time -- append-only in effect. ----
+    const { error: hhh4Err } = await parentHHH.rpc("acknowledge_incident", { p_incident_children_id: icHHHRow.id });
+    record(
+      "HHH4 acknowledge_incident() refuses a second acknowledgement on the same row",
+      Boolean(hhh4Err) && /already been acknowledged/i.test(hhh4Err.message),
+      hhh4Err?.message
+    );
+
+    // ---- HHH5: get_parent_incidents()'s own widened shape --
+    // incident_children_id and parent_acknowledged_at resolve
+    // correctly for the real guardian. ----
+    const { data: hhh5Rows, error: hhh5Err } = await parentHHH.rpc("get_parent_incidents", { p_passport_id: childHHHId });
+    const hhh5Row = (hhh5Rows ?? []).find((r) => r.incident_id === incidentHHHId);
+    record(
+      "HHH5 get_parent_incidents() returns the widened incident_children_id and a non-null parent_acknowledged_at for the real guardian",
+      !hhh5Err && Boolean(hhh5Row) && hhh5Row.incident_children_id === icHHHRow.id && hhh5Row.parent_acknowledged_at !== null,
+      hhh5Err?.message ?? JSON.stringify(hhh5Row)
+    );
+
+    console.log("HHH summary complete.");
+
+    await admin.from("incident_children").delete().eq("incident_id", incidentHHHId);
+    await admin.from("incidents").delete().eq("id", incidentHHHId);
+    await admin.from("passport_guardians").delete().eq("passport_id", childHHHId);
+    await admin.from("passport_institution_links").delete().eq("passport_id", childHHHId);
+    await admin.from("passports").delete().eq("id", childHHHId);
+    await admin.from("institutions").delete().eq("id", institutionHHHId);
+    const { data: outsiderParentHHHUser } = await admin.auth.admin.listUsers();
+    const outsiderParentHHHId = outsiderParentHHHUser.users.find((u) => u.email === "hhh.outsiderparent@thebehaviourhive.com")?.id;
+    const parentHHHId = outsiderParentHHHUser.users.find((u) => u.email === "hhh.parent@thebehaviourhive.com")?.id;
+    for (const id of [principalHHHId, teacherHHHId, parentHHHId, outsiderParentHHHId].filter(Boolean)) {
       await admin.auth.admin.deleteUser(id);
     }
   }
