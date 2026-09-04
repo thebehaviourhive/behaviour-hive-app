@@ -148,6 +148,14 @@ export function CountersignCard({
   const [isSigning, setIsSigning] = useState(false);
   const [signError, setSignError] = useState<string | null>(null);
   const [isAmendOpen, setIsAmendOpen] = useState(false);
+  // The signature moment (Daniel's own framing): "the last irreversible
+  // act on a legal document... should feel like a signature, not a
+  // dismissal." A brief, unmissable success state inside the sheet
+  // itself before it closes -- same visual language as the EOD wizard's
+  // own success beat elsewhere in this app (a scaling checkmark), not a
+  // new pattern invented for this one screen.
+  const [showSuccess, setShowSuccess] = useState(false);
+  const [successVisible, setSuccessVisible] = useState(false);
 
   // Pure fetch, no setState of its own -- deliberately separated from
   // the setters so both the mount effect and the post-amendment reload
@@ -207,9 +215,43 @@ export function CountersignCard({
       setSignError(error.message);
       return;
     }
-    setIsConfirmOpen(false);
-    onCountersigned();
+    // THE STALE-SNAPSHOT BUG, found live investigating why a real
+    // countersign appeared to show no confirmation: this component's
+    // own `summary` only ever loaded once, keyed on [incidentId] alone
+    // (see the mount effect above) -- never on anything from this
+    // action. The write succeeded, the sheet closed, and the card
+    // behind it kept rendering the exact same "Countersign record" /
+    // "Add amendment and countersign" buttons as before, indistinguishable
+    // from the action having silently done nothing. Same shape as
+    // SignOffCard's own documented stale-snapshot bug (CLAUDE.md), just
+    // masked differently there (isLocked flips true and unmounts
+    // SignOffCard entirely, so a missing refresh was never visible) --
+    // here nothing unmounts, so the staleness was the whole visible
+    // result. Fixed the same way AddAmendmentSheet's own onAdded
+    // callback, right below, already does in this same file: refetch
+    // directly, don't rely on the parent's reloadKey bump ever reaching
+    // a component that never remounts.
+    applyCountersignData(await fetchCountersignData());
+    // The signature moment, not an instant close -- see this state's
+    // own declaration above.
+    setShowSuccess(true);
   }
+
+  useEffect(() => {
+    if (!showSuccess) return;
+    const raf = requestAnimationFrame(() => setSuccessVisible(true));
+    const timer = setTimeout(() => {
+      setSuccessVisible(false);
+      setShowSuccess(false);
+      setIsConfirmOpen(false);
+      onCountersigned();
+    }, 1400);
+    return () => {
+      cancelAnimationFrame(raf);
+      clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showSuccess]);
 
   if (isLoading) {
     return <div className="h-32 animate-pulse rounded-2xl bg-brand-off-white/60" />;
@@ -292,9 +334,7 @@ export function CountersignCard({
               amendment" would cast disagreement as the urgent/problem
               option under this app's colour-to-state mapping, the exact
               asymmetry Daniel's own instruction warns against. Both
-              solid Prussian Blue (primary/secondary), stacked at every
-              width -- the labels don't fit side by side without wrapping
-              awkwardly even at 1280px.
+              solid Prussian Blue (primary/secondary).
 
               NO fixed-to-viewport footer, on any width -- reversed
               deliberately. PRD 4 Stage 3 built one below lg specifically
@@ -306,65 +346,91 @@ export function CountersignCard({
               sticky. Same fix on every width now: this renders in normal
               document flow, after the report, after AttestationCard,
               after everything above it in this card -- the action lives
-              after the thing it acts on, full stop, not just at lg+. */}
-          <div className="flex flex-col gap-2 pt-1">
-            <Button type="button" onClick={() => setIsAmendOpen(true)} variant="secondary">
+              after the thing it acts on, full stop, not just at lg+.
+
+              STACKED below lg (375px unchanged), SIDE BY SIDE at lg+ --
+              the "doesn't fit without wrapping" reasoning that justified
+              stacking at every width was measured against the old
+              384px sidebar rail, which no longer exists; against this
+              page's own new max-w-2xl reading column (672px) both
+              labels fit on one line with room to spare. Equal weight is
+              preserved either way -- same variant pair, same flex-1
+              share of the row, neither reads as more important. */}
+          <div className="flex flex-col gap-2 pt-1 lg:flex-row lg:gap-3">
+            <Button type="button" onClick={() => setIsAmendOpen(true)} variant="secondary" className="lg:flex-1">
               Add amendment and countersign
             </Button>
-            <Button type="button" onClick={() => setIsConfirmOpen(true)}>
+            <Button type="button" onClick={() => setIsConfirmOpen(true)} className="lg:flex-1">
               Countersign record
             </Button>
           </div>
         </>
       )}
 
-      <BottomSheet isOpen={isConfirmOpen} onClose={() => !isSigning && setIsConfirmOpen(false)}>
-        <h2 className="font-heading text-xl font-semibold text-brand-neutral-black">Countersign this incident?</h2>
-
-        {/* What's being signed -- named, not implied. */}
-        <div className="mt-3 rounded-2xl border border-black/5 bg-black/[0.02] p-3.5">
-          <p className="text-sm font-semibold text-brand-neutral-black">
-            {childNames.length > 0 ? childNames.join(", ") : "This incident"}
-          </p>
-          <p className="mt-0.5 text-xs text-brand-neutral-black/60">{occurredAtLabel}</p>
-          <p className={`mt-1.5 text-xs font-semibold ${restraintUsed ? "text-brand-golden-brown" : "text-brand-neutral-black/50"}`}>
-            {restraintUsed ? "Restraint (CPI) was used" : "No restraint used"}
-          </p>
-        </div>
-
-        {everWithdrawn.length > 0 && (
-          <div className="mt-3 rounded-xl border border-brand-golden-brown/30 bg-brand-golden-brown/10 p-3">
-            <p className="text-xs font-semibold text-brand-golden-brown">
-              {everWithdrawn.map((s) => s.name).join(", ")} withdrew {everWithdrawn.length === 1 ? "an attestation" : "attestations"}{" "}
-              on this record{everWithdrawn.every((s) => s.status !== "withdrawn") ? " and later re-attested" : ""}. The account was
-              disputed at some point, not just currently clean.
-            </p>
+      <BottomSheet isOpen={isConfirmOpen} onClose={() => !isSigning && !showSuccess && setIsConfirmOpen(false)}>
+        {showSuccess ? (
+          <div className="flex flex-col items-center gap-3 py-6 text-center">
+            <span
+              aria-hidden
+              className={`flex h-16 w-16 items-center justify-center rounded-full bg-green-100 text-3xl transition-all duration-300 ${
+                successVisible ? "scale-100 opacity-100" : "scale-50 opacity-0"
+              }`}
+            >
+              ✅
+            </span>
+            <p className="font-heading text-lg font-semibold text-brand-neutral-black">Countersigned</p>
+            <p className="text-sm text-brand-neutral-black/60">This record is now closed.</p>
           </div>
+        ) : (
+          <>
+            <h2 className="font-heading text-xl font-semibold text-brand-neutral-black">Countersign this incident?</h2>
+
+            {/* What's being signed -- named, not implied. */}
+            <div className="mt-3 rounded-2xl border border-black/5 bg-black/[0.02] p-3.5">
+              <p className="text-sm font-semibold text-brand-neutral-black">
+                {childNames.length > 0 ? childNames.join(", ") : "This incident"}
+              </p>
+              <p className="mt-0.5 text-xs text-brand-neutral-black/60">{occurredAtLabel}</p>
+              <p className={`mt-1.5 text-xs font-semibold ${restraintUsed ? "text-brand-golden-brown" : "text-brand-neutral-black/50"}`}>
+                {restraintUsed ? "Restraint (CPI) was used" : "No restraint used"}
+              </p>
+            </div>
+
+            {everWithdrawn.length > 0 && (
+              <div className="mt-3 rounded-xl border border-brand-golden-brown/30 bg-brand-golden-brown/10 p-3">
+                <p className="text-xs font-semibold text-brand-golden-brown">
+                  {everWithdrawn.map((s) => s.name).join(", ")} withdrew {everWithdrawn.length === 1 ? "an attestation" : "attestations"}{" "}
+                  on this record{everWithdrawn.every((s) => s.status !== "withdrawn") ? " and later re-attested" : ""}. The account was
+                  disputed at some point, not just currently clean.
+                </p>
+              </div>
+            )}
+
+            <p className="mt-3 text-sm text-brand-neutral-black/70">
+              This is permanent and cannot be undone. The record is closed and can never be edited again. Amendments can
+              still be added afterwards.
+            </p>
+
+            {signError && (
+              <p role="alert" className="mt-3 text-sm font-medium text-red-600">
+                {signError}
+              </p>
+            )}
+
+            <Button type="button" onClick={handleConfirmCountersign} disabled={isSigning} className="mt-6">
+              {isSigning ? "Countersigning…" : "Countersign"}
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => setIsConfirmOpen(false)}
+              disabled={isSigning}
+              className="mt-2 !border-black/10 !text-black/60"
+            >
+              Cancel
+            </Button>
+          </>
         )}
-
-        <p className="mt-3 text-sm text-brand-neutral-black/70">
-          This is permanent and cannot be undone. The record is closed and can never be edited again. Amendments can
-          still be added afterwards.
-        </p>
-
-        {signError && (
-          <p role="alert" className="mt-3 text-sm font-medium text-red-600">
-            {signError}
-          </p>
-        )}
-
-        <Button type="button" onClick={handleConfirmCountersign} disabled={isSigning} className="mt-6">
-          {isSigning ? "Countersigning…" : "Countersign"}
-        </Button>
-        <Button
-          type="button"
-          variant="secondary"
-          onClick={() => setIsConfirmOpen(false)}
-          disabled={isSigning}
-          className="mt-2 !border-black/10 !text-black/60"
-        >
-          Cancel
-        </Button>
       </BottomSheet>
 
       <AddAmendmentSheet

@@ -1497,7 +1497,16 @@ export default function IncidentRecordPage() {
         <h1 className="font-heading text-xl font-bold text-brand-prussian-blue">Incident Record</h1>
       </header>
 
-      <main className="flex-1 px-4">
+      {/* max-w-2xl -- a real gap named directly, not guessed: removing
+          the sticky-sidebar split (this file's own header comment
+          above) made this page's own available width the full
+          viewport, and nothing here had ever needed a content width
+          constraint before because the old lg:col-span-8 grid column
+          was doing that job incidentally. Matches this exact record's
+          own print view (teacher/incidents/[incidentId]/print/page.tsx),
+          not an invented number -- same content, same sensible reading
+          width, live and printed. */}
+      <main className="mx-auto flex-1 px-4 lg:max-w-2xl">
         {isLoading ? (
           <div className="flex flex-col gap-2">
             <div className="h-32 animate-pulse rounded-2xl bg-white" />

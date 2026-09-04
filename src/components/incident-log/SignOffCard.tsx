@@ -115,6 +115,17 @@ export function SignOffCard({
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
   const [isSigning, setIsSigning] = useState(false);
   const [signError, setSignError] = useState<string | null>(null);
+  // The signature moment (Daniel's own framing, applied to both halves
+  // of this record's own close-out for consistency -- CountersignCard
+  // carries the identical pattern, see its own header comment for the
+  // full reasoning). SignOffCard's own stale-render risk was already
+  // masked by the whole-page reload (isLocked flips true and unmounts
+  // this component entirely), but "the last irreversible act should
+  // feel like a signature, not a dismissal" describes this action just
+  // as much as countersigning -- an instant close read as thin here
+  // too, not just where the bug was.
+  const [showSuccess, setShowSuccess] = useState(false);
+  const [successVisible, setSuccessVisible] = useState(false);
 
   useEffect(() => {
     let isMounted = true;
@@ -154,16 +165,36 @@ export function SignOffCard({
       setSignError(error.message);
       return;
     }
-    setIsConfirmOpen(false);
-    // Reload rather than patch local state -- sign-off changes what's
-    // editable, what's visible, and what section renders where across
-    // this whole page (debrief, actions, injuries, body map, welfare
-    // fields all become read-only at once); a full refetch from the
-    // server is the only way to guarantee everything derived from
-    // teacher_signed_at is correct after the transition, not just the
-    // few fields this component itself touched.
-    onSignedOff();
+    // The signature moment, not an instant close -- see this state's
+    // own declaration above. onSignedOff() (the full-page reload) fires
+    // once it's been visible for a beat, not immediately -- the page
+    // transforming to its read-only state is itself a strong signal,
+    // but it shouldn't arrive so fast the confirmation never registers.
+    setShowSuccess(true);
   }
+
+  useEffect(() => {
+    if (!showSuccess) return;
+    const raf = requestAnimationFrame(() => setSuccessVisible(true));
+    const timer = setTimeout(() => {
+      setSuccessVisible(false);
+      setShowSuccess(false);
+      setIsConfirmOpen(false);
+      // Reload rather than patch local state -- sign-off changes what's
+      // editable, what's visible, and what section renders where across
+      // this whole page (debrief, actions, injuries, body map, welfare
+      // fields all become read-only at once); a full refetch from the
+      // server is the only way to guarantee everything derived from
+      // teacher_signed_at is correct after the transition, not just the
+      // few fields this component itself touched.
+      onSignedOff();
+    }, 1400);
+    return () => {
+      cancelAnimationFrame(raf);
+      clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showSuccess]);
 
   if (isLoading) {
     return <div className="h-24 animate-pulse rounded-2xl bg-brand-off-white/60" />;
@@ -269,54 +300,71 @@ export function SignOffCard({
         </>
       )}
 
-      <BottomSheet isOpen={isConfirmOpen} onClose={() => !isSigning && setIsConfirmOpen(false)}>
-        <h2 className="font-heading text-xl font-semibold text-brand-neutral-black">Sign off?</h2>
-
-        {/* What's being signed -- named, not implied. */}
-        <div className="mt-3 rounded-2xl border border-black/5 bg-black/[0.02] p-3.5">
-          <p className="text-sm font-semibold text-brand-neutral-black">
-            {childNames.length > 0 ? childNames.join(", ") : "This incident"}
-          </p>
-          <p className="mt-0.5 text-xs text-brand-neutral-black/60">{occurredAtLabel}</p>
-          <p className={`mt-1.5 text-xs font-semibold ${restraintUsed ? "text-brand-golden-brown" : "text-brand-neutral-black/50"}`}>
-            {restraintUsed ? "Restraint (CPI) was used" : "No restraint used"}
-          </p>
-        </div>
-
-        {resolvedWithdrawalHistory.length > 0 && (
-          <div className="mt-3 rounded-xl border border-brand-golden-brown/30 bg-brand-golden-brown/10 p-3">
-            <p className="text-xs font-semibold text-brand-golden-brown">
-              {resolvedWithdrawalHistory.map((s) => s.name).join(", ")} withdrew{" "}
-              {resolvedWithdrawalHistory.length === 1 ? "an attestation" : "attestations"} on this record, then
-              re-attested. Resolved, not currently blocking -- worth knowing before you sign.
-            </p>
+      <BottomSheet isOpen={isConfirmOpen} onClose={() => !isSigning && !showSuccess && setIsConfirmOpen(false)}>
+        {showSuccess ? (
+          <div className="flex flex-col items-center gap-3 py-6 text-center">
+            <span
+              aria-hidden
+              className={`flex h-16 w-16 items-center justify-center rounded-full bg-green-100 text-3xl transition-all duration-300 ${
+                successVisible ? "scale-100 opacity-100" : "scale-50 opacity-0"
+              }`}
+            >
+              ✅
+            </span>
+            <p className="font-heading text-lg font-semibold text-brand-neutral-black">Signed off</p>
+            <p className="text-sm text-brand-neutral-black/60">A principal countersign is next.</p>
           </div>
+        ) : (
+          <>
+            <h2 className="font-heading text-xl font-semibold text-brand-neutral-black">Sign off?</h2>
+
+            {/* What's being signed -- named, not implied. */}
+            <div className="mt-3 rounded-2xl border border-black/5 bg-black/[0.02] p-3.5">
+              <p className="text-sm font-semibold text-brand-neutral-black">
+                {childNames.length > 0 ? childNames.join(", ") : "This incident"}
+              </p>
+              <p className="mt-0.5 text-xs text-brand-neutral-black/60">{occurredAtLabel}</p>
+              <p className={`mt-1.5 text-xs font-semibold ${restraintUsed ? "text-brand-golden-brown" : "text-brand-neutral-black/50"}`}>
+                {restraintUsed ? "Restraint (CPI) was used" : "No restraint used"}
+              </p>
+            </div>
+
+            {resolvedWithdrawalHistory.length > 0 && (
+              <div className="mt-3 rounded-xl border border-brand-golden-brown/30 bg-brand-golden-brown/10 p-3">
+                <p className="text-xs font-semibold text-brand-golden-brown">
+                  {resolvedWithdrawalHistory.map((s) => s.name).join(", ")} withdrew{" "}
+                  {resolvedWithdrawalHistory.length === 1 ? "an attestation" : "attestations"} on this record, then
+                  re-attested. Resolved, not currently blocking -- worth knowing before you sign.
+                </p>
+              </div>
+            )}
+
+            <p className="mt-3 text-sm text-brand-neutral-black/70">
+              This is permanent. Once signed off, this incident becomes read-only and can never be edited again --
+              any correction from here goes through an append-only amendment, never an edit. A principal
+              countersign is required next.
+            </p>
+
+            {signError && (
+              <p role="alert" className="mt-3 text-sm font-medium text-red-600">
+                {signError}
+              </p>
+            )}
+
+            <Button type="button" onClick={handleConfirmSignOff} disabled={isSigning} className="mt-6">
+              {isSigning ? "Signing off…" : "Sign off"}
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => setIsConfirmOpen(false)}
+              disabled={isSigning}
+              className="mt-2 !border-black/10 !text-black/60"
+            >
+              Cancel
+            </Button>
+          </>
         )}
-
-        <p className="mt-3 text-sm text-brand-neutral-black/70">
-          This is permanent. Once signed off, this incident becomes read-only and can never be edited again --
-          any correction from here goes through an append-only amendment, never an edit. A principal
-          countersign is required next.
-        </p>
-
-        {signError && (
-          <p role="alert" className="mt-3 text-sm font-medium text-red-600">
-            {signError}
-          </p>
-        )}
-
-        <Button type="button" onClick={handleConfirmSignOff} disabled={isSigning} className="mt-6">
-          {isSigning ? "Signing off…" : "Sign off"}
-        </Button>
-        <Button
-          type="button"
-          variant="secondary"
-          onClick={() => setIsConfirmOpen(false)}
-          disabled={isSigning}
-          className="mt-2 !border-black/10 !text-black/60"
-        >
-          Cancel
-        </Button>
       </BottomSheet>
     </div>
   );
