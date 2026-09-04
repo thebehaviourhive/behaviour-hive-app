@@ -20,7 +20,7 @@
 // stage development. Every check from V onward is independently
 // self-contained (own institution, own accounts, own cleanup) and
 // individually selectable: V, W, X, Y, Z, AA, BB, CC, DD, EE, FF, GG,
-// HH, II, JJ, KK, LL, MM, NN, OO, PP, QQ, RR, SS, TT, UU, VV, WW, XX, YY, ZZ, AAA, BBB, CCC, DDD. Selecting none of these (ONLY_CHECKS unset) is the full run --
+// HH, II, JJ, KK, LL, MM, NN, OO, PP, QQ, RR, SS, TT, UU, VV, WW, XX, YY, ZZ, AAA, BBB, CCC, DDD, EEE. Selecting none of these (ONLY_CHECKS unset) is the full run --
 // the one that gates deploys -- and its behavior is unchanged: same
 // checks, same order, same pass/fail counts. The only observable
 // difference is where the top-level fixture's own cleanup log line
@@ -11640,6 +11640,198 @@ async function main() {
     await admin.from("passports").delete().in("id", [child1DDDId, child2DDDId]);
     await admin.from("institutions").delete().eq("id", institutionDDDId);
     for (const id of [principalDDDId, eligibleDDDId, coDDDId, snaDDDId, regularDDDId]) {
+      await admin.auth.admin.deleteUser(id);
+    }
+  }
+
+  console.log(`\n== CHECK EEE: SQL for migrations 0161/0162/0163 -- principal messaging. Two real bugs shipped in 0161 and were only caught by live-verifying the actual compose flow, not by review or the rest of this suite: (1) get_message_recipient_candidates()'s own \`authorized\` CTE gates every branch of \`candidates\`, and 0161 widened \`candidates\` to include a principal branch without ever widening \`authorized\` itself -- so a PRINCIPAL calling this RPC to populate their own compose picker got back zero candidates, not just no principal option, nothing at all, including the parent they were trying to message (fixed by 0162). (2) even with candidates resolved, the actual send_message() INSERT was refused by messages.sender_role's own check constraint -- untouched since 0061, only ever 'parent'/'class_teacher'/'clinician' -- and message_recipients.recipient_role carries the identical unwidened constraint, found and fixed pre-emptively in the same migration (0163) before it could bite a message sent TO a principal. This check proves the whole shape end to end: a principal's own candidates for a real child (parent AND class teacher, not empty), a principal composing a NEW thread to the parent, the parent reading and replying to it, an unrelated teacher-to-parent thread staying invisible to the principal ("threads they are addressed on, nothing else" for READING), a teacher composing TO the principal (the message_recipients half of 0163, not exercised by 0162's own live-verification pass), cross-institution refusal for both candidates and send, and a category that does not list 'principal' in allowed_sender_roles being refused. ==`);
+  if (shouldRun("EEE")) {
+    const { data: instEEE, error: instEEEErr } = await admin
+      .from("institutions")
+      .insert({ name: "EEE Institution A", institution_code: CODE + "EEEA", status: "verified" })
+      .select()
+      .single();
+    if (instEEEErr) throw instEEEErr;
+    const institutionEEEId = instEEE.id;
+
+    const { data: instEEEB, error: instEEEBErr } = await admin
+      .from("institutions")
+      .insert({ name: "EEE Institution B", institution_code: CODE + "EEEB", status: "verified" })
+      .select()
+      .single();
+    if (instEEEBErr) throw instEEEBErr;
+    const institutionEEEBId = instEEEB.id;
+
+    const principalEEEId = await createUser("eee.principal@thebehaviourhive.com", "EEE Principal", "principal");
+    const teacherEEEId = await createUser("eee.teacher@thebehaviourhive.com", "EEE Teacher", "class_teacher");
+    const parentEEEId = await createUser("eee.parent@thebehaviourhive.com", "EEE Parent", "parent");
+    const principalEEEBId = await createUser("eee.principal.b@thebehaviourhive.com", "EEE Principal B", "principal");
+
+    await admin.from("institution_staff").insert({ institution_id: institutionEEEId, user_id: principalEEEId, role: "principal" });
+    const { data: teacherEEEStaffRow } = await admin
+      .from("institution_staff")
+      .insert({ institution_id: institutionEEEId, user_id: teacherEEEId, role: "class_teacher" })
+      .select()
+      .single();
+    await admin.from("institution_staff").insert({ institution_id: institutionEEEBId, user_id: principalEEEBId, role: "principal" });
+
+    const principalEEE = await signedInClient("eee.principal@thebehaviourhive.com");
+    const teacherEEE = await signedInClient("eee.teacher@thebehaviourhive.com");
+    const parentEEE = await signedInClient("eee.parent@thebehaviourhive.com");
+    const principalEEEB = await signedInClient("eee.principal.b@thebehaviourhive.com");
+
+    const { error: approveEEEErr } = await principalEEE.rpc("approve_staff_join", { p_institution_staff_id: teacherEEEStaffRow.id });
+    if (approveEEEErr) throw approveEEEErr;
+
+    const { data: classEEEId } = await principalEEE.rpc("create_class", { p_institution_id: institutionEEEId, p_name: "EEE Room" });
+    await principalEEE.rpc("add_class_teacher", { p_class_id: classEEEId, p_user_id: teacherEEEId });
+
+    const { data: childEEEId } = await principalEEE.rpc("create_school_passport", { p_institution_id: institutionEEEId, p_child_name: "EEE Child" });
+    await principalEEE.rpc("add_class_child", { p_class_id: classEEEId, p_passport_id: childEEEId });
+
+    // A real claimed guardian -- generate_passport_claim_code() ->
+    // redeem_passport_claim_code(), never a hand-set passport_guardians
+    // row (CHECK II's own rule). create_school_passport() leaves zero
+    // guardian rows until this runs.
+    const { data: claimCodeEEE, error: claimCodeEEEErr } = await principalEEE.rpc("generate_passport_claim_code", {
+      p_institution_id: institutionEEEId,
+      p_passport_id: childEEEId,
+    });
+    if (claimCodeEEEErr) throw claimCodeEEEErr;
+    const { error: redeemEEEErr } = await parentEEE.rpc("redeem_passport_claim_code", { p_code: claimCodeEEE });
+    if (redeemEEEErr) throw redeemEEEErr;
+
+    // ---- EEE1: the 0162 fix itself -- the principal's OWN candidates
+    // for this child, non-empty. ----
+    const { data: principalCandidatesEEE, error: principalCandErr } = await principalEEE.rpc("get_message_recipient_candidates", {
+      p_passport_id: childEEEId,
+    });
+    record("EEE1a no error calling get_message_recipient_candidates() as principal", !principalCandErr, principalCandErr?.message);
+    const principalCandRolesEEE = (principalCandidatesEEE ?? []).map((c) => c.role).sort();
+    record(
+      "EEE1b THE 0162 FIX: candidates is non-empty and includes the parent (0161 left this empty for every principal caller)",
+      principalCandRolesEEE.includes("parent"),
+      principalCandRolesEEE
+    );
+    record("EEE1c candidates also includes the class teacher", principalCandRolesEEE.includes("class_teacher"), principalCandRolesEEE);
+
+    // ---- EEE2: principal composes a NEW thread to the parent -- the
+    // 0163 fix on messages.sender_role_check. ----
+    const parentCandidateEEE = (principalCandidatesEEE ?? []).find((c) => c.role === "parent");
+    const { data: wellbeingCatsEEE } = await principalEEE
+      .from("message_categories")
+      .select("id, label, allowed_sender_roles")
+      .contains("allowed_sender_roles", ["principal"]);
+    const wellbeingEEE = (wellbeingCatsEEE ?? []).find((c) => c.label === "Wellbeing note");
+    record("EEE2a 'Wellbeing note' category allows principal as sender (0161 data update)", Boolean(wellbeingEEE), wellbeingCatsEEE);
+
+    const { data: threadPrincipalToParentEEE, error: sendPrincipalErr } = await principalEEE.rpc("send_message", {
+      p_passport_id: childEEEId,
+      p_category_id: wellbeingEEE.id,
+      p_body: "EEE: principal composing to parent.",
+      p_response_required: true,
+      p_recipient_ids: [parentCandidateEEE.recipient_id],
+    });
+    record(
+      "EEE2b THE 0163 FIX: send_message() succeeds for principal -> parent (0161 alone left the INSERT refused by messages_sender_role_check)",
+      !sendPrincipalErr,
+      sendPrincipalErr?.message
+    );
+
+    // ---- EEE3: the parent reads and replies. ----
+    const { data: parentReadsEEE, error: parentReadErr } = await parentEEE.from("messages").select("id").eq("id", threadPrincipalToParentEEE);
+    record("EEE3a the parent can read the principal-initiated thread (can_view_message principal branch)", !parentReadErr && (parentReadsEEE ?? []).length === 1, parentReadErr?.message ?? parentReadsEEE);
+    const { error: parentReplyErr } = await parentEEE.rpc("reply_to_message", { p_message_id: threadPrincipalToParentEEE, p_body: "EEE: parent replying." });
+    record("EEE3b the parent can reply (reply_to_message confirmed role-blind, unchanged)", !parentReplyErr, parentReplyErr?.message);
+
+    // ---- EEE4: an unrelated teacher-to-parent thread stays invisible
+    // to the principal -- READING is still "threads they are addressed
+    // on, nothing else", unaffected by 0162/0163. ----
+    const { data: teacherCandidatesEEE } = await teacherEEE.rpc("get_message_recipient_candidates", { p_passport_id: childEEEId });
+    const parentForTeacherEEE = (teacherCandidatesEEE ?? []).find((c) => c.role === "parent");
+    const { data: teacherCatsEEE } = await teacherEEE
+      .from("message_categories")
+      .select("id, allowed_sender_roles")
+      .contains("allowed_sender_roles", ["class_teacher"]);
+    const { data: threadTeacherToParentEEE, error: sendTeacherErr } = await teacherEEE.rpc("send_message", {
+      p_passport_id: childEEEId,
+      p_category_id: teacherCatsEEE[0].id,
+      p_body: "EEE: teacher to parent, unrelated to the principal.",
+      p_response_required: false,
+      p_recipient_ids: [parentForTeacherEEE.recipient_id],
+    });
+    record("EEE4a teacher -> parent send still works, unaffected", !sendTeacherErr, sendTeacherErr?.message);
+    const { data: principalSeesTeacherThreadEEE } = await principalEEE.from("messages").select("id").eq("id", threadTeacherToParentEEE);
+    record(
+      "EEE4b the principal is NOT a party to this thread and cannot see it -- 'threads they are addressed on, nothing else' holds",
+      (principalSeesTeacherThreadEEE ?? []).length === 0,
+      principalSeesTeacherThreadEEE
+    );
+
+    // ---- EEE5: a teacher composes TO the principal -- the
+    // message_recipients half of 0163 (recipient_role = 'principal'),
+    // not exercised by 0162's own live-verification pass, which only
+    // ever sent messages FROM the principal. ----
+    const principalForTeacherEEE = (teacherCandidatesEEE ?? []).find((c) => c.role === "principal");
+    record("EEE5a a teacher's own candidates for this child include the principal", Boolean(principalForTeacherEEE), teacherCandidatesEEE);
+    const { data: threadTeacherToPrincipalEEE, error: sendToPrincipalErr } = await teacherEEE.rpc("send_message", {
+      p_passport_id: childEEEId,
+      p_category_id: teacherCatsEEE[0].id,
+      p_body: "EEE: teacher composing to the principal.",
+      p_response_required: false,
+      p_recipient_ids: [principalForTeacherEEE.recipient_id],
+    });
+    record(
+      "EEE5b THE OTHER HALF OF 0163: send_message() succeeds with the principal as RECIPIENT (message_recipients.recipient_role_check, the constraint's twin)",
+      !sendToPrincipalErr,
+      sendToPrincipalErr?.message
+    );
+    const { data: principalReadsOwnEEE } = await principalEEE.from("messages").select("id").eq("id", threadTeacherToPrincipalEEE);
+    record("EEE5c the principal can read the thread addressed to them", (principalReadsOwnEEE ?? []).length === 1, principalReadsOwnEEE);
+
+    // ---- EEE6: cross-institution refusal -- Principal B, an unrelated
+    // school, gets nothing from candidates and is refused on send. ----
+    const { data: candidatesBEEE } = await principalEEEB.rpc("get_message_recipient_candidates", { p_passport_id: childEEEId });
+    record("EEE6a Principal B (wrong institution) sees zero candidates for this child", (candidatesBEEE ?? []).length === 0, candidatesBEEE);
+    const { error: sendBErr } = await principalEEEB.rpc("send_message", {
+      p_passport_id: childEEEId,
+      p_category_id: wellbeingEEE.id,
+      p_body: "EEE: should be refused -- wrong institution.",
+      p_response_required: false,
+      p_recipient_ids: [principalEEEId],
+    });
+    record("EEE6b send_message refuses Principal B for a child at a different institution", Boolean(sendBErr), sendBErr?.message);
+
+    // ---- EEE7: a category that does not list 'principal' in
+    // allowed_sender_roles is refused. ----
+    const { data: disallowedCatsEEE } = await principalEEE
+      .from("message_categories")
+      .select("id, allowed_sender_roles")
+      .not("allowed_sender_roles", "cs", '{"principal"}');
+    const disallowedEEE = (disallowedCatsEEE ?? [])[0];
+    record("EEE7a found a category that does not list principal", Boolean(disallowedEEE), disallowedCatsEEE);
+    const { error: disallowedSendErr } = await principalEEE.rpc("send_message", {
+      p_passport_id: childEEEId,
+      p_category_id: disallowedEEE.id,
+      p_body: "EEE: should be refused -- category does not allow principal.",
+      p_response_required: false,
+      p_recipient_ids: [parentCandidateEEE.recipient_id],
+    });
+    record("EEE7b send_message refuses principal using a disallowed category", Boolean(disallowedSendErr), disallowedSendErr?.message);
+
+    console.log("EEE summary complete.");
+
+    await admin.from("message_replies").delete().in("message_id", [threadPrincipalToParentEEE, threadTeacherToParentEEE, threadTeacherToPrincipalEEE].filter(Boolean));
+    await admin.from("message_recipients").delete().in("message_id", [threadPrincipalToParentEEE, threadTeacherToParentEEE, threadTeacherToPrincipalEEE].filter(Boolean));
+    await admin.from("messages").delete().in("id", [threadPrincipalToParentEEE, threadTeacherToParentEEE, threadTeacherToPrincipalEEE].filter(Boolean));
+    await admin.from("class_children").delete().eq("passport_id", childEEEId);
+    await admin.from("class_teachers").delete().eq("class_id", classEEEId);
+    await admin.from("classes").delete().eq("id", classEEEId);
+    await admin.from("passport_guardians").delete().eq("passport_id", childEEEId);
+    await admin.from("passport_institution_links").delete().eq("passport_id", childEEEId);
+    await admin.from("passports").delete().eq("id", childEEEId);
+    await admin.from("institutions").delete().in("id", [institutionEEEId, institutionEEEBId]);
+    for (const id of [principalEEEId, teacherEEEId, parentEEEId, principalEEEBId]) {
       await admin.auth.admin.deleteUser(id);
     }
   }
