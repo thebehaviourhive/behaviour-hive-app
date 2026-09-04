@@ -20,7 +20,7 @@
 // stage development. Every check from V onward is independently
 // self-contained (own institution, own accounts, own cleanup) and
 // individually selectable: V, W, X, Y, Z, AA, BB, CC, DD, EE, FF, GG,
-// HH, II, JJ, KK, LL, MM, NN, OO, PP, QQ, RR, SS, TT, UU, VV, WW, XX, YY, ZZ, AAA, BBB, CCC, DDD, EEE. Selecting none of these (ONLY_CHECKS unset) is the full run --
+// HH, II, JJ, KK, LL, MM, NN, OO, PP, QQ, RR, SS, TT, UU, VV, WW, XX, YY, ZZ, AAA, BBB, CCC, DDD, EEE, FFF, GGG. Selecting none of these (ONLY_CHECKS unset) is the full run --
 // the one that gates deploys -- and its behavior is unchanged: same
 // checks, same order, same pass/fail counts. The only observable
 // difference is where the top-level fixture's own cleanup log line
@@ -11832,6 +11832,290 @@ async function main() {
     await admin.from("passports").delete().eq("id", childEEEId);
     await admin.from("institutions").delete().in("id", [institutionEEEId, institutionEEEBId]);
     for (const id of [principalEEEId, teacherEEEId, parentEEEId, principalEEEBId]) {
+      await admin.auth.admin.deleteUser(id);
+    }
+  }
+
+  console.log(`\n== CHECK FFF: SQL for migration 0164 -- the attestation self-row exclusion sweep. build_staff_attestations_summary() (0149) excluded an incident's own owning teacher from its own attestation list; three OTHER functions read incident_staff/get_attestation_status() independently and never got the same treatment, found by grepping every consumer rather than trusting the one reported instance was the only one. get_my_incident_attestations() (the bug actually reported -- a teacher's own self-named row on their own incident defaults to 'not_attested' the instant the incident exists, with nothing to attest to) now excludes it while still surfacing a genuine non-owner named staff member's own row (FFF1). attest_to_incident() itself gained a server-side guard refusing an owning teacher's attempt to attest to their own record -- the client already hid this button, this closes the same gap at the data layer (FFF2), and is what makes the exclusion in get_my_incident_attestation_issues() reachable as a real defense rather than dead code: a legacy/pre-guard self-attestation reaching 'withdrawn' (simulated here via a direct insert, since the guard now makes it otherwise unreachable through the app) stays excluded from the owner's own issues list, while a genuine non-owner's real withdrawn attestation still surfaces normally (FFF3). get_staff_deactivation_preview()'s own outstanding_attestations list gets the identical treatment -- a departing teacher's own self-named not_attested row on their own incident is excluded, while a real not_attested row where they're named but don't own the incident still counts (FFF4). ==`);
+  if (shouldRun("FFF")) {
+    const { data: locFFF } = await admin.from("incident_locations").select("id").eq("value", "Classroom").is("institution_id", null).single();
+
+    const { data: instFFF, error: instFFFErr } = await admin
+      .from("institutions")
+      .insert({ name: "FFF Institution", institution_code: CODE + "FFF", status: "verified" })
+      .select()
+      .single();
+    if (instFFFErr) throw instFFFErr;
+    const institutionFFFId = instFFF.id;
+
+    const principalFFFId = await createUser("fff.principal@thebehaviourhive.com", "FFF Principal", "principal");
+    const teacherFFFId = await createUser("fff.teacher@thebehaviourhive.com", "FFF Teacher", "class_teacher");
+    const teacherBFFFId = await createUser("fff.teacherb@thebehaviourhive.com", "FFF Teacher B", "class_teacher");
+    const teacherCFFFId = await createUser("fff.teacherc@thebehaviourhive.com", "FFF Teacher C", "class_teacher");
+
+    await admin.from("institution_staff").insert({ institution_id: institutionFFFId, user_id: principalFFFId, role: "principal" });
+    const { data: teacherFFFStaffRow } = await admin.from("institution_staff").insert({ institution_id: institutionFFFId, user_id: teacherFFFId, role: "class_teacher" }).select().single();
+    const { data: teacherBFFFStaffRow } = await admin.from("institution_staff").insert({ institution_id: institutionFFFId, user_id: teacherBFFFId, role: "class_teacher" }).select().single();
+    const { data: teacherCFFFStaffRow } = await admin.from("institution_staff").insert({ institution_id: institutionFFFId, user_id: teacherCFFFId, role: "class_teacher" }).select().single();
+
+    const principalFFF = await signedInClient("fff.principal@thebehaviourhive.com");
+    const teacherFFF = await signedInClient("fff.teacher@thebehaviourhive.com");
+    const teacherBFFF = await signedInClient("fff.teacherb@thebehaviourhive.com");
+
+    for (const row of [teacherFFFStaffRow, teacherBFFFStaffRow, teacherCFFFStaffRow]) {
+      const { error } = await principalFFF.rpc("approve_staff_join", { p_institution_staff_id: row.id });
+      if (error) throw error;
+    }
+
+    const { data: childFFFId } = await principalFFF.rpc("create_school_passport", { p_institution_id: institutionFFFId, p_child_name: "FFF Child" });
+    const { error: linkFFFErr } = await admin.from("passport_institution_links").insert({ passport_id: childFFFId, institution_id: institutionFFFId, approved_by_parent: true });
+    if (linkFFFErr) throw linkFFFErr;
+
+    // ---- incidentFFF1: owned by teacherFFF, self-named as staff
+    // alongside a genuine non-owner (teacherBFFF). ----
+    const { data: incidentFFF1Id, error: stampFFF1Err } = await teacherFFF.rpc("create_incident_stamp", {
+      p_institution_id: institutionFFFId,
+      p_occurred_at: new Date().toISOString(),
+      p_location_id: locFFF.id,
+      p_child_passport_ids: [childFFFId],
+      p_staff: [{ user_id: teacherFFFId }, { user_id: teacherBFFFId }],
+    });
+    if (stampFFF1Err) throw stampFFF1Err;
+
+    const { data: fff1StaffRows } = await admin.from("incident_staff").select("id, user_id").eq("incident_id", incidentFFF1Id);
+    const fff1OwnerStaffId = fff1StaffRows.find((r) => r.user_id === teacherFFFId).id;
+    const fff1TeacherBStaffId = fff1StaffRows.find((r) => r.user_id === teacherBFFFId).id;
+
+    const { data: fff1aRows, error: fff1aErr } = await teacherFFF.rpc("get_my_incident_attestations");
+    record(
+      "FFF1a THE 0164 FIX: get_my_incident_attestations() called by the owning teacher excludes their own self-named row on their own incident",
+      !fff1aErr && !(fff1aRows ?? []).some((r) => r.incident_id === incidentFFF1Id),
+      fff1aErr?.message ?? JSON.stringify(fff1aRows)
+    );
+
+    // ---- FFF2: attest_to_incident()'s new server-side guard. Run
+    // BEFORE FFF1b -- can_view_incident()'s own named-staff branch
+    // requires either a non-draft incident or a prior attestation from
+    // that same staff member (0104), so teacherBFFF genuinely cannot
+    // see this still-draft incident at all until they attest; FFF1b
+    // depends on that having already happened. ----
+    const { error: fff2aErr } = await teacherFFF.rpc("attest_to_incident", { p_incident_staff_id: fff1OwnerStaffId, p_addendum: "Trying to attest to my own incident." });
+    record(
+      "FFF2a THE GUARD ITSELF: attest_to_incident() refuses the owning teacher attesting to their own record",
+      Boolean(fff2aErr) && /nothing for you to attest/i.test(fff2aErr.message),
+      fff2aErr?.message
+    );
+
+    const { error: fff2bErr } = await teacherBFFF.rpc("attest_to_incident", { p_incident_staff_id: fff1TeacherBStaffId, p_addendum: "Confirmed, not the owner." });
+    record("FFF2b REGRESSION: a genuine non-owner can still attest normally", !fff2bErr, fff2bErr?.message);
+
+    const { data: fff1bRows, error: fff1bErr } = await teacherBFFF.rpc("get_my_incident_attestations");
+    const fff1bRow = (fff1bRows ?? []).find((r) => r.incident_id === incidentFFF1Id);
+    record(
+      "FFF1b REGRESSION: a genuine non-owner named staff member still sees their own row (now 'current' after FFF2b's real attestation) -- the exclusion is scoped to the owner only",
+      !fff1bErr && Boolean(fff1bRow) && fff1bRow.status === "current",
+      fff1bErr?.message ?? JSON.stringify(fff1bRow)
+    );
+
+    // Admin-withdraw teacherBFFF's now-real attestation -- a genuine,
+    // real issue that must still surface to the owner below.
+    const { error: fff3WithdrawRealErr } = await admin.from("incident_attestations").insert({
+      incident_id: incidentFFF1Id,
+      incident_staff_id: fff1TeacherBStaffId,
+      action: "withdrawn",
+      withdrawal_reason: "FFF3 fixture: real withdrawal to prove the bucket still surfaces genuine issues.",
+      created_by: teacherBFFFId,
+    });
+    if (fff3WithdrawRealErr) throw fff3WithdrawRealErr;
+
+    // Simulate a LEGACY self-attestation reaching 'withdrawn' -- the new
+    // guard makes this otherwise unreachable through the app, but old
+    // data (or a future regression) could still produce it, and this is
+    // exactly what get_my_incident_attestation_issues()'s own exclusion
+    // must keep hiding from the owner.
+    const { error: fff3WithdrawSelfErr } = await admin.from("incident_attestations").insert({
+      incident_id: incidentFFF1Id,
+      incident_staff_id: fff1OwnerStaffId,
+      action: "withdrawn",
+      withdrawal_reason: "FFF3 fixture: simulated legacy self-attestation, now withdrawn.",
+      created_by: teacherFFFId,
+    });
+    if (fff3WithdrawSelfErr) throw fff3WithdrawSelfErr;
+
+    const { data: fff3Rows, error: fff3Err } = await teacherFFF.rpc("get_my_incident_attestation_issues");
+    const fff3OwnIncidentRows = (fff3Rows ?? []).filter((r) => r.incident_id === incidentFFF1Id);
+    record(
+      "FFF3 THE 0164 FIX: get_my_incident_attestation_issues() surfaces the genuine non-owner's withdrawn attestation but excludes the simulated legacy self-attestation -- exactly one row for this incident, not two",
+      !fff3Err && fff3OwnIncidentRows.length === 1 && fff3OwnIncidentRows[0].staff_user_id === teacherBFFFId,
+      fff3Err?.message ?? JSON.stringify(fff3OwnIncidentRows)
+    );
+
+    // ---- incidentFFF2: owned by teacherCFFF, with teacherFFF named
+    // but NOT the owner -- a genuine not_attested issue for teacherFFF
+    // that get_staff_deactivation_preview() must still count. ----
+    const teacherCFFF = await signedInClient("fff.teacherc@thebehaviourhive.com");
+    const { data: incidentFFF2Id, error: stampFFF2Err } = await teacherCFFF.rpc("create_incident_stamp", {
+      p_institution_id: institutionFFFId,
+      p_occurred_at: new Date().toISOString(),
+      p_location_id: locFFF.id,
+      p_child_passport_ids: [childFFFId],
+      p_staff: [{ user_id: teacherCFFFId }, { user_id: teacherFFFId }],
+    });
+    if (stampFFF2Err) throw stampFFF2Err;
+
+    const { data: fff4Preview, error: fff4Err } = await principalFFF.rpc("get_staff_deactivation_preview", { p_institution_staff_id: teacherFFFStaffRow.id });
+    const fff4Attestations = fff4Preview?.outstanding_attestations ?? [];
+    record(
+      "FFF4a THE 0164 FIX: get_staff_deactivation_preview() excludes teacherFFF's own self-named not_attested row on incidentFFF1 (which they own)",
+      !fff4Err && !fff4Attestations.some((a) => a.incident_id === incidentFFF1Id),
+      fff4Err?.message ?? JSON.stringify(fff4Attestations)
+    );
+    record(
+      "FFF4b REGRESSION: the same preview still counts incidentFFF2, where teacherFFF is genuinely named but does not own it",
+      fff4Attestations.some((a) => a.incident_id === incidentFFF2Id),
+      JSON.stringify(fff4Attestations)
+    );
+
+    console.log("FFF summary complete.");
+
+    await admin.from("incident_attestations").delete().in("incident_id", [incidentFFF1Id, incidentFFF2Id]);
+    await admin.from("incident_staff").delete().in("incident_id", [incidentFFF1Id, incidentFFF2Id]);
+    await admin.from("incident_children").delete().in("incident_id", [incidentFFF1Id, incidentFFF2Id]);
+    await admin.from("incidents").delete().in("id", [incidentFFF1Id, incidentFFF2Id]);
+    await admin.from("passport_institution_links").delete().eq("passport_id", childFFFId);
+    await admin.from("passports").delete().eq("id", childFFFId);
+    await admin.from("institutions").delete().eq("id", institutionFFFId);
+    for (const id of [principalFFFId, teacherFFFId, teacherBFFFId, teacherCFFFId]) {
+      await admin.auth.admin.deleteUser(id);
+    }
+  }
+
+  console.log(`\n== CHECK GGG: SQL for migration 0165 -- "No SNA required" as a persisted fact, scoped to (passport_id, institution_id), not to the class or the passport alone. Proves the whole shape: a real gap (get_my_class_sna_gaps()) clears the moment set_child_sna_not_required() is called (GGG1), a caller with no relationship to the child is refused (GGG2), clear_child_sna_not_required() is a real, working undo -- the gap reappears (GGG3), a REAL 1:1 SNA assignment (assign_sna_to_child()) clears the fact automatically rather than contradicting it, proven by re-setting the flag and then asserting it's gone after a genuine assignment, not merely inferred (GGG4), and the class-wide equivalent (assign_class_sna()) clears the fact for EVERY child currently in the class in one call, proven on two children simultaneously (GGG5). ==`);
+  if (shouldRun("GGG")) {
+    const { data: instGGG, error: instGGGErr } = await admin
+      .from("institutions")
+      .insert({ name: "GGG Institution", institution_code: CODE + "GGG", status: "verified" })
+      .select()
+      .single();
+    if (instGGGErr) throw instGGGErr;
+    const institutionGGGId = instGGG.id;
+
+    const principalGGGId = await createUser("ggg.principal@thebehaviourhive.com", "GGG Principal", "principal");
+    const teacherGGGId = await createUser("ggg.teacher@thebehaviourhive.com", "GGG Teacher", "class_teacher");
+    const snaGGGId = await createUser("ggg.sna@thebehaviourhive.com", "GGG SNA", "sna");
+    const outsiderGGGId = await createUser("ggg.outsider@thebehaviourhive.com", "GGG Outsider", "class_teacher");
+
+    await admin.from("institution_staff").insert({ institution_id: institutionGGGId, user_id: principalGGGId, role: "principal" });
+    const { data: teacherGGGStaffRow } = await admin.from("institution_staff").insert({ institution_id: institutionGGGId, user_id: teacherGGGId, role: "class_teacher" }).select().single();
+    const { data: snaGGGStaffRow } = await admin.from("institution_staff").insert({ institution_id: institutionGGGId, user_id: snaGGGId, role: "sna" }).select().single();
+
+    const principalGGG = await signedInClient("ggg.principal@thebehaviourhive.com");
+    const teacherGGG = await signedInClient("ggg.teacher@thebehaviourhive.com");
+    const outsiderGGG = await signedInClient("ggg.outsider@thebehaviourhive.com");
+
+    for (const row of [teacherGGGStaffRow, snaGGGStaffRow]) {
+      const { error } = await principalGGG.rpc("approve_staff_join", { p_institution_staff_id: row.id });
+      if (error) throw error;
+    }
+
+    const { data: classGGGId } = await principalGGG.rpc("create_class", { p_institution_id: institutionGGGId, p_name: "GGG Room" });
+    await principalGGG.rpc("add_class_teacher", { p_class_id: classGGGId, p_user_id: teacherGGGId });
+
+    const { data: child1GGGId } = await principalGGG.rpc("create_school_passport", { p_institution_id: institutionGGGId, p_child_name: "GGG Child One" });
+    const { data: child2GGGId } = await principalGGG.rpc("create_school_passport", { p_institution_id: institutionGGGId, p_child_name: "GGG Child Two" });
+    await principalGGG.rpc("add_class_child", { p_class_id: classGGGId, p_passport_id: child1GGGId });
+    await principalGGG.rpc("add_class_child", { p_class_id: classGGGId, p_passport_id: child2GGGId });
+
+    const { data: gapsBeforeGGG } = await teacherGGG.rpc("get_my_class_sna_gaps");
+    record(
+      "GGG0 both children start as real gaps -- background fact this fixture depends on",
+      (gapsBeforeGGG ?? []).some((g) => g.passport_id === child1GGGId) && (gapsBeforeGGG ?? []).some((g) => g.passport_id === child2GGGId),
+      JSON.stringify(gapsBeforeGGG)
+    );
+
+    // ---- GGG2: refused for a caller with no relationship to the
+    // child (not this class's teacher, not the principal). ----
+    const { error: gggOutsiderErr } = await outsiderGGG.rpc("set_child_sna_not_required", { p_passport_id: child1GGGId, p_institution_id: institutionGGGId });
+    record("GGG2 set_child_sna_not_required() refuses a caller with no relationship to this child", Boolean(gggOutsiderErr), gggOutsiderErr?.message);
+
+    // ---- GGG1: THE FEATURE ITSELF -- setting it clears the gap. ----
+    const { error: gggSetErr } = await teacherGGG.rpc("set_child_sna_not_required", { p_passport_id: child1GGGId, p_institution_id: institutionGGGId });
+    record("GGG1a set_child_sna_not_required() succeeds for the child's current class teacher", !gggSetErr, gggSetErr?.message);
+
+    const { data: gapsAfterSetGGG } = await teacherGGG.rpc("get_my_class_sna_gaps");
+    record(
+      "GGG1b THE FIX ITSELF: child1 no longer appears as a gap once the fact is recorded -- child2 (untouched) still does",
+      !(gapsAfterSetGGG ?? []).some((g) => g.passport_id === child1GGGId) && (gapsAfterSetGGG ?? []).some((g) => g.passport_id === child2GGGId),
+      JSON.stringify(gapsAfterSetGGG)
+    );
+
+    const { error: gggIdempotentErr } = await teacherGGG.rpc("set_child_sna_not_required", { p_passport_id: child1GGGId, p_institution_id: institutionGGGId });
+    record("GGG1c setting it a second time is a harmless no-op, not an error (on conflict do nothing)", !gggIdempotentErr, gggIdempotentErr?.message);
+
+    // ---- GGG3: reversible -- clear_child_sna_not_required() is a
+    // real, working undo. ----
+    const { error: gggClearErr } = await teacherGGG.rpc("clear_child_sna_not_required", { p_passport_id: child1GGGId, p_institution_id: institutionGGGId });
+    record("GGG3a clear_child_sna_not_required() succeeds for the same authority", !gggClearErr, gggClearErr?.message);
+
+    const { data: gapsAfterClearGGG } = await teacherGGG.rpc("get_my_class_sna_gaps");
+    record(
+      "GGG3b THE UNDO ITSELF: child1 reappears as a gap after clearing the fact",
+      (gapsAfterClearGGG ?? []).some((g) => g.passport_id === child1GGGId),
+      JSON.stringify(gapsAfterClearGGG)
+    );
+
+    // ---- GGG4: a REAL 1:1 SNA assignment clears the fact
+    // automatically, per Daniel's own requirement (b) -- proven by
+    // re-setting it, then asserting it's genuinely gone after a real
+    // assign_sna_to_child() call, not merely inferred from the gap
+    // disappearing (which a real assignment would do anyway). ----
+    await teacherGGG.rpc("set_child_sna_not_required", { p_passport_id: child1GGGId, p_institution_id: institutionGGGId });
+    const { data: flagBeforeAssignGGG } = await admin.from("child_sna_not_required").select("id").eq("passport_id", child1GGGId).eq("institution_id", institutionGGGId);
+    record("GGG4a setup: the fact is genuinely recorded before the real assignment", (flagBeforeAssignGGG ?? []).length === 1, JSON.stringify(flagBeforeAssignGGG));
+
+    const { error: gggAssignErr } = await teacherGGG.rpc("assign_sna_to_child", { p_passport_id: child1GGGId, p_user_id: snaGGGId, p_institution_id: institutionGGGId });
+    if (gggAssignErr) throw gggAssignErr;
+
+    const { data: flagAfterAssignGGG } = await admin.from("child_sna_not_required").select("id").eq("passport_id", child1GGGId).eq("institution_id", institutionGGGId);
+    record(
+      "GGG4b THE FIX ITSELF: a real SNA assignment clears the fact rather than contradicting it -- zero rows remain, confirmed by direct re-read, not just the gap's own absence",
+      (flagAfterAssignGGG ?? []).length === 0,
+      JSON.stringify(flagAfterAssignGGG)
+    );
+
+    // ---- GGG5: the class-wide equivalent (assign_class_sna()) clears
+    // the fact for EVERY child currently in the class, proven on two
+    // children at once. child1 already has a real 1:1 assignment from
+    // GGG4 (so its own flag is already gone, nothing left to prove
+    // there) -- set the fact fresh on child2, plus end child1's 1:1 so
+    // a class-wide SNA can be assigned without "already has an
+    // assigned SNA" refusing it. ----
+    await admin.from("child_assignments").update({ ended_at: new Date().toISOString(), ended_by: principalGGGId, end_reason: "GGG5 fixture: freeing child1 for the class-wide assignment test." }).eq("passport_id", child1GGGId).is("ended_at", null);
+    await teacherGGG.rpc("set_child_sna_not_required", { p_passport_id: child2GGGId, p_institution_id: institutionGGGId });
+    const { data: flagsBeforeClassAssignGGG } = await admin.from("child_sna_not_required").select("passport_id").eq("institution_id", institutionGGGId);
+    record("GGG5a setup: child2's fact is recorded before the class-wide assignment", (flagsBeforeClassAssignGGG ?? []).some((r) => r.passport_id === child2GGGId), JSON.stringify(flagsBeforeClassAssignGGG));
+
+    const { error: gggClassAssignErr } = await principalGGG.rpc("assign_class_sna", { p_class_id: classGGGId, p_user_id: snaGGGId });
+    if (gggClassAssignErr) throw gggClassAssignErr;
+
+    const { data: flagsAfterClassAssignGGG } = await admin.from("child_sna_not_required").select("passport_id").eq("institution_id", institutionGGGId);
+    record(
+      "GGG5b THE CLASS-WIDE FIX: assign_class_sna() clears the fact for child2 too -- zero rows remain for this institution",
+      (flagsAfterClassAssignGGG ?? []).length === 0,
+      JSON.stringify(flagsAfterClassAssignGGG)
+    );
+
+    console.log("GGG summary complete.");
+
+    await admin.from("class_sna_assignments").delete().eq("class_id", classGGGId);
+    await admin.from("child_assignments").delete().eq("institution_id", institutionGGGId);
+    await admin.from("child_sna_not_required").delete().eq("institution_id", institutionGGGId);
+    await admin.from("class_children").delete().eq("class_id", classGGGId);
+    await admin.from("class_teachers").delete().eq("class_id", classGGGId);
+    await admin.from("classes").delete().eq("id", classGGGId);
+    await admin.from("passports").delete().in("id", [child1GGGId, child2GGGId]);
+    await admin.from("institutions").delete().eq("id", institutionGGGId);
+    for (const id of [principalGGGId, teacherGGGId, snaGGGId, outsiderGGGId]) {
       await admin.auth.admin.deleteUser(id);
     }
   }

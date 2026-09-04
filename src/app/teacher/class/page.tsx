@@ -83,6 +83,12 @@ export default function TeacherClassPage() {
   const [roster, setRoster] = useState<RosterChild[]>([]);
   const [nameMap, setNameMap] = useState<Map<string, string>>(new Map());
   const [assignmentMap, setAssignmentMap] = useState<Map<string, Assignment>>(new Map());
+  // Migration 0165 -- passport ids currently recorded as "does not
+  // require an SNA" at this institution. A persisted fact, not a
+  // per-viewer dismissal, so it's read the same way assignmentMap is:
+  // fresh from the shared table, not owned by this page.
+  const [snaNotRequiredSet, setSnaNotRequiredSet] = useState<Set<string>>(new Set());
+  const [snaNotRequiredPendingId, setSnaNotRequiredPendingId] = useState<string | null>(null);
   const [eligibleSnas, setEligibleSnas] = useState<{ userId: string; fullName: string }[]>([]);
   const [startTime, setStartTime] = useState<string>("07:30:00");
   const [cutoffTime, setCutoffTime] = useState<string>("15:00:00");
@@ -202,12 +208,52 @@ export default function TeacherClassPage() {
         assignments.set(a.passport_id, { id: a.id, snaUserId: a.user_id });
       }
       setAssignmentMap(assignments);
+
+      const { data: notRequiredRows } = await supabase
+        .from("child_sna_not_required")
+        .select("passport_id")
+        .eq("institution_id", staffRow.institution_id)
+        .in("passport_id", passportIds);
+      setSnaNotRequiredSet(new Set((notRequiredRows ?? []).map((r) => r.passport_id)));
     } else {
       setAssignmentMap(new Map());
+      setSnaNotRequiredSet(new Set());
     }
 
     setIsLoading(false);
   }, [user]);
+
+  async function handleSetSnaNotRequired(passportId: string) {
+    if (!institutionId) return;
+    setSnaNotRequiredPendingId(passportId);
+    const supabase = createClient();
+    const { error } = await supabase.rpc("set_child_sna_not_required", {
+      p_passport_id: passportId,
+      p_institution_id: institutionId,
+    });
+    setSnaNotRequiredPendingId(null);
+    if (!error) {
+      setSnaNotRequiredSet((prev) => new Set(prev).add(passportId));
+    }
+  }
+
+  async function handleClearSnaNotRequired(passportId: string) {
+    if (!institutionId) return;
+    setSnaNotRequiredPendingId(passportId);
+    const supabase = createClient();
+    const { error } = await supabase.rpc("clear_child_sna_not_required", {
+      p_passport_id: passportId,
+      p_institution_id: institutionId,
+    });
+    setSnaNotRequiredPendingId(null);
+    if (!error) {
+      setSnaNotRequiredSet((prev) => {
+        const next = new Set(prev);
+        next.delete(passportId);
+        return next;
+      });
+    }
+  }
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -267,11 +313,17 @@ export default function TeacherClassPage() {
                     <div className="flex flex-col gap-2">
                       {classRoster.map((c) => {
                         const assignment = assignmentMap.get(c.passportId);
+                        const isNotRequired = !assignment && snaNotRequiredSet.has(c.passportId);
+                        const isPending = snaNotRequiredPendingId === c.passportId;
                         return (
                           <div key={c.passportId} className="rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
                             <p className="text-sm font-semibold text-brand-neutral-black">{c.childName}</p>
                             <p className="mt-0.5 text-xs text-brand-neutral-black/50">
-                              {assignment ? `SNA: ${nameMap.get(assignment.snaUserId) ?? "Unknown"}` : "No SNA assigned"}
+                              {assignment
+                                ? `SNA: ${nameMap.get(assignment.snaUserId) ?? "Unknown"}`
+                                : isNotRequired
+                                  ? "No SNA required"
+                                  : "No SNA assigned"}
                             </p>
                             <button
                               type="button"
@@ -280,6 +332,32 @@ export default function TeacherClassPage() {
                             >
                               {assignment ? "Reassign SNA" : "Assign SNA"}
                             </button>
+                            {/* Migration 0165 -- a persisted fact, reversible
+                                either direction, never shown once a real
+                                assignment exists (assign_sna_to_child()
+                                clears it server-side anyway, but there's no
+                                reason to offer either action for a child who
+                                already has an SNA). */}
+                            {!assignment &&
+                              (isNotRequired ? (
+                                <button
+                                  type="button"
+                                  onClick={() => handleClearSnaNotRequired(c.passportId)}
+                                  disabled={isPending}
+                                  className="mt-2 block w-full text-center text-xs font-semibold text-brand-neutral-black/50 disabled:opacity-50"
+                                >
+                                  {isPending ? "…" : "Undo"}
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => handleSetSnaNotRequired(c.passportId)}
+                                  disabled={isPending}
+                                  className="mt-2 block w-full text-center text-xs font-semibold text-brand-neutral-black/50 disabled:opacity-50"
+                                >
+                                  {isPending ? "…" : "No SNA required"}
+                                </button>
+                              ))}
                           </div>
                         );
                       })}

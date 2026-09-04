@@ -64,6 +64,7 @@ interface MyIncidentRow {
   incident_id: string;
   occurred_at: string;
   location: string;
+  category: string | null;
   child_indices: string[] | null;
   debrief_required: boolean;
   debrief_completed: boolean;
@@ -112,6 +113,23 @@ function childCountLabel(childIndices: string[] | null): string {
   return `${count} child${count === 1 ? "" : "ren"} named`;
 }
 
+// A stub is an incident that has been stamped but never opened past
+// that -- category is the very first field the incident detail page
+// asks for (its own "category & narrative first" ordering), and
+// create_incident_stamp() never sets it. Null category is therefore
+// "genuinely nothing written yet", not "written but not yet signed
+// off" -- the two states get different copy below because "Sign off"
+// is simply wrong for a record that has no content to sign off on.
+function isUnstartedStub(incident: MyIncidentRow): boolean {
+  return incident.category === null;
+}
+
+function formatStampDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+}
+
 function getGreeting(): string {
   const hour = new Date().getHours();
   if (hour < 12) return "Good morning";
@@ -146,6 +164,27 @@ export default function TeacherDashboardPage() {
   const [coverGrants, setCoverGrants] = useState<CoverGrantRow[]>([]);
   const [snaGaps, setSnaGaps] = useState<SnaGapRow[]>([]);
   const [cutoffTime, setCutoffTime] = useState<string | null>(null);
+  const [snaNotRequiredPendingId, setSnaNotRequiredPendingId] = useState<string | null>(null);
+
+  // Migration 0165 -- "No SNA required" is a persisted fact
+  // (child_sna_not_required), not a per-viewer dismissal: it clears the
+  // gap for every teacher/principal at this institution, not just this
+  // screen. Removed from local state immediately on success rather than
+  // a full reload -- get_my_class_sna_gaps() itself now excludes it
+  // server-side too, so a later reload agrees.
+  async function handleNoSnaRequired(row: SnaGapRow) {
+    if (!institutionId) return;
+    setSnaNotRequiredPendingId(row.passport_id);
+    const supabase = createClient();
+    const { error } = await supabase.rpc("set_child_sna_not_required", {
+      p_passport_id: row.passport_id,
+      p_institution_id: institutionId,
+    });
+    setSnaNotRequiredPendingId(null);
+    if (!error) {
+      setSnaGaps((prev) => prev.filter((r) => r.passport_id !== row.passport_id));
+    }
+  }
 
   useEffect(() => {
     if (!user) return;
@@ -234,6 +273,12 @@ export default function TeacherDashboardPage() {
 
   const owed = attestationsOwed.filter((r) => !r.is_closed && (r.status === "not_attested" || r.status === "stale"));
   const notSignedOff = myIncidents.filter((i) => !i.teacher_signed_at);
+  // Split by whether anything has actually been written yet -- see
+  // isUnstartedStub()'s own comment. Same underlying bucket
+  // (get_my_incidents(), !teacher_signed_at), different copy: "Sign
+  // off" only makes sense once there's a record to sign off on.
+  const unstartedStubs = notSignedOff.filter(isUnstartedStub);
+  const writtenNotSignedOff = notSignedOff.filter((i) => !isUnstartedStub(i));
   const debriefOwed = myIncidents.filter((i) => i.debrief_required && !i.debrief_completed);
 
   const actionItemsReady = !isLoadingActionItems;
@@ -291,7 +336,19 @@ export default function TeacherDashboardPage() {
               />
             ))}
 
-            {notSignedOff.map((incident) => (
+            {unstartedStubs.map((incident) => (
+              <WorkQueueRow
+                key={incident.incident_id}
+                urgent
+                entity={`Incident Log ${formatStampDate(incident.occurred_at)}`}
+                exception={`${childCountLabel(incident.child_indices)} · not yet written`}
+                context={formatWaitingSince(incident.occurred_at)}
+                actionLabel="Continue Log"
+                href={`/teacher/incidents/${incident.incident_id}`}
+              />
+            ))}
+
+            {writtenNotSignedOff.map((incident) => (
               <WorkQueueRow
                 key={incident.incident_id}
                 urgent
@@ -343,6 +400,9 @@ export default function TeacherDashboardPage() {
                 exception={`No SNA assigned · ${row.class_name}`}
                 actionLabel="Review"
                 href="/teacher/class"
+                secondaryActionLabel="No SNA required"
+                onSecondaryAction={() => handleNoSnaRequired(row)}
+                isSecondaryActionPending={snaNotRequiredPendingId === row.passport_id}
               />
             ))}
           </div>

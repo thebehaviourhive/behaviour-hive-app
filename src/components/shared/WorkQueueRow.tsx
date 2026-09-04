@@ -52,6 +52,17 @@ export interface WorkQueueRowProps {
   href?: string;
   isActionPending?: boolean;
   urgent?: boolean;
+  // Optional SECOND action, always a mutation (onAction only -- a row
+  // with two navigations doesn't need this component's help). Added for
+  // the no-SNA-assigned bucket's own "No SNA required" -- a row whose
+  // primary action opens the record (Review/Assign) can also offer a
+  // direct resolution that clears the row without navigating away.
+  // Rendered as a lighter, outline-styled sibling button, never a
+  // second onAction/href pair on the primary slot -- most buckets have
+  // nothing to put here and omit it entirely.
+  secondaryActionLabel?: string;
+  onSecondaryAction?: () => void;
+  isSecondaryActionPending?: boolean;
 }
 
 export function WorkQueueRow({
@@ -63,6 +74,9 @@ export function WorkQueueRow({
   href,
   isActionPending = false,
   urgent = false,
+  secondaryActionLabel,
+  onSecondaryAction,
+  isSecondaryActionPending = false,
 }: WorkQueueRowProps) {
   const rowClassName = `rounded-2xl border p-4 shadow-sm lg:flex lg:items-center lg:gap-4 ${
     urgent ? "border-brand-golden-brown/20 bg-brand-pastel-blue/15" : "border-black/5 bg-white"
@@ -78,6 +92,13 @@ export function WorkQueueRow({
   const actionButtonClassName =
     "w-full lg:w-auto mt-3 flex-shrink-0 rounded-xl bg-brand-prussian-blue px-4 py-2 text-center font-sans text-body font-semibold text-white transition-colors disabled:cursor-not-allowed disabled:opacity-50 lg:mt-0";
 
+  // Outline-styled sibling for the secondary action -- deliberately
+  // lighter than the primary's filled button so the row still reads as
+  // one recommended action with a second, equally valid resolution
+  // beside it, not two competing calls to action.
+  const secondaryActionButtonClassName =
+    "w-full lg:w-auto mt-2 flex-shrink-0 rounded-xl border border-brand-prussian-blue px-4 py-2 text-center font-sans text-body font-semibold text-brand-prussian-blue transition-colors disabled:cursor-not-allowed disabled:opacity-50 lg:mt-0";
+
   const action = href ? (
     <Link href={href} className={`block ${actionButtonClassName}`}>
       {actionLabel}
@@ -90,6 +111,17 @@ export function WorkQueueRow({
       className={actionButtonClassName}
     >
       {isActionPending ? "…" : actionLabel}
+    </button>
+  );
+
+  const secondaryAction = secondaryActionLabel && onSecondaryAction && (
+    <button
+      type="button"
+      onClick={onSecondaryAction}
+      disabled={isSecondaryActionPending}
+      className={secondaryActionButtonClassName}
+    >
+      {isSecondaryActionPending ? "…" : secondaryActionLabel}
     </button>
   );
 
@@ -122,7 +154,14 @@ export function WorkQueueRow({
         </p>
       )}
 
-      {action}
+      {secondaryAction ? (
+        <div className="flex flex-col lg:flex-shrink-0 lg:flex-row lg:items-center lg:gap-2">
+          {action}
+          {secondaryAction}
+        </div>
+      ) : (
+        action
+      )}
     </div>
   );
 }
