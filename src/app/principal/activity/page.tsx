@@ -11,14 +11,16 @@ import type { ActivityEventType } from "@/lib/activityEvents";
 
 const PAGE_SIZE = 20;
 
-// Migration 0158, Support Button item 6. Institutional/operational
-// events only -- not whole-school-per-child (that's the teacher's own
-// job, and would break the privacy posture the incident work-queue
-// buckets already hold), not narrowly self-only (too thin to mean
-// anything for a role that isn't a participant in most school events
-// the way a parent or teacher is). Support alerts are the first, and
-// only, event type this feed carries so far -- see that migration's own
-// header for what's deliberately not built yet.
+// Migration 0158, Support Button item 6, widened by 0171. Institutional/
+// operational events only -- not whole-school-per-child (that's the
+// teacher's own job, and would break the privacy posture the incident
+// work-queue buckets already hold), not narrowly self-only (too thin to
+// mean anything for a role that isn't a participant in most school
+// events the way a parent or teacher is). Support alerts (0158) plus
+// the staff-level roster history (0171: joins, leaves, rejections,
+// handovers, temporary access grants). The per-child half stays
+// deliberately unbuilt -- see CLAUDE.md's own "PRINCIPAL ACTIVITY FEED
+// -- PER-CHILD EVENTS, OPEN" entry.
 //
 // Row shape is leaner than the teacher/clinician/parent feeds
 // (id/event_type/event_description/created_at only) -- no passport_id/

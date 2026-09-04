@@ -41,7 +41,18 @@ export type ActivityEventType =
   // child_name are null on these rows). Principal side deliberately
   // not built here; depends on how that track's own activity container
   // ends up scoped, reported separately.
-  | "support_alert";
+  | "support_alert"
+  // Migration 0171 -- the principal activity feed's staff half (joins,
+  // leaves, rejections, handovers, temporary access grants). Principal
+  // track only -- none of these are per-child, so none of the other
+  // tracks' own feeds ever produce them. The per-child half stays
+  // deliberately unbuilt; see CLAUDE.md's own "PRINCIPAL ACTIVITY FEED
+  // -- PER-CHILD EVENTS, OPEN" entry for why.
+  | "staff_joined"
+  | "staff_deactivated"
+  | "staff_join_rejected"
+  | "principal_handover"
+  | "temporary_access_grant";
 
 export interface ActivityLogEntry {
   id: string;
@@ -97,6 +108,15 @@ export const ACTIVITY_EVENT_ICON: Record<
   // that file already does -- this feature already deviates from the
   // hand-drawn icons.tsx house style there, not a new inconsistency.
   support_alert: SupportAlertIcon,
+  // Migration 0171 -- reusing existing icons rather than adding new
+  // ones: PeopleIcon already means "a roster/team change" (team_linked);
+  // LockIcon already means "access changed" (access_revoked); KeyIcon
+  // already means "access granted/transferred" (passport_shared).
+  staff_joined: PeopleIcon,
+  staff_deactivated: LockIcon,
+  staff_join_rejected: LockIcon,
+  principal_handover: KeyIcon,
+  temporary_access_grant: KeyIcon,
 };
 
 export function formatActivityTimestamp(isoString: string): string {
