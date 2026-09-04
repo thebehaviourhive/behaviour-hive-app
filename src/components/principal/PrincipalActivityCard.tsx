@@ -17,7 +17,10 @@ interface PrincipalActivityEntry {
 
 // Migration 0158, Support Button item 6's dashboard preview. Same
 // "3 rows, link to the full page" shape as TeacherActivityCard/
-// ClinicianActivityCard.
+// ClinicianActivityCard. Renders inside <main>'s own px-4 (moved above
+// the incident list -- see the dashboard's own comment at its call
+// site), so this owns no horizontal margin of its own, matching
+// ClinicianActivityCard's identical convention for the same reason.
 export function PrincipalActivityCard() {
   const fetchPage = useCallback(async (limit: number, offset: number) => {
     const supabase = createClient();
@@ -32,7 +35,7 @@ export function PrincipalActivityCard() {
   return (
     <Link
       href="/principal/activity"
-      className="mx-4 mb-6 block rounded-2xl border border-brand-off-white bg-white p-5 shadow-sm"
+      className="mb-6 block rounded-2xl border border-brand-off-white bg-white p-5 shadow-sm"
     >
       <h2 className="mb-4 font-heading text-xl font-bold text-brand-prussian-blue">
         Recent Activity

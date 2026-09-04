@@ -532,6 +532,12 @@ export default function PrincipalDashboardPage() {
           </>
         )}
 
+        {/* Daniel's own call, reversing the original placement: Recent
+            Activity now sits above the incident list rather than below
+            it -- institution-wide operational context (support alerts
+            today) belongs before the incident history, not after it. */}
+        {!isLoading && !error && <PrincipalActivityCard />}
+
         {!isLoading && !error && (
           <section className="mt-6">
             <h2 className="mb-2 font-accent text-eyebrow font-bold uppercase tracking-wide text-brand-neutral-black/50">
@@ -555,13 +561,6 @@ export default function PrincipalDashboardPage() {
           </section>
         )}
       </main>
-
-      {/* Migration 0158, item 6 -- institutional/operational activity,
-          support alerts only so far. Same "3 rows, link to the full
-          page" preview shape as the teacher/clinician dashboards' own
-          cards, placed at the same point in the page (after the work
-          queue, before the nav) for consistency. */}
-      {!isLoading && !error && <PrincipalActivityCard />}
 
       {reviewTarget && (
         <ReviewStaffJoinSheet

@@ -262,9 +262,10 @@ export default function PrincipalDirectoryPage() {
             <div className="rounded-2xl bg-white p-8 text-center shadow-sm">
               <p className="font-sans text-body text-brand-neutral-black/60">Select an entry from the list to see its detail.</p>
             </div>
-          ) : segment === "staff" && selectedStaff ? (
+          ) : segment === "staff" && selectedStaff && institutionId ? (
             <StaffDetail
               member={selectedStaff}
+              institutionId={institutionId}
               isSelf={selectedStaff.user_id === user?.id}
               onChanged={() => setStaffRefreshToken((n) => n + 1)}
             />
@@ -282,14 +283,19 @@ export default function PrincipalDirectoryPage() {
             <div className="overflow-hidden rounded-2xl bg-white shadow-sm">
               <ChildDetail passportId={selectedPassportId} />
             </div>
-          ) : segment === "temporary-access" && selectedGrant ? (
+          ) : segment === "temporary-access" && selectedGrant && institutionId ? (
             <TemporaryAccessDetail
               grant={selectedGrant}
+              institutionId={institutionId}
               cutoffTime={cutoffTime}
-              onRevoked={() => {
-                setSelectedGrant(null);
-                setTemporaryAccessRefreshToken((n) => n + 1);
-              }}
+              // Selection deliberately stays put after a revoke -- the
+              // pane now refreshes its own state directly (see
+              // TemporaryAccessDetail's own header comment) and shows
+              // "Revoked" in place, rather than the old
+              // setSelectedGrant(null) that unmounted it and made
+              // correctness depend on that unmount instead of a real
+              // refresh.
+              onRevoked={() => setTemporaryAccessRefreshToken((n) => n + 1)}
             />
           ) : segment === "clinicians" && institutionId && isEngagingNewClinician && isDesktopWidth ? (
             <ClinicianCoverageDetail
