@@ -2,7 +2,13 @@
 // Stage 1: data model + core lifecycle only -- see supabase/migrations/
 // 0061_messages_ticketing.sql for the schema and RPCs these mirror.
 
-export type MessageRole = "parent" | "class_teacher" | "clinician";
+// "principal" added -- a principal can now both be addressed (a new
+// recipient branch on get_message_recipient_candidates()) and start a
+// thread (a new sender branch on send_message(), scoped to children
+// enrolled at their own institution). "Threads they are addressed on,
+// nothing else" was the rule for READING -- can_view_message() -- not
+// for who may send; Daniel's own correction, see migration 0161.
+export type MessageRole = "parent" | "class_teacher" | "clinician" | "principal";
 
 export type MessageStatus = "open" | "acknowledged" | "in_discussion" | "closed";
 
@@ -10,6 +16,7 @@ export const ROLE_LABEL: Record<MessageRole, string> = {
   parent: "Parent",
   class_teacher: "Class Teacher",
   clinician: "Clinician",
+  principal: "Principal",
 };
 
 export interface MessageCategory {

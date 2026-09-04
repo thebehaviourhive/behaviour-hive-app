@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { AppBottomNav } from "@/components/ui/AppBottomNav";
 import { useSupportButtonNavSlots } from "@/hooks/useSupportButtonNavSlots";
+import { useMessagesAwaitingActionCount } from "@/hooks/useMessagesAwaitingActionCount";
 import { createClient } from "@/lib/supabase/client";
 import { PRINCIPAL_NAV_TABS } from "./principalNavTabs";
 
@@ -68,6 +69,16 @@ export function PrincipalBottomNav() {
   }, [userId]);
   const { alertSlot } = useSupportButtonNavSlots({ institutionId, userId, role: null });
 
+  // Migration 0161 -- same shared hook TeacherBottomNav/ClinicianBottomNav
+  // already use for their own Messages badge, "entirely self-scoped
+  // server-side (auth.uid()), nothing role-specific needed" per its own
+  // comment -- confirmed true for a principal too, no RPC change required
+  // for this specific count.
+  const messagesAwaitingCount = useMessagesAwaitingActionCount(userId);
+  const tabs = PRINCIPAL_NAV_TABS.map((tab) =>
+    tab.key === "messages" ? { ...tab, badgeCount: messagesAwaitingCount } : tab
+  );
+
   // Widened past AppBottomNav's own max-w-sm default -- measured live at
   // 1280px (Stage 1's own review): the shared default left the four tabs
   // clustered in a 384px strip centred inside a full-width white bar,
@@ -78,7 +89,7 @@ export function PrincipalBottomNav() {
   // still applies.
   return (
     <div className="lg:hidden">
-      <AppBottomNav tabs={PRINCIPAL_NAV_TABS} maxWidthClassName="max-w-2xl" alertSlot={alertSlot} />
+      <AppBottomNav tabs={tabs} maxWidthClassName="max-w-2xl" alertSlot={alertSlot} />
     </div>
   );
 }

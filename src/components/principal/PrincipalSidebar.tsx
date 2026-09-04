@@ -5,7 +5,9 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { BrandMark } from "@/components/ui/BrandMark";
 import { useSupportButtonNavSlots } from "@/hooks/useSupportButtonNavSlots";
+import { useMessagesAwaitingActionCount } from "@/hooks/useMessagesAwaitingActionCount";
 import { createClient } from "@/lib/supabase/client";
+import { CountBadge } from "@/components/ui/CountBadge";
 import { PRINCIPAL_NAV_TABS } from "./principalNavTabs";
 
 // PRD 4, Stage 1 -- the principal track's first responsive breakpoint,
@@ -69,6 +71,11 @@ export function PrincipalSidebar() {
   }, [userId]);
   const { alertSlot } = useSupportButtonNavSlots({ institutionId, userId, role: null });
 
+  // Migration 0161 -- same hook the bottom nav's own Messages badge
+  // uses; kept in sync by sharing that same self-scoped RPC, not by
+  // being the same component, matching the alertSlot comment above.
+  const messagesAwaitingCount = useMessagesAwaitingActionCount(userId);
+
   return (
     <aside className="hidden lg:fixed lg:inset-y-0 lg:left-0 lg:z-10 lg:flex lg:w-64 lg:flex-col lg:border-r lg:border-black/5 lg:bg-brand-off-white lg:px-4 lg:py-6">
       <div className="flex items-center gap-2 px-2 pb-6">
@@ -98,7 +105,10 @@ export function PrincipalSidebar() {
                   : "font-medium text-brand-neutral-black/70"
               }`}
             >
-              <Icon aria-hidden size={20} strokeWidth={2} />
+              <span className="relative flex">
+                <Icon aria-hidden size={20} strokeWidth={2} />
+                {tab.key === "messages" && <CountBadge count={messagesAwaitingCount} size="small" />}
+              </span>
               {tab.label}
             </Link>
           );

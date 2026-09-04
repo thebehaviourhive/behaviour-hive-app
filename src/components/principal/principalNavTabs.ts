@@ -1,4 +1,4 @@
-import { House, TriangleAlert, Users, School as SchoolIcon } from "lucide-react";
+import { House, Mail, TriangleAlert, Users, School as SchoolIcon } from "lucide-react";
 import type { NavTab } from "@/components/ui/AppBottomNav";
 
 // PRD 4, Stage 1 -- the one place the principal track's four top-level
@@ -44,5 +44,18 @@ export const PRINCIPAL_NAV_TABS: NavTab[] = [
     icon: SchoolIcon,
     href: "/principal/school",
     isActive: (pathname) => pathname.startsWith("/principal/school"),
+  },
+  // Migration 0161 -- a principal can now be addressed on a thread and
+  // start one (scoped to their own institution's children); "messages"
+  // is a real fifth destination, not a placeholder. badgeCount is
+  // injected by each consumer (PrincipalBottomNav/PrincipalSidebar),
+  // same as every field on this base array that varies per render --
+  // this file only owns the destinations themselves.
+  {
+    key: "messages",
+    label: "Messages",
+    icon: Mail,
+    href: "/principal/messages",
+    isActive: (pathname) => pathname.startsWith("/principal/messages"),
   },
 ];
