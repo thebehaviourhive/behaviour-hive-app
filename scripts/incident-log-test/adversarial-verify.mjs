@@ -20,7 +20,7 @@
 // stage development. Every check from V onward is independently
 // self-contained (own institution, own accounts, own cleanup) and
 // individually selectable: V, W, X, Y, Z, AA, BB, CC, DD, EE, FF, GG,
-// HH, II, JJ, KK, LL, MM, NN, OO, PP, QQ, RR, SS, TT, UU, VV, WW, XX, YY, ZZ, AAA, BBB, CCC, DDD, EEE, FFF, GGG, HHH. Selecting none of these (ONLY_CHECKS unset) is the full run --
+// HH, II, JJ, KK, LL, MM, NN, OO, PP, QQ, RR, SS, TT, UU, VV, WW, XX, YY, ZZ, AAA, BBB, CCC, DDD, EEE, FFF, GGG, HHH, III, JJJ. Selecting none of these (ONLY_CHECKS unset) is the full run --
 // the one that gates deploys -- and its behavior is unchanged: same
 // checks, same order, same pass/fail counts. The only observable
 // difference is where the top-level fixture's own cleanup log line
@@ -12244,6 +12244,378 @@ async function main() {
     const outsiderParentHHHId = outsiderParentHHHUser.users.find((u) => u.email === "hhh.outsiderparent@thebehaviourhive.com")?.id;
     const parentHHHId = outsiderParentHHHUser.users.find((u) => u.email === "hhh.parent@thebehaviourhive.com")?.id;
     for (const id of [principalHHHId, teacherHHHId, parentHHHId, outsiderParentHHHId].filter(Boolean)) {
+      await admin.auth.admin.deleteUser(id);
+    }
+  }
+
+  console.log(`\n== CHECK III: Incident Log Phase 7 -- THE CONTINUOUS LIFECYCLE RUN. Every existing check builds its own fixture and proves one guarantee in isolation; nothing has ever walked a SINGLE incident through every stage in one continuous sequence. This does: create_incident_stamp() (two children, so two-child scoping survives the whole run, not just the stamp) -> content written for BOTH children separately -> attestations_requested toggled (stage two, status draft->awaiting_signoff) -> a named staff member attests, withdraws (blocking sign-off while withdrawn -- proven, not assumed), re-attests -> a debrief completed -> sign_off_incident() (the RPC, not a raw update) -> an immutability tamper attempt by the same owning teacher who just signed, confirmed not persisted -> countersign_incident() (the RPC) -> get_incident_export(), read by the owning teacher, checked for the two-child content split specifically (each child's own distress_level/remained_on_site/remained_detail, the restrictive practice attributed to child A, the injury attributed to child B) -- the one thing CHECK U's own export coverage never proved (one child only) and CHECK B's own two-child incident never reached (sign-off there was a raw update, never fed to export). Report note: whether this run found anything the per-stage checks missed is reported separately, in prose, not folded into a pass count. ==`);
+  if (shouldRun("III")) {
+    const { data: locIII } = await admin.from("incident_locations").select("id").eq("value", "Classroom").is("institution_id", null).single();
+    const { data: restraintActionIII } = await admin.from("incident_action_types").select("id").eq("value", "Physical restraint (CPI)").is("institution_id", null).single();
+    const { data: bruisingTypeIII } = await admin.from("incident_injury_types").select("id").eq("value", "Bruising").is("institution_id", null).single();
+    const { data: headRegionIII } = await admin.from("incident_body_regions").select("id").eq("value", "head").is("institution_id", null).single();
+
+    const { data: instIII, error: instIIIErr } = await admin
+      .from("institutions")
+      .insert({ name: "III Institution", institution_code: CODE + "III", status: "verified" })
+      .select()
+      .single();
+    if (instIIIErr) throw instIIIErr;
+    const institutionIIIId = instIII.id;
+
+    const teacherIIIId = await createUser("iii.teacher@thebehaviourhive.com", "III Teacher", "class_teacher");
+    const teacherBIIIId = await createUser("iii.teacherb@thebehaviourhive.com", "III Teacher B", "class_teacher");
+    const principalIIIId = await createUser("iii.principal@thebehaviourhive.com", "III Principal", "principal");
+    const outsiderIIIId = await createUser("iii.outsider@thebehaviourhive.com", "III Outsider", "class_teacher");
+
+    await admin.from("institution_staff").insert({ institution_id: institutionIIIId, user_id: principalIIIId, role: "principal" });
+    const { data: teacherIIIStaffRow } = await admin.from("institution_staff").insert({ institution_id: institutionIIIId, user_id: teacherIIIId, role: "class_teacher" }).select().single();
+    const { data: teacherBIIIStaffRow } = await admin.from("institution_staff").insert({ institution_id: institutionIIIId, user_id: teacherBIIIId, role: "class_teacher" }).select().single();
+
+    const principalIII = await signedInClient("iii.principal@thebehaviourhive.com");
+    const teacherIII = await signedInClient("iii.teacher@thebehaviourhive.com");
+    const teacherBIII = await signedInClient("iii.teacherb@thebehaviourhive.com");
+    const outsiderIII = await signedInClient("iii.outsider@thebehaviourhive.com");
+
+    for (const row of [teacherIIIStaffRow, teacherBIIIStaffRow]) {
+      const { error } = await principalIII.rpc("approve_staff_join", { p_institution_staff_id: row.id });
+      if (error) throw error;
+    }
+
+    const { data: childAIIIId } = await principalIII.rpc("create_school_passport", { p_institution_id: institutionIIIId, p_child_name: "III Child A" });
+    const { data: childBIIIId } = await principalIII.rpc("create_school_passport", { p_institution_id: institutionIIIId, p_child_name: "III Child B" });
+
+    // ---- STAGE 1: the 15-second stamp, two children, one real named --
+    // staff member (never the owner -- matches the default UI shape:
+    // the client always pre-selects the creator, but this proves the
+    // lifecycle for a genuine third party too, which is the harder
+    // case attestation-wise). ----
+    const { data: incidentIIIId, error: stampIIIErr } = await teacherIII.rpc("create_incident_stamp", {
+      p_institution_id: institutionIIIId,
+      p_occurred_at: new Date().toISOString(),
+      p_location_id: locIII.id,
+      p_child_passport_ids: [childAIIIId, childBIIIId],
+      p_staff: [{ user_id: teacherBIIIId, involvement: "witnessed" }],
+    });
+    record("III1 STAGE 1: create_incident_stamp() succeeds for a two-child incident", !stampIIIErr, stampIIIErr?.message);
+
+    const { data: iiiChildRows } = await admin.from("incident_children").select("id, passport_id, child_index").eq("incident_id", incidentIIIId);
+    record("III1b exactly 2 children, never a childless window", (iiiChildRows ?? []).length === 2, JSON.stringify(iiiChildRows));
+    const iiiChildARow = iiiChildRows.find((r) => r.passport_id === childAIIIId);
+    const iiiChildBRow = iiiChildRows.find((r) => r.passport_id === childBIIIId);
+
+    // ---- STAGE 1b: content, written SEPARATELY for both children -- --
+    // the two-child scoping this run exists to prove survives all the
+    // way to export.
+    const { error: iiiContentErr } = await teacherIII.from("incidents").update({
+      category: "one_party_incident",
+      narrative: "III continuous-run narrative.",
+      parent_summary: "III continuous-run parent summary.",
+      anyone_injured: true,
+      debrief_required: true,
+    }).eq("id", incidentIIIId);
+    record("III2 base incident content saved", !iiiContentErr, iiiContentErr?.message);
+
+    const { error: iiiChildAErr } = await teacherIII.from("incident_children").update({
+      distress_level: "yes_definitely",
+      remained_on_site: true,
+      recovery_methods: ["chat", "co-regulation"],
+    }).eq("id", iiiChildARow.id);
+    const { error: iiiChildBErr } = await teacherIII.from("incident_children").update({
+      distress_level: "not_distressed",
+      remained_on_site: false,
+      remained_detail: "Collected early by a guardian.",
+      recovery_methods: ["choice"],
+    }).eq("id", iiiChildBRow.id);
+    record("III2b per-child content saved for BOTH children independently", !iiiChildAErr && !iiiChildBErr, `A:${iiiChildAErr?.message}, B:${iiiChildBErr?.message}`);
+
+    // ---- STAGE 1c: restrictive practice on child A, injury on child --
+    // B -- deliberately different children, so export's own per-record
+    // passport_id attribution is a real test, not coincidence. ----
+    const { error: iiiActionErr } = await teacherIII.from("incident_actions").insert({ incident_id: incidentIIIId, action_type_id: restraintActionIII.id });
+    const { data: iiiRpRow, error: iiiRpErr } = await teacherIII
+      .from("restrictive_practices")
+      .insert({ incident_id: incidentIIIId, passport_id: childAIIIId, planning_status: "not_planned", hold_type: "childrens", hold_position: "standing", hold_level: "low" })
+      .select()
+      .single();
+    record("III3a CPI action + restrictive practice recorded for child A", !iiiActionErr && !iiiRpErr && Boolean(iiiRpRow), `${iiiActionErr?.message}, ${iiiRpErr?.message}`);
+
+    const { data: iiiInjuryRow, error: iiiInjuryErr } = await teacherIII
+      .from("incident_injuries")
+      .insert({ incident_id: incidentIIIId, injured_party_type: "student", passport_id: childBIIIId, injury_types: ["Bruising"] })
+      .select()
+      .single();
+    const { error: iiiBodyMarkErr } = await teacherIII.from("incident_body_marks").insert({
+      injury_id: iiiInjuryRow.id, view: "front", x: 0.5, y: 0.5, injury_type_id: bruisingTypeIII.id, region_id: headRegionIII.id, side: "centre",
+    });
+    record("III3b injury + body mark recorded for child B", !iiiInjuryErr && !iiiBodyMarkErr, `${iiiInjuryErr?.message}, ${iiiBodyMarkErr?.message}`);
+
+    // ---- STAGE 2: attestations_requested toggled -- the transition --
+    // no other check in this run's own family (CHECK U) ever exercises
+    // on the SAME incident it later exports.
+    const { error: iiiStage2Err } = await teacherIII.from("incidents").update({ attestations_requested: true }).eq("id", incidentIIIId);
+    const { data: iiiAfterStage2 } = await admin.from("incidents").select("status, attestations_requested_at").eq("id", incidentIIIId).single();
+    record(
+      "III4 STAGE 2: attestations_requested toggled, status derives to 'awaiting_signoff'",
+      !iiiStage2Err && iiiAfterStage2.status === "awaiting_signoff" && iiiAfterStage2.attestations_requested_at !== null,
+      `${iiiStage2Err?.message}, ${JSON.stringify(iiiAfterStage2)}`
+    );
+
+    // ---- STAGE 3: attest, withdraw (proving it genuinely blocks --
+    // sign-off while withdrawn, not just changing a label), re-attest.
+    const { data: iiiStaffRow } = await admin.from("incident_staff").select("id").eq("incident_id", incidentIIIId).eq("user_id", teacherBIIIId).single();
+    const { error: iiiAttest1Err } = await teacherBIII.rpc("attest_to_incident", { p_incident_staff_id: iiiStaffRow.id, p_addendum: "First pass." });
+    record("III5a STAGE 3: named staff member attests", !iiiAttest1Err, iiiAttest1Err?.message);
+
+    const { error: iiiWithdrawErr } = await teacherBIII.rpc("withdraw_attestation", { p_incident_staff_id: iiiStaffRow.id, p_reason: "III run: checking the record before re-confirming." });
+    record("III5b withdraws", !iiiWithdrawErr, iiiWithdrawErr?.message);
+
+    const { error: iiiBlockedSignoffErr } = await teacherIII.rpc("sign_off_incident", { p_incident_id: incidentIIIId });
+    record(
+      "III5c COMPOSITION PROOF: sign_off_incident() is genuinely refused while the attestation is withdrawn -- not just a status label, an actual gate on the very next stage",
+      Boolean(iiiBlockedSignoffErr) && /withdrawn/i.test(iiiBlockedSignoffErr.message),
+      iiiBlockedSignoffErr?.message
+    );
+
+    const { error: iiiReattestErr } = await teacherBIII.rpc("attest_to_incident", { p_incident_staff_id: iiiStaffRow.id, p_addendum: "Confirmed, re-attesting." });
+    record("III5d re-attests, clearing the block", !iiiReattestErr, iiiReattestErr?.message);
+
+    // ---- STAGE 4: debrief, completed (debrief_required was set true --
+    // in III2, so this is a real gate being satisfied, not a no-op).
+    const { error: iiiDebriefErr } = await teacherIII.from("incident_debriefs").insert({
+      incident_id: incidentIIIId,
+      debrief_date: new Date().toISOString().slice(0, 10),
+      staff_present: ["III Teacher", "III Teacher B"],
+      notes: "III continuous-run debrief notes.",
+      actions_for_management: "III continuous-run management actions.",
+      completed_by: teacherIIIId,
+      completed_at: new Date().toISOString(),
+    });
+    record("III6 STAGE 4: debrief completed", !iiiDebriefErr, iiiDebriefErr?.message);
+
+    // ---- STAGE 5: sign_off_incident() -- the RPC, now genuinely --
+    // unblocked (re-attested, debrief complete).
+    const { error: iiiSignErr } = await teacherIII.rpc("sign_off_incident", { p_incident_id: incidentIIIId });
+    record("III7 STAGE 5: sign_off_incident() succeeds now every gate is satisfied", !iiiSignErr, iiiSignErr?.message);
+
+    // ---- IMMUTABILITY: the same owning teacher who just signed --
+    // attempts a direct tamper. Not re-proving the trigger's own rigor
+    // (CHECK O6/R12 already do that, deliberately, via a caller with a
+    // genuinely valid RLS path) -- this proves the simpler, more
+    // literal case IN THIS SAME CONTINUOUS RUN: a finalised record does
+    // not silently accept a write from the person who most recently had
+    // every reason to be allowed to write to it.
+    const { error: iiiTamperErr } = await teacherIII.from("incidents").update({ narrative: "III tampered narrative." }).eq("id", incidentIIIId);
+    const { data: iiiAfterTamper } = await admin.from("incidents").select("narrative").eq("id", incidentIIIId).single();
+    record(
+      "III8 IMMUTABILITY: a post-signoff tamper attempt by the same owning teacher does not persist",
+      iiiAfterTamper.narrative === "III continuous-run narrative." && iiiAfterTamper.narrative !== "III tampered narrative.",
+      iiiAfterTamper.narrative
+    );
+
+    // ---- STAGE 6: countersign_incident() -- the RPC. ----
+    const { error: iiiCountersignErr } = await principalIII.rpc("countersign_incident", { p_incident_id: incidentIIIId });
+    const { data: iiiAfterCountersign } = await admin.from("incidents").select("status, countersigned_at").eq("id", incidentIIIId).single();
+    record(
+      "III9 STAGE 6: countersign_incident() succeeds, status derives to 'finalised'",
+      !iiiCountersignErr && iiiAfterCountersign.status === "finalised" && iiiAfterCountersign.countersigned_at !== null,
+      `${iiiCountersignErr?.message}, ${JSON.stringify(iiiAfterCountersign)}`
+    );
+
+    // ---- STAGE 7: get_incident_export() -- the two-child scoping --
+    // proof this run exists for. ----
+    const { data: iiiExport, error: iiiExportErr } = await teacherIII.rpc("get_incident_export", { p_incident_id: incidentIIIId });
+    record("III10a STAGE 7: get_incident_export() succeeds for the owning teacher", !iiiExportErr, iiiExportErr?.message);
+
+    const iiiExportChildA = iiiExport?.children?.find((c) => c.passport_id === childAIIIId);
+    const iiiExportChildB = iiiExport?.children?.find((c) => c.passport_id === childBIIIId);
+    record(
+      "III10b THE PROOF: export's own children array carries child A's OWN content (yes_definitely/remained on site), not merged with or overwritten by child B's",
+      iiiExportChildA?.distress_level === "yes_definitely" && iiiExportChildA?.remained_on_site === true,
+      JSON.stringify(iiiExportChildA)
+    );
+    record(
+      "III10c THE PROOF: export's own children array carries child B's OWN content (not_distressed/did not remain, with the detail), independently of child A's",
+      iiiExportChildB?.distress_level === "not_distressed" && iiiExportChildB?.remained_on_site === false && iiiExportChildB?.remained_detail === "Collected early by a guardian.",
+      JSON.stringify(iiiExportChildB)
+    );
+    record(
+      "III10d the restrictive practice is attributed to child A specifically, not child B or unattributed",
+      iiiExport?.restrictive_practices?.[0]?.passport_id === childAIIIId,
+      JSON.stringify(iiiExport?.restrictive_practices)
+    );
+    record(
+      "III10e the injury (with its body mark nested) is attributed to child B specifically, not child A",
+      iiiExport?.injuries?.[0]?.passport_id === childBIIIId && (iiiExport?.injuries?.[0]?.body_marks?.length ?? 0) === 1,
+      JSON.stringify(iiiExport?.injuries)
+    );
+    record(
+      "III10f the debrief this run completed in stage 4 is present in the export, correct content",
+      iiiExport?.debrief?.notes === "III continuous-run debrief notes." && iiiExport?.debrief?.completed_at !== null,
+      JSON.stringify(iiiExport?.debrief)
+    );
+    record(
+      "III10g the named staff member's final attestation state (re-attested, 'current') is reflected in staff_attestations, not the intermediate withdrawn state stage 3 passed through",
+      (iiiExport?.staff_attestations ?? []).find((s) => s.incident_staff_id === iiiStaffRow.id)?.status === "current",
+      JSON.stringify(iiiExport?.staff_attestations)
+    );
+
+    const { error: iiiOutsiderExportErr } = await outsiderIII.rpc("get_incident_export", { p_incident_id: incidentIIIId });
+    record("III11 an outsider with no standing on this incident is refused export, at the very end of the same run", Boolean(iiiOutsiderExportErr), iiiOutsiderExportErr?.message);
+
+    console.log("III summary complete.");
+
+    await admin.from("incident_body_marks").delete().eq("injury_id", iiiInjuryRow.id);
+    await admin.from("incident_injuries").delete().eq("incident_id", incidentIIIId);
+    await admin.from("restrictive_practices").delete().eq("incident_id", incidentIIIId);
+    await admin.from("incident_actions").delete().eq("incident_id", incidentIIIId);
+    await admin.from("incident_debriefs").delete().eq("incident_id", incidentIIIId);
+    await admin.from("incident_attestations").delete().eq("incident_id", incidentIIIId);
+    await admin.from("incident_staff").delete().eq("incident_id", incidentIIIId);
+    await admin.from("incident_children").delete().eq("incident_id", incidentIIIId);
+    await admin.from("incidents").delete().eq("id", incidentIIIId);
+    await admin.from("passports").delete().in("id", [childAIIIId, childBIIIId]);
+    await admin.from("institutions").delete().eq("id", institutionIIIId);
+    for (const id of [teacherIIIId, teacherBIIIId, principalIIIId, outsiderIIIId]) {
+      await admin.auth.admin.deleteUser(id);
+    }
+  }
+
+  console.log(`\n== CHECK JJJ: Incident Log Phase 7 -- the two guard triggers with zero coverage anywhere in this suite, found by grepping every incident-module RPC/trigger name against every check (0080). guard_incident_injuries_named_party() refuses an injury naming a child or staff member not already on the incident (JJJ1); guard_restrictive_practice_staff_real_account() refuses linking a free-text-only staff entry, or one named on a DIFFERENT incident, to a restrictive-practice record (JJJ2). Both are BEFORE INSERT triggers, so a raw client insert hits them exactly as sign_off_incident()'s own guards do -- no RPC to call, the insert itself is the test. Each has a regression control proving the genuinely-valid case still works. ==`);
+  if (shouldRun("JJJ")) {
+    const { data: locJJJ } = await admin.from("incident_locations").select("id").eq("value", "Classroom").is("institution_id", null).single();
+
+    const { data: instJJJ, error: instJJJErr } = await admin
+      .from("institutions")
+      .insert({ name: "JJJ Institution", institution_code: CODE + "JJJ", status: "verified" })
+      .select()
+      .single();
+    if (instJJJErr) throw instJJJErr;
+    const institutionJJJId = instJJJ.id;
+
+    const teacherJJJId = await createUser("jjj.teacher@thebehaviourhive.com", "JJJ Teacher", "class_teacher");
+    const teacherBJJJId = await createUser("jjj.teacherb@thebehaviourhive.com", "JJJ Teacher B", "class_teacher");
+    const principalJJJId = await createUser("jjj.principal@thebehaviourhive.com", "JJJ Principal", "principal");
+
+    await admin.from("institution_staff").insert({ institution_id: institutionJJJId, user_id: principalJJJId, role: "principal" });
+    const { data: teacherJJJStaffRow } = await admin.from("institution_staff").insert({ institution_id: institutionJJJId, user_id: teacherJJJId, role: "class_teacher" }).select().single();
+    const { data: teacherBJJJStaffRow } = await admin.from("institution_staff").insert({ institution_id: institutionJJJId, user_id: teacherBJJJId, role: "class_teacher" }).select().single();
+
+    const principalJJJ = await signedInClient("jjj.principal@thebehaviourhive.com");
+    const teacherJJJ = await signedInClient("jjj.teacher@thebehaviourhive.com");
+
+    for (const row of [teacherJJJStaffRow, teacherBJJJStaffRow]) {
+      const { error } = await principalJJJ.rpc("approve_staff_join", { p_institution_staff_id: row.id });
+      if (error) throw error;
+    }
+
+    const { data: childJJJId } = await principalJJJ.rpc("create_school_passport", { p_institution_id: institutionJJJId, p_child_name: "JJJ Named Child" });
+    const { data: outsiderChildJJJId } = await principalJJJ.rpc("create_school_passport", { p_institution_id: institutionJJJId, p_child_name: "JJJ Unnamed Child" });
+
+    // incidentJJJ: owned by teacherJJJ, one named child, one named
+    // real-account staff member (teacherBJJJ) and one free-text-only
+    // staff entry -- exactly the two shapes JJJ2 needs to refuse.
+    const { data: incidentJJJId, error: stampJJJErr } = await teacherJJJ.rpc("create_incident_stamp", {
+      p_institution_id: institutionJJJId,
+      p_occurred_at: new Date().toISOString(),
+      p_location_id: locJJJ.id,
+      p_child_passport_ids: [childJJJId],
+      p_staff: [{ user_id: teacherBJJJId, involvement: "witnessed" }, { free_text_name: "Bus Escort (JJJ)", involvement: "witnessed" }],
+    });
+    if (stampJJJErr) throw stampJJJErr;
+
+    const { data: jjjStaffRows } = await admin.from("incident_staff").select("id, user_id, free_text_name").eq("incident_id", incidentJJJId);
+    const jjjRealStaffId = jjjStaffRows.find((r) => r.user_id === teacherBJJJId).id;
+    const jjjFreeTextStaffId = jjjStaffRows.find((r) => r.free_text_name === "Bus Escort (JJJ)").id;
+
+    // ---- JJJ1: guard_incident_injuries_named_party() ----
+    const { error: jjj1aErr } = await teacherJJJ.from("incident_injuries").insert({
+      incident_id: incidentJJJId,
+      injured_party_type: "student",
+      passport_id: outsiderChildJJJId,
+      injury_types: ["Bruising"],
+    });
+    record(
+      "JJJ1a THE GUARD ITSELF: an injury naming a child NOT on this incident is refused",
+      Boolean(jjj1aErr) && /must be one of the children already named/i.test(jjj1aErr.message),
+      jjj1aErr?.message
+    );
+
+    const outsiderTeacherJJJId = await createUser("jjj.outsiderstaff@thebehaviourhive.com", "JJJ Outsider Staff", "class_teacher");
+    const { error: jjj1bErr } = await teacherJJJ.from("incident_injuries").insert({
+      incident_id: incidentJJJId,
+      injured_party_type: "staff",
+      staff_user_id: outsiderTeacherJJJId,
+    });
+    record(
+      "JJJ1b THE GUARD ITSELF: an injury naming a staff member NOT on this incident is refused",
+      Boolean(jjj1bErr) && /must be one of the staff already named/i.test(jjj1bErr.message),
+      jjj1bErr?.message
+    );
+
+    const { error: jjj1cErr } = await teacherJJJ.from("incident_injuries").insert({
+      incident_id: incidentJJJId,
+      injured_party_type: "student",
+      passport_id: childJJJId,
+      injury_types: ["Bruising"],
+    });
+    record("JJJ1c REGRESSION: an injury naming the genuinely-named child still succeeds", !jjj1cErr, jjj1cErr?.message);
+
+    // ---- JJJ2: guard_restrictive_practice_staff_real_account() ----
+    const { data: jjjRpRow, error: jjjRpErr } = await teacherJJJ
+      .from("restrictive_practices")
+      .insert({ incident_id: incidentJJJId, passport_id: childJJJId, planning_status: "not_planned", hold_type: "childrens", hold_position: "standing", hold_level: "low" })
+      .select()
+      .single();
+    if (jjjRpErr) throw jjjRpErr;
+
+    const { error: jjj2aErr } = await teacherJJJ.from("restrictive_practice_staff").insert({
+      restrictive_practice_id: jjjRpRow.id,
+      incident_staff_id: jjjFreeTextStaffId,
+    });
+    record(
+      "JJJ2a THE GUARD ITSELF: linking a free-text-only staff entry to a restrictive practice record is refused",
+      Boolean(jjj2aErr) && /only staff with a real account can be linked/i.test(jjj2aErr.message),
+      jjj2aErr?.message
+    );
+
+    // A restrictive_practices row on a SEPARATE incident, so its own
+    // incident_staff row belongs to a different incident than jjjRpRow.
+    const { data: incidentJJJ2Id } = await teacherJJJ.rpc("create_incident_stamp", {
+      p_institution_id: institutionJJJId,
+      p_occurred_at: new Date().toISOString(),
+      p_location_id: locJJJ.id,
+      p_child_passport_ids: [childJJJId],
+      p_staff: [{ user_id: teacherBJJJId, involvement: "witnessed" }],
+    });
+    const { data: jjjOtherStaffRows } = await admin.from("incident_staff").select("id").eq("incident_id", incidentJJJ2Id).eq("user_id", teacherBJJJId).single();
+    const { error: jjj2bErr } = await teacherJJJ.from("restrictive_practice_staff").insert({
+      restrictive_practice_id: jjjRpRow.id,
+      incident_staff_id: jjjOtherStaffRows.id,
+    });
+    record(
+      "JJJ2b THE GUARD ITSELF: linking a staff member named on a DIFFERENT incident is refused",
+      Boolean(jjj2bErr) && /not named on the same incident/i.test(jjj2bErr.message),
+      jjj2bErr?.message
+    );
+
+    const { error: jjj2cErr } = await teacherJJJ.from("restrictive_practice_staff").insert({
+      restrictive_practice_id: jjjRpRow.id,
+      incident_staff_id: jjjRealStaffId,
+    });
+    record("JJJ2c REGRESSION: linking a genuine real-account staff member named on the SAME incident still succeeds", !jjj2cErr, jjj2cErr?.message);
+
+    console.log("JJJ summary complete.");
+
+    await admin.from("restrictive_practice_staff").delete().eq("restrictive_practice_id", jjjRpRow.id);
+    await admin.from("restrictive_practices").delete().eq("incident_id", incidentJJJId);
+    await admin.from("incident_injuries").delete().eq("incident_id", incidentJJJId);
+    await admin.from("incident_staff").delete().in("incident_id", [incidentJJJId, incidentJJJ2Id]);
+    await admin.from("incident_children").delete().in("incident_id", [incidentJJJId, incidentJJJ2Id]);
+    await admin.from("incidents").delete().in("id", [incidentJJJId, incidentJJJ2Id]);
+    await admin.from("passports").delete().in("id", [childJJJId, outsiderChildJJJId]);
+    await admin.from("institutions").delete().eq("id", institutionJJJId);
+    for (const id of [teacherJJJId, teacherBJJJId, principalJJJId, outsiderTeacherJJJId]) {
       await admin.auth.admin.deleteUser(id);
     }
   }
