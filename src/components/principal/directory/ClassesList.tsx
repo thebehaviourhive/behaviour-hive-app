@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { CreateClassSheet } from "@/components/principal/CreateClassSheet";
+import { PlusIcon } from "@/components/ui/icons";
 
 // PRD 4, Stage 4 -- extracted from principal/classes/page.tsx. Below lg,
 // each row is a real Link to /principal/classes/[classId] -- exactly
@@ -12,6 +13,19 @@ import { CreateClassSheet } from "@/components/principal/CreateClassSheet";
 // split view's right pane fills in without leaving this page -- one
 // row, two behaviours, chosen at click time by matching Tailwind's own
 // lg breakpoint (1024px), not a persistent resize listener.
+//
+// Layout/interaction redesign, Sep 2026 -- two changes, both matching
+// ClassDetail.tsx's own redesign pass:
+// 1. Each card now shows teacher names, class SNA status, and cover-
+//    today, not just bare counts -- so the shape of a class reads
+//    before opening it. Needs get_institution_classes_roster() widened
+//    (0175) with teacher_names/class_sna_names/children_with_1to1/
+//    cover_today_names; falls back to the old count-only line via `??`
+//    if an older deployed function is ever hit (it shouldn't be, once
+//    0175 is run, but costs nothing to guard).
+// 2. The unlabeled circular "+" button is now a labeled "+ New class"
+//    pill, matching the add-row wording pattern this same pass
+//    introduced on the detail side.
 export function ClassesList({
   institutionId,
   selectedClassId,
@@ -24,7 +38,17 @@ export function ClassesList({
   refreshToken: number;
 }) {
   const [classes, setClasses] = useState<
-    { id: string; name: string; teacherCount: number; childCount: number }[]
+    {
+      id: string;
+      name: string;
+      teacherCount: number;
+      childCount: number;
+      teacherNames: string | null;
+      classSnaNames: string | null;
+      childrenWith1to1: number;
+      coverTodayNames: string | null;
+      isEnriched: boolean;
+    }[]
   >([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -43,11 +67,30 @@ export function ClassesList({
       return;
     }
     setClasses(
-      ((classRows ?? []) as { class_id: string; name: string; teacher_count: number; child_count: number }[]).map((c) => ({
+      (
+        (classRows ?? []) as {
+          class_id: string;
+          name: string;
+          teacher_count: number;
+          child_count: number;
+          teacher_names?: string | null;
+          class_sna_names?: string | null;
+          children_with_1to1?: number | null;
+          cover_today_names?: string | null;
+        }[]
+      ).map((c) => ({
         id: c.class_id,
         name: c.name,
         teacherCount: c.teacher_count,
         childCount: c.child_count,
+        // Optional chaining/`?? null`: the enriched columns only exist
+        // once migration 0175 has run. Until then this falls back to
+        // the old count-only card rather than showing "undefined".
+        teacherNames: c.teacher_names ?? null,
+        classSnaNames: c.class_sna_names ?? null,
+        childrenWith1to1: c.children_with_1to1 ?? 0,
+        coverTodayNames: c.cover_today_names ?? null,
+        isEnriched: "teacher_names" in c,
       }))
     );
     setIsLoading(false);
@@ -80,10 +123,10 @@ export function ClassesList({
           <button
             type="button"
             onClick={() => setIsCreateOpen(true)}
-            aria-label="Create a class"
-            className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-brand-prussian-blue text-lg text-white shadow-sm"
+            className="flex min-h-9 flex-shrink-0 items-center gap-1.5 rounded-full bg-brand-prussian-blue py-2 pl-3 pr-4 text-xs font-semibold text-white shadow-sm"
           >
-            +
+            <PlusIcon className="h-[15px] w-[15px]" />
+            New class
           </button>
         )}
       </div>
@@ -118,10 +161,24 @@ export function ClassesList({
               <p className="font-heading text-h2 font-semibold text-brand-prussian-blue lg:text-body lg:font-semibold lg:text-brand-neutral-black">
                 {c.name}
               </p>
-              <p className="mt-0.5 font-sans text-body text-brand-neutral-black/50 lg:text-eyebrow">
-                {c.teacherCount} teacher{c.teacherCount === 1 ? "" : "s"} · {c.childCount} child
-                {c.childCount === 1 ? "" : "ren"}
-              </p>
+              {c.isEnriched ? (
+                <div className="mt-0.5 flex flex-col gap-0.5 font-sans text-body text-brand-neutral-black/60 lg:text-eyebrow">
+                  <p>
+                    {c.teacherNames ?? "No teacher assigned yet"} · {c.childCount} child
+                    {c.childCount === 1 ? "" : "ren"}
+                    {c.childrenWith1to1 > 0 ? `, ${c.childrenWith1to1} with a 1:1` : ""}
+                  </p>
+                  <p>{c.classSnaNames ? `Class SNA: ${c.classSnaNames}` : "Class SNA: not assigned"}</p>
+                  {c.coverTodayNames && <p>Cover today: {c.coverTodayNames}</p>}
+                </div>
+              ) : (
+                // Falls back to the old count-only line until migration
+                // 0175 has run and the enriched columns exist.
+                <p className="mt-0.5 font-sans text-body text-brand-neutral-black/50 lg:text-eyebrow">
+                  {c.teacherCount} teacher{c.teacherCount === 1 ? "" : "s"} · {c.childCount} child
+                  {c.childCount === 1 ? "" : "ren"}
+                </p>
+              )}
             </Link>
           ))}
         </div>

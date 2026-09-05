@@ -156,26 +156,34 @@ export default function PrincipalDirectoryPage() {
       </header>
 
       <main className="flex-1 px-4 lg:grid lg:grid-cols-12 lg:items-start lg:gap-6">
-        <div className="lg:col-span-4">
-          {/* Segmented control -- Pastel Blue selected state, matching
-              every other pill/segment control this PRD has introduced. */}
-          <div className="mb-4 flex flex-wrap gap-2">
-            {SEGMENTS.map((s) => (
-              <button
-                key={s.key}
-                type="button"
-                onClick={() => switchSegment(s.key)}
-                className={`rounded-full border px-4 py-2 font-sans text-body font-semibold transition-colors ${
-                  segment === s.key
-                    ? "border-brand-pastel-blue bg-brand-pastel-blue text-brand-prussian-blue"
-                    : "border-black/10 bg-white text-brand-neutral-black/70"
-                }`}
-              >
-                {s.label}
-              </button>
-            ))}
-          </div>
+        {/* Segmented control -- Pastel Blue selected state, matching every
+            other pill/segment control this PRD has introduced. Spans the
+            full content width above the two-column split, not the left
+            column alone: at 1280px the left column is only ~315px wide
+            (256px sidebar + page padding + the 4/12 grid split), and five
+            pills don't fit there without wrapping even at their shortest
+            labels -- shortening the labels alone doesn't solve it, so the
+            container moved instead. Below lg this renders exactly where
+            it always has, above a single-column list. */}
+        <div className="mb-4 flex flex-wrap gap-2 lg:col-span-12">
+          {SEGMENTS.map((s) => (
+            <button
+              key={s.key}
+              type="button"
+              onClick={() => switchSegment(s.key)}
+              aria-pressed={segment === s.key}
+              className={`rounded-full border px-4 py-2 font-sans text-body font-semibold transition-colors ${
+                segment === s.key
+                  ? "border-brand-pastel-blue bg-brand-pastel-blue text-brand-prussian-blue underline underline-offset-4"
+                  : "border-black/10 bg-white text-brand-neutral-black/70"
+              }`}
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
 
+        <div className="lg:col-span-4">
           {segment === "staff" && (
             <StaffList
               currentUserId={user?.id}

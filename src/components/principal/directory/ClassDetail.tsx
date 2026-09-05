@@ -9,6 +9,7 @@ import { AssignSnaSheet } from "@/components/shared/AssignSnaSheet";
 import { GrantTemporaryAccessSheet } from "@/components/shared/GrantTemporaryAccessSheet";
 import { ReasonConfirmSheet } from "@/components/shared/ReasonConfirmSheet";
 import { formatTimeOfDay, todayLocalDateString } from "@/lib/temporaryAccessTime";
+import { MoreVerticalIcon, PlusIcon, SwapIcon } from "@/components/ui/icons";
 
 // PRD 1, Stage 2, Step 3. Principal's class detail: teachers (add/remove
 // within the 3-slot cap), roster (add/remove a child), and per-child SNA
@@ -59,6 +60,30 @@ import { formatTimeOfDay, todayLocalDateString } from "@/lib/temporaryAccessTime
 // class name back up via onNameResolved so a route wrapper can put it
 // in its own header -- this component itself renders no header/back-
 // chevron, that's the caller's job in both contexts.
+//
+// Layout/interaction redesign, Sep 2026 -- same data, same actions, same
+// RPCs; only how they're presented changed, per Daniel's own brief:
+// 1. A one-line snapshot ("2 teachers · Class SNA: X · 2 children, 1
+//    with a 1:1 · Cover today: Y") now sits above the sections, built
+//    from state this component already loads -- no new query.
+// 2. The constructive action per section (Add a teacher / Assign a
+//    class SNA / Add a child / Grant cover) is now a full-width dashed
+//    add-row at the END of that section's list, not a small "+ Add"
+//    text link in its header -- the header is a plain label again.
+// 3. The one destructive action any row has (Remove / Revoke) moved
+//    from a full-width Golden-Brown-bordered button into a small
+//    overflow (kebab) menu -- available, not announced, plain ink
+//    text, never Golden Brown or red. RowOverflowMenu below is the
+//    only new piece of interaction machinery this redesign adds.
+// 4. A child's own "Assign/Reassign 1:1 SNA" stays a separate,
+//    always-visible icon button beside the overflow menu -- it's
+//    constructive, not the row's destructive action, so it doesn't
+//    move behind anything.
+// 5. An empty history section (0 previous teachers/class SNAs/children)
+//    now renders nothing at all, not even its own header -- previously
+//    every section rendered a "(0)" toggle unconditionally. A non-empty
+//    history section is unchanged: same header weight as the section
+//    above it, collapsed by default.
 
 interface TeacherRow {
   id: string;
@@ -129,6 +154,49 @@ function formatDate(value: string): string {
   return d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 }
 
+// The one destructive action any row in this screen has, tucked behind
+// a small overflow menu -- available, not announced. Menu items are
+// plain ink text, never Golden Brown or red (nothing here is a delete;
+// it's a removal that stays in this class's history).
+function RowOverflowMenu({
+  label,
+  isOpen,
+  onToggle,
+  children,
+}: {
+  label: string;
+  isOpen: boolean;
+  onToggle: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="relative flex-shrink-0" data-row-overflow>
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-haspopup="menu"
+        aria-expanded={isOpen}
+        aria-label={label}
+        className={`flex h-11 w-11 items-center justify-center rounded-xl transition-colors ${
+          isOpen
+            ? "bg-black/[0.06] text-brand-neutral-black/85"
+            : "text-brand-neutral-black/65 hover:bg-black/[0.045] hover:text-brand-neutral-black/80"
+        }`}
+      >
+        <MoreVerticalIcon className="h-[18px] w-[18px]" />
+      </button>
+      {isOpen && (
+        <div
+          role="menu"
+          className="absolute right-0 top-12 z-10 w-48 overflow-hidden rounded-xl border border-black/10 bg-white py-1 shadow-lg"
+        >
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function ClassDetail({
   classId,
   onNameResolved,
@@ -171,6 +239,7 @@ export function ClassDetail({
   const [removeClassSnaTarget, setRemoveClassSnaTarget] = useState<ClassSnaRow | null>(null);
   const [assignSnaTarget, setAssignSnaTarget] = useState<ChildRow | null>(null);
   const [revokeCoverTarget, setRevokeCoverTarget] = useState<CoverGrant | null>(null);
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setIsLoading(true);
@@ -393,7 +462,50 @@ export function ClassDetail({
     });
   }
 
+  // A row's overflow menu closes on an outside click or Escape -- the
+  // only interaction machinery this redesign adds (see header comment).
+  useEffect(() => {
+    if (!openMenuId) return;
+    function handlePointerDown(e: MouseEvent) {
+      if (!(e.target instanceof Element) || !e.target.closest("[data-row-overflow]")) {
+        setOpenMenuId(null);
+      }
+    }
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") setOpenMenuId(null);
+    }
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [openMenuId]);
+
   const slotsRemaining = 3 - teachers.active.length;
+
+  // The snapshot line -- entirely derived from state this component
+  // already loads, no new query. Mirrors the design's own format:
+  // "N teachers · Class SNA: X · N children, N with a 1:1 · Cover
+  // today: Y" -- each clause only appears when it has something to say,
+  // except teacher/child counts, which always show.
+  const classSnaNames = classSnas.active.map((s) => nameMap.get(s.userId) ?? "Unknown");
+  const childrenWith1to1 = children.active.filter((c) => assignmentMap.has(c.passportId)).length;
+  const today = todayLocalDateString();
+  const coverTodayNames = coverGrants.active
+    .filter((g) => g.grantedForDate === today)
+    .map((g) => nameMap.get(g.grantedTo) ?? "Unknown");
+  const snapshotParts = [
+    `${teachers.active.length} teacher${teachers.active.length === 1 ? "" : "s"}`,
+    classSnaNames.length > 0 ? `Class SNA: ${classSnaNames.join(", ")}` : "No class SNA",
+    `${children.active.length} child${children.active.length === 1 ? "" : "ren"}${
+      childrenWith1to1 > 0 ? `, ${childrenWith1to1} with a 1:1` : ""
+    }`,
+  ];
+  if (coverTodayNames.length > 0) {
+    snapshotParts.push(`Cover today: ${coverTodayNames.join(", ")}`);
+  }
+  const snapshotLine = snapshotParts.join(" · ");
 
   return (
     <>
@@ -406,19 +518,12 @@ export function ClassDetail({
         <p className="text-sm text-brand-neutral-black/60">{error}</p>
       ) : (
         <>
+          <p className="mb-6 text-sm text-brand-neutral-black/60">{snapshotLine}</p>
+
           <section className="mb-6">
-            <div className="mb-2 flex items-center justify-between">
-              <h2 className="font-heading text-sm font-bold uppercase tracking-wide text-brand-neutral-black/60">
-                Teachers ({teachers.active.length}/3)
-              </h2>
-              <button
-                type="button"
-                onClick={() => setIsAddTeacherOpen(true)}
-                className="text-xs font-semibold text-brand-prussian-blue"
-              >
-                + Add
-              </button>
-            </div>
+            <h2 className="mb-2 font-heading text-sm font-bold uppercase tracking-wide text-brand-neutral-black/60">
+              Teachers ({teachers.active.length}/3)
+            </h2>
             {teachers.active.length === 0 ? (
               <p className="rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-center text-sm text-brand-neutral-black/60">
                 No teachers assigned yet.
@@ -426,47 +531,64 @@ export function ClassDetail({
             ) : (
               <div className="flex flex-col gap-2">
                 {teachers.active.map((t) => (
-                  <div key={t.id} className="rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
-                    <div className="flex items-start justify-between gap-2">
-                      <p className="text-sm font-semibold text-brand-neutral-black">
+                  <div key={t.id} className="flex items-center justify-between gap-2 rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <p className="truncate text-sm font-semibold text-brand-neutral-black">
                         {nameMap.get(t.userId) ?? "Unknown"}
                       </p>
                       <span className="flex-shrink-0 rounded-full bg-brand-pastel-blue/20 px-2.5 py-1 text-xs font-semibold text-brand-prussian-blue">
                         Active
                       </span>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => setRemoveTeacherTarget(t)}
-                      className="mt-3 block w-full rounded-xl border border-brand-golden-brown py-2 text-center text-xs font-semibold text-brand-golden-brown"
+                    <RowOverflowMenu
+                      label={`More actions for ${nameMap.get(t.userId) ?? "this teacher"}`}
+                      isOpen={openMenuId === `teacher-${t.id}`}
+                      onToggle={() => setOpenMenuId((prev) => (prev === `teacher-${t.id}` ? null : `teacher-${t.id}`))}
                     >
-                      Remove
-                    </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          setOpenMenuId(null);
+                          setRemoveTeacherTarget(t);
+                        }}
+                        className="block w-full px-4 py-2.5 text-left text-sm font-medium text-brand-neutral-black hover:bg-black/[0.04]"
+                      >
+                        Remove from class
+                      </button>
+                    </RowOverflowMenu>
                   </div>
                 ))}
               </div>
             )}
 
-            {/* Stage 4's own correction, applied here too: same
-                header weight as the section above it, not a muted
-                footnote. Collapsed by default for density only. */}
-            <div className="mt-4">
-              <button
-                type="button"
-                onClick={() => setShowPastTeachers((v) => !v)}
-                className="mb-2 flex w-full items-center justify-between"
-              >
-                <h2 className="font-heading text-sm font-bold uppercase tracking-wide text-brand-neutral-black/60">
-                  Previous Teachers ({teachers.past.length})
-                </h2>
-                <span className="text-sm font-semibold text-brand-neutral-black/40">{showPastTeachers ? "−" : "+"}</span>
-              </button>
-              {showPastTeachers && (
-                teachers.past.length === 0 ? (
-                  <p className="rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-center text-sm text-brand-neutral-black/60">
-                    No previous teachers.
-                  </p>
-                ) : (
+            <button
+              type="button"
+              onClick={() => setIsAddTeacherOpen(true)}
+              className="mt-2 flex min-h-11 w-full items-center justify-center gap-2 rounded-2xl border-[1.5px] border-dashed border-brand-prussian-blue/35 py-3 text-sm font-semibold text-brand-prussian-blue transition-colors hover:border-brand-prussian-blue hover:bg-brand-pastel-blue/10"
+            >
+              <PlusIcon className="h-[18px] w-[18px]" />
+              Add a teacher
+            </button>
+
+            {/* Non-empty history keeps the same header weight as the
+                section above it, collapsed by default for density only
+                -- unchanged from before this redesign. An EMPTY history
+                section now renders nothing at all, not even its own
+                header (it used to always render a "(0)" toggle). */}
+            {teachers.past.length > 0 && (
+              <div className="mt-4">
+                <button
+                  type="button"
+                  onClick={() => setShowPastTeachers((v) => !v)}
+                  className="mb-2 flex w-full items-center justify-between"
+                >
+                  <h2 className="font-heading text-sm font-bold uppercase tracking-wide text-brand-neutral-black/60">
+                    Previous Teachers ({teachers.past.length})
+                  </h2>
+                  <span className="text-sm font-semibold text-brand-neutral-black/40">{showPastTeachers ? "−" : "+"}</span>
+                </button>
+                {showPastTeachers && (
                   <div className="flex flex-col gap-2">
                     {teachers.past.map((t) => (
                       <div key={t.id} className="rounded-2xl border border-black/5 bg-white/60 p-4">
@@ -483,24 +605,15 @@ export function ClassDetail({
                       </div>
                     ))}
                   </div>
-                )
-              )}
-            </div>
+                )}
+              </div>
+            )}
           </section>
 
           <section className="mb-6">
-            <div className="mb-2 flex items-center justify-between">
-              <h2 className="font-heading text-sm font-bold uppercase tracking-wide text-brand-neutral-black/60">
-                Class SNA ({classSnas.active.length})
-              </h2>
-              <button
-                type="button"
-                onClick={() => setIsAssignClassSnaOpen(true)}
-                className="text-xs font-semibold text-brand-prussian-blue"
-              >
-                + Assign
-              </button>
-            </div>
+            <h2 className="mb-2 font-heading text-sm font-bold uppercase tracking-wide text-brand-neutral-black/60">
+              Class SNA ({classSnas.active.length})
+            </h2>
             {classSnas.active.length === 0 ? (
               <p className="rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-center text-sm text-brand-neutral-black/60">
                 No class SNA assigned. A class SNA sees everything for every child here -- for day-scoped cover
@@ -509,44 +622,59 @@ export function ClassDetail({
             ) : (
               <div className="flex flex-col gap-2">
                 {classSnas.active.map((s) => (
-                  <div key={s.id} className="rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
-                    <div className="flex items-start justify-between gap-2">
-                      <p className="text-sm font-semibold text-brand-neutral-black">
+                  <div key={s.id} className="flex items-center justify-between gap-2 rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <p className="truncate text-sm font-semibold text-brand-neutral-black">
                         {nameMap.get(s.userId) ?? "Unknown"}
                       </p>
                       <span className="flex-shrink-0 rounded-full bg-brand-pastel-blue/20 px-2.5 py-1 text-xs font-semibold text-brand-prussian-blue">
                         Active
                       </span>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => setRemoveClassSnaTarget(s)}
-                      className="mt-3 block w-full rounded-xl border border-brand-golden-brown py-2 text-center text-xs font-semibold text-brand-golden-brown"
+                    <RowOverflowMenu
+                      label={`More actions for ${nameMap.get(s.userId) ?? "this class SNA"}`}
+                      isOpen={openMenuId === `classsna-${s.id}`}
+                      onToggle={() => setOpenMenuId((prev) => (prev === `classsna-${s.id}` ? null : `classsna-${s.id}`))}
                     >
-                      Remove
-                    </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          setOpenMenuId(null);
+                          setRemoveClassSnaTarget(s);
+                        }}
+                        className="block w-full px-4 py-2.5 text-left text-sm font-medium text-brand-neutral-black hover:bg-black/[0.04]"
+                      >
+                        Remove from class
+                      </button>
+                    </RowOverflowMenu>
                   </div>
                 ))}
               </div>
             )}
 
-            <div className="mt-4">
-              <button
-                type="button"
-                onClick={() => setShowPastClassSnas((v) => !v)}
-                className="mb-2 flex w-full items-center justify-between"
-              >
-                <h2 className="font-heading text-sm font-bold uppercase tracking-wide text-brand-neutral-black/60">
-                  Previous Class SNAs ({classSnas.past.length})
-                </h2>
-                <span className="text-sm font-semibold text-brand-neutral-black/40">{showPastClassSnas ? "−" : "+"}</span>
-              </button>
-              {showPastClassSnas && (
-                classSnas.past.length === 0 ? (
-                  <p className="rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-center text-sm text-brand-neutral-black/60">
-                    No previous class SNAs.
-                  </p>
-                ) : (
+            <button
+              type="button"
+              onClick={() => setIsAssignClassSnaOpen(true)}
+              className="mt-2 flex min-h-11 w-full items-center justify-center gap-2 rounded-2xl border-[1.5px] border-dashed border-brand-prussian-blue/35 py-3 text-sm font-semibold text-brand-prussian-blue transition-colors hover:border-brand-prussian-blue hover:bg-brand-pastel-blue/10"
+            >
+              <PlusIcon className="h-[18px] w-[18px]" />
+              Assign a class SNA
+            </button>
+
+            {classSnas.past.length > 0 && (
+              <div className="mt-4">
+                <button
+                  type="button"
+                  onClick={() => setShowPastClassSnas((v) => !v)}
+                  className="mb-2 flex w-full items-center justify-between"
+                >
+                  <h2 className="font-heading text-sm font-bold uppercase tracking-wide text-brand-neutral-black/60">
+                    Previous Class SNAs ({classSnas.past.length})
+                  </h2>
+                  <span className="text-sm font-semibold text-brand-neutral-black/40">{showPastClassSnas ? "−" : "+"}</span>
+                </button>
+                {showPastClassSnas && (
                   <div className="flex flex-col gap-2">
                     {classSnas.past.map((s) => (
                       <div key={s.id} className="rounded-2xl border border-black/5 bg-white/60 p-4">
@@ -563,24 +691,15 @@ export function ClassDetail({
                       </div>
                     ))}
                   </div>
-                )
-              )}
-            </div>
+                )}
+              </div>
+            )}
           </section>
 
           <section>
-            <div className="mb-2 flex items-center justify-between">
-              <h2 className="font-heading text-sm font-bold uppercase tracking-wide text-brand-neutral-black/60">
-                Roster ({children.active.length})
-              </h2>
-              <button
-                type="button"
-                onClick={() => setIsAddChildOpen(true)}
-                className="text-xs font-semibold text-brand-prussian-blue"
-              >
-                + Add
-              </button>
-            </div>
+            <h2 className="mb-2 font-heading text-sm font-bold uppercase tracking-wide text-brand-neutral-black/60">
+              Roster ({children.active.length})
+            </h2>
             {children.active.length === 0 ? (
               <p className="rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-center text-sm text-brand-neutral-black/60">
                 No children in this class yet.
@@ -590,34 +709,49 @@ export function ClassDetail({
                 {children.active.map((c) => {
                   const assignment = assignmentMap.get(c.passportId);
                   const history = assignmentHistoryMap.get(c.passportId) ?? [];
-                  const classSnaNames = classSnas.active.map((s) => nameMap.get(s.userId) ?? "Unknown");
+                  const rowClassSnaNames = classSnas.active.map((s) => nameMap.get(s.userId) ?? "Unknown");
                   const snaLine = assignment
                     ? `1:1 SNA: ${nameMap.get(assignment.snaUserId) ?? "Unknown"}`
-                    : classSnaNames.length > 0
-                      ? `Class SNA: ${classSnaNames.join(", ")}`
+                    : rowClassSnaNames.length > 0
+                      ? `Class SNA: ${rowClassSnaNames.join(", ")}`
                       : "No SNA assigned";
                   const isHistoryOpen = expandedHistoryFor.has(c.passportId);
+                  const childName = childNameMap.get(c.passportId) ?? "this child";
                   return (
                     <div key={c.id} className="rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
-                      <p className="text-sm font-semibold text-brand-neutral-black">
-                        {childNameMap.get(c.passportId) ?? "Unknown"}
-                      </p>
-                      <p className="mt-0.5 text-xs text-brand-neutral-black/50">{snaLine}</p>
-                      <div className="mt-3 flex gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setAssignSnaTarget(c)}
-                          className="flex-1 rounded-xl border border-brand-prussian-blue py-2 text-center text-xs font-semibold text-brand-prussian-blue"
-                        >
-                          {assignment ? "Reassign 1:1 SNA" : "Assign 1:1 SNA"}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setRemoveChildTarget(c)}
-                          className="flex-1 rounded-xl border border-brand-golden-brown py-2 text-center text-xs font-semibold text-brand-golden-brown"
-                        >
-                          Remove
-                        </button>
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-semibold text-brand-neutral-black">{childName}</p>
+                          <p className="mt-0.5 text-xs text-brand-neutral-black/50">{snaLine}</p>
+                        </div>
+                        <div className="flex flex-shrink-0 items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => setAssignSnaTarget(c)}
+                            aria-label={`${assignment ? "Reassign" : "Assign"} 1:1 SNA for ${childName}`}
+                            title={assignment ? "Reassign 1:1 SNA" : "Assign 1:1 SNA"}
+                            className="flex h-11 w-11 items-center justify-center rounded-xl border border-brand-prussian-blue/30 text-brand-prussian-blue transition-colors hover:bg-brand-pastel-blue/10"
+                          >
+                            <SwapIcon className="h-[17px] w-[17px]" />
+                          </button>
+                          <RowOverflowMenu
+                            label={`More actions for ${childName}`}
+                            isOpen={openMenuId === `child-${c.id}`}
+                            onToggle={() => setOpenMenuId((prev) => (prev === `child-${c.id}` ? null : `child-${c.id}`))}
+                          >
+                            <button
+                              type="button"
+                              role="menuitem"
+                              onClick={() => {
+                                setOpenMenuId(null);
+                                setRemoveChildTarget(c);
+                              }}
+                              className="block w-full px-4 py-2.5 text-left text-sm font-medium text-brand-neutral-black hover:bg-black/[0.04]"
+                            >
+                              Remove from class
+                            </button>
+                          </RowOverflowMenu>
+                        </div>
                       </div>
 
                       {history.length > 0 && (
@@ -656,23 +790,28 @@ export function ClassDetail({
               </div>
             )}
 
-            <div className="mt-4">
-              <button
-                type="button"
-                onClick={() => setShowPastChildren((v) => !v)}
-                className="mb-2 flex w-full items-center justify-between"
-              >
-                <h2 className="font-heading text-sm font-bold uppercase tracking-wide text-brand-neutral-black/60">
-                  Previously in this Class ({children.past.length})
-                </h2>
-                <span className="text-sm font-semibold text-brand-neutral-black/40">{showPastChildren ? "−" : "+"}</span>
-              </button>
-              {showPastChildren && (
-                children.past.length === 0 ? (
-                  <p className="rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-center text-sm text-brand-neutral-black/60">
-                    No children have left this class.
-                  </p>
-                ) : (
+            <button
+              type="button"
+              onClick={() => setIsAddChildOpen(true)}
+              className="mt-2 flex min-h-11 w-full items-center justify-center gap-2 rounded-2xl border-[1.5px] border-dashed border-brand-prussian-blue/35 py-3 text-sm font-semibold text-brand-prussian-blue transition-colors hover:border-brand-prussian-blue hover:bg-brand-pastel-blue/10"
+            >
+              <PlusIcon className="h-[18px] w-[18px]" />
+              Add a child
+            </button>
+
+            {children.past.length > 0 && (
+              <div className="mt-4">
+                <button
+                  type="button"
+                  onClick={() => setShowPastChildren((v) => !v)}
+                  className="mb-2 flex w-full items-center justify-between"
+                >
+                  <h2 className="font-heading text-sm font-bold uppercase tracking-wide text-brand-neutral-black/60">
+                    Previously in this Class ({children.past.length})
+                  </h2>
+                  <span className="text-sm font-semibold text-brand-neutral-black/40">{showPastChildren ? "−" : "+"}</span>
+                </button>
+                {showPastChildren && (
                   <div className="flex flex-col gap-2">
                     {children.past.map((c) => (
                       <div key={c.id} className="rounded-2xl border border-black/5 bg-white/60 p-4">
@@ -686,24 +825,15 @@ export function ClassDetail({
                       </div>
                     ))}
                   </div>
-                )
-              )}
-            </div>
+                )}
+              </div>
+            )}
           </section>
 
           <section className="mt-6">
-            <div className="mb-2 flex items-center justify-between">
-              <h2 className="font-heading text-sm font-bold uppercase tracking-wide text-brand-neutral-black/60">
-                Temporary Cover
-              </h2>
-              <button
-                type="button"
-                onClick={() => setIsGrantCoverOpen(true)}
-                className="text-xs font-semibold text-brand-prussian-blue"
-              >
-                + Grant Cover
-              </button>
-            </div>
+            <h2 className="mb-2 font-heading text-sm font-bold uppercase tracking-wide text-brand-neutral-black/60">
+              Temporary Cover
+            </h2>
             {coverGrants.active.length === 0 ? (
               <p className="rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-center text-sm text-brand-neutral-black/60">
                 No cover granted for this class.
@@ -711,23 +841,45 @@ export function ClassDetail({
             ) : (
               <div className="flex flex-col gap-2">
                 {coverGrants.active.map((g) => (
-                  <div key={g.id} className="rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
-                    <p className="text-sm font-semibold text-brand-neutral-black">{nameMap.get(g.grantedTo) ?? "Unknown"}</p>
-                    <p className="mt-0.5 text-xs text-brand-neutral-black/50">
-                      {g.grantedForDate === todayLocalDateString() ? "Today" : g.grantedForDate} · until {formatTimeOfDay(cutoffTime)}
-                    </p>
-                    <p className="mt-1 text-sm text-brand-neutral-black/70">&ldquo;{g.reason}&rdquo;</p>
-                    <button
-                      type="button"
-                      onClick={() => setRevokeCoverTarget(g)}
-                      className="mt-2 block w-full rounded-xl border border-brand-golden-brown py-1.5 text-center text-xs font-semibold text-brand-golden-brown"
+                  <div key={g.id} className="flex items-start justify-between gap-2 rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-brand-neutral-black">{nameMap.get(g.grantedTo) ?? "Unknown"}</p>
+                      <p className="mt-0.5 text-xs text-brand-neutral-black/50">
+                        {g.grantedForDate === todayLocalDateString() ? "Today" : g.grantedForDate} · until {formatTimeOfDay(cutoffTime)}
+                      </p>
+                      <p className="mt-1 text-sm text-brand-neutral-black/70">&ldquo;{g.reason}&rdquo;</p>
+                    </div>
+                    <RowOverflowMenu
+                      label={`More actions for ${nameMap.get(g.grantedTo) ?? "this"} cover`}
+                      isOpen={openMenuId === `cover-${g.id}`}
+                      onToggle={() => setOpenMenuId((prev) => (prev === `cover-${g.id}` ? null : `cover-${g.id}`))}
                     >
-                      Revoke
-                    </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          setOpenMenuId(null);
+                          setRevokeCoverTarget(g);
+                        }}
+                        className="block w-full px-4 py-2.5 text-left text-sm font-medium text-brand-neutral-black hover:bg-black/[0.04]"
+                      >
+                        Revoke cover
+                      </button>
+                    </RowOverflowMenu>
                   </div>
                 ))}
               </div>
             )}
+
+            <button
+              type="button"
+              onClick={() => setIsGrantCoverOpen(true)}
+              className="mt-2 flex min-h-11 w-full items-center justify-center gap-2 rounded-2xl border-[1.5px] border-dashed border-brand-prussian-blue/35 py-3 text-sm font-semibold text-brand-prussian-blue transition-colors hover:border-brand-prussian-blue hover:bg-brand-pastel-blue/10"
+            >
+              <PlusIcon className="h-[18px] w-[18px]" />
+              Grant cover
+            </button>
+
             {coverGrants.past.length > 0 && (
               <div className="mt-3">
                 <button

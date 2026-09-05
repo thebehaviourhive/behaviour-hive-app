@@ -143,3 +143,34 @@ export function AlertTriangleIcon(props: IconProps) {
     </Base>
   );
 }
+
+export function PlusIcon(props: IconProps) {
+  return (
+    <Base {...props}>
+      <path d="M12 5v14M5 12h14" />
+    </Base>
+  );
+}
+
+// The one destructive action any row here has (Remove/Revoke) sits
+// behind this -- available, not announced. Filled dots, not stroked,
+// matching how a kebab menu conventionally reads at small sizes.
+export function MoreVerticalIcon(props: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" className={props.className} aria-hidden="true">
+      <circle cx="12" cy="5.5" r="1.6" fill="currentColor" />
+      <circle cx="12" cy="12" r="1.6" fill="currentColor" />
+      <circle cx="12" cy="18.5" r="1.6" fill="currentColor" />
+    </svg>
+  );
+}
+
+export function SwapIcon(props: IconProps) {
+  return (
+    <Base {...props}>
+      <circle cx="9" cy="8" r="3" />
+      <path d="M4 19c0-3 2-5.5 5-5.5s5 2.5 5 5.5" />
+      <path d="M18 8.5v5M15.5 11h5" />
+    </Base>
+  );
+}
