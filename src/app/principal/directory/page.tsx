@@ -155,7 +155,7 @@ export default function PrincipalDirectoryPage() {
         <h1 className="font-heading text-h1 font-bold text-brand-prussian-blue">Directory</h1>
       </header>
 
-      <main className="flex-1 px-4 lg:grid lg:grid-cols-12 lg:items-start lg:gap-6">
+      <main className="flex-1 px-4">
         {/* Segmented control -- Pastel Blue selected state, matching every
             other pill/segment control this PRD has introduced. Spans the
             full content width above the two-column split, not the left
@@ -164,8 +164,18 @@ export default function PrincipalDirectoryPage() {
             pills don't fit there without wrapping even at their shortest
             labels -- shortening the labels alone doesn't solve it, so the
             container moved instead. Below lg this renders exactly where
-            it always has, above a single-column list. */}
-        <div className="mb-4 flex flex-wrap gap-2 lg:col-span-12">
+            it always has, above a single-column list.
+            Deliberately a SIBLING of the two-column grid below, not a
+            third item spanning all 12 of its columns -- that first version
+            turned a single-row grid (the two columns, the only shape this
+            grid had ever been) into a two-row one, and Safari's grid
+            auto-placement reserved a large, wrong amount of empty track
+            height for the row above the columns (not reproducible in
+            Chromium, confirmed live on an actual Safari/macOS session).
+            Keeping the grid to the two columns it's always had, and moving
+            this above it as ordinary block content, sidesteps that
+            entirely rather than chasing the specific Safari sizing bug. */}
+        <div className="mb-4 flex flex-wrap gap-2">
           {SEGMENTS.map((s) => (
             <button
               key={s.key}
@@ -183,6 +193,7 @@ export default function PrincipalDirectoryPage() {
           ))}
         </div>
 
+        <div className="lg:grid lg:grid-cols-12 lg:items-start lg:gap-6">
         <div className="lg:col-span-4">
           {segment === "staff" && (
             <StaffList
@@ -319,6 +330,7 @@ export default function PrincipalDirectoryPage() {
               onCoverageChanged={() => setClinicianRefreshToken((n) => n + 1)}
             />
           ) : null}
+        </div>
         </div>
       </main>
 
