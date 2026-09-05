@@ -2,7 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { ChevronDown } from "lucide-react";
+import { usePathname } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { useTaskTiming } from "@/hooks/useTaskTiming";
+import { logAppEvent } from "@/lib/logAppEvent";
 import {
   ABC_ROLE_CONFIG,
   ABC_ROLE_DISPLAY_LABEL,
@@ -139,6 +142,18 @@ export function ABCLogger({
   const [localSaveMessage, setLocalSaveMessage] = useState<string | null>(null);
   const [showSuccess, setShowSuccess] = useState(false);
   const [savedLogId, setSavedLogId] = useState<string | null>(null);
+  // Time-on-task, Pass 1 -- see CLAUDE.md's TIME-ON-TASK INSTRUMENTATION
+  // entry. Not special-cased for a resumed draft: screenOpenedAt is
+  // always this mount's own open time, consistent with every other
+  // form this hook covers.
+  // ABCLogger renders as a modal over whatever page hosts it, not its
+  // own route -- usePathname() gives the real, honest location instead
+  // of a fabricated path, and correlates naturally with the page_view
+  // PageViewTracker already logged for the same pathname.
+  const pathname = usePathname();
+  const { screenOpenedAt, firstInputAt, markFirstInput } = useTaskTiming(() =>
+    logAppEvent({ route: pathname ?? "/abc-logger", eventType: "task_started", metadata: { task: "abc_log" } })
+  );
   // The confirmation step only waits for an explicit tap when there's
   // something to tap -- clinician-authored logs (no onOfferMessage
   // passed at all) keep the original auto-dismiss behaviour untouched.
@@ -330,6 +345,8 @@ export function ABCLogger({
         perceived_function: draft.perceivedFunction,
         perceived_function_other:
           draft.perceivedFunction === "other" ? draft.perceivedFunctionOther.trim() || null : null,
+        screen_opened_at: screenOpenedAt,
+        first_input_at: firstInputAt,
       });
 
       if (error) {
@@ -427,7 +444,11 @@ export function ABCLogger({
 
   return (
     <div className="fixed inset-0 z-[100] flex flex-col justify-end bg-black/50">
-      <div className="relative flex h-[85vh] flex-col rounded-t-2xl bg-white shadow-lg">
+      <div
+        className="relative flex h-[85vh] flex-col rounded-t-2xl bg-white shadow-lg"
+        onFocusCapture={markFirstInput}
+        onClickCapture={markFirstInput}
+      >
         <div className="mx-auto mt-3 h-1.5 w-12 flex-shrink-0 rounded-full bg-black/10" />
 
         {showSuccess && (

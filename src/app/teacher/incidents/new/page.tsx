@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { useInstitutionRoster } from "@/hooks/useInstitutionRoster";
+import { useTaskTiming } from "@/hooks/useTaskTiming";
+import { logAppEvent } from "@/lib/logAppEvent";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/Button";
 import { Checkbox } from "@/components/ui/Checkbox";
@@ -54,6 +56,16 @@ export default function NewIncidentStampPage() {
   const [selectedStaffIds, setSelectedStaffIds] = useState<string[]>([]);
   const [freeTextStaff, setFreeTextStaff] = useState<string[]>([]);
   const [freeTextInput, setFreeTextInput] = useState("");
+
+  // Time-on-task, Pass 1 -- "how long does the 15-second stamp actually
+  // take" (nothing answers this today; see CLAUDE.md). Both values
+  // ride along on the create_incident_stamp() call below, no extra
+  // network round trip. Pass 2's task_started fires on this same first-
+  // input moment, not on mount -- an accidental navigation into this
+  // screen must not count as a started stamp.
+  const { screenOpenedAt, firstInputAt, markFirstInput } = useTaskTiming(() =>
+    logAppEvent({ route: "/teacher/incidents/new", eventType: "task_started", institutionId, metadata: { task: "incident_stamp" } })
+  );
 
   // "Adjusting state when a prop changes" -- computed during render, not
   // in an effect (React's own documented pattern for this shape of
@@ -140,6 +152,8 @@ export default function NewIncidentStampPage() {
       p_location_id: locationId,
       p_child_passport_ids: selectedChildIds,
       p_staff: staffPayload,
+      p_client_opened_at: screenOpenedAt,
+      p_client_first_input_at: firstInputAt,
     });
 
     setIsSubmitting(false);
@@ -156,11 +170,23 @@ export default function NewIncidentStampPage() {
   const isLoading = isRosterLoading || isLoadingLocations;
 
   return (
-    <div className="flex min-h-full flex-1 flex-col bg-brand-off-white/40 pb-10">
+    <div
+      className="flex min-h-full flex-1 flex-col bg-brand-off-white/40 pb-10"
+      onFocusCapture={markFirstInput}
+      onClickCapture={markFirstInput}
+    >
       <header className="flex items-center gap-3 px-4 pt-6 pb-4">
         <button
           type="button"
-          onClick={() => router.back()}
+          onClick={() => {
+            // Pass 2 -- only a cancellation if a task was actually
+            // started (firstInputAt set); backing out of an untouched
+            // screen isn't abandoning anything, it's just leaving.
+            if (firstInputAt) {
+              logAppEvent({ route: "/teacher/incidents/new", eventType: "task_cancelled", institutionId, metadata: { task: "incident_stamp" } });
+            }
+            router.back();
+          }}
           aria-label="Back"
           className="flex h-8 w-8 flex-shrink-0 items-center justify-center text-2xl leading-none text-brand-prussian-blue"
         >

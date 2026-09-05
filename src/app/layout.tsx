@@ -5,6 +5,7 @@ import { SpeedInsights } from "@vercel/speed-insights/next";
 import "./globals.css";
 import PreventPinchZoom from "./PreventPinchZoom";
 import BrandedLaunchShell from "./BrandedLaunchShell";
+import PageViewTracker from "./PageViewTracker";
 
 const baloo2 = Baloo_2({
   variable: "--font-baloo-2",
@@ -128,6 +129,7 @@ export default function RootLayout({
             BrandedLaunchShell.tsx for what it does and doesn't cover. */}
         <BrandedLaunchShell />
         <PreventPinchZoom />
+        <PageViewTracker />
         {children}
         <Analytics />
         <SpeedInsights />

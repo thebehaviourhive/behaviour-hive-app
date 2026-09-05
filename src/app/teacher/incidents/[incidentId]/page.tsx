@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useRequireRole } from "@/hooks/useRequireRole";
@@ -224,6 +224,19 @@ export default function IncidentRecordPage() {
   const [error, setError] = useState<string | null>(null);
   const [canEdit, setCanEdit] = useState(false);
   const [isLocked, setIsLocked] = useState(false);
+
+  // Time-on-task, Pass 1 -- stage two's own two timestamps. Unlike the
+  // single-shot forms (useTaskTiming), stage two is a resumable, multi-
+  // session process with no one submission moment to attach these to,
+  // so each is set ONCE, directly, the first time it genuinely happens --
+  // never re-fired on a later visit. Deliberately scoped to the owning
+  // teacher alone (canEdit), matching the existing "Owning teacher can
+  // edit before teacher sign-off" RLS policy exactly: a plain .update()
+  // from anyone else would just be silently filtered by that policy
+  // (CLAUDE.md's own first gotcha), so there's no reason to even attempt
+  // it as a non-owner. hasMarkedFirstEditRef seeds from the fetched row
+  // so a resumed session doesn't refire it.
+  const hasMarkedFirstEditRef = useRef(false);
   // Bug report item 2 -- SignOffCard's own onSignedOff used to call
   // window.location.reload(), a genuine full browser navigation. This
   // codebase already has one documented case (CLAUDE.md, "verification
@@ -291,6 +304,33 @@ export default function IncidentRecordPage() {
   function bumpSignoffSummary() {
     setSignoffRefreshSignal((v) => v + 1);
   }
+
+  // Time-on-task, Pass 1 -- deliberately NOT folded into bumpSignoffSummary
+  // itself. Every genuine content edit already bumps signoffRefreshSignal
+  // (see bumpSignoffSummary's own caller list above), so reacting to that
+  // signal here gets the identical "first real edit" trigger without
+  // touching a function called from ~15 places -- inlining a network call
+  // directly into bumpSignoffSummary's own body confused the purity
+  // checker into flagging unrelated, pre-existing Date.now() calls in
+  // several of ITS OWN callers (handleSaveDebrief, handleSave, and
+  // others) as possibly-during-render, which they are not and always
+  // weren't. This effect-based version doesn't touch bumpSignoffSummary
+  // at all, so those callers stay exactly as they were.
+  useEffect(() => {
+    if (signoffRefreshSignal === 0) return; // the initial value, not a real edit
+    if (!canEdit || hasMarkedFirstEditRef.current) return;
+    hasMarkedFirstEditRef.current = true;
+    const supabase = createClient();
+    supabase
+      .from("incidents")
+      .update({ stage_two_first_edit_at: new Date().toISOString() })
+      .eq("id", params.incidentId)
+      .then(
+        () => {},
+        () => {}
+      );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [signoffRefreshSignal]);
 
   const [summary, setSummary] = useState<StampSummary | null>(null);
   const [children, setChildren] = useState<ChildFormState[]>([]);
@@ -418,7 +458,7 @@ export default function IncidentRecordPage() {
       const { data: incident, error: incidentError } = await supabase
         .from("incidents")
         .select(
-          "institution_id, created_by, owning_teacher_id, teacher_signed_at, occurred_at, incident_locations(value), category, party, party_other, item_involved, narrative, parent_summary, staff_count_needed, staff_distressed, risk_reduction_future, other_information, debrief_required, anyone_injured, attestations_requested, support_button_pressed, support_alert_id"
+          "institution_id, created_by, owning_teacher_id, teacher_signed_at, occurred_at, incident_locations(value), category, party, party_other, item_involved, narrative, parent_summary, staff_count_needed, staff_distressed, risk_reduction_future, other_information, debrief_required, anyone_injured, attestations_requested, support_button_pressed, support_alert_id, stage_two_opened_at, stage_two_first_edit_at"
         )
         .eq("id", params.incidentId)
         .maybeSingle();
@@ -723,7 +763,24 @@ export default function IncidentRecordPage() {
       // now the ONLY condition, matching the live RLS policy exactly --
       // the same condition the debrief-specific comment below already
       // used, correctly, the whole time.
-      setCanEdit(!incident.teacher_signed_at && incident.owning_teacher_id === user!.id);
+      const isOwningTeacher = !incident.teacher_signed_at && incident.owning_teacher_id === user!.id;
+      setCanEdit(isOwningTeacher);
+
+      // Time-on-task, Pass 1 -- fire-and-forget, error-swallowed, never
+      // awaited: a failed instrumentation write must never surface to
+      // the teacher or slow anything real. Only ever attempted by the
+      // owning teacher (see this state's own declaration above for why).
+      hasMarkedFirstEditRef.current = Boolean(incident.stage_two_first_edit_at);
+      if (isOwningTeacher && !incident.stage_two_opened_at) {
+        supabase
+          .from("incidents")
+          .update({ stage_two_opened_at: new Date().toISOString() })
+          .eq("id", params.incidentId)
+          .then(
+            () => {},
+            () => {}
+          );
+      }
 
       // The debrief was already owning-teacher-only, matching incident_
       // debriefs' own RLS exactly ("i.owning_teacher_id = auth.uid()") --

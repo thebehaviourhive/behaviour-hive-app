@@ -54,6 +54,10 @@ export default function TeacherBulkEodPage() {
       passport_id: child.passportId,
       teacher_id: user.id,
       marked_absent: true,
+      // No screen_opened_at/first_input_at -- a one-click mark-absent
+      // has no form to time. submission_source is still set so every
+      // teacher_updates row answers "which flow produced this".
+      submission_source: "bulk",
     });
     if (insertError) throw new Error(insertError.message);
     advance();

@@ -1,7 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { usePathname } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { useTaskTiming } from "@/hooks/useTaskTiming";
+import { logAppEvent } from "@/lib/logAppEvent";
 import { insertWithOfflineRetry } from "@/lib/waitForReconnect";
 import { logActivity } from "@/lib/logActivity";
 import { usePassportClinicalContent } from "@/hooks/usePassportClinicalContent";
@@ -101,6 +104,26 @@ export function EodWizardForChild({
   const [isMarkingAbsent, setIsMarkingAbsent] = useState(false);
   const [absentError, setAbsentError] = useState<string | null>(null);
 
+  // Time-on-task, Pass 1. Resets naturally per child in the bulk flow --
+  // this component remounts with key={passportId} for every child in
+  // the walk, so screenOpenedAt is fresh each time, exactly the per-
+  // child signal wanted. submissionSource is derived from onMarkAbsent's
+  // presence rather than a new prop -- it's already the exact signal
+  // that distinguishes the bulk caller from the standalone one (see this
+  // file's own header comment), no reason to duplicate it.
+  const submissionSource: "bulk" | "standalone" = onMarkAbsent ? "bulk" : "standalone";
+  // Real host pathname (see ABCLogger's identical reasoning) -- this
+  // component is mounted on both /teacher/eod/bulk and /teacher/eod/
+  // [passportId], and usePathname() reports whichever is actually live.
+  const pathname = usePathname();
+  const { screenOpenedAt, firstInputAt, markFirstInput } = useTaskTiming(() =>
+    logAppEvent({
+      route: pathname ?? "/teacher/eod",
+      eventType: "task_started",
+      metadata: { task: "eod_update", submissionSource },
+    })
+  );
+
   // Stage 2's optional step 5: "did you use any of [child]'s strategies
   // today?" -- reuses the same role-scoped RPC every other clinical-team
   // surface reads through (a teacher viewer only ever gets strategy_school/
@@ -192,6 +215,9 @@ export function EodWizardForChild({
           energy_level: energyLevel,
           flags: flags.filter((f) => f !== NO_FLAGS),
           heads_up: headsUp.trim() || null,
+          screen_opened_at: screenOpenedAt,
+          first_input_at: firstInputAt,
+          submission_source: submissionSource,
         }),
       setStatus,
       controller.signal
@@ -321,7 +347,11 @@ export function EodWizardForChild({
   }
 
   return (
-    <div className="flex min-h-full flex-1 flex-col bg-brand-off-white/40">
+    <div
+      className="flex min-h-full flex-1 flex-col bg-brand-off-white/40"
+      onFocusCapture={markFirstInput}
+      onClickCapture={markFirstInput}
+    >
       <header className="flex flex-col gap-1 px-4 pt-6 pb-2">
         {progressLabel && (
           <p className="text-xs font-semibold uppercase tracking-wide text-brand-golden-brown">{progressLabel}</p>

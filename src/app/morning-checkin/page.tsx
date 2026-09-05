@@ -5,6 +5,8 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { useMyPassport } from "@/hooks/useMyPassport";
+import { useTaskTiming } from "@/hooks/useTaskTiming";
+import { logAppEvent } from "@/lib/logAppEvent";
 import { logActivity } from "@/lib/logActivity";
 
 type SleepQuality = "slept_through" | "woke_briefly" | "very_restless" | "barely_slept";
@@ -108,6 +110,11 @@ export default function MorningCheckinPage() {
   const [error, setError] = useState<string | null>(null);
   const [showSuccess, setShowSuccess] = useState(false);
   const [successVisible, setSuccessVisible] = useState(false);
+  // Time-on-task, Pass 1 -- see CLAUDE.md's TIME-ON-TASK INSTRUMENTATION
+  // entry.
+  const { screenOpenedAt, firstInputAt, markFirstInput } = useTaskTiming(() =>
+    logAppEvent({ route: "/morning-checkin", eventType: "task_started", metadata: { task: "morning_checkin" } })
+  );
 
   useEffect(() => {
     if (!showSuccess) return;
@@ -151,6 +158,8 @@ export default function MorningCheckinPage() {
       regulation_state: regulationState,
       morning_stressors: stressors,
       heads_up: headsUp.trim() || null,
+      screen_opened_at: screenOpenedAt,
+      first_input_at: firstInputAt,
     });
 
     setIsSubmitting(false);
@@ -198,7 +207,11 @@ export default function MorningCheckinPage() {
   }
 
   return (
-    <div className="flex min-h-full flex-1 flex-col bg-brand-off-white/40">
+    <div
+      className="flex min-h-full flex-1 flex-col bg-brand-off-white/40"
+      onFocusCapture={markFirstInput}
+      onClickCapture={markFirstInput}
+    >
       <header className="flex flex-col gap-1 px-4 pt-6 pb-2">
         <p className="text-xs font-medium text-black/40">Step {step} of 4</p>
         <p className="text-sm font-semibold text-brand-neutral-black">{childName}</p>
