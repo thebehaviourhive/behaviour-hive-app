@@ -110,30 +110,6 @@ export function LoginContent() {
             </Button>
           </form>
 
-          <div className="my-5 flex items-center gap-3">
-            <div className="h-px flex-1 bg-black/10" />
-            <span className="text-xs font-medium text-black/40">
-              or continue with
-            </span>
-            <div className="h-px flex-1 bg-black/10" />
-          </div>
-
-          <div className="flex flex-col gap-3">
-            <button
-              type="button"
-              className="flex items-center justify-center gap-2 rounded-2xl border border-black/10 bg-white py-3 text-sm font-semibold text-brand-neutral-black transition-colors hover:bg-black/[0.02]"
-            >
-              <span aria-hidden className="text-base font-bold">G</span>
-              Continue with Google
-            </button>
-            <button
-              type="button"
-              className="flex items-center justify-center gap-2 rounded-2xl border border-black/10 bg-white py-3 text-sm font-semibold text-brand-neutral-black transition-colors hover:bg-black/[0.02]"
-            >
-              Continue with Apple
-            </button>
-          </div>
-
           <p className="mt-5 text-center text-sm text-black/60">
             Don&apos;t have an account?{" "}
             <a href="/register" className="font-semibold text-brand-prussian-blue">

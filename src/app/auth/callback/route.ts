@@ -3,26 +3,25 @@ import type { EmailOtpType } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import { getPostAuthRedirect } from "@/lib/roleRedirect";
 
+// The `code` (authorization-code / PKCE) branch this route used to handle
+// was OAuth-exclusive in this app -- checked before removing it, not
+// assumed: no magic-link (signInWithOtp) call exists anywhere in this
+// codebase, and password recovery/email confirmation both use the
+// token_hash+type branch below (the custom email template uses
+// {{ .TokenHash }}/{{ .Type }}, not a PKCE code link -- see that branch's
+// own comment for why). With Google/Apple sign-in removed, nothing in
+// this app ever produces a `?code=` callback any more; disabling the
+// providers in the Supabase dashboard is what actually stops a request
+// from arriving with one, but this route no longer attempting to
+// complete one is real defense in depth on the app's own side, not
+// just cosmetic.
+
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
-  const code = searchParams.get("code");
   const tokenHash = searchParams.get("token_hash");
   const type = searchParams.get("type") as EmailOtpType | null;
 
   const supabase = await createClient();
-
-  if (code) {
-    const { data, error } = await supabase.auth.exchangeCodeForSession(code);
-
-    if (!error) {
-      const next = getPostAuthRedirect(data.user?.app_metadata?.role);
-      return NextResponse.redirect(`${origin}${next}`);
-    }
-
-    return NextResponse.redirect(
-      `${origin}/login?error=auth-callback-failed&reason=${encodeURIComponent(error.message)}`
-    );
-  }
 
   // token_hash + type: the confirmation email links directly to this route
   // (via {{ .SiteURL }}/auth/callback?token_hash={{ .TokenHash }}&type=
@@ -56,11 +55,11 @@ export async function GET(request: Request) {
     );
   }
 
-  // No `code` or `token_hash` query param — Supabase may have used the
-  // implicit flow instead (tokens/errors arrive in the URL hash fragment,
-  // which a server route can never see), or the link may already have
-  // been consumed (e.g. pre-fetched by a mail client's link scanner) with
-  // the resulting error also only present in the hash. Hand off to a
-  // client page that can actually read window.location.hash.
+  // No `token_hash` query param — Supabase may have used the implicit flow
+  // instead (tokens/errors arrive in the URL hash fragment, which a server
+  // route can never see), or the link may already have been consumed
+  // (e.g. pre-fetched by a mail client's link scanner) with the resulting
+  // error also only present in the hash. Hand off to a client page that
+  // can actually read window.location.hash.
   return NextResponse.redirect(`${origin}/auth/callback/complete`);
 }
