@@ -49,6 +49,25 @@ import { BottomSheet } from "@/components/ui/BottomSheet";
 //    never declared those fields. Restated in the confirm sheet too --
 //    a teacher signing off should know an account was disputed and
 //    resolved, not just that it currently reads clean.
+//
+// THE ATTESTATION SIGN-OFF RACE (found live, real production data, 7
+// September 2026, CLAUDE.md). A named colleague could be recorded as
+// never-attested when they were never actually given the chance -- a
+// teacher could request attestations and sign off moments later, and
+// nothing anywhere distinguished "nobody was asked" from "asked, then
+// the window closed". incident_signoff_issues() still deliberately
+// never BLOCKS on never-attested -- that stays right for a record where
+// nobody was asked at all. What's new: when attestations_requested is
+// true and at least one named, non-owner colleague genuinely hasn't
+// responded, this card now requires an explicit second confirmation
+// (a checkbox, not just the same "Sign off" tap) before proceeding --
+// Daniel's own call, over a hard block: "a teacher who needs to close a
+// record should be able to, but 'signed off with 2 attestations
+// outstanding' is a fact a principal should see, not a silence." The
+// server enforces the identical rule independently (sign_off_
+// incident()'s own p_proceed_without_attestations, migration 0176) --
+// this checkbox can't be the only thing standing between an accidental
+// tap and a fact going unrecorded.
 
 interface BlockingIssue {
   code: string;
@@ -70,6 +89,7 @@ interface SignoffSummary {
   can_sign_off: boolean;
   blocking_issues: BlockingIssue[];
   staff_attestations: StaffAttestation[];
+  attestations_requested: boolean;
   anyone_injured: { value: boolean | null; note: string | null };
 }
 
@@ -126,6 +146,12 @@ export function SignOffCard({
   // too, not just where the bug was.
   const [showSuccess, setShowSuccess] = useState(false);
   const [successVisible, setSuccessVisible] = useState(false);
+  // The attestation race fix's own explicit second confirmation -- see
+  // this file's own header comment. Reset whenever the sheet reopens so
+  // a stale "yes, proceed" from a previous open (e.g. cancelled, then
+  // reopened after someone actually attested in the meantime) can never
+  // silently carry forward.
+  const [proceedWithoutAttestations, setProceedWithoutAttestations] = useState(false);
 
   useEffect(() => {
     let isMounted = true;
@@ -154,7 +180,10 @@ export function SignOffCard({
     setIsSigning(true);
     setSignError(null);
     const supabase = createClient();
-    const { error } = await supabase.rpc("sign_off_incident", { p_incident_id: incidentId });
+    const { error } = await supabase.rpc("sign_off_incident", {
+      p_incident_id: incidentId,
+      p_proceed_without_attestations: proceedWithoutAttestations,
+    });
     setIsSigning(false);
     if (error) {
       // Shouldn't normally happen -- the summary above already reflects
@@ -209,6 +238,11 @@ export function SignOffCard({
   }
 
   const notYetAttested = summary.staff_attestations.filter((s) => s.status === "not_attested");
+  // ONLY when attestations were genuinely requested -- never when
+  // nobody was asked at all, which incident_signoff_issues() has always
+  // deliberately let through unremarked. This is the one distinction
+  // the whole fix turns on (see this file's own header comment).
+  const requestedButNotYetAttested = summary.attestations_requested ? notYetAttested : [];
   const blockingStaff = summary.staff_attestations.filter((s) => s.blocks_signoff);
   // Withdrawn is its own class of blocking issue, not a variant of
   // "stale" or a missing debrief -- see this file's own header comment.
@@ -288,7 +322,13 @@ export function SignOffCard({
       )}
 
       {summary.can_sign_off ? (
-        <Button type="button" onClick={() => setIsConfirmOpen(true)}>
+        <Button
+          type="button"
+          onClick={() => {
+            setProceedWithoutAttestations(false);
+            setIsConfirmOpen(true);
+          }}
+        >
           Sign off
         </Button>
       ) : (
@@ -345,13 +385,42 @@ export function SignOffCard({
               countersign is required next.
             </p>
 
+            {/* The attestation race fix's own explicit second
+                confirmation -- see this file's own header comment. Only
+                ever shown when attestations were genuinely requested and
+                someone named hasn't responded; never for a record where
+                nobody was asked. A principal sees this recorded on the
+                incident afterward (CountersignCard, the dashboard's own
+                Routine bucket) -- this checkbox is what makes that
+                record true. */}
+            {requestedButNotYetAttested.length > 0 && (
+              <label className="mt-3 flex cursor-pointer items-start gap-2.5 rounded-xl border border-brand-golden-brown/30 bg-brand-golden-brown/10 p-3">
+                <input
+                  type="checkbox"
+                  checked={proceedWithoutAttestations}
+                  onChange={(e) => setProceedWithoutAttestations(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 flex-shrink-0 accent-brand-golden-brown"
+                />
+                <span className="text-sm text-brand-neutral-black">
+                  {requestedButNotYetAttested.map((s) => s.name).join(", ")}{" "}
+                  {requestedButNotYetAttested.length === 1 ? "hasn't" : "haven't"} attested yet. I&apos;m signing off
+                  without waiting -- this will be recorded and visible to the principal.
+                </span>
+              </label>
+            )}
+
             {signError && (
               <p role="alert" className="mt-3 text-sm font-medium text-red-600">
                 {signError}
               </p>
             )}
 
-            <Button type="button" onClick={handleConfirmSignOff} disabled={isSigning} className="mt-6">
+            <Button
+              type="button"
+              onClick={handleConfirmSignOff}
+              disabled={isSigning || (requestedButNotYetAttested.length > 0 && !proceedWithoutAttestations)}
+              className="mt-6"
+            >
               {isSigning ? "Signing off…" : "Sign off"}
             </Button>
             <Button

@@ -105,6 +105,38 @@ interface ChildRosterRow {
   current_class_id: string | null;
 }
 
+// Migration 0176 -- THE ATTESTATION SIGN-OFF RACE (CLAUDE.md). A fact
+// to review, not an urgent action -- rendered in the Routine bucket
+// below, "Review" + href like awaitingSignoff/outstandingDebriefs, never
+// the urgent parentCalls/withdrawnAttestations shape. The teacher's own
+// explicit decision to proceed already happened; this is the principal
+// finding out, not something for them to act on right now.
+interface SignedOffWithOutstandingAttestationsRow {
+  incident_id: string;
+  occurred_at: string;
+  location: string;
+  teacher_signed_at: string;
+  teacher_signed_by_name: string | null;
+  outstanding_count: number;
+  outstanding_names: string | null;
+}
+
+// Migration 0177 -- PARENT CALL, THE EXPLICIT NO (CLAUDE.md). Same
+// Routine placement, same reasoning -- a restraint/injury occurred and
+// the reporting teacher explicitly answered No to a parent call. Worded
+// as a fact to review, never an instruction to call (they already
+// decided not to) -- see this row's own exception text below.
+interface DeclinedParentCallRow {
+  incident_children_id: string;
+  incident_id: string;
+  occurred_at: string;
+  location: string;
+  child_index: string;
+  child_name: string | null;
+  owning_teacher_name: string | null;
+  parent_call_answered_at: string;
+}
+
 // PRD 3, Stage 3 -- sixth instance of the established bucket pattern.
 // No status field -- "outstanding" is the RPC's own filter
 // (passports.section_a_complete = false), not a column this row carries.
@@ -153,6 +185,10 @@ export default function PrincipalDashboardPage() {
   const [pendingStaff, setPendingStaff] = useState<StaffRosterRow[]>([]);
   const [parentCalls, setParentCalls] = useState<RestraintNeedingCallRow[]>([]);
   const [withdrawnAttestations, setWithdrawnAttestations] = useState<WithdrawnAttestationRow[]>([]);
+  const [signedOffWithOutstandingAttestations, setSignedOffWithOutstandingAttestations] = useState<
+    SignedOffWithOutstandingAttestationsRow[]
+  >([]);
+  const [declinedParentCalls, setDeclinedParentCalls] = useState<DeclinedParentCallRow[]>([]);
   const [unassignedChildren, setUnassignedChildren] = useState<ChildRosterRow[]>([]);
   const [passportCompletionsOutstanding, setPassportCompletionsOutstanding] = useState<PassportCompletionOutstandingRow[]>([]);
   const [outstandingSupportAlerts, setOutstandingSupportAlerts] = useState<OutstandingSupportAlertRow[]>([]);
@@ -229,6 +265,8 @@ export default function PrincipalDashboardPage() {
       childRosterResult,
       passportCompletionsResult,
       outstandingSupportAlertsResult,
+      signedOffWithOutstandingAttestationsResult,
+      declinedParentCallResult,
     ] = await Promise.all([
       supabase.rpc("get_institution_incidents", { p_institution_id: staffRow.institution_id }),
       supabase.rpc("get_institution_staff_roster", {
@@ -241,6 +279,10 @@ export default function PrincipalDashboardPage() {
       supabase.rpc("get_institution_child_roster", { p_institution_id: staffRow.institution_id }),
       supabase.rpc("get_institution_passport_completions_outstanding", { p_institution_id: staffRow.institution_id }),
       supabase.rpc("get_institution_outstanding_support_alerts", { p_institution_id: staffRow.institution_id }),
+      supabase.rpc("get_institution_incidents_signed_off_with_outstanding_attestations", {
+        p_institution_id: staffRow.institution_id,
+      }),
+      supabase.rpc("get_institution_restraints_with_declined_parent_call", { p_institution_id: staffRow.institution_id }),
     ]);
 
     if (rpcError) {
@@ -270,6 +312,14 @@ export default function PrincipalDashboardPage() {
     }
     if (!outstandingSupportAlertsResult.error) {
       setOutstandingSupportAlerts((outstandingSupportAlertsResult.data ?? []) as OutstandingSupportAlertRow[]);
+    }
+    if (!signedOffWithOutstandingAttestationsResult.error) {
+      setSignedOffWithOutstandingAttestations(
+        (signedOffWithOutstandingAttestationsResult.data ?? []) as SignedOffWithOutstandingAttestationsRow[]
+      );
+    }
+    if (!declinedParentCallResult.error) {
+      setDeclinedParentCalls((declinedParentCallResult.data ?? []) as DeclinedParentCallRow[]);
     }
 
     setIncidents((rows ?? []) as InstitutionIncidentRow[]);
@@ -324,7 +374,9 @@ export default function PrincipalDashboardPage() {
     pendingStaff.length +
     unassignedChildren.length +
     outstandingDebriefs.length +
-    passportCompletionsOutstanding.length;
+    passportCompletionsOutstanding.length +
+    signedOffWithOutstandingAttestations.length +
+    declinedParentCalls.length;
 
   const nothingOutstanding = !isLoading && !error && needsActionCount === 0 && routineCount === 0;
 
@@ -524,6 +576,38 @@ export default function PrincipalDashboardPage() {
                       context={formatWaitingSince(incident.occurred_at)}
                       actionLabel="Review"
                       href={`/teacher/incidents/${incident.incident_id}`}
+                    />
+                  ))}
+                  {/* Migration 0176 -- THE ATTESTATION SIGN-OFF RACE
+                      (CLAUDE.md). A fact, not an instruction: the
+                      owning teacher already made the decision to
+                      proceed; this is discovery, not a task. */}
+                  {signedOffWithOutstandingAttestations.map((incident) => (
+                    <WorkQueueRow
+                      key={incident.incident_id}
+                      entity={incident.location}
+                      exception={`Signed off with ${incident.outstanding_count} attestation${
+                        incident.outstanding_count === 1 ? "" : "s"
+                      } outstanding${incident.outstanding_names ? ` — ${incident.outstanding_names}` : ""}`}
+                      context={formatWaitingSince(incident.teacher_signed_at)}
+                      actionLabel="Review"
+                      href={`/teacher/incidents/${incident.incident_id}`}
+                    />
+                  ))}
+                  {/* Migration 0177 -- PARENT CALL, THE EXPLICIT NO
+                      (CLAUDE.md). Worded as a fact to review -- the
+                      teacher already decided not to call; this is not
+                      an instruction to call the parent. */}
+                  {declinedParentCalls.map((row) => (
+                    <WorkQueueRow
+                      key={row.incident_children_id}
+                      entity={row.child_name ?? `Child ${row.child_index}`}
+                      exception={`Restraint or injury recorded — ${
+                        row.owning_teacher_name ?? "the reporting teacher"
+                      } answered No to a parent call`}
+                      context={formatWaitingSince(row.parent_call_answered_at)}
+                      actionLabel="Review"
+                      href={`/teacher/incidents/${row.incident_id}`}
                     />
                   ))}
                 </div>

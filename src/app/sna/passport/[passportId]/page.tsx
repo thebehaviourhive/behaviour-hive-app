@@ -113,6 +113,19 @@ export default function SnaPassportPage() {
     reload: reloadClinicalContent,
   } = usePassportClinicalContent(passportId);
 
+  // Migration 0178 -- SUPPLY TEACHER PROMPT TO REVIEW THE CLASS'S
+  // PASSPORTS (CLAUDE.md). Fire-and-forget, once per mount -- the RPC
+  // itself silently no-ops for anyone without a currently-active
+  // covering grant on this child's class (a permanent SNA, or a class
+  // teacher, opening this same page is simply not what this tracks). No
+  // loading state, no error surfaced -- a failed write here should never
+  // block or slow down the page someone opened to actually read.
+  useEffect(() => {
+    if (!isReady || !passportId || !user) return;
+    const supabase = createClient();
+    supabase.rpc("mark_passport_reviewed", { p_passport_id: passportId }).then(() => {});
+  }, [isReady, passportId, user]);
+
   useEffect(() => {
     if (!isReady || !passportId || !user) return;
     let isMounted = true;

@@ -18,6 +18,13 @@ import { createClient } from "@/lib/supabase/client";
 // name is on a legal record and they should be able to look up what
 // they attested to (or withdrew, or never got to) even after it's
 // closed, not lose the ability to find it the moment it locks.
+//
+// THE ATTESTATION SIGN-OFF RACE (migration 0176, CLAUDE.md). A closed
+// incident's Row now distinguishes "you attested, preserved read-only"
+// from "this closed before you responded" -- previously the same
+// generic copy covered both, which read as normal record-keeping when
+// what actually happened was a request that became unfulfillable
+// before anyone had a real chance to answer it.
 
 interface AttestationRow {
   incident_id: string;
@@ -120,7 +127,23 @@ export default function IncidentAttestationsPage() {
           </span>
         </div>
         {whatChanged && <p className="mt-2 text-xs text-brand-neutral-black/70">{whatChanged}</p>}
-        {row.is_closed && <p className="mt-2 text-xs text-brand-neutral-black/50">This incident is closed. Your record is preserved, read-only.</p>}
+        {row.is_closed &&
+          (row.status === "not_attested" ? (
+            // THE ATTESTATION SIGN-OFF RACE (migration 0176, CLAUDE.md).
+            // "Preserved, read-only" was previously shown here
+            // regardless of whether this person ever actually attested
+            // -- indistinguishable from a genuine attestation being
+            // preserved, when what actually happened is the request
+            // became unfulfillable before they had a real chance to
+            // respond. Named plainly instead of vanishing into the same
+            // generic copy every other closed row gets.
+            <p className="mt-2 text-xs text-brand-neutral-black/50">
+              This was signed off before you responded. Your attestation was requested, but the record closed
+              first — nothing further to do here.
+            </p>
+          ) : (
+            <p className="mt-2 text-xs text-brand-neutral-black/50">This incident is closed. Your record is preserved, read-only.</p>
+          ))}
       </Link>
     );
   }

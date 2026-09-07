@@ -126,6 +126,12 @@ interface ChildFormState {
   recoveryMethods: string[];
   recoveryMethodsOther: string;
   parentCallRequired: boolean;
+  // Migration 0177 -- PARENT CALL, THE EXPLICIT NO (CLAUDE.md). Set
+  // only by the teacher's own explicit answer (set_parent_call_answer,
+  // either direction), never by the auto-raise triggers -- distinguishes
+  // "never answered" from "explicitly reviewed" at the schema level,
+  // which the boolean above never could on its own.
+  parentCallAnsweredAt: string | null;
   parentCalledAt: string | null;
   parentCalledBy: string | null;
   parentNotifiedAt: string | null;
@@ -296,7 +302,7 @@ export default function IncidentRecordPage() {
   // NOT bumped, named rather than silently omitted:
   //   setSupportButtonPressedAndSave, setSupportAlertIdAndSave
   //   (support-button metadata -- not part of the record's own content,
-  //   not read by any sign-off check), setParentCallRequiredAndSave,
+  //   not read by any sign-off check), setParentCallAnswerAndSave,
   //   markParentCalled (the parent-contact workflow -- same reasoning,
   //   and this page's own "Parent contact" block already documents
   //   that split as "the ACTION workflow, separate from the facts").
@@ -508,7 +514,7 @@ export default function IncidentRecordPage() {
         supabase
           .from("incident_children")
           .select(
-            "id, child_index, passport_id, distress_level, remained_on_site, remained_detail, recovery_methods, recovery_methods_other, parent_call_required, parent_called_at, parent_called_by, parent_notified_at, parent_notification_blocked_reason, parent_acknowledged_at"
+            "id, child_index, passport_id, distress_level, remained_on_site, remained_detail, recovery_methods, recovery_methods_other, parent_call_required, parent_call_answered_at, parent_called_at, parent_called_by, parent_notified_at, parent_notification_blocked_reason, parent_acknowledged_at"
           )
           .eq("incident_id", params.incidentId)
           .order("child_index"),
@@ -621,6 +627,7 @@ export default function IncidentRecordPage() {
           recoveryMethods: row.recovery_methods ?? [],
           recoveryMethodsOther: row.recovery_methods_other ?? "",
           parentCallRequired: row.parent_call_required,
+          parentCallAnsweredAt: row.parent_call_answered_at,
           parentCalledAt: row.parent_called_at,
           parentCalledBy: row.parent_called_by,
           parentNotifiedAt: row.parent_notified_at,
@@ -1299,31 +1306,40 @@ export default function IncidentRecordPage() {
 
   // Parent-call flag -- per child (incident_children), immediate write
   // like debrief_required/anyone_injured above, not batched into the
-  // main Save. One-way in the UI: the toggle is only ever offered while
-  // false -- injuries/restrictive practice can also flip it true
-  // automatically, and 0068's own trigger comment is explicit that it
-  // never goes back to false once set ("a physical injury or
-  // restrictive practice was used" doesn't un-happen). A raw update
-  // COULD technically still write false (no DB-level guard against it),
-  // but the UI simply never offers that action.
-  async function setParentCallRequiredAndSave(childId: string) {
+  // main Save. One-way in the UI once true: injuries/restrictive
+  // practice can also flip it true automatically, and 0068's own
+  // trigger comment is explicit that it never goes back to false once
+  // set ("a physical injury or restrictive practice was used" doesn't
+  // un-happen).
+  //
+  // PARENT CALL, THE EXPLICIT NO (migration 0177, CLAUDE.md). This used
+  // to be a raw .update({parent_call_required: true}) -- one-way, no
+  // way to explicitly answer No at all. false was simply the untouched
+  // default, displayed as a "No" pill but never affirmatively chosen --
+  // found live: a teacher who genuinely believed they'd "answered No"
+  // had no action that ever recorded that, so a later injury's own
+  // auto-raise trigger silently overwrote a decision nobody had actually
+  // made yet. Now routes through set_parent_call_answer(), which sets
+  // parent_call_answered_at atomically with the value -- the one fact
+  // the auto-raise triggers now check before ever touching this column
+  // again.
+  async function setParentCallAnswerAndSave(childId: string, required: boolean) {
     setParentCallSaveError(null);
-    updateChild(childId, { parentCallRequired: true });
+    const previous = children.find((c) => c.id === childId);
+    updateChild(childId, { parentCallRequired: required, parentCallAnsweredAt: new Date().toISOString() });
 
     const supabase = createClient();
-    // Bug report follow-up -- rows-affected check, single known row.
-    const { data, error: updateError } = await supabase
-      .from("incident_children")
-      .update({ parent_call_required: true })
-      .eq("id", childId)
-      .select("id");
+    const { error: rpcError } = await supabase.rpc("set_parent_call_answer", {
+      p_incident_children_id: childId,
+      p_required: required,
+    });
 
-    if (updateError) {
-      updateChild(childId, { parentCallRequired: false });
-      setParentCallSaveError(updateError.message);
-    } else if (!data || data.length === 0) {
-      updateChild(childId, { parentCallRequired: false });
-      setParentCallSaveError(friendlyAccessLapsedMessage("This flag"));
+    if (rpcError) {
+      updateChild(childId, {
+        parentCallRequired: previous?.parentCallRequired ?? false,
+        parentCallAnsweredAt: previous?.parentCallAnsweredAt ?? null,
+      });
+      setParentCallSaveError(rpcError.message);
     }
   }
 
@@ -1913,7 +1929,11 @@ export default function IncidentRecordPage() {
                             Parent called {formatDateTime(child.parentCalledAt)}
                             {child.parentCalledBy && ` by ${staffNameById.get(child.parentCalledBy) || "a staff member"}`}.
                           </p>
-                        ) : !child.parentCallRequired ? (
+                        ) : !child.parentCallRequired && child.parentCallAnsweredAt ? (
+                          // Only once explicitly answered -- migration
+                          // 0177. This used to show for the untouched
+                          // default too, reading as a decision that had
+                          // never actually been made.
                           <p className="text-sm text-brand-neutral-black/50">Parent call not required.</p>
                         ) : null}
                         {child.parentAcknowledgedAt ? (
@@ -1937,21 +1957,48 @@ export default function IncidentRecordPage() {
                         separate from the facts above. Unchanged except
                         for the "already called" fact display moving up
                         into the always-visible block -- this stays
-                        conditional because it's a task, not a fact. */}
+                        conditional because it's a task, not a fact.
+                        PARENT CALL, THE EXPLICIT NO (migration 0177,
+                        CLAUDE.md): previously "No" was a static pill --
+                        the untouched default, never an action anyone
+                        actually took, so an auto-raise trigger could
+                        silently override it later with nothing to show
+                        a decision had ever been made. Now a genuine,
+                        unanswered question offers BOTH real buttons; an
+                        explicit No stays visible as confirmed (still
+                        overridable to Yes, matching the one-way-once-
+                        true rule everywhere else on this page). */}
                     <div className="border-t border-black/[0.06] pt-4">
                       <span className="mb-2 block text-sm font-semibold text-brand-neutral-black">Parent call required?</span>
                       {child.parentCallRequired ? (
                         <span className="inline-block rounded-full border border-brand-golden-brown bg-brand-golden-brown/10 px-3 py-1.5 text-xs font-semibold text-brand-golden-brown">
                           Yes
                         </span>
-                      ) : (
-                        <div className="flex flex-wrap gap-2">
+                      ) : child.parentCallAnsweredAt ? (
+                        <div className="flex flex-wrap items-center gap-2">
                           <span className="rounded-full border border-brand-prussian-blue bg-brand-pastel-blue/30 px-3 py-1.5 text-xs font-semibold text-brand-prussian-blue">
                             No
                           </span>
                           <button
                             type="button"
-                            onClick={() => setParentCallRequiredAndSave(child.id)}
+                            onClick={() => setParentCallAnswerAndSave(child.id, true)}
+                            className="rounded-full border border-black/10 bg-white px-3 py-1.5 text-xs font-semibold text-black/60 transition-colors hover:bg-black/[0.02]"
+                          >
+                            Change to Yes
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setParentCallAnswerAndSave(child.id, false)}
+                            className="rounded-full border border-black/10 bg-white px-3 py-1.5 text-xs font-semibold text-black/60 transition-colors hover:bg-black/[0.02]"
+                          >
+                            No
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setParentCallAnswerAndSave(child.id, true)}
                             className="rounded-full border border-black/10 bg-white px-3 py-1.5 text-xs font-semibold text-black/60 transition-colors hover:bg-black/[0.02]"
                           >
                             Yes

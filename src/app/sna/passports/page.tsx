@@ -8,6 +8,7 @@ import { useSnaChildren } from "@/hooks/useSnaChildren";
 import { useTeacherMorningCheckins, type MorningPupilStatus } from "@/hooks/useTeacherMorningCheckins";
 import { getChildDisplayName } from "@/lib/childDisplayName";
 import { SnaBottomNav } from "@/components/sna/SnaBottomNav";
+import { SupplyTeacherPassportReviewCard } from "@/components/sna/SupplyTeacherPassportReviewCard";
 import { TemporaryAccessBanner } from "@/components/shared/TemporaryAccessBanner";
 import { AlertTriangleIcon, PeopleIcon } from "@/components/ui/icons";
 import { QuestionnairePromptCard } from "@/components/questionnaire/QuestionnairePromptCard";
@@ -29,6 +30,12 @@ import { AttestationPromptCard } from "@/components/incident-log/AttestationProm
 // been granting them access to since Stage 2. useTeacherMorningCheckins()
 // still does the RAG-status/sort work, fed this page's own merged list
 // via its optional override param rather than re-deriving that logic.
+//
+// Migration 0178 -- SUPPLY TEACHER PROMPT TO REVIEW THE CLASS'S
+// PASSPORTS (CLAUDE.md). One SupplyTeacherPassportReviewCard per active
+// coverage, right below its own TemporaryAccessBanner -- both keyed off
+// the same activeCoverage this hook already resolves, both self-hide
+// the same way when there's nothing to show.
 const RAG_LABEL: Record<MorningPupilStatus["rag"], string> = {
   green: "Settled",
   amber: "Anxious",
@@ -144,6 +151,13 @@ export default function SnaPassportsPage() {
               coveringClassName={coverage.className}
               startTime={coverage.startTime}
               cutoffTime={coverage.cutoffTime}
+            />
+          ))}
+          {activeCoverage.map((coverage) => (
+            <SupplyTeacherPassportReviewCard
+              key={coverage.classId}
+              classId={coverage.classId}
+              className={coverage.className}
             />
           ))}
         </div>

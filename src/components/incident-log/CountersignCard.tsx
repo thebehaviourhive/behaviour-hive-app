@@ -26,6 +26,17 @@ import { AddAmendmentSheet } from "@/components/incident-log/AddAmendmentSheet";
 // wording). "Add an amendment" sits at equal visual weight next to
 // "Countersign", same size, same solid treatment, distinguished only
 // by colour -- disagreement has to be as easy as agreement.
+//
+// THE ATTESTATION SIGN-OFF RACE (migration 0176, CLAUDE.md). Before
+// this, "N of the above have not attested" rendered as one muted line
+// identically whether nobody was ever asked or someone genuinely never
+// got the chance before sign-off -- the exact silence Daniel's own
+// finding named. signed_off_with_outstanding_attestations distinguishes
+// the second case and gets its own non-muted callout, set once by
+// sign_off_incident() itself when the owning teacher used the explicit
+// "sign off without waiting" confirmation (SignOffCard's own header
+// comment) -- a fact for the countersigning principal to see here,
+// not a line they'd have to already know to go looking for.
 
 interface StaffAttestation {
   incident_staff_id: string;
@@ -44,6 +55,7 @@ interface CountersignSummary {
   staff_attestations: StaffAttestation[];
   teacher_signed_at: string;
   teacher_signed_by_name: string | null;
+  signed_off_with_outstanding_attestations: boolean;
   anyone_injured: { value: boolean | null; note: string | null };
   already_countersigned: boolean;
   countersigned_at: string | null;
@@ -284,6 +296,19 @@ export function CountersignCard({
           Signed off by {summary.teacher_signed_by_name ?? "the owning teacher"} on {formatDateTime(summary.teacher_signed_at)}.
         </p>
       </div>
+
+      {/* A fact to see, not a silence -- see this file's own header
+          comment. Neutral ink, not Golden Brown or red (this isn't a
+          warning or an error -- the owning teacher made an explicit,
+          recorded decision to proceed; a principal reviewing that is
+          normal process, not a problem to flag as urgent). */}
+      {summary.signed_off_with_outstanding_attestations && (
+        <p className="rounded-2xl border border-black/10 bg-black/[0.03] p-4 text-sm text-brand-neutral-black">
+          Signed off before every named colleague had attested.{" "}
+          {summary.teacher_signed_by_name ?? "The owning teacher"} chose to proceed without waiting for everyone
+          to respond -- see who below.
+        </p>
+      )}
 
       {summary.staff_attestations.length > 0 && (
         <div className="flex flex-col gap-3">
