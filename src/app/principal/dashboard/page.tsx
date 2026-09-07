@@ -279,7 +279,12 @@ export default function PrincipalDashboardPage() {
       supabase.rpc("get_institution_child_roster", { p_institution_id: staffRow.institution_id }),
       supabase.rpc("get_institution_passport_completions_outstanding", { p_institution_id: staffRow.institution_id }),
       supabase.rpc("get_institution_outstanding_support_alerts", { p_institution_id: staffRow.institution_id }),
-      supabase.rpc("get_institution_incidents_signed_off_with_outstanding_attestations", {
+      // Migration 0179 -- the original name (0176) was 66 characters,
+      // three over Postgres's 63-byte identifier limit; CREATE FUNCTION
+      // silently truncated it rather than erroring, so this call never
+      // found a real function until renamed shorter. Found live during
+      // verification, not assumed.
+      supabase.rpc("get_institution_incidents_outstanding_attestations", {
         p_institution_id: staffRow.institution_id,
       }),
       supabase.rpc("get_institution_restraints_with_declined_parent_call", { p_institution_id: staffRow.institution_id }),

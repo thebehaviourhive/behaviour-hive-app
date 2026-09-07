@@ -2149,7 +2149,19 @@ async function main() {
     // an earlier draft of this test did, which staled teacherB's own
     // attestation again right before sign-off and blocked it for an
     // unrelated reason.)
-    const { error: pSignErr } = await teacherA.rpc("sign_off_incident", { p_incident_id: pIncidentId });
+    //
+    // Migration 0176 (THE ATTESTATION SIGN-OFF RACE): the SNA named at
+    // P10 never attests -- exactly what P16b below is built to prove
+    // still surfaces post-signoff -- so this is now genuinely the new
+    // soft-block's own condition. P16-pre proves the default refusal;
+    // the explicit override then preserves P16's original intent.
+    const { error: pSignBlockedErr } = await teacherA.rpc("sign_off_incident", { p_incident_id: pIncidentId });
+    record(
+      "P16-pre: migration 0176 -- sign-off is refused by default with the SNA (named at P10) still not attested",
+      Boolean(pSignBlockedErr) && /attest/i.test(pSignBlockedErr?.message ?? ""),
+      pSignBlockedErr?.message
+    );
+    const { error: pSignErr } = await teacherA.rpc("sign_off_incident", { p_incident_id: pIncidentId, p_proceed_without_attestations: true });
     record("P16 setup: this incident actually reached sign-off (consistency gates satisfied)", !pSignErr, pSignErr?.message);
 
     const { data: pMyListAfterSignoff } = await teacherB.rpc("get_my_incident_attestations");
@@ -2245,10 +2257,29 @@ async function main() {
       JSON.stringify(qStaleCats)
     );
     // -- Q10: renew, sign off -- status derives to 'awaiting_principal'. --
+    // Migration 0176 (THE ATTESTATION SIGN-OFF RACE): the SNA named at
+    // Q7 never attests, and attestations_requested is genuinely true --
+    // exactly the new soft-block's own condition, collateral to what
+    // this check was originally about (status derivation on sign-off).
+    // Used as real coverage for the new gate rather than worked around:
+    // Q10a proves the default refusal fires; Q10b proves the explicit
+    // override succeeds and records signed_off_with_outstanding_
+    // attestations; Q10 (original) then asserts what it always did.
     await teacherB.rpc("attest_to_incident", { p_incident_staff_id: qStaffRow.id, p_addendum: "Re-confirming after reset." });
-    const { error: qSignErr } = await teacherA.rpc("sign_off_incident", { p_incident_id: qIncidentId });
-    const { data: qRow4 } = await admin.from("incidents").select("status").eq("id", qIncidentId).single();
+    const { error: qSignBlockedErr } = await teacherA.rpc("sign_off_incident", { p_incident_id: qIncidentId });
+    record(
+      "Q10a: migration 0176 -- sign-off is refused by default with the SNA (named at Q7) still not attested, even though teacherB has re-attested",
+      Boolean(qSignBlockedErr) && /attest/i.test(qSignBlockedErr?.message ?? ""),
+      qSignBlockedErr?.message
+    );
+    const { error: qSignErr } = await teacherA.rpc("sign_off_incident", { p_incident_id: qIncidentId, p_proceed_without_attestations: true });
+    const { data: qRow4 } = await admin.from("incidents").select("status, signed_off_with_outstanding_attestations").eq("id", qIncidentId).single();
     record("Q10: signing off derives status='awaiting_principal'", !qSignErr && qRow4.status === "awaiting_principal", `err=${qSignErr?.message}, status=${qRow4.status}`);
+    record(
+      "Q10b: migration 0176 -- signed_off_with_outstanding_attestations is true once explicitly overridden",
+      qRow4.signed_off_with_outstanding_attestations === true,
+      JSON.stringify(qRow4)
+    );
 
     await admin.from("incidents").delete().eq("id", qIncidentId);
   }
@@ -2574,7 +2605,20 @@ async function main() {
     // not cached from stage 1's result.
     const parent2S = await signedInClient("checks.parent2@thebehaviourhive.com"); // this sign-in itself sets last_sign_in_at, making them active from here on
 
-    const { error: sSignErr } = await teacherS.rpc("sign_off_incident", { p_incident_id: sIncidentId });
+    // Migration 0176 (THE ATTESTATION SIGN-OFF RACE): snaSId was named
+    // at stamp creation ("witnessed") and never attests anywhere in
+    // this check -- attestations_requested is true (S3a), so this is
+    // exactly the new soft-block's own condition, collateral to what
+    // S4 is actually testing (parent-notification staging). S3c below
+    // proves the default refusal fires first; S4a then uses the
+    // explicit override, matching the original intent of this check.
+    const { error: sSignBlockedErr } = await teacherS.rpc("sign_off_incident", { p_incident_id: sIncidentId });
+    record(
+      "S3c: migration 0176 -- sign-off is refused by default with snaSId (named at stamp creation) still not attested",
+      Boolean(sSignBlockedErr) && /attest/i.test(sSignBlockedErr?.message ?? ""),
+      sSignBlockedErr?.message
+    );
+    const { error: sSignErr } = await teacherS.rpc("sign_off_incident", { p_incident_id: sIncidentId, p_proceed_without_attestations: true });
     record("S4a: teacher sign-off succeeds", !sSignErr, sSignErr?.message);
 
     const { data: sChildRowsAfter } = await admin.from("incident_children").select("id, passport_id, parent_notified_at, parent_notification_blocked_reason").eq("incident_id", sIncidentId);
