@@ -1251,8 +1251,12 @@ async function main() {
       .single();
     // (service role for the insert itself here -- the point under test
     // is editability/deletability after the fact, not the insert
-    // authorization path, which check J4's own policy already covers
-    // via the owning-teacher/principal/clinician branches.)
+    // authorization path. The insert-authorization branches themselves
+    // are covered adversarially in CHECK R (R13 principal succeeds,
+    // R14/R15/R16 owning teacher/uninvolved staff/clinician all refused
+    // as of migration 0180) -- the earlier version of this comment
+    // pointed at a "check J4" that never existed under that label;
+    // corrected here rather than left to mislead the next reader.)
     record("Amendment can be appended", !amendErr, amendErr?.message);
 
     await teacherA.from("incident_amendments").update({ content: "Tampered" }).eq("id", amendment.id);
@@ -1265,6 +1269,28 @@ async function main() {
 
     const { data: visibleToPrincipal } = await principal.from("incident_amendments").select("id").eq("id", amendment.id);
     record("Amendment visible to principal", (visibleToPrincipal?.length ?? 0) === 1, `rows=${visibleToPrincipal?.length}`);
+
+    // -- Amendment access lockdown, item 3 (CLAUDE.md, migration 0180): --
+    // get_incident_amendments() is the new on-screen surface every role
+    // reads from. teacherA is the OWNING TEACHER on this incident -- can
+    // no longer INSERT an amendment (0180), but must still be able to
+    // SEE one, which is the entire point of item 3 (a correction against
+    // your own record has to be visible to you, not just to whoever
+    // wrote it). (A "returns zero rows for a genuine non-viewer" check
+    // is deliberately not added here -- this fixture's incidentId
+    // carries two children, and every other actor in scope by this
+    // point in the script has SOME real standing on one of them
+    // [parent1/parent2 once signed-off, teacherB via passport_access,
+    // clinician via clinician_access on child1] -- reusing any of them
+    // would test the wrong thing. get_incident_amendments() shares
+    // can_view_incident() with get_incident_export(), whose own identical
+    // gate is already exercised negatively elsewhere in this suite.)
+    const { data: teacherAAmendments, error: teacherAAmendErr } = await teacherA.rpc("get_incident_amendments", { p_incident_id: incidentId });
+    record(
+      "get_incident_amendments() -- the owning teacher CAN see an amendment against their own record, even though they can no longer add one",
+      !teacherAAmendErr && teacherAAmendments?.length === 1 && teacherAAmendments[0].reason === "Correction" && teacherAAmendments[0].author_name === "Teacher A Owning",
+      `err=${teacherAAmendErr?.message}, ${JSON.stringify(teacherAAmendments)}`
+    );
   }
 
   console.log(`\n== CHECK 8: CPI is_restraint flag, robust lookup ==`);
@@ -2423,16 +2449,34 @@ async function main() {
       `err=${rSmuggleErr?.message}, ${JSON.stringify(rSmuggleAfter)}`
     );
 
-    // -- R13/R14/R15: amendment-notify trigger -- principal's amendment --
-    // notifies the owning teacher; the owning teacher's OWN amendment
-    // does not notify themselves; teacherB (visible via passport_access,
-    // but no countersign authority left after R9's grant was revoked, and
-    // not creator/owning teacher/clinician) cannot add one at all.
+    // -- R13-R16: AMENDMENT ACCESS LOCKDOWN (migration 0180, CLAUDE.md). --
+    // Decided: amendments are principal-only. 0078's own INSERT policy
+    // had three branches -- owning teacher, can_countersign_incident(),
+    // verified/engaged clinician -- and this block used to prove all
+    // three worked (R13 principal, R14 owning teacher, an untested
+    // clinician branch) plus R15's unrelated third party refused. 0180
+    // dropped two of those three branches deliberately: an owning
+    // teacher who could always append to their own signed-off account
+    // (enforced only by AddAmendmentSheet never being wired up for them
+    // -- a UI omission, not a database rule) is exactly the shape CLAUDE.md
+    // already documents repeatedly -- a real capability with no adversarial
+    // check proving whether it was intended. R14 below used to assert
+    // that capability as a PASS ("does not raise a self-notice"); rewritten
+    // to assert its refusal instead, matching the CHECK C precedent this
+    // same session already applied to the attestation-race fixes: a check
+    // whose name described a limitation as a guarantee needed rewriting,
+    // not patching. R16 is genuinely NEW coverage, not a rewrite -- the
+    // clinician branch was never adversarially tested at all before now
+    // (grepped: no prior check exercised it), so this closes a real
+    // coverage gap the same pass that closes the teacher one. The
+    // top-level `clinician` actor is already actively engaged with
+    // child1 (top-level setup) and rSmuggleId is stamped on child1, so
+    // no new fixture is needed.
     const { data: rNoticesBefore } = await admin.from("school_notices").select("id").eq("incident_id", rSmuggleId).eq("notice_type", "incident_amendment_added");
     const { error: rPrincipalAmendErr } = await principal.from("incident_amendments").insert({ incident_id: rSmuggleId, author_id: principalId, reason: "Disagreement", content: "I was not present for this but the record raises a concern." });
     const { data: rNoticesAfterPrincipal } = await admin.from("school_notices").select("id").eq("incident_id", rSmuggleId).eq("notice_type", "incident_amendment_added");
     record(
-      "R13: principal's amendment raises exactly one incident_amendment_added notice",
+      "R13: principal's amendment succeeds (the one surviving INSERT branch) and raises exactly one incident_amendment_added notice",
       !rPrincipalAmendErr && (rNoticesBefore?.length ?? 0) === 0 && (rNoticesAfterPrincipal?.length ?? 0) === 1,
       `err=${rPrincipalAmendErr?.message}, before=${rNoticesBefore?.length}, after=${rNoticesAfterPrincipal?.length}`
     );
@@ -2440,13 +2484,21 @@ async function main() {
     const { error: rTeacherAmendErr } = await teacherA.from("incident_amendments").insert({ incident_id: rSmuggleId, author_id: teacherAId, reason: "Clarification", content: "Adding detail the principal asked about." });
     const { data: rNoticesAfterTeacher } = await admin.from("school_notices").select("id").eq("incident_id", rSmuggleId).eq("notice_type", "incident_amendment_added");
     record(
-      "R14: the owning teacher's OWN amendment does not raise a self-notice -- still exactly one notice total",
-      !rTeacherAmendErr && (rNoticesAfterTeacher?.length ?? 0) === 1,
+      "R14: the owning teacher can no longer add their own amendment -- the insert itself is refused (migration 0180), not just unoffered in the UI -- and the earlier notice count is unchanged since nothing new landed",
+      Boolean(rTeacherAmendErr) && (rNoticesAfterTeacher?.length ?? 0) === 1,
       `err=${rTeacherAmendErr?.message}, notices=${rNoticesAfterTeacher?.length}`
     );
 
     const { error: rTeacherBAmendErr } = await teacherB.from("incident_amendments").insert({ incident_id: rSmuggleId, author_id: teacherBId, reason: "Uninvited", content: "I can see this incident but have no standing to amend it." });
-    record("R15: a caller who can SEE the incident but is not creator/owning teacher/countersigner/clinician CANNOT add an amendment", Boolean(rTeacherBAmendErr), rTeacherBAmendErr?.message);
+    record("R15: a caller who can SEE the incident but is not the owning teacher, a countersigner, or an engaged clinician CANNOT add an amendment", Boolean(rTeacherBAmendErr), rTeacherBAmendErr?.message);
+
+    const { error: rClinicianAmendErr } = await clinician.from("incident_amendments").insert({ incident_id: rSmuggleId, author_id: clinicianId, reason: "Clinical concern", content: "A clinician appending to a school's incident record was never a designed case." });
+    const { data: rNoticesAfterClinician } = await admin.from("school_notices").select("id").eq("incident_id", rSmuggleId).eq("notice_type", "incident_amendment_added");
+    record(
+      "R16: a verified, actively-engaged clinician CANNOT add an amendment either -- 0180 dropped this branch deliberately, not narrowed it -- notice count still unchanged",
+      Boolean(rClinicianAmendErr) && (rNoticesAfterClinician?.length ?? 0) === 1,
+      `err=${rClinicianAmendErr?.message}, notices=${rNoticesAfterClinician?.length}`
+    );
 
     await admin.from("incidents").delete().eq("id", rIncidentId);
     await admin.from("incidents").delete().eq("id", rGrantId);
@@ -3034,6 +3086,27 @@ async function main() {
       "U9: amendment attributed and dated -- present even though added AFTER countersign",
       uExport?.amendments?.length === 1 && uExport.amendments[0].reason === "Export check reason." && uExport.amendments[0].author_name === "Principal Test",
       JSON.stringify(uExport?.amendments)
+    );
+
+    // -- Amendment access lockdown, item 3 (CLAUDE.md, migration 0180): --
+    // get_incident_amendments() is the ON-SCREEN sibling of the export's
+    // own amendments array proven above (U9) -- same data, same
+    // can_view_incident() gate as get_incident_export() (U1's own
+    // comment already names parent2 as a genuine non-viewer on this
+    // single-child fixture, unlike the shared two-child incidentId
+    // fixture CHECK E uses), so both sides of that gate are provable
+    // here cleanly.
+    const { data: uScreenAmendments, error: uScreenAmendErr } = await teacherA.rpc("get_incident_amendments", { p_incident_id: uIncidentId });
+    record(
+      "U10: get_incident_amendments() -- the same amendment, attributed and dated, reachable from the on-screen surface, not just the export",
+      !uScreenAmendErr && uScreenAmendments?.length === 1 && uScreenAmendments[0].reason === "Export check reason." && uScreenAmendments[0].author_name === "Principal Test",
+      `err=${uScreenAmendErr?.message}, ${JSON.stringify(uScreenAmendments)}`
+    );
+    const { error: uScreenAmendDeniedErr } = await parent2.rpc("get_incident_amendments", { p_incident_id: uIncidentId });
+    record(
+      "U11: get_incident_amendments() refused for a caller with no standing on this incident, same as get_incident_export()",
+      Boolean(uScreenAmendDeniedErr) && /permission/i.test(uScreenAmendDeniedErr?.message ?? ""),
+      uScreenAmendDeniedErr?.message
     );
 
     await admin.from("incidents").delete().eq("id", uIncidentId);

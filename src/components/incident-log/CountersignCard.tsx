@@ -133,6 +133,13 @@ interface CountersignCardProps {
   incidentId: string;
   userId: string;
   onCountersigned: () => void;
+  // Bumps the parent page's own amendments list (item 3, migration
+  // 0180) whenever an amendment is added from here -- this card has no
+  // reason to know that section's shape, only that something else on
+  // the page needs to refetch. Optional: CountersignCard is also used
+  // (indirectly, via AddAmendmentSheet's shared component) in contexts
+  // that don't render that section.
+  onAmendmentAdded?: () => void;
   // What's being signed, named in the confirm sheet -- straight from
   // the parent page's own already-loaded state, no new fetch. Same
   // reasoning as SignOffCard's own identical props: generic permanence
@@ -147,6 +154,7 @@ export function CountersignCard({
   incidentId,
   userId,
   onCountersigned,
+  onAmendmentAdded,
   childNames,
   occurredAtLabel,
   restraintUsed,
@@ -337,11 +345,33 @@ export function CountersignCard({
       )}
 
       {summary.already_countersigned ? (
-        <p className="rounded-2xl border border-brand-pastel-blue/40 bg-brand-pastel-blue/10 p-4 text-sm text-brand-neutral-black">
-          Countersigned by {summary.countersigned_by_name ?? "someone"} ({summary.countersigned_role_at_time ?? "unknown role"}
-          {ViaLabel(summary.countersigned_via) && <>, {ViaLabel(summary.countersigned_via)}</>}) on{" "}
-          {summary.countersigned_at && formatDateTime(summary.countersigned_at)}.
-        </p>
+        <>
+          <p className="rounded-2xl border border-brand-pastel-blue/40 bg-brand-pastel-blue/10 p-4 text-sm text-brand-neutral-black">
+            Countersigned by {summary.countersigned_by_name ?? "someone"} ({summary.countersigned_role_at_time ?? "unknown role"}
+            {ViaLabel(summary.countersigned_via) && <>, {ViaLabel(summary.countersigned_via)}</>}) on{" "}
+            {summary.countersigned_at && formatDateTime(summary.countersigned_at)}.
+          </p>
+
+          {/* THE PERSISTENT SURFACE (CLAUDE.md, amendment access
+              lockdown, migration 0180). Before this, "Add amendment"
+              only ever existed bundled into the pre-countersign confirm
+              flow ("Add amendment and countersign") -- the confirm
+              sheet's own copy already promised "Amendments can still be
+              added afterwards" (below), but nothing after countersign
+              ever offered a way to act on that promise. Amendments are
+              principal-only now (0180 dropped the owning-teacher and
+              clinician INSERT branches), so this button is the ONLY
+              route left to add one once countersigning is done --
+              reachable any time afterwards, on the record itself, not
+              buried behind a re-opened confirm sheet. Any amendment
+              added this way appears in the read-only list every viewer
+              sees on this same incident (below the isLocked banner,
+              teacher/incidents/[incidentId]/page.tsx) and in the PDF
+              export -- both already sourced from the same table. */}
+          <Button type="button" onClick={() => setIsAmendOpen(true)} variant="secondary">
+            Add an amendment
+          </Button>
+        </>
       ) : (
         <>
           <p className="text-sm text-brand-neutral-black/80">
@@ -466,6 +496,7 @@ export function CountersignCard({
         onAdded={async () => {
           setIsAmendOpen(false);
           applyCountersignData(await fetchCountersignData());
+          onAmendmentAdded?.();
         }}
       />
     </div>

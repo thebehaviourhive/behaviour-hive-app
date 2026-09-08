@@ -16,7 +16,10 @@ import { SignOffCard } from "@/components/incident-log/SignOffCard";
 import { AttestationCard } from "@/components/incident-log/AttestationCard";
 import { RequestAttestationsCard } from "@/components/incident-log/RequestAttestationsCard";
 import { CountersignCard } from "@/components/incident-log/CountersignCard";
+import { IncidentAmendmentsSection } from "@/components/incident-log/IncidentAmendmentsSection";
+import { RequestCorrectionLink } from "@/components/incident-log/RequestCorrectionLink";
 import { friendlyAccessLapsedMessage } from "@/lib/temporaryAccessTime";
+import type { MessageRole } from "@/types/messages";
 
 // School Incident Log -- Phase 3 stage two, built in sections per
 // explicit instruction: category & narrative first (this round), then
@@ -310,6 +313,14 @@ export default function IncidentRecordPage() {
   function bumpSignoffSummary() {
     setSignoffRefreshSignal((v) => v + 1);
   }
+
+  // Amendment access lockdown, item 3 (CLAUDE.md) -- bumped by
+  // CountersignCard's own onAmendmentAdded whenever an amendment is
+  // added from its persistent post-countersign button, so
+  // IncidentAmendmentsSection's list doesn't sit stale for the rest of
+  // the visit (the exact stale-snapshot shape CLAUDE.md already
+  // documents twice over for this same component).
+  const [amendmentsRefreshSignal, setAmendmentsRefreshSignal] = useState(0);
 
   // Time-on-task, Pass 1 -- deliberately NOT folded into bumpSignoffSummary
   // itself. Every genuine content edit already bumps signoffRefreshSignal
@@ -1655,6 +1666,31 @@ export default function IncidentRecordPage() {
                 >
                   Export incident report
                 </Link>
+
+                {/* Amendment access lockdown, items 3 and 4 (CLAUDE.md).
+                    On-screen for every role that can see this page --
+                    get_incident_amendments() self-hides while empty, and
+                    the same data already renders in the PDF export
+                    above (get_incident_export(), confirmed unchanged). */}
+                <IncidentAmendmentsSection
+                  incidentId={params.incidentId as string}
+                  refreshSignal={amendmentsRefreshSignal}
+                />
+
+                {/* Amendments are principal-only as of migration 0180 --
+                    this is the route left for anyone else who realises
+                    later that something on their own record is wrong.
+                    Self-hides for a principal (CountersignCard's own
+                    persistent "Add an amendment" button is their route
+                    instead) and degrades honestly if the institution has
+                    no active principal to message. */}
+                {institutionId && staffRole && staffRole !== "principal" && (
+                  <RequestCorrectionLink
+                    institutionId={institutionId}
+                    viewerRole={staffRole as MessageRole}
+                    occurredAtLabel={formatDateTime(summary.occurredAt)}
+                  />
+                )}
               </>
             )}
 
@@ -2836,6 +2872,7 @@ export default function IncidentRecordPage() {
                 incidentId={params.incidentId as string}
                 userId={user.id}
                 onCountersigned={() => setReloadKey((k) => k + 1)}
+                onAmendmentAdded={() => setAmendmentsRefreshSignal((v) => v + 1)}
                 childNames={children.map((c) => c.childName)}
                 occurredAtLabel={formatDateTime(summary.occurredAt)}
                 restraintUsed={hasCpiSelected}

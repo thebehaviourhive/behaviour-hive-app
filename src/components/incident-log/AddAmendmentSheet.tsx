@@ -10,10 +10,16 @@ import { BottomSheet } from "@/components/ui/BottomSheet";
 // never edits the teacher's own narrative -- incident_amendments has no
 // UPDATE or DELETE policy at all (confirmed this session), so once
 // added an amendment can't be edited or removed by anyone either.
-// Reusable by design (any caller whose real standing already passes
-// incident_amendments' own INSERT policy -- owning teacher,
-// countersigner, verified clinician -- can use this), currently wired
-// up only from the countersign screen, per this piece's scope.
+//
+// PRINCIPAL-ONLY since migration 0180: incident_amendments' own INSERT
+// policy now has exactly one branch, can_countersign_incident(). The
+// owning-teacher and verified-clinician branches that used to pass were
+// deliberately dropped, not narrowed -- see 0180's own comment. This
+// component is still generic (any caller whose standing passes the
+// live policy can use it) but in practice that's now only a principal
+// or countersign-grant holder; wired up from CountersignCard (the
+// pre-countersign flow, unchanged) and, as of this same change, its own
+// persistent post-countersign action too.
 
 interface AddAmendmentSheetProps {
   incidentId: string;
