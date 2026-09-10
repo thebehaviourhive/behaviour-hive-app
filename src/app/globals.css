@@ -68,6 +68,11 @@
   --font-heading: var(--font-baloo-2);
   --font-sans: var(--font-nunito-sans);
   --font-accent: var(--font-quicksand);
+  /* Consent/agreement screens only -- see layout.tsx's own comment on
+     the Inter loader. A distinct token (`font-consent`, not `font-sans`)
+     so it can never accidentally leak into the rest of the app's own
+     default body type by a stray find-and-replace. */
+  --font-consent: var(--font-inter);
 
   /* PRD 4, Stage 1 -- the principal track's type scale. Size and
      line-height only, as named Tailwind size tokens (text-h1, text-h2,

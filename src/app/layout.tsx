@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Baloo_2, Nunito_Sans, Quicksand } from "next/font/google";
+import { Baloo_2, Nunito_Sans, Quicksand, Inter } from "next/font/google";
 import { Analytics } from "@vercel/analytics/next";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import "./globals.css";
@@ -20,6 +20,21 @@ const nunitoSans = Nunito_Sans({
 const quicksand = Quicksand({
   variable: "--font-quicksand",
   subsets: ["latin"],
+});
+
+// Scoped to the consent/agreement screens only (design correction,
+// CLAUDE.md-style rationale: those five screens are deliberately NOT
+// bound by the app's warm/rounded type stack -- "typography is free").
+// Already reachable via next/font/google, same mechanism as the three
+// faces above, so nothing new to install. A real fallback stack
+// (rather than letting it fall through to the body's own Nunito Sans
+// default) matters here specifically: a slow-loading Inter falling
+// back to the app's own default body font would read as "the new
+// design didn't load", not as a deliberate different system.
+const inter = Inter({
+  variable: "--font-inter",
+  subsets: ["latin"],
+  fallback: ["ui-sans-serif", "system-ui", "Helvetica", "Arial", "sans-serif"],
 });
 
 export const metadata: Metadata = {
@@ -119,7 +134,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${baloo2.variable} ${nunitoSans.variable} ${quicksand.variable} h-full antialiased`}
+      className={`${baloo2.variable} ${nunitoSans.variable} ${quicksand.variable} ${inter.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
         {/* PWA cold-start fix: first thing in body, ahead of

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ConsentScreenShell, ConsentTick } from "@/components/consent/ConsentScreenShell";
+import { ConsentScreenShell, ConsentTick, ConsentEmphasis } from "@/components/consent/ConsentScreenShell";
 
 // SNA's own screen -- not a variant of teacher's, even though the two
 // are close in substance. Copy below is final, signed off, reproduced
@@ -10,10 +10,12 @@ export function SnaAgreementScreen({
   onContinue,
   isSubmitting,
   error,
+  onOpenPrivacy,
 }: {
   onContinue: () => void;
   isSubmitting: boolean;
   error: string | null;
+  onOpenPrivacy: () => void;
 }) {
   const [useTick, setUseTick] = useState(false);
   const [confidentialityTick, setConfidentialityTick] = useState(false);
@@ -26,7 +28,17 @@ export function SnaAgreementScreen({
       continueDisabled={!allTicked}
       isSubmitting={isSubmitting}
       error={error}
+      onOpenPrivacy={onOpenPrivacy}
       footerNote="If you do not agree, close the app and speak to your principal."
+      lede="You will record what happens with the children you support - end-of-day updates, ABC logs, and incidents including any use of physical intervention."
+      body={[
+        <>
+          <ConsentEmphasis>What you write becomes a permanent record, and your name stays on it.</ConsentEmphasis>{" "}
+          When you are named on someone else&apos;s incident you may be asked to confirm their account is
+          accurate - that is your own statement, and you can withdraw it. Records are kept in line with your
+          school&apos;s own retention policy.
+        </>,
+      ]}
       ticks={
         <>
           <ConsentTick id="sna-use" checked={useTick} onChange={setUseTick}>
@@ -41,17 +53,6 @@ export function SnaAgreementScreen({
           </ConsentTick>
         </>
       }
-    >
-      <p>
-        You will record what happens with the children you support - end-of-day updates, ABC logs, and incidents
-        including any use of physical intervention.
-      </p>
-      <p>
-        <strong className="font-semibold">What you write becomes a permanent record, and your name stays on it.</strong>{" "}
-        When you are named on someone else&apos;s incident you may be asked to confirm their account is accurate -
-        that is your own statement, and you can withdraw it. Records are kept in line with your school&apos;s own
-        retention policy.
-      </p>
-    </ConsentScreenShell>
+    />
   );
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ConsentScreenShell, ConsentTick } from "@/components/consent/ConsentScreenShell";
+import { ConsentScreenShell, ConsentTick, ConsentEmphasis } from "@/components/consent/ConsentScreenShell";
 
 // Clinician's own screen -- not a variant of any other role's. Copy
 // below is final, signed off, reproduced verbatim -- do not rewrite,
@@ -10,10 +10,12 @@ export function ClinicianAgreementScreen({
   onContinue,
   isSubmitting,
   error,
+  onOpenPrivacy,
 }: {
   onContinue: () => void;
   isSubmitting: boolean;
   error: string | null;
+  onOpenPrivacy: () => void;
 }) {
   const [useTick, setUseTick] = useState(false);
   const [confidentialityTick, setConfidentialityTick] = useState(false);
@@ -26,7 +28,16 @@ export function ClinicianAgreementScreen({
       continueDisabled={!allTicked}
       isSubmitting={isSubmitting}
       error={error}
+      onOpenPrivacy={onOpenPrivacy}
       footerNote="If you do not agree, close the app and speak to your principal."
+      lede="You will see the full record for the children on your caseload, including what families share from home."
+      body={[
+        <>
+          <ConsentEmphasis>Home logs stay between you and the family. School staff never see them.</ConsentEmphasis>{" "}
+          What you publish as a strategy or assessment does reach the classroom - so publish the guidance, not
+          the raw account. Records are kept in line with the school&apos;s own retention policy.
+        </>,
+      ]}
       ticks={
         <>
           <ConsentTick id="clinician-use" checked={useTick} onChange={setUseTick}>
@@ -41,13 +52,6 @@ export function ClinicianAgreementScreen({
           </ConsentTick>
         </>
       }
-    >
-      <p>You will see the full record for the children on your caseload, including what families share from home.</p>
-      <p>
-        <strong className="font-semibold">Home logs stay between you and the family. School staff never see them.</strong>{" "}
-        What you publish as a strategy or assessment does reach the classroom - so publish the guidance, not the
-        raw account. Records are kept in line with the school&apos;s own retention policy.
-      </p>
-    </ConsentScreenShell>
+    />
   );
 }

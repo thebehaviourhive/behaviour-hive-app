@@ -10,6 +10,9 @@ import { TeacherAgreementScreen } from "@/components/consent/TeacherAgreementScr
 import { SnaAgreementScreen } from "@/components/consent/SnaAgreementScreen";
 import { PrincipalAgreementScreen } from "@/components/consent/PrincipalAgreementScreen";
 import { ClinicianAgreementScreen } from "@/components/consent/ClinicianAgreementScreen";
+import { BottomSheet } from "@/components/ui/BottomSheet";
+import { PrivacyPolicyContent } from "@/components/PrivacyPolicyContent";
+import { Button } from "@/components/ui/Button";
 
 // Consent/agreement screens rebuild. This page owns auth/routing/
 // submission only -- no copy, no per-role card/label lookup tables
@@ -35,6 +38,7 @@ export default function ConsentPage() {
   const [role, setRole] = useState<ConsentRole | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isPrivacyOpen, setIsPrivacyOpen] = useState(false);
 
   useEffect(() => {
     let isMounted = true;
@@ -114,18 +118,49 @@ export default function ConsentPage() {
     return null;
   }
 
-  const screenProps = { onContinue: handleAccept, isSubmitting, error };
+  const screenProps = {
+    onContinue: handleAccept,
+    isSubmitting,
+    error,
+    onOpenPrivacy: () => setIsPrivacyOpen(true),
+  };
 
+  let screen: React.ReactNode;
   switch (role) {
     case "parent":
-      return <ParentConsentScreen {...screenProps} />;
+      screen = <ParentConsentScreen {...screenProps} />;
+      break;
     case "class_teacher":
-      return <TeacherAgreementScreen {...screenProps} />;
+      screen = <TeacherAgreementScreen {...screenProps} />;
+      break;
     case "sna":
-      return <SnaAgreementScreen {...screenProps} />;
+      screen = <SnaAgreementScreen {...screenProps} />;
+      break;
     case "principal":
-      return <PrincipalAgreementScreen {...screenProps} />;
+      screen = <PrincipalAgreementScreen {...screenProps} />;
+      break;
     case "clinician":
-      return <ClinicianAgreementScreen {...screenProps} />;
+      screen = <ClinicianAgreementScreen {...screenProps} />;
+      break;
   }
+
+  return (
+    <>
+      {screen}
+
+      {/* The privacy sheet opens OVER the consent screen rather than
+          navigating to /privacy -- this screen's own React state (the
+          ticked/unticked boxes) never unmounts, so there's nothing for
+          a Back/dismiss action to skip past. Same pattern the old
+          screen used, restored here (round 2) after being dropped in
+          round 1 only because the layout brief was given literally. */}
+      <BottomSheet isOpen={isPrivacyOpen} onClose={() => setIsPrivacyOpen(false)}>
+        <h2 className="mb-4 font-heading text-xl font-semibold text-brand-neutral-black">Privacy Policy</h2>
+        <PrivacyPolicyContent />
+        <Button type="button" onClick={() => setIsPrivacyOpen(false)} className="mt-5">
+          Close
+        </Button>
+      </BottomSheet>
+    </>
+  );
 }
