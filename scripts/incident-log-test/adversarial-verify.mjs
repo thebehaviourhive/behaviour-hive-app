@@ -2465,7 +2465,7 @@ async function main() {
     // to assert its refusal instead, matching the CHECK C precedent this
     // same session already applied to the attestation-race fixes: a check
     // whose name described a limitation as a guarantee needed rewriting,
-    // not patching. R16 is genuinely NEW coverage, not a rewrite -- the
+    // not patching. R15b is genuinely NEW coverage, not a rewrite -- the
     // clinician branch was never adversarially tested at all before now
     // (grepped: no prior check exercised it), so this closes a real
     // coverage gap the same pass that closes the teacher one. The
@@ -2494,8 +2494,12 @@ async function main() {
 
     const { error: rClinicianAmendErr } = await clinician.from("incident_amendments").insert({ incident_id: rSmuggleId, author_id: clinicianId, reason: "Clinical concern", content: "A clinician appending to a school's incident record was never a designed case." });
     const { data: rNoticesAfterClinician } = await admin.from("school_notices").select("id").eq("incident_id", rSmuggleId).eq("notice_type", "incident_amendment_added");
+    // Labelled R15b, not R16 -- this file already has an unrelated R16a/
+    // R16b pair (attestation withdrawal/re-attestation sequence) directly
+    // after this block; a bare "R16" here would read as though they were
+    // sub-parts of this amendment check instead of their own thing.
     record(
-      "R16: a verified, actively-engaged clinician CANNOT add an amendment either -- 0180 dropped this branch deliberately, not narrowed it -- notice count still unchanged",
+      "R15b: a verified, actively-engaged clinician CANNOT add an amendment either -- 0180 dropped this branch deliberately, not narrowed it -- notice count still unchanged",
       Boolean(rClinicianAmendErr) && (rNoticesAfterClinician?.length ?? 0) === 1,
       `err=${rClinicianAmendErr?.message}, notices=${rNoticesAfterClinician?.length}`
     );
