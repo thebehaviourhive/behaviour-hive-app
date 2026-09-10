@@ -10,17 +10,28 @@ interface RequestRow {
   passport_id: string;
   child_name: string;
   institution_name: string;
+  target_section: "a" | "e";
   created_at: string;
 }
 
-// PRD 3, Stage 3 -- CORRECTED. The request is a PROMPT pointing at the
-// existing Section A wizard, not a new form -- no separate question
-// set, no answering surface of its own. Self-contained, same idiom as
-// QuestionnairePromptCard: fetches its own data via
-// get_my_passport_completion_requests(), renders nothing when nothing
-// is outstanding. "Outstanding" is derived entirely from the passport's
-// own section_a_complete field server-side -- this card disappears the
-// moment that's true, whether or not the guardian ever tapped it.
+const SECTION_HREF: Record<"a" | "e", string> = {
+  a: "/passport/section-a",
+  e: "/passport/section-e",
+};
+
+const SECTION_COPY: Record<"a" | "e", (childName: string, institutionName: string) => string> = {
+  a: (childName, institutionName) => `${institutionName} has asked you to complete ${childName}'s passport`,
+  e: (childName, institutionName) =>
+    `${institutionName} has asked you to add ${childName}'s medical & care needs`,
+};
+
+// PRD 3, Stage 3 -- generalised (migration 0185) to point at either
+// Section A or Section E, per each request's own target_section. No
+// separate answering surface either way -- the request is a prompt
+// pointing at the real section wizard. "Outstanding" is derived
+// entirely server-side against the right completion flag for that
+// section -- this card disappears the moment that's true, whether or
+// not the guardian ever tapped it.
 export function PassportCompletionPromptCard({ className = "" }: { className?: string }) {
   const [requests, setRequests] = useState<RequestRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -52,7 +63,7 @@ export function PassportCompletionPromptCard({ className = "" }: { className?: s
       {requests.map((request) => (
         <Link
           key={request.id}
-          href="/passport/section-a"
+          href={SECTION_HREF[request.target_section]}
           className="flex w-full items-center gap-3 rounded-2xl border-l-4 border-brand-golden-brown bg-brand-safe-ivory/30 p-4 text-left shadow-md transition-transform active:scale-[0.99]"
         >
           <span
@@ -62,8 +73,10 @@ export function PassportCompletionPromptCard({ className = "" }: { className?: s
             📄
           </span>
           <span className="flex-1 text-sm font-semibold text-brand-neutral-black">
-            {request.institution_name} has asked you to complete{" "}
-            {getChildDisplayName(request.child_name)}&apos;s passport
+            {SECTION_COPY[request.target_section](
+              getChildDisplayName(request.child_name),
+              request.institution_name
+            )}
           </span>
           <span
             aria-hidden

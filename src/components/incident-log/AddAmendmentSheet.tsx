@@ -27,9 +27,18 @@ interface AddAmendmentSheetProps {
   isOpen: boolean;
   onClose: () => void;
   onAdded: () => void;
+  // THE INCIDENT PDF CARRIES REAL CHILD NAMES, item 1b (CLAUDE.md):
+  // an amendment has no per-child scoping at all -- incident_amendments.
+  // incident_id only -- so on a multi-child incident, BOTH children's
+  // parent exports show the SAME amendment text. If this free text
+  // happens to name the other child, that name reaches a family it was
+  // never meant to. Not fixable by a WHERE clause (this is free text, not
+  // structured data) -- this reminder is the mitigation: named at the
+  // moment of writing, when the author can actually act on it.
+  isMultiChild?: boolean;
 }
 
-export function AddAmendmentSheet({ incidentId, authorId, isOpen, onClose, onAdded }: AddAmendmentSheetProps) {
+export function AddAmendmentSheet({ incidentId, authorId, isOpen, onClose, onAdded, isMultiChild }: AddAmendmentSheetProps) {
   const [reason, setReason] = useState("");
   const [content, setContent] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -75,6 +84,13 @@ export function AddAmendmentSheet({ incidentId, authorId, isOpen, onClose, onAdd
         This is added to the record, attributed to you and dated -- it does not change anything the teacher wrote.
         Once added, an amendment can&apos;t be edited or removed by anyone, including you.
       </p>
+
+      {isMultiChild && (
+        <p role="alert" className="mt-3 rounded-xl border border-brand-golden-brown/30 bg-brand-golden-brown/10 p-3 text-sm text-brand-neutral-black">
+          This incident involves more than one child. Each family sees this amendment on their own child&apos;s
+          record -- do not name the other child here.
+        </p>
+      )}
 
       <div className="mt-4 flex flex-col gap-3">
         <Textarea

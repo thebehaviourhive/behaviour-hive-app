@@ -6,25 +6,33 @@ import { createClient } from "@/lib/supabase/client";
 interface RequestRow {
   id: string;
   recipient_name: string | null;
+  target_section: "a" | "e";
   created_at: string;
 }
 
-// PRD 3, Stage 3 -- CORRECTED. No response content to display here --
-// the answer IS Section A-D, already rendered elsewhere on this same
-// page once filled in. This component's only job is the request action
-// and a plain record of who was asked, derived against the passport's
-// own section_a_complete rather than any status this table itself
-// tracks (it doesn't -- there's nothing to update after a request row
-// is inserted). Self-contained, same "drop it in" idiom as the rest of
-// this family of components.
+const SECTION_LABEL: Record<"a" | "e", string> = {
+  a: "passport",
+  e: "medical & care needs",
+};
+
+// PRD 3, Stage 3 -- generalised (migration 0185) to request either
+// Section A or Section E, per the caller's own targetSection prop. No
+// response content to display here regardless of which -- the answer
+// IS the section itself, already rendered elsewhere on this same page
+// once filled in. This component's only job is the request action and
+// a plain record of who was asked, derived against the passport's own
+// completion flag (section_a_complete or passport_section_e.
+// section_e_complete) rather than any status this table itself tracks.
 export function PassportCompletionSection({
   passportId,
   institutionId,
-  sectionAComplete,
+  targetSection,
+  isSectionComplete,
 }: {
   passportId: string;
   institutionId: string;
-  sectionAComplete: boolean;
+  targetSection: "a" | "e";
+  isSectionComplete: boolean;
 }) {
   const [requests, setRequests] = useState<RequestRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -43,9 +51,9 @@ export function PassportCompletionSection({
       setIsLoading(false);
       return;
     }
-    setRequests((data ?? []) as RequestRow[]);
+    setRequests(((data ?? []) as RequestRow[]).filter((r) => r.target_section === targetSection));
     setIsLoading(false);
-  }, [passportId]);
+  }, [passportId, targetSection]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -60,6 +68,7 @@ export function PassportCompletionSection({
     const { data, error } = await supabase.rpc("request_passport_completion", {
       p_passport_id: passportId,
       p_institution_id: institutionId,
+      p_target_section: targetSection,
     });
     setIsRequesting(false);
     if (error) {
@@ -76,10 +85,12 @@ export function PassportCompletionSection({
     return null;
   }
 
-  if (sectionAComplete) {
+  if (isSectionComplete) {
     return (
       <div className="rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
-        <p className="text-sm font-semibold text-green-800">Section A complete.</p>
+        <p className="text-sm font-semibold text-green-800">
+          {targetSection === "a" ? "Section A complete." : "Medical & care needs complete."}
+        </p>
       </div>
     );
   }
@@ -88,7 +99,7 @@ export function PassportCompletionSection({
     <div className="flex flex-col gap-3">
       {requests.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-sm text-black/50">
-          Not yet requested. Ask a guardian to complete this child&apos;s passport.
+          Not yet requested. Ask a guardian to complete this child&apos;s {SECTION_LABEL[targetSection]}.
         </div>
       ) : (
         <div className="rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
@@ -123,7 +134,9 @@ export function PassportCompletionSection({
         {isRequesting
           ? "Sending…"
           : requests.length === 0
-            ? "Request Passport Completion"
+            ? targetSection === "a"
+              ? "Request Passport Completion"
+              : "Request Medical & Care Needs"
             : "Ask another guardian"}
       </button>
     </div>

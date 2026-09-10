@@ -5,6 +5,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { getChildFirstName } from "@/lib/childDisplayName";
+import { formatRelativeDate } from "@/lib/relativeDate";
 import { ABCLogger } from "@/components/abc-logger/ABCLogger";
 import { ABCTimeline } from "@/components/abc-logger/ABCTimeline";
 import { usePassportClinicalContent } from "@/hooks/usePassportClinicalContent";
@@ -30,10 +31,11 @@ import { ChildIncidentsTab } from "@/components/shared/ChildIncidentsTab";
 // (has_child_access() gated, same as the teacher track -- has_sna_
 // access() is one of that function's own OR-branches, nothing new
 // granted).
-type TabKey = "summary" | "behaviour" | "communication" | "supports" | "incidents" | "incidentLog" | "clinicalTeam";
+type TabKey = "summary" | "medical" | "behaviour" | "communication" | "supports" | "incidents" | "incidentLog" | "clinicalTeam";
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: "summary", label: "Summary" },
+  { key: "medical", label: "Medical & Care" },
   { key: "behaviour", label: "Behaviour Signals" },
   { key: "communication", label: "Communication" },
   { key: "supports", label: "Supports" },
@@ -85,6 +87,12 @@ interface ClassroomProfile {
   sensorySeeksOther: string | null;
   sensoryAvoids: string[];
   sensoryAvoidsOther: string | null;
+  allergies: string | null;
+  medicalConditions: string | null;
+  medications: string | null;
+  emergencyProtocol: string | null;
+  intimateCareNeeds: string | null;
+  sectionEUpdatedAt: string | null;
   todayContext: TodayContext | null;
 }
 
@@ -98,6 +106,7 @@ export default function SnaPassportPage() {
   const [profile, setProfile] = useState<ClassroomProfile | null>(null);
   const [institutionId, setInstitutionId] = useState<string | null>(null);
   const [isSectionAComplete, setIsSectionAComplete] = useState(false);
+  const [isSectionEComplete, setIsSectionEComplete] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<TabKey>(() => {
     const requested = searchParams.get("tab");
@@ -182,6 +191,7 @@ export default function SnaPassportPage() {
         { data: sectionB },
         { data: sectionC },
         { data: sectionD },
+        { data: sectionE },
         { data: checkin },
       ] = await Promise.all([
         supabase
@@ -209,6 +219,11 @@ export default function SnaPassportPage() {
           .eq("passport_id", passportId)
           .maybeSingle(),
         supabase
+          .from("passport_section_e")
+          .select("allergies, medical_conditions, medications, emergency_protocol, intimate_care_needs, section_e_complete, updated_at")
+          .eq("passport_id", passportId)
+          .maybeSingle(),
+        supabase
           .from("morning_checkins")
           .select("sleep_quality, regulation_state, morning_stressors, heads_up, checked_in_at")
           .eq("passport_id", passportId)
@@ -226,6 +241,7 @@ export default function SnaPassportPage() {
       }
 
       setIsSectionAComplete(Boolean(passport.section_a_complete));
+      setIsSectionEComplete(Boolean(sectionE?.section_e_complete));
 
       setProfile({
         childFirstName: getChildFirstName(passport.child_name),
@@ -252,6 +268,12 @@ export default function SnaPassportPage() {
         sensorySeeksOther: sectionD?.sensory_seeks_other ?? null,
         sensoryAvoids: Array.isArray(sectionD?.sensory_avoids) ? sectionD.sensory_avoids : [],
         sensoryAvoidsOther: sectionD?.sensory_avoids_other ?? null,
+        allergies: sectionE?.allergies ?? null,
+        medicalConditions: sectionE?.medical_conditions ?? null,
+        medications: sectionE?.medications ?? null,
+        emergencyProtocol: sectionE?.emergency_protocol ?? null,
+        intimateCareNeeds: sectionE?.intimate_care_needs ?? null,
+        sectionEUpdatedAt: sectionE?.updated_at ?? null,
         todayContext: checkin
           ? {
               sleepQuality: checkin.sleep_quality,
@@ -393,9 +415,35 @@ export default function SnaPassportPage() {
               <PassportCompletionSection
                 passportId={passportId}
                 institutionId={institutionId}
-                sectionAComplete={isSectionAComplete}
+                targetSection="a"
+                isSectionComplete={isSectionAComplete}
               />
             )}
+
+            <SectionHeading>Medical &amp; Care Needs</SectionHeading>
+            {institutionId && (
+              <PassportCompletionSection
+                passportId={passportId}
+                institutionId={institutionId}
+                targetSection="e"
+                isSectionComplete={isSectionEComplete}
+              />
+            )}
+          </>
+        )}
+
+        {activeTab === "medical" && (
+          <>
+            {profile.sectionEUpdatedAt && (
+              <p className="-mt-2 text-xs font-semibold text-black/40">
+                {formatRelativeDate(profile.sectionEUpdatedAt)}
+              </p>
+            )}
+            <TextCard label="Allergies" text={profile.allergies} />
+            <TextCard label="Medical conditions relevant to daily care" text={profile.medicalConditions} />
+            <TextCard label="Medications" text={profile.medications} />
+            <TextCard label="Emergency protocol" text={profile.emergencyProtocol} />
+            <TextCard label="Intimate care needs" text={profile.intimateCareNeeds} />
           </>
         )}
 

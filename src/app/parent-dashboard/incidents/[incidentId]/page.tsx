@@ -7,6 +7,8 @@ import { createClient } from "@/lib/supabase/client";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { useMyPassport } from "@/hooks/useMyPassport";
 import { InlineErrorState } from "@/components/ui/InlineErrorState";
+import { BodyMapPrintCard, type PrintableMark } from "@/components/incident-log/body-map/BodyMapPrintCard";
+import type { BodyView, Side } from "@/components/incident-log/body-map/bodyMapRegions";
 
 // The full incident a parent is entitled to see -- the destination
 // IncidentNoticeCard's own cards, and this same track's persistent
@@ -39,6 +41,17 @@ const PLANNING_STATUS_LABEL: Record<string, string> = {
   not_planned: "Not part of a planned approach",
 };
 
+interface BodyMarkRow {
+  id: string;
+  view: BodyView;
+  x: number;
+  y: number;
+  region_value: string;
+  side: Side;
+  injury_type_name: string;
+  skin_broken: boolean | null;
+}
+
 interface InjuryRow {
   injury_types: string[] | null;
   injury_notes: string | null;
@@ -49,10 +62,17 @@ interface InjuryRow {
   treatment_other: string | null;
   remained_on_site: boolean | null;
   remained_detail: string | null;
+  body_marks: BodyMarkRow[];
 }
 
 interface RestrictivePracticeRow {
   planning_status: string | null;
+}
+
+interface AmendmentRow {
+  reason: string;
+  content: string;
+  created_at: string;
 }
 
 interface ParentIncidentDetail {
@@ -74,8 +94,12 @@ interface ParentIncidentDetail {
   parent_acknowledged_at: string | null;
   teacher_signed_at: string | null;
   countersigned_at: string | null;
+  // Migration 0183 -- widened deliberately: says WHETHER physical
+  // intervention was used, never the mechanics or who performed it.
+  restraint_used: boolean;
   injuries: InjuryRow[];
   restrictive_practice: RestrictivePracticeRow[];
+  amendments: AmendmentRow[];
 }
 
 function formatDateTime(value: string): string {
@@ -241,38 +265,92 @@ export default function ParentIncidentDetailPage() {
                 <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-brand-neutral-black/40">
                   Injury
                 </h2>
-                {incident.injuries.map((inj, idx) => (
-                  <div key={idx} className={idx > 0 ? "mt-3 border-t border-black/5 pt-3" : ""}>
-                    {inj.injury_types && inj.injury_types.length > 0 && (
-                      <p className="text-sm text-brand-neutral-black">{inj.injury_types.join(", ")}</p>
-                    )}
-                    {inj.injury_notes && <p className="mt-1 text-sm text-brand-neutral-black/70">{inj.injury_notes}</p>}
-                    <p className="mt-1.5 text-sm text-brand-neutral-black/70">
-                      {inj.first_aider_called
-                        ? `First aid was given${inj.first_aider_name ? ` by ${inj.first_aider_name}` : ""}.`
-                        : "First aid was not needed."}
-                      {inj.doctor_ambulance_called ? " A doctor or ambulance was called." : ""}
-                    </p>
-                    {inj.treatments && inj.treatments.length > 0 && (
-                      <p className="mt-1 text-sm text-brand-neutral-black/70">{inj.treatments.join(", ")}</p>
-                    )}
-                    {inj.treatment_other && <p className="mt-1 text-sm text-brand-neutral-black/70">{inj.treatment_other}</p>}
-                  </div>
-                ))}
+                {incident.injuries.map((inj, idx) => {
+                  const marks: PrintableMark[] = inj.body_marks.map((m) => ({
+                    id: m.id,
+                    view: m.view,
+                    x: m.x,
+                    y: m.y,
+                    regionValue: m.region_value,
+                    side: m.side,
+                    injuryTypeName: m.injury_type_name,
+                    skinBroken: m.skin_broken,
+                  }));
+                  return (
+                    <div key={idx} className={idx > 0 ? "mt-3 border-t border-black/5 pt-3" : ""}>
+                      {inj.injury_types && inj.injury_types.length > 0 && (
+                        <p className="text-sm text-brand-neutral-black">{inj.injury_types.join(", ")}</p>
+                      )}
+                      {inj.injury_notes && <p className="mt-1 text-sm text-brand-neutral-black/70">{inj.injury_notes}</p>}
+                      <p className="mt-1.5 text-sm text-brand-neutral-black/70">
+                        {inj.first_aider_called
+                          ? `First aid was given${inj.first_aider_name ? ` by ${inj.first_aider_name}` : ""}.`
+                          : "First aid was not needed."}
+                        {inj.doctor_ambulance_called ? " A doctor or ambulance was called." : ""}
+                      </p>
+                      {inj.treatments && inj.treatments.length > 0 && (
+                        <p className="mt-1 text-sm text-brand-neutral-black/70">{inj.treatments.join(", ")}</p>
+                      )}
+                      {inj.treatment_other && <p className="mt-1 text-sm text-brand-neutral-black/70">{inj.treatment_other}</p>}
+                      {marks.length > 0 && (
+                        <div className="mt-3 flex justify-center">
+                          <BodyMapPrintCard partyName="Where it happened" marks={marks} />
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             )}
 
-            {incident.restrictive_practice.length > 0 && (
+            {/* Always rendered, not just when a record exists -- a
+                parent whose child was physically restrained must be
+                told so in words; the absence of this section would
+                read as "nothing to see" rather than as a real answer.
+                Never the hold mechanics or who performed it, matching
+                the same widening in the PDF export (migration 0183). */}
+            <div className="rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
+              <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-brand-neutral-black/40">
+                Physical intervention
+              </h2>
+              {!incident.restraint_used ? (
+                <p className="text-sm text-brand-neutral-black/70">No physical intervention was used.</p>
+              ) : (
+                <>
+                  <p className="text-sm font-semibold text-brand-neutral-black">Physical intervention was used.</p>
+                  {incident.restrictive_practice.map((rp, idx) => (
+                    <p key={idx} className="mt-1 text-sm text-brand-neutral-black/70">
+                      {rp.planning_status ? PLANNING_STATUS_LABEL[rp.planning_status] ?? rp.planning_status : "Recorded"}
+                    </p>
+                  ))}
+                </>
+              )}
+            </div>
+
+            {incident.amendments.length > 0 && (
               <div className="rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
                 <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-brand-neutral-black/40">
-                  Physical support used
+                  Amendments
                 </h2>
-                {incident.restrictive_practice.map((rp, idx) => (
-                  <p key={idx} className="text-sm text-brand-neutral-black">
-                    {rp.planning_status ? PLANNING_STATUS_LABEL[rp.planning_status] ?? rp.planning_status : "Recorded"}
-                  </p>
-                ))}
+                <div className="flex flex-col gap-3">
+                  {incident.amendments.map((am, idx) => (
+                    <div key={idx} className={idx > 0 ? "border-t border-black/5 pt-3" : ""}>
+                      <p className="text-xs text-brand-neutral-black/50">{formatDateTime(am.created_at)}</p>
+                      <p className="mt-1 text-sm font-semibold text-brand-neutral-black">{am.reason}</p>
+                      <p className="mt-1 text-sm text-brand-neutral-black">{am.content}</p>
+                    </div>
+                  ))}
+                </div>
               </div>
+            )}
+
+            {passportId && (
+              <Link
+                href={`/incidents/${incident.incident_id}/print-parent/${passportId}`}
+                className="block rounded-2xl bg-brand-prussian-blue py-3 text-center text-sm font-semibold text-white shadow-sm"
+              >
+                Export this record
+              </Link>
             )}
 
             {(incident.parent_notified_at || incident.parent_called_at) && (

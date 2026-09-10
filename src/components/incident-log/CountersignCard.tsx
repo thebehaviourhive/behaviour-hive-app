@@ -493,6 +493,7 @@ export function CountersignCard({
         authorId={userId}
         isOpen={isAmendOpen}
         onClose={() => setIsAmendOpen(false)}
+        isMultiChild={childNames.length > 1}
         onAdded={async () => {
           setIsAmendOpen(false);
           applyCountersignData(await fetchCountersignData());

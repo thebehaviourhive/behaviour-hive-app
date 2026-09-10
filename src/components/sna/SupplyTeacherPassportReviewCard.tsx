@@ -11,15 +11,14 @@ import { getChildDisplayName } from "@/lib/childDisplayName";
 // happens who has what triggers, what calms them, and their
 // communication needs -- reading that after an incident is too late.
 //
-// SCOPED TO THREE OF FOUR SECTIONS, DELIBERATELY, NAMED PLAINLY IN THE
-// COPY BELOW: triggers, calming approaches, and communication needs are
-// all real, all confirmed reachable through the exact "sna" tier access
-// a temporary cover grant already provides. MEDICAL AND INTIMATE CARE
-// NEEDS ARE NOT -- neither field exists anywhere in the passport
-// schema, under any name. Not a design decision made here; a
-// pre-existing product gap (CLAUDE.md, deferred work), going to
-// Catherine separately. This card does not silently cover three of four
-// and imply completeness.
+// COVERS ALL FOUR AREAS AS OF SECTION E (CLAUDE.md, "MEDICAL AND
+// INTIMATE CARE NEEDS -- BUILD"): triggers, calming approaches,
+// communication needs, and now medical & care needs, all confirmed
+// reachable through the exact "sna" tier access a temporary cover grant
+// already provides (Section E's own RLS copies B/C/D's proven pattern
+// verbatim). This card used to name a real gap plainly in its own copy
+// rather than silently cover three of four sections and imply
+// completeness -- that gap is closed, the copy below reflects it.
 //
 // Self-contained per class, matching TemporaryAccessBanner/
 // QuestionnairePromptCard's own established idiom on this same page --
@@ -82,8 +81,8 @@ export function SupplyTeacherPassportReviewCard({ classId, className }: { classI
     <div className="mb-4 rounded-2xl border-l-4 border-brand-golden-brown bg-brand-safe-ivory/30 p-4 shadow-md">
       <p className="font-heading text-sm font-bold text-brand-neutral-black">Review {className} before you start</p>
       <p className="mt-1 text-xs text-brand-neutral-black/70">
-        Triggers, calming approaches, and communication needs for each child -- one tap each. (Medical and intimate
-        care needs aren&apos;t recorded in this app yet.)
+        Triggers, calming approaches, communication needs, and medical &amp; care needs for each child -- one tap
+        each.
       </p>
       <div className="mt-3 flex flex-col gap-2">
         {unreviewed.map((row) => (

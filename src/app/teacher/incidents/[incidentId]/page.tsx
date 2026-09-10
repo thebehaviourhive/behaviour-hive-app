@@ -1667,6 +1667,32 @@ export default function IncidentRecordPage() {
                   Export incident report
                 </Link>
 
+                {/* Export for parent, per child (CLAUDE.md, "THE
+                    INCIDENT PDF CARRIES REAL CHILD NAMES"). Same route
+                    a parent reaches from their own incident page --
+                    get_parent_incidents()'s own can_view_incident()
+                    branch is the real gate here, this is just where
+                    it's reasonable to surface the entry point for
+                    staff. One link per child on this incident, siloed
+                    the same way the on-screen parent view already is --
+                    never a combined multi-child document. */}
+                {children.length > 0 && (
+                  <div className="flex flex-col gap-2">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-brand-neutral-black/50">
+                      Export for parent
+                    </p>
+                    {children.map((c) => (
+                      <Link
+                        key={c.passportId}
+                        href={`/incidents/${params.incidentId}/print-parent/${c.passportId}`}
+                        className="block rounded-2xl border-2 border-brand-prussian-blue py-3 text-center text-sm font-semibold text-brand-prussian-blue"
+                      >
+                        {c.childName}
+                      </Link>
+                    ))}
+                  </div>
+                )}
+
                 {/* Amendment access lockdown, items 3 and 4 (CLAUDE.md).
                     On-screen for every role that can see this page --
                     get_incident_amendments() self-hides while empty, and
