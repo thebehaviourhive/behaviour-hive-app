@@ -28,6 +28,12 @@ interface IncidentAmendment {
   content: string;
   author_name: string | null;
   created_at: string;
+  // THE AMENDMENT LEAK, FIXED (CLAUDE.md, migration 0186). Whether this
+  // amendment's own author chose to share it with the family --
+  // get_parent_incidents() only ever returns the ones marked true. Shown
+  // here so a teacher/principal can see, without opening the parent
+  // export, which amendments a parent will actually see.
+  is_parent_visible: boolean;
 }
 
 function formatDateTime(value: string): string {
@@ -92,9 +98,16 @@ export function IncidentAmendmentsSection({
       <div className="flex flex-col gap-3">
         {amendments.map((am) => (
           <div key={am.id} className="rounded-xl border border-black/10 bg-black/[0.015] p-3">
-            <p className="text-xs text-brand-neutral-black/50">
-              {am.author_name ?? "—"} · {formatDateTime(am.created_at)}
-            </p>
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-xs text-brand-neutral-black/50">
+                {am.author_name ?? "—"} · {formatDateTime(am.created_at)}
+              </p>
+              {am.is_parent_visible && (
+                <span className="flex-shrink-0 rounded-full bg-brand-prussian-blue/10 px-2 py-0.5 text-[11px] font-medium text-brand-prussian-blue">
+                  Shared with family
+                </span>
+              )}
+            </div>
             <p className="mt-1 text-sm font-semibold text-brand-neutral-black">{am.reason}</p>
             <p className="mt-1 text-sm text-brand-neutral-black">{am.content}</p>
           </div>

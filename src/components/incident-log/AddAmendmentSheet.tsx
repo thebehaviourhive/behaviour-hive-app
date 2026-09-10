@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/Button";
 import { Textarea } from "@/components/ui/Textarea";
 import { BottomSheet } from "@/components/ui/BottomSheet";
+import { Checkbox } from "@/components/ui/Checkbox";
 
 // Phase 4, piece 3. The disagreement path: append-only, attributed,
 // never edits the teacher's own narrative -- incident_amendments has no
@@ -27,26 +28,31 @@ interface AddAmendmentSheetProps {
   isOpen: boolean;
   onClose: () => void;
   onAdded: () => void;
-  // THE INCIDENT PDF CARRIES REAL CHILD NAMES, item 1b (CLAUDE.md):
-  // an amendment has no per-child scoping at all -- incident_amendments.
-  // incident_id only -- so on a multi-child incident, BOTH children's
-  // parent exports show the SAME amendment text. If this free text
-  // happens to name the other child, that name reaches a family it was
-  // never meant to. Not fixable by a WHERE clause (this is free text, not
-  // structured data) -- this reminder is the mitigation: named at the
-  // moment of writing, when the author can actually act on it.
+  // THE AMENDMENT LEAK, FIXED (CLAUDE.md, migration 0186). incident_
+  // amendments has no per-child scoping at all -- incident_id only -- so
+  // on a multi-child incident, every child's own parent export/on-screen
+  // record shows the SAME amendment text. Confirmed live: Parent B saw
+  // an amendment meant to sit alongside Parent A's own record. Fixed by
+  // making sharing an explicit author choice (is_parent_visible, default
+  // false) rather than a database-level guess -- the checkbox below --
+  // not by asking the author to write child-agnostically, which isn't
+  // enforceable on free text. isMultiChild still narrows WHEN the
+  // warning shows: only relevant once the author has actually chosen to
+  // share, on an incident where another child's name could appear.
   isMultiChild?: boolean;
 }
 
 export function AddAmendmentSheet({ incidentId, authorId, isOpen, onClose, onAdded, isMultiChild }: AddAmendmentSheetProps) {
   const [reason, setReason] = useState("");
   const [content, setContent] = useState("");
+  const [shareWithParents, setShareWithParents] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   function reset() {
     setReason("");
     setContent("");
+    setShareWithParents(false);
     setError(null);
   }
 
@@ -58,9 +64,13 @@ export function AddAmendmentSheet({ incidentId, authorId, isOpen, onClose, onAdd
     setIsSubmitting(true);
     setError(null);
     const supabase = createClient();
-    const { error: insertError } = await supabase
-      .from("incident_amendments")
-      .insert({ incident_id: incidentId, author_id: authorId, reason: reason.trim(), content: content.trim() });
+    const { error: insertError } = await supabase.from("incident_amendments").insert({
+      incident_id: incidentId,
+      author_id: authorId,
+      reason: reason.trim(),
+      content: content.trim(),
+      is_parent_visible: shareWithParents,
+    });
     setIsSubmitting(false);
     if (insertError) {
       setError(insertError.message);
@@ -85,13 +95,6 @@ export function AddAmendmentSheet({ incidentId, authorId, isOpen, onClose, onAdd
         Once added, an amendment can&apos;t be edited or removed by anyone, including you.
       </p>
 
-      {isMultiChild && (
-        <p role="alert" className="mt-3 rounded-xl border border-brand-golden-brown/30 bg-brand-golden-brown/10 p-3 text-sm text-brand-neutral-black">
-          This incident involves more than one child. Each family sees this amendment on their own child&apos;s
-          record -- do not name the other child here.
-        </p>
-      )}
-
       <div className="mt-4 flex flex-col gap-3">
         <Textarea
           label="Reason for this amendment"
@@ -107,6 +110,21 @@ export function AddAmendmentSheet({ incidentId, authorId, isOpen, onClose, onAdd
           onChange={(e) => setContent(e.target.value)}
           placeholder="In your own words"
         />
+      </div>
+
+      <div className="mt-4 rounded-xl border border-black/10 bg-black/[0.015] p-3">
+        <Checkbox
+          id="amendment-share-with-parents"
+          checked={shareWithParents}
+          onChange={setShareWithParents}
+          label="Share this amendment with the family. Unchecked, it stays on the school's own record only."
+        />
+        {isMultiChild && shareWithParents && (
+          <p role="alert" className="mt-3 rounded-xl border border-brand-golden-brown/30 bg-brand-golden-brown/10 p-3 text-sm text-brand-neutral-black">
+            This incident involves more than one child. Every family you share this with sees the same text --
+            do not name the other child here.
+          </p>
+        )}
       </div>
 
       {error && (

@@ -26,6 +26,20 @@ import { STATUS_LABEL, formatIncidentDate, type InstitutionIncidentRow } from "@
 // rules as the single-incident export: "not recorded" (the fact wasn't
 // captured) is never conflated with "No" (the fact is known and
 // negative) or with "—" (the question doesn't apply here at all).
+//
+// REAL NAMES, DECIDED (CLAUDE.md, closed 10 Sept 2026): this table used
+// to fall back to anonymous letter codes (child_indices) even after the
+// on-screen table and card both switched to real names -- deliberately
+// held back, on the reasoning that a printed list is a document that
+// LEAVES the app in a way a scrolled screen doesn't. Overtaken by a
+// bigger decision made in the same session: the PARENT-facing incident
+// PDF (per child) now carries a child's real name in its own header,
+// which is a materially larger exposure than a principal, already
+// authorized to see every child at their own school by name on the
+// detail page, seeing those same names on a list they requested. child_
+// names falls back to child_indices only if a row somehow carries none
+// (shouldn't happen for a principal-scoped query, kept as a guard, not
+// a real path).
 
 const PLANNING_STATUS_LABEL: Record<string, string> = {
   in_bsp: "In BSP",
@@ -223,7 +237,9 @@ export default function PrincipalIncidentsPrintPage() {
               {rows.map((r) => (
                 <tr key={r.incident_id} className="border-b border-black/5 print-avoid-break">
                   <td className="py-2 pr-3 text-brand-neutral-black">{formatIncidentDate(r.occurred_at)}</td>
-                  <td className="py-2 pr-3 text-brand-neutral-black">{(r.child_indices ?? []).join(", ") || "—"}</td>
+                  <td className="py-2 pr-3 text-brand-neutral-black">
+                    {(r.child_names ?? []).length > 0 ? (r.child_names ?? []).join(", ") : (r.child_indices ?? []).join(", ") || "—"}
+                  </td>
                   <td className="py-2 pr-3 text-brand-neutral-black">{STATUS_LABEL[r.status] ?? r.status}</td>
                   <td className="py-2 pr-3 text-brand-neutral-black">{r.location}</td>
                   <td className="py-2 pr-3 text-brand-neutral-black">{r.has_restrictive_practice ? "Yes" : "No"}</td>
