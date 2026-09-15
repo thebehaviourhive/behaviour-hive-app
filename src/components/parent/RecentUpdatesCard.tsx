@@ -50,6 +50,19 @@ export function RecentUpdatesCard({ passportId }: { passportId: string | null })
     load();
   }, [load]);
 
+  // Stage 2, 15 Sept 2026: every other card on this dashboard already
+  // returns null when it has nothing to show (PassportCompletionPromptCard,
+  // CalmLogReminderCard, the questionnaire prompt); this was the one
+  // exception, rendering a full card-sized "nothing has happened yet"
+  // apology unconditionally -- including on a brand-new claimed parent's
+  // very first visit, when by definition nothing has happened. Loading
+  // and error states still render (a skeleton avoids layout jump once
+  // real content arrives; an error needs its own retry) -- only the
+  // genuinely settled, empty state hides now.
+  if (!isLoading && !error && entries.length === 0) {
+    return null;
+  }
+
   return (
     <Link
       href="/parent-dashboard/activity"
@@ -75,14 +88,9 @@ export function RecentUpdatesCard({ passportId }: { passportId: string | null })
             load();
           }}
         />
-      ) : entries.length === 0 ? (
-        <div className="rounded-xl border-2 border-dashed border-brand-pastel-blue bg-brand-off-white/30 p-4 text-center">
-          <p className="font-sans text-sm text-brand-neutral-black/70">
-            Activity will appear here once you and your team start using the
-            app!
-          </p>
-        </div>
       ) : (
+        // entries.length === 0 is unreachable here -- the early return
+        // above already handles it.
         entries.map((entry) => <ActivityRow key={entry.id} entry={entry} />)
       )}
 

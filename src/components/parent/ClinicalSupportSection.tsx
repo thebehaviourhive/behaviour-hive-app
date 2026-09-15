@@ -162,13 +162,6 @@ export function ClinicalSupportSection({
         ) : (
           <FbaCard state={fbaState} childName={childName} onOpenInfo={() => setIsInfoSheetOpen(true)} />
         )}
-
-        <ClinicalDocumentCard
-          title="Behaviour Support Plan"
-          body={<p>Behaviour Support Plans are currently in development.</p>}
-          disabled
-          disabledPillLabel="Coming Soon"
-        />
       </div>
 
       <WhatIsAnFbaSheet isOpen={isInfoSheetOpen} onClose={() => setIsInfoSheetOpen(false)} />
