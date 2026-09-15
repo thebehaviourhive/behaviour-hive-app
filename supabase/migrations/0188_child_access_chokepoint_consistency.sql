@@ -69,7 +69,7 @@
 create or replace function public.request_passport_completion(
   p_passport_id uuid,
   p_institution_id uuid,
-  p_target_section text
+  p_target_section text default 'a'
 )
 returns integer
 language plpgsql
