@@ -5,6 +5,8 @@ import { useCallback, useEffect, useState } from "react";
 import { format } from "date-fns";
 import { createClient } from "@/lib/supabase/client";
 import { useRequireRole } from "@/hooks/useRequireRole";
+import { useClinicianReviewState } from "@/hooks/useClinicianReviewState";
+import { ClinicianAccessGate } from "@/components/clinician/ClinicianAccessGate";
 import { ClinicianBottomNav } from "@/components/clinician/ClinicianBottomNav";
 import { ClinicalFileDetail } from "@/components/clinician/ClinicalFileDetail";
 import { InlineErrorState } from "@/components/ui/InlineErrorState";
@@ -50,7 +52,9 @@ function getDiagnosisPills(diagnoses: string[] | null, diagnosisOther: string | 
 }
 
 export default function ClinicianPassportsPage() {
-  const { isReady } = useRequireRole("clinician");
+  const { user, isReady } = useRequireRole("clinician");
+  const { isLoading: isLoadingReview, profile, reviewState, error: reviewError, refresh: refreshReview } =
+    useClinicianReviewState(user?.id ?? null);
   const [passports, setPassports] = useState<ClinicianPassportRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -92,6 +96,13 @@ export default function ClinicianPassportsPage() {
   }
 
   return (
+    <ClinicianAccessGate
+      isLoading={isLoadingReview}
+      profile={profile}
+      reviewState={reviewState}
+      error={reviewError}
+      onRetry={refreshReview}
+    >
     <div className="flex min-h-full flex-1 flex-col bg-brand-off-white/40 pb-24">
       <header className="px-4 pt-8 pb-2">
         <h1 className="font-heading text-2xl font-semibold text-brand-neutral-black">
@@ -196,6 +207,7 @@ export default function ClinicianPassportsPage() {
 
       <ClinicianBottomNav />
     </div>
+    </ClinicianAccessGate>
   );
 }
 

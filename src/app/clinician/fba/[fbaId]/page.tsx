@@ -6,6 +6,8 @@ import { useEffect, useRef, useState } from "react";
 import { ChevronRight } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { useRequireRole } from "@/hooks/useRequireRole";
+import { useClinicianReviewState } from "@/hooks/useClinicianReviewState";
+import { ClinicianAccessGate } from "@/components/clinician/ClinicianAccessGate";
 import { useFbaReport } from "@/hooks/useFbaReport";
 import { useAflsAssessmentsForFba } from "@/hooks/useAflsAssessmentsForFba";
 import { FBA_SECTIONS, getSectionCompleteness } from "@/lib/fba/sections";
@@ -21,7 +23,9 @@ const STATUS_LABEL: Record<string, string> = {
 
 export default function FbaWorkspacePage() {
   const { fbaId } = useParams<{ fbaId: string }>();
-  const { isReady } = useRequireRole("clinician");
+  const { user, isReady } = useRequireRole("clinician");
+  const { isLoading: isLoadingReview, profile: reviewProfile, reviewState, error: reviewError, refresh: refreshReview } =
+    useClinicianReviewState(user?.id ?? null);
   const { report, isLoading, loadError, reload } = useFbaReport(fbaId);
   const { assessments: aflsAssessments } = useAflsAssessmentsForFba(fbaId);
 
@@ -72,6 +76,13 @@ export default function FbaWorkspacePage() {
   }
 
   return (
+    <ClinicianAccessGate
+      isLoading={isLoadingReview}
+      profile={reviewProfile}
+      reviewState={reviewState}
+      error={reviewError}
+      onRetry={refreshReview}
+    >
     <div className="flex min-h-full flex-1 flex-col bg-brand-off-white/40 pb-10">
       <header className="flex items-center gap-3 px-4 pt-6 pb-2">
         <Link
@@ -179,6 +190,7 @@ export default function FbaWorkspacePage() {
         </div>
       </main>
     </div>
+    </ClinicianAccessGate>
   );
 }
 

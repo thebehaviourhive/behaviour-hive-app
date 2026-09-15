@@ -4,6 +4,8 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useRequireRole } from "@/hooks/useRequireRole";
+import { useClinicianReviewState } from "@/hooks/useClinicianReviewState";
+import { ClinicianAccessGate } from "@/components/clinician/ClinicianAccessGate";
 import { ABCLogger } from "@/components/abc-logger/ABCLogger";
 import { ABCTimeline } from "@/components/abc-logger/ABCTimeline";
 import { usePassportClinicalContent } from "@/hooks/usePassportClinicalContent";
@@ -130,6 +132,8 @@ export function ClinicalFileDetail({
 }) {
   const router = useRouter();
   const { user, isReady } = useRequireRole("clinician");
+  const { isLoading: isLoadingReview, profile: reviewProfile, reviewState, error: reviewError, refresh: refreshReview } =
+    useClinicianReviewState(user?.id ?? null);
   const searchParams = useSearchParams();
 
   const [profile, setProfile] = useState<ClinicalProfile | null>(null);
@@ -271,6 +275,26 @@ export function ClinicalFileDetail({
 
   if (!isReady || isLoading) {
     return null;
+  }
+
+  // QA run-through, item 4: an unverified clinician reaching a case's
+  // Clinical File directly (deep link, or a stale bookmark) used to
+  // just see the generic "couldn't find this passport" message below --
+  // technically not wrong (RLS genuinely returns no profile), but a
+  // confusing way to learn you're not approved yet. Same lock card as
+  // every other clinician page now, checked before that fallback.
+  if (isLoadingReview || reviewState !== "verified") {
+    return (
+      <ClinicianAccessGate
+        isLoading={isLoadingReview}
+        profile={reviewProfile}
+        reviewState={reviewState}
+        error={reviewError}
+        onRetry={refreshReview}
+      >
+        {null}
+      </ClinicianAccessGate>
+    );
   }
 
   if (!profile) {

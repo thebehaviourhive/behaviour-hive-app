@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { Plus } from "lucide-react";
 import { useRequireRole } from "@/hooks/useRequireRole";
+import { useClinicianReviewState } from "@/hooks/useClinicianReviewState";
+import { ClinicianAccessGate } from "@/components/clinician/ClinicianAccessGate";
 import { useClinicianPassports } from "@/hooks/useClinicianPassports";
 import { useMessageTriage } from "@/hooks/useMessageTriage";
 import { useMessageThread } from "@/hooks/useMessageThread";
@@ -26,6 +28,8 @@ import { MessageChildPickerSheet } from "@/components/messages/MessageChildPicke
 // Clinical File tab, just aggregated here across every case at once.
 export default function ClinicianMessagesPage() {
   const { user, isReady: isRoleReady } = useRequireRole("clinician");
+  const { isLoading: isLoadingReview, profile, reviewState, error: reviewError, refresh: refreshReview } =
+    useClinicianReviewState(user?.id ?? null);
   const { isLoading: isLoadingPassports, passports, error, refresh: refreshPassports } = useClinicianPassports(user?.id ?? null);
   const { groups, nameById, isLoading, loadError, refresh } = useMessageTriage(passports);
 
@@ -60,6 +64,13 @@ export default function ClinicianMessagesPage() {
   }
 
   return (
+    <ClinicianAccessGate
+      isLoading={isLoadingReview}
+      profile={profile}
+      reviewState={reviewState}
+      error={reviewError}
+      onRetry={refreshReview}
+    >
     <div className="flex min-h-full flex-1 flex-col bg-brand-off-white/40 pb-24">
       <header className="flex items-center justify-between gap-3 px-4 pt-6 pb-2">
         <h1 className="font-heading text-2xl font-semibold text-brand-prussian-blue">Messages</h1>
@@ -126,5 +137,6 @@ export default function ClinicianMessagesPage() {
 
       <ClinicianBottomNav />
     </div>
+    </ClinicianAccessGate>
   );
 }

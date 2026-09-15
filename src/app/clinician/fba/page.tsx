@@ -6,6 +6,8 @@ import { useCallback, useEffect, useState } from "react";
 import { format } from "date-fns";
 import { createClient } from "@/lib/supabase/client";
 import { useRequireRole } from "@/hooks/useRequireRole";
+import { useClinicianReviewState } from "@/hooks/useClinicianReviewState";
+import { ClinicianAccessGate } from "@/components/clinician/ClinicianAccessGate";
 import { logActivity } from "@/lib/logActivity";
 import { formatClinicianReference } from "@/lib/clinicianDisplayName";
 import { ClinicianBottomNav } from "@/components/clinician/ClinicianBottomNav";
@@ -48,6 +50,8 @@ const UNIQUE_VIOLATION = "23505";
 export default function ClinicianFbaListPage() {
   const router = useRouter();
   const { user, isReady } = useRequireRole("clinician");
+  const { isLoading: isLoadingReview, profile: reviewProfile, reviewState, error: reviewError, refresh: refreshReview } =
+    useClinicianReviewState(user?.id ?? null);
 
   const [tab, setTab] = useState<"active" | "completed">("active");
   const [fbas, setFbas] = useState<ClinicianFbaRow[]>([]);
@@ -204,6 +208,13 @@ export default function ClinicianFbaListPage() {
   );
 
   return (
+    <ClinicianAccessGate
+      isLoading={isLoadingReview}
+      profile={reviewProfile}
+      reviewState={reviewState}
+      error={reviewError}
+      onRetry={refreshReview}
+    >
     <div className="flex min-h-full flex-1 flex-col bg-brand-off-white/40 pb-24">
       <header className="flex items-center gap-3 px-4 pt-6 pb-2">
         <Link
@@ -343,6 +354,7 @@ export default function ClinicianFbaListPage() {
         )}
       </BottomSheet>
     </div>
+    </ClinicianAccessGate>
   );
 }
 

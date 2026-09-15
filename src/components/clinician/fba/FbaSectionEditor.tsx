@@ -2,6 +2,8 @@
 
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { useRequireRole } from "@/hooks/useRequireRole";
+import { useClinicianReviewState } from "@/hooks/useClinicianReviewState";
+import { ClinicianAccessGate } from "@/components/clinician/ClinicianAccessGate";
 import { useFbaReport } from "@/hooks/useFbaReport";
 import { FBA_SECTIONS, getFbaSection } from "@/lib/fba/sections";
 import { FbaSectionShell } from "@/components/clinician/fba/FbaSectionShell";
@@ -56,7 +58,9 @@ export const FbaSectionEditor = forwardRef<
     onNavigateSection: (slug: string) => void;
   }
 >(function FbaSectionEditor({ fbaId, sectionId, onNavigateBack, onNavigateSection }, ref) {
-  const { isReady } = useRequireRole("clinician");
+  const { user, isReady } = useRequireRole("clinician");
+  const { isLoading: isLoadingReview, profile: reviewProfile, reviewState, error: reviewError, refresh: refreshReview } =
+    useClinicianReviewState(user?.id ?? null);
   const { report, isLoading, loadError, reload, saveContent, saveStatus, saveError } = useFbaReport(fbaId);
 
   const section = getFbaSection(sectionId);
@@ -243,6 +247,20 @@ export const FbaSectionEditor = forwardRef<
 
   if (!isReady) {
     return null;
+  }
+
+  if (isLoadingReview || reviewState !== "verified") {
+    return (
+      <ClinicianAccessGate
+        isLoading={isLoadingReview}
+        profile={reviewProfile}
+        reviewState={reviewState}
+        error={reviewError}
+        onRetry={refreshReview}
+      >
+        {null}
+      </ClinicianAccessGate>
+    );
   }
 
   if (!section) {

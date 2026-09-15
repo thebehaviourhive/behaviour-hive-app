@@ -4,6 +4,8 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useRequireRole } from "@/hooks/useRequireRole";
+import { useClinicianReviewState } from "@/hooks/useClinicianReviewState";
+import { ClinicianAccessGate } from "@/components/clinician/ClinicianAccessGate";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 import { ABCLogger } from "@/components/abc-logger/ABCLogger";
 import { ClinicalFileIcon } from "@/components/ui/icons";
@@ -19,6 +21,8 @@ type LogType = "abc" | "fba" | "bsp";
 export default function ClinicianAddLogPage() {
   const router = useRouter();
   const { user, isReady } = useRequireRole("clinician");
+  const { isLoading: isLoadingReview, profile, reviewState, error: reviewError, refresh: refreshReview } =
+    useClinicianReviewState(user?.id ?? null);
 
   const [passports, setPassports] = useState<ClinicianPassportOption[]>([]);
   const [isLoadingPassports, setIsLoadingPassports] = useState(true);
@@ -70,6 +74,13 @@ export default function ClinicianAddLogPage() {
   }
 
   return (
+    <ClinicianAccessGate
+      isLoading={isLoadingReview}
+      profile={profile}
+      reviewState={reviewState}
+      error={reviewError}
+      onRetry={refreshReview}
+    >
     <div className="flex min-h-full flex-1 flex-col bg-brand-off-white/40">
       <header className="flex items-center gap-3 px-4 pt-6 pb-4">
         <button
@@ -190,5 +201,6 @@ export default function ClinicianAddLogPage() {
         />
       )}
     </div>
+    </ClinicianAccessGate>
   );
 }

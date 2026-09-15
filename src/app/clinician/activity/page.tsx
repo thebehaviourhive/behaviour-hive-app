@@ -5,6 +5,8 @@ import { useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { useActivityFeed } from "@/hooks/useActivityFeed";
+import { useClinicianReviewState } from "@/hooks/useClinicianReviewState";
+import { ClinicianAccessGate } from "@/components/clinician/ClinicianAccessGate";
 import { ActivityRow, ActivityRowSkeleton } from "@/components/parent/ActivityRow";
 import { InlineErrorState } from "@/components/ui/InlineErrorState";
 import type { ActivityEventType } from "@/lib/activityEvents";
@@ -23,7 +25,9 @@ interface ClinicianActivityEntry {
 }
 
 export default function ClinicianActivityPage() {
-  const { isReady } = useRequireRole("clinician");
+  const { user, isReady } = useRequireRole("clinician");
+  const { isLoading: isLoadingReview, profile, reviewState, error: reviewError, refresh: refreshReview } =
+    useClinicianReviewState(user?.id ?? null);
 
   const fetchPage = useCallback(async (limit: number, offset: number) => {
     const supabase = createClient();
@@ -38,6 +42,13 @@ export default function ClinicianActivityPage() {
   }
 
   return (
+    <ClinicianAccessGate
+      isLoading={isLoadingReview}
+      profile={profile}
+      reviewState={reviewState}
+      error={reviewError}
+      onRetry={refreshReview}
+    >
     <div className="flex min-h-full flex-1 flex-col bg-brand-off-white/40">
       <header className="flex items-center gap-3 px-4 pt-6 pb-4">
         <Link
@@ -114,5 +125,6 @@ export default function ClinicianActivityPage() {
         )}
       </main>
     </div>
+    </ClinicianAccessGate>
   );
 }

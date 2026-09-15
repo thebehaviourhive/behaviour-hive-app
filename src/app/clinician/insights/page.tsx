@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import { useRequireRole } from "@/hooks/useRequireRole";
+import { useClinicianReviewState } from "@/hooks/useClinicianReviewState";
+import { ClinicianAccessGate } from "@/components/clinician/ClinicianAccessGate";
 import { ClinicianBottomNav } from "@/components/clinician/ClinicianBottomNav";
 import { InlineErrorState } from "@/components/ui/InlineErrorState";
 import { ProgressEmptyState } from "@/components/progress/ProgressEmptyState";
@@ -41,7 +43,9 @@ type Selection = { strategyTypeId: string | null } | undefined;
 // client-side scoping needed). Read-only, same "counts, never
 // recommends" posture as Stage 3.
 export default function ClinicianInsightsPage() {
-  const { isReady } = useRequireRole("clinician");
+  const { user, isReady } = useRequireRole("clinician");
+  const { isLoading: isLoadingReview, profile, reviewState, error: reviewError, refresh: refreshReview } =
+    useClinicianReviewState(user?.id ?? null);
   const [setting, setSetting] = useState<InsightsSetting>(null);
   const [rangeKey, setRangeKey] = useState<ProgressRangeKey>("all");
   const [selection, setSelection] = useState<Selection>(undefined);
@@ -56,6 +60,13 @@ export default function ClinicianInsightsPage() {
   }
 
   return (
+    <ClinicianAccessGate
+      isLoading={isLoadingReview}
+      profile={profile}
+      reviewState={reviewState}
+      error={reviewError}
+      onRetry={refreshReview}
+    >
     <div className="flex min-h-full flex-1 flex-col bg-brand-off-white/40 pb-24">
       <header className="px-4 pt-8 pb-2">
         <h1 className="font-heading text-2xl font-semibold text-brand-prussian-blue">Strategy Insights</h1>
@@ -126,5 +137,6 @@ export default function ClinicianInsightsPage() {
 
       <ClinicianBottomNav />
     </div>
+    </ClinicianAccessGate>
   );
 }
