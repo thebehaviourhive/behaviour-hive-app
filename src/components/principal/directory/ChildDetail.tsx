@@ -839,9 +839,18 @@ export function ChildDetail({
                   <h2 className="font-heading text-sm font-bold uppercase tracking-wide text-brand-neutral-black/60">
                     Current Access ({access.active.length})
                   </h2>
-                  <button type="button" onClick={() => setIsGrantOpen(true)} className="text-xs font-semibold text-brand-prussian-blue">
-                    + Grant Access
-                  </button>
+                  {/* QA run-through, item 3: a past pupil (enrolment
+                      ended) could still be granted NEW passport access
+                      here -- nothing gated this the way End Enrolment's
+                      own trigger already gates on enrolment?.endedAt.
+                      Their existing access rows still render above/below
+                      regardless -- it's granting something NEW that
+                      stops, matching "records stay, selection stops". */}
+                  {!enrolment?.endedAt && (
+                    <button type="button" onClick={() => setIsGrantOpen(true)} className="text-xs font-semibold text-brand-prussian-blue">
+                      + Grant Access
+                    </button>
+                  )}
                 </div>
 
                 {access.active.length === 0 ? (
@@ -960,13 +969,18 @@ export function ChildDetail({
                   <h2 className="font-heading text-sm font-bold uppercase tracking-wide text-brand-neutral-black/60">
                     Clinical Team ({clinicians.length})
                   </h2>
-                  <button
-                    type="button"
-                    onClick={() => setIsGrantClinicianOpen(true)}
-                    className="text-xs font-semibold text-brand-prussian-blue"
-                  >
-                    + Connect Clinician
-                  </button>
+                  {/* Same gate as "+ Grant Access" above, same reason:
+                      a past pupil shouldn't be newly connected to a
+                      clinician either. */}
+                  {!enrolment?.endedAt && (
+                    <button
+                      type="button"
+                      onClick={() => setIsGrantClinicianOpen(true)}
+                      className="text-xs font-semibold text-brand-prussian-blue"
+                    >
+                      + Connect Clinician
+                    </button>
+                  )}
                 </div>
 
                 {cliniciansError ? (

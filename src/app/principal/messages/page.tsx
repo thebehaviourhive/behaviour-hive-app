@@ -45,7 +45,9 @@ import { MessageChildPickerSheet } from "@/components/messages/MessageChildPicke
 // widening specific to this section.
 export default function PrincipalMessagesPage() {
   const { user, isReady: isRoleReady } = useRequireRole("principal");
-  const [passports, setPassports] = useState<{ passportId: string; displayName: string }[]>([]);
+  const [passports, setPassports] = useState<
+    { passportId: string; displayName: string; enrolmentEndedAt: string | null }[]
+  >([]);
   const [institutionId, setInstitutionId] = useState<string | null>(null);
   const [isLoadingRoster, setIsLoadingRoster] = useState(true);
   const [rosterError, setRosterError] = useState<string | null>(null);
@@ -81,10 +83,13 @@ export default function PrincipalMessagesPage() {
       return;
     }
     setPassports(
-      ((rosterRows ?? []) as { passport_id: string; child_name: string }[]).map((r) => ({
-        passportId: r.passport_id,
-        displayName: r.child_name,
-      }))
+      ((rosterRows ?? []) as { passport_id: string; child_name: string; enrolment_ended_at: string | null }[]).map(
+        (r) => ({
+          passportId: r.passport_id,
+          displayName: r.child_name,
+          enrolmentEndedAt: r.enrolment_ended_at,
+        })
+      )
     );
     setIsLoadingRoster(false);
   }, [user]);
@@ -95,6 +100,14 @@ export default function PrincipalMessagesPage() {
   }, [loadRoster]);
 
   const { groups, nameById, isLoading, loadError, refresh } = useMessageTriage(passports);
+  // QA run-through, item 3: composing a NEW message and reading EXISTING
+  // threads are different questions. passports (unfiltered) stays the
+  // triage's own roster on purpose -- a past pupil's existing thread
+  // must stay visible, per can_view_message()'s own comment above. This
+  // is the compose picker's own candidate list, filtered to children
+  // still actively enrolled -- a principal shouldn't be able to START a
+  // new conversation about someone no longer at the school.
+  const composeCandidates = passports.filter((p) => !p.enrolmentEndedAt);
   const {
     messages: staffMessages,
     nameById: staffNameById,
@@ -194,7 +207,7 @@ export default function PrincipalMessagesPage() {
         isOpen={pickerStep === "student"}
         onClose={() => setPickerStep("closed")}
         title="Message about which child?"
-        candidates={passports}
+        candidates={composeCandidates}
         emptyMessage="No children enrolled yet."
         onSelect={(passportId) => {
           setComposePassportId(passportId);

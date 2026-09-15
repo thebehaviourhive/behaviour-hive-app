@@ -79,11 +79,25 @@ export function useInstitutionRoster(userId: string | null): UseInstitutionRoste
         return;
       }
 
+      // QA run-through, item 3: a child whose enrolment has ended still
+      // appeared here, selectable for a brand new incident. get_
+      // institution_child_roster() (live def: migration 0129) already
+      // returns enrolment_ended_at (added 0122, deliberately non-
+      // filtering at the RPC level so callers could opt in) -- this is
+      // that opt-in, since this is genuinely a NEW-record picker, not a
+      // browse view: an incident about a still-enrolled child needs
+      // every current member of staff selectable regardless of THEIR
+      // own individual has_child_access(), which is exactly why this
+      // hook exists instead of useTeacherPassports -- but "no approval
+      // gate on the STAFF side" was never meant to also mean "no
+      // enrolment gate on the CHILD side".
       setChildren(
-        (childRosterResult.data ?? []).map((row: { passport_id: string; child_name: string }) => ({
-          passportId: row.passport_id,
-          childName: row.child_name || "Unnamed child",
-        }))
+        (childRosterResult.data ?? [])
+          .filter((row: { enrolment_ended_at: string | null }) => !row.enrolment_ended_at)
+          .map((row: { passport_id: string; child_name: string }) => ({
+            passportId: row.passport_id,
+            childName: row.child_name || "Unnamed child",
+          }))
       );
       setStaff(
         (staffRosterResult.data ?? []).map((row: { user_id: string; full_name: string | null; role: string }) => ({
