@@ -20,7 +20,7 @@
 // stage development. Every check from V onward is independently
 // self-contained (own institution, own accounts, own cleanup) and
 // individually selectable: V, W, X, Y, Z, AA, BB, CC, DD, EE, FF, GG,
-// HH, II, JJ, KK, LL, MM, NN, OO, PP, QQ, RR, SS, TT, UU, VV, WW, XX, YY, ZZ, AAA, BBB, CCC, DDD, EEE, FFF, GGG, HHH, III, JJJ, KKK, LLL. Selecting none of these (ONLY_CHECKS unset) is the full run --
+// HH, II, JJ, KK, LL, MM, NN, OO, PP, QQ, RR, SS, TT, UU, VV, WW, XX, YY, ZZ, AAA, BBB, CCC, DDD, EEE, FFF, GGG, HHH, III, JJJ, KKK, LLL, MMM, NNN, OOO, PPP. Selecting none of these (ONLY_CHECKS unset) is the full run --
 // the one that gates deploys -- and its behavior is unchanged: same
 // checks, same order, same pass/fail counts. The only observable
 // difference is where the top-level fixture's own cleanup log line
@@ -13405,6 +13405,100 @@ async function main() {
     for (const id of [principalOOOId, teacherOOOId, snaOOOId, teacherOtherOOOId]) {
       await admin.auth.admin.deleteUser(id);
     }
+  }
+
+  if (shouldRun("PPP")) {
+    // STRUCTURAL, not a fixture check -- no accounts created, nothing to
+    // tear down, runs in well under a second. Reads live function bodies
+    // via pg_get_functiondef() (list_functions_referencing_passport_
+    // access(), migration 0189) rather than migration file text --
+    // migration text lies the moment a fix ships via ALTER POLICY or a
+    // later CREATE OR REPLACE the file grep won't see, exactly the
+    // mistake made by hand while auditing this the first time, 15 Sept
+    // 2026 (wrongly flagged the passports table's own SELECT policy as
+    // still broken; it had been fixed in 0104 via ALTER POLICY).
+    //
+    // NAMED FOR EXACTLY WHAT IT PROVES, NOT MORE: this catches Group A's
+    // failure shape -- a NEW function added later that never goes
+    // through has_child_access()/has_class_teacher_access()/
+    // has_sna_access() at all, at commit time instead of a QA run three
+    // months on. IT DOES NOT CATCH GROUP B'S FAILURE SHAPE -- a function
+    // that calls the chokepoint correctly today and silently drifts out
+    // of sync the next time has_class_teacher_access()/has_sna_access()
+    // grows a fifth branch. That is a different, harder check (something
+    // closer to "no enumeration function was last touched earlier than
+    // the primitives it depends on") and is not what this proves. This
+    // codebase has seven checks elsewhere whose names claimed more than
+    // they tested -- see CLAUDE.md's own "A CHECK CAN ENCODE A BUG AS A
+    // SPEC" entry -- this comment exists so PPP doesn't become an eighth.
+    console.log(`\n== CHECK PPP: every public-schema function referencing public.passport_access directly is on a reasoned allowlist (catches Group A's failure shape only -- see the comment immediately above this block for what it does NOT catch) ==`);
+
+    // Each entry's value is the REASON that function is allowed to touch
+    // passport_access directly, not just its name -- an unexplained list
+    // is something people add to; a reasoned one is something they have
+    // to argue with.
+    const ALLOWED_PASSPORT_ACCESS_FUNCTIONS = {
+      has_class_teacher_access:
+        "IS one of the chokepoint's two primitives (0104, live def 0130) -- its entire job is querying passport_access directly (the explicit-grant branch) alongside the class-roster branches. has_child_access() calls this; this calls nothing.",
+      has_sna_access:
+        "IS the chokepoint's other primitive (0104, live def 0133) -- same reasoning as has_class_teacher_access above.",
+      grant_passport_access:
+        "The explicit-grant CRUD itself (0148) -- this is the function that WRITES a passport_access row into existence. A gate has nothing to delegate to here; this IS the mechanism has_child_access() checks for.",
+      revoke_passport_access:
+        "The explicit-grant CRUD itself, the revoke half (0111) -- writes revoked_at/revoked_by/revocation_reason onto an existing row.",
+      _close_child_access_for_departure:
+        "Internal trigger helper (0104) -- closes out passport_access rows when a class teacher/SNA's own class_teachers/class_sna_assignments/child_assignments row ends. A write triggered by departure, not a read gating anyone's access.",
+      _close_child_access_for_enrolment_end:
+        "Internal trigger helper (0123) -- same shape, fired when a CHILD's own enrolment ends instead of a staff member's own assignment.",
+      _close_passport_access_for_departure:
+        "Internal trigger helper (0102) -- same shape again, fired on institution departure / principal handover.",
+      get_passport_access_for_child:
+        "The principal's own Manage Access screen (0148) -- its whole job is DISPLAYING passport_access's own rows (who has an explicit grant, when, revoked by whom) for a principal to review/revoke, not deciding anyone's access. Direct reference is the point, not a gate skipped.",
+      get_passport_team:
+        "0188 rewrote this to gate purely on has_child_access(s.user_id, p_passport_id) -- the LEFT JOIN to passport_access that remains is cosmetic only, recovering a best-effort linked_at provenance value for display (confirmed unused by the one caller, YourTeamCard.tsx, today). It plays no part in deciding who's included.",
+      // TRACKED, NOT PERMANENT -- both below are the parked "SNA
+      // messaging about a child" decision (see 0188's own header
+      // comment): now DECIDED (SNAs get it) but deliberately scoped as
+      // its own follow-up piece, not folded into the Group A/B pass.
+      // Remove these two entries the moment that piece lands and both
+      // are rewritten to gate on has_child_access() like everything
+      // else here -- if this check is still passing with either name
+      // present after that work is reported done, the allowlist itself
+      // has gone stale in the permissive direction, which PPP2 cannot
+      // catch (it only catches an entry with no matching live function,
+      // not an entry that's overstayed its reason).
+      get_message_recipient_candidates:
+        "Its class_teacher branch checks passport_access directly and has no SNA branch at all (0162) -- a known, decided, not-yet-built gap, not an oversight. Tracked as its own piece after the Group A/B access-consistency pass, since it also needs message_categories.allowed_sender_roles work.",
+      send_message:
+        "Its child-conversation sender-role resolution checks passport_access directly and stops at class_teachers (0169) -- same known gap as get_message_recipient_candidates above, same tracked follow-up.",
+    };
+
+    const { data: flagged, error: flaggedErr } = await admin.rpc("list_functions_referencing_passport_access");
+    if (flaggedErr) throw flaggedErr;
+
+    const unexpected = (flagged ?? []).filter((f) => !(f.function_name in ALLOWED_PASSPORT_ACCESS_FUNCTIONS));
+    record(
+      "PPP1 every public-schema function whose LIVE body references public.passport_access is on the reasoned allowlist above -- an unexplained name here is a function that may be bypassing has_child_access()/has_class_teacher_access()/has_sna_access() entirely, the exact shape request_passport_completion()/request_passport_home_profile() had before 0188",
+      unexpected.length === 0,
+      unexpected.length > 0
+        ? `UNEXPECTED: ${unexpected.map((f) => `${f.function_name}(${f.arguments})`).join(", ")} -- either this is genuinely a chokepoint primitive/grant-revoke/cleanup-trigger and needs a reasoned entry added to ALLOWED_PASSPORT_ACCESS_FUNCTIONS above, or it's a gate that skipped the chokepoint and needs fixing to call has_child_access() instead`
+        : `checked ${(flagged ?? []).length} function(s): ${(flagged ?? []).map((f) => f.function_name).join(", ")}`
+    );
+
+    // Defensive in the OTHER direction: an allowlist entry whose
+    // function no longer shows up at all (renamed, dropped, or its body
+    // no longer references passport_access) means the reason attached
+    // to it is now describing something that doesn't exist -- worth
+    // surfacing, not silently ignoring, so the allowlist stays an
+    // accurate record rather than accumulating dead entries the same
+    // way it's meant to stop dead access-checks from accumulating.
+    const liveNames = new Set((flagged ?? []).map((f) => f.function_name));
+    const staleAllowlistEntries = Object.keys(ALLOWED_PASSPORT_ACCESS_FUNCTIONS).filter((name) => !liveNames.has(name));
+    record(
+      "PPP2 the allowlist itself has no stale entries -- every reasoned name still exists as a live function that still references public.passport_access",
+      staleAllowlistEntries.length === 0,
+      staleAllowlistEntries.length > 0 ? `STALE (renamed/dropped/no longer references it): ${staleAllowlistEntries.join(", ")}` : undefined
+    );
   }
 
   console.log(`\n== Summary ==`);
