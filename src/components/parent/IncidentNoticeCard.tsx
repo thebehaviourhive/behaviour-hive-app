@@ -45,6 +45,14 @@ interface ParentIncidentRow {
   occurred_at: string;
   location: string;
   parent_summary: string | null;
+  // QA run-through, item 6: this card was built entirely on
+  // parent_incident_notices -- an append-only event log with no
+  // acknowledged state of its own (same shape CLAUDE.md's "query live
+  // state, not an event log" note already warns about) -- so it kept
+  // showing an incident forever regardless of acknowledge_incident()
+  // having been called. get_parent_incidents() already returns this
+  // column (ic.parent_acknowledged_at); it just wasn't read here.
+  parent_acknowledged_at: string | null;
 }
 
 interface IncidentEntry {
@@ -100,9 +108,17 @@ async function fetchEntries(passportId: string): Promise<IncidentEntry[]> {
     });
   }
 
-  return Array.from(byIncidentId.values()).sort(
-    (a, b) => new Date(b.recordedAt).getTime() - new Date(a.recordedAt).getTime()
-  );
+  return Array.from(byIncidentId.values())
+    // The prompt clears on acknowledgement; the fact of it stays on the
+    // incident itself (get_parent_incidents(), visible to staff via
+    // get_incident_export() etc.) -- this filter only ever removes the
+    // dashboard prompt, never any underlying record. A stage-1 notice's
+    // fullDetail is always null (get_parent_incidents() only returns
+    // signed-off incidents, and acknowledge_incident() itself refuses
+    // before sign-off), so this can never exclude an un-acknowledgeable
+    // stage-1 notice by accident.
+    .filter((entry) => !entry.fullDetail?.parent_acknowledged_at)
+    .sort((a, b) => new Date(b.recordedAt).getTime() - new Date(a.recordedAt).getTime());
 }
 
 export function IncidentNoticeCard({ passportId }: { passportId: string | null }) {
