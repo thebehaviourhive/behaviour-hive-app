@@ -10,6 +10,12 @@ type Availability = "checking" | "available" | "unavailable";
 function buildHref(viewerRole: MessageRole, passportId: string, abcLogId: string): string {
   if (viewerRole === "parent") return `/passport/dashboard#abc-log-${abcLogId}`;
   if (viewerRole === "class_teacher") return `/teacher/passport/${passportId}?tab=incidents&logId=${abcLogId}`;
+  // Principal's own ABC Logs tab (ChildDetail.tsx, added alongside
+  // get_abc_logs()'s new principal branch, migration 0190) -- a
+  // separate tab from "incidents" there, same reason SNA's own page
+  // keeps them apart (formal incident record vs. day-to-day ABC log).
+  if (viewerRole === "principal") return `/principal/passports/${passportId}?tab=abcLogs`;
+  if (viewerRole === "sna") return `/sna/passport/${passportId}?tab=incidents&logId=${abcLogId}`;
   return `/clinician/passport/${passportId}?tab=incidents&logId=${abcLogId}`;
 }
 

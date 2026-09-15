@@ -4,7 +4,14 @@
 //
 // Everything that reads from these (ABCLogger's step content, ABCTimeline's
 // footer/reporter-filter labels) picks up a new entry automatically.
-export type ABCLoggerRole = "parent" | "class_teacher" | "clinician" | "sna";
+// "principal" added for ABCTimeline's own new read-only tab
+// (ChildDetail.tsx's "ABC Logs" tab) -- a principal never AUTHORS an
+// entry (ABCLogger, the creation form, is never opened by this role),
+// so ABC_ROLE_CONFIG's own principal entry below is never actually
+// read; it exists only because this type is a Record key set, and
+// log.loggedByRole (ABC_ROLE_DISPLAY_LABEL's own lookup) can likewise
+// never equal "principal" for the same reason.
+export type ABCLoggerRole = "parent" | "class_teacher" | "clinician" | "sna" | "principal";
 
 // Vocabulary refresh (2026-08): every chip step's "Other" option is now
 // literally labelled "Other (please describe)" rather than a bare
@@ -128,6 +135,13 @@ export const ABC_ROLE_CONFIG: Record<ABCLoggerRole, ABCRoleConfig> = {
     behaviour: UNIFIED_BEHAVIOUR,
     consequence: UNIFIED_CONSEQUENCE,
   },
+  // Never actually reached -- see this file's own ABCLoggerRole comment.
+  principal: {
+    intensityLabel: "Intensity Level",
+    antecedent: UNIFIED_ANTECEDENT,
+    behaviour: UNIFIED_BEHAVIOUR,
+    consequence: UNIFIED_CONSEQUENCE,
+  },
 };
 
 export const ABC_ROLE_DISPLAY_LABEL: Record<ABCLoggerRole, string> = {
@@ -135,6 +149,7 @@ export const ABC_ROLE_DISPLAY_LABEL: Record<ABCLoggerRole, string> = {
   class_teacher: "Teacher",
   clinician: "Clinician",
   sna: "SNA",
+  principal: "Principal",
 };
 
 // ============================================================

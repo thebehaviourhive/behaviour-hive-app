@@ -10,6 +10,7 @@ import { EndEnrolmentSheet } from "@/components/principal/EndEnrolmentSheet";
 import { GrantClinicianAccessSheet } from "@/components/principal/GrantClinicianAccessSheet";
 import { CLINICIAN_SPECIALTY_LABEL, type ClinicianSpecialty } from "@/lib/clinicianSpecialties";
 import { IncidentCard, type InstitutionIncidentRow } from "@/components/principal/IncidentCard";
+import { ABCTimeline } from "@/components/abc-logger/ABCTimeline";
 
 // PRD 1, Stage 4, Step 3. Principal's passport detail. PRD 2, Stage 3:
 // rewritten into three tabs (Enrolment / Access / Clinical), reusing
@@ -188,13 +189,20 @@ interface ClinicalContentItem {
 // already grants a principal every incident at their institution
 // (can_countersign_incident()); p_passport_id is a new filter on that
 // same, already-granted set, not new access.
-type TabKey = "enrolment" | "access" | "clinical" | "passport" | "incidents";
+type TabKey = "enrolment" | "access" | "clinical" | "passport" | "abcLogs" | "incidents";
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: "enrolment", label: "Enrolment" },
   { key: "access", label: "Access" },
   { key: "clinical", label: "Clinical" },
   { key: "passport", label: "Passport" },
+  // Added per Daniel's own instruction: a principal should not find ABC
+  // logs somewhere different from where an SNA finds them -- matches
+  // sna/passport/[passportId]/page.tsx's own tab exactly, its own
+  // separate slot from "Incidents" for the same reason SNA's page keeps
+  // them apart (formal incident record vs. day-to-day ABC log -- folding
+  // them together would blur that distinction).
+  { key: "abcLogs", label: "ABC Logs" },
   { key: "incidents", label: "Incidents" },
 ];
 
@@ -1206,6 +1214,8 @@ export function ChildDetail({
               )}
             </>
           )}
+
+          {activeTab === "abcLogs" && <ABCTimeline passportId={passportId} viewerRole="principal" />}
 
           {activeTab === "incidents" && (
             <>
