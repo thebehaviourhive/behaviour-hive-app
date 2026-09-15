@@ -1,14 +1,32 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { forwardRef, useImperativeHandle, useRef, useState } from "react";
 import { ChevronDown, Plus, Trash2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { useAflsItemBank } from "@/hooks/useAflsItemBank";
-import { useAflsAssessmentsForFba } from "@/hooks/useAflsAssessmentsForFba";
+import { useAflsAssessmentsForFba, SaveCancelledError } from "@/hooks/useAflsAssessmentsForFba";
 import { AFLS_DOMAINS, AFLS_NA_RULE_HINTS } from "@/lib/fba/types";
 import { InlineErrorState } from "@/components/ui/InlineErrorState";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 import type { AflsAssessment, AflsScores, AflsTaskScore, InstrumentItem } from "@/lib/fba/types";
+
+// Imperative handle so the routing page's own flushAndAdvance (Back/
+// Previous/Next) can wait for THIS section's own save queue before
+// navigating away -- AFLS save resilience, 15 Sept 2026. Deliberately
+// not folded into the generic content_data flush: this section has no
+// shared `content` blob at that level at all (see this file's own
+// header comment), so the routing page can't wait on anything it
+// already tracks. Exposing exactly one method keeps the coupling
+// narrow -- the routing page doesn't need to know anything about
+// saveQueueRef, tokens, or AFLS's own internal status vocabulary.
+export interface AflsSectionHandle {
+  // Resolves once whatever's currently queued has settled, true only if
+  // it actually saved -- false for a cancelled or failed save, so the
+  // caller can refuse to navigate rather than lose the edit one step
+  // later (same "stay put unless truly saved" rule flushAndAdvance
+  // already applies to the generic path).
+  flushPendingSave: () => Promise<boolean>;
+}
 
 // Section 11 REBUILD: the AFLS is conducted ON PAPER -- this is the
 // transcription and results layer only. Fully self-contained (own
@@ -42,11 +60,46 @@ function formatAssessmentDate(dateStr: string): string {
   return new Date(y, m - 1, d).toLocaleDateString("en-IE", { day: "numeric", month: "short", year: "numeric" });
 }
 
-type InlineStatus = "idle" | "saving" | "saved" | "error";
+type InlineStatus = "idle" | "saving" | "waiting-for-connection" | "saved" | "error";
 
-function InlineSaveStatus({ status }: { status: InlineStatus }) {
+// Same vocabulary and behaviour as SavedStateIndicator.tsx (the generic
+// content_data path's own header indicator), scaled down to this
+// section's own inline pill: "waiting-for-connection" and "error" both
+// get a retry tap-target, and waiting additionally gets Cancel, since
+// that's the one state that could otherwise retry indefinitely.
+function InlineSaveStatus({
+  status,
+  onRetry,
+  onCancel,
+}: {
+  status: InlineStatus;
+  onRetry: () => void;
+  onCancel: () => void;
+}) {
+  if (status === "waiting-for-connection" || status === "error") {
+    const label = status === "waiting-for-connection" ? "Offline" : "Couldn't save";
+    return (
+      <span className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={onRetry}
+          className="text-xs font-semibold text-brand-golden-brown underline underline-offset-2"
+        >
+          {label} · Retry
+        </button>
+        {status === "waiting-for-connection" && (
+          <button
+            type="button"
+            onClick={onCancel}
+            className="text-xs font-medium text-brand-golden-brown underline underline-offset-2"
+          >
+            Cancel
+          </button>
+        )}
+      </span>
+    );
+  }
   if (status === "saving") return <span className="text-xs font-semibold text-brand-pastel-blue animate-pulse">Saving…</span>;
-  if (status === "error") return <span className="text-xs font-semibold text-red-600">Couldn&apos;t save</span>;
   if (status === "saved") return <span className="text-xs font-semibold text-green-600">Saved</span>;
   return null;
 }
@@ -170,7 +223,7 @@ function DomainCard({
   );
 }
 
-export function AflsSection({ fbaId }: { fbaId: string }) {
+export const AflsSection = forwardRef<AflsSectionHandle, { fbaId: string }>(function AflsSection({ fbaId }, ref) {
   const { itemsByDomain, loadError: itemBankError, refresh: refreshItemBank } = useAflsItemBank();
   const { assessments, loadError, reload, createAssessment, updateAssessment, deleteAssessment } =
     useAflsAssessmentsForFba(fbaId);
@@ -196,9 +249,26 @@ export function AflsSection({ fbaId }: { fbaId: string }) {
   // carrying the final merged state, instead of firing one PATCH per
   // tap. draftScoresRef mirrors draftScores synchronously (state
   // updates aren't visible to same-tick closures) -- see handleScoreTap.
-  const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
+  //
+  // AFLS save resilience, 15 Sept 2026: the chain's own type is now
+  // Promise<"saved"|"cancelled"|"error">, not Promise<void> -- each step
+  // resolves to (never rejects with) its own real outcome, same
+  // vocabulary the generic content_data path's saveContent returns, so
+  // flushPendingSave below can check the outcome directly rather than
+  // re-reading `status` state after an await (that would be a stale
+  // closure read, same pitfall the generic path's own flushAndAdvance
+  // was built to avoid).
+  const saveQueueRef = useRef<Promise<"saved" | "cancelled" | "error">>(Promise.resolve("saved"));
   const draftScoresRef = useRef<AflsScores>({});
   const draftCommentsRef = useRef<Record<string, string>>({});
+  // Always points at whichever save is CURRENTLY executing (set inside
+  // the queue step itself, not at queueSave call time) -- a rapid burst
+  // of taps still coalesces exactly as before (this does NOT abort a
+  // still-QUEUED-but-not-yet-running save the way triggerSave's own
+  // abort-latest-wins does for the generic path); this ref exists only
+  // so the manual Cancel control can abort whichever attempt is
+  // actually in flight right now.
+  const saveAbortRef = useRef<AbortController | null>(null);
 
   const openAssessment = openAssessmentId ? assessments.find((a) => a.id === openAssessmentId) ?? null : null;
 
@@ -211,12 +281,19 @@ export function AflsSection({ fbaId }: { fbaId: string }) {
     setDraftDate(assessment.assessmentDate);
     setDraftAssessor(assessment.assessorName);
     setStatus("idle");
-    saveQueueRef.current = Promise.resolve();
+    saveQueueRef.current = Promise.resolve("saved");
   }
 
   // Queues one save behind whatever's already pending for this
   // assessment. `buildPatch` is called only once the save actually
   // starts running, so it always sees the truly-latest draft state.
+  //
+  // AFLS save resilience, 15 Sept 2026: now passes onStatusChange/signal
+  // through to updateAssessment (offline-retry, same insertWithOfflineRetry
+  // the generic path uses) and returns the settled outcome, chained --
+  // deliberately does NOT abort a previous call's controller here (that
+  // would break the existing coalescing behaviour above); saveAbortRef is
+  // only ever set to whichever attempt is actually running right now.
   function queueSave(
     assessmentId: string,
     buildPatch: () => Partial<{
@@ -225,19 +302,63 @@ export function AflsSection({ fbaId }: { fbaId: string }) {
       scores: AflsScores;
       domainComments: Record<string, string>;
     }>
-  ) {
+  ): Promise<"saved" | "cancelled" | "error"> {
     const token = ++saveTokenRef.current;
     setStatus("saving");
-    saveQueueRef.current = saveQueueRef.current
-      .then(() => updateAssessment(assessmentId, buildPatch()))
-      .then(() => {
+    const outcome = saveQueueRef.current.then(async () => {
+      const controller = new AbortController();
+      saveAbortRef.current = controller;
+      try {
+        await updateAssessment(
+          assessmentId,
+          buildPatch(),
+          (s) => {
+            if (saveTokenRef.current === token) setStatus(s);
+          },
+          controller.signal
+        );
         if (saveTokenRef.current === token) setStatus("saved");
-      })
-      .catch((err) => {
+        return "saved" as const;
+      } catch (err) {
+        if (err instanceof SaveCancelledError) {
+          if (saveTokenRef.current === token) setStatus("idle");
+          return "cancelled" as const;
+        }
         console.error("Failed to save AFLS assessment:", err);
         if (saveTokenRef.current === token) setStatus("error");
-      });
+        return "error" as const;
+      }
+    });
+    saveQueueRef.current = outcome;
+    return outcome;
   }
+
+  // Manual retry: re-sends the FULL current draft (every field, not
+  // just whichever one last failed) -- same posture as the generic
+  // path's own flush, which always saves the whole content blob rather
+  // than tracking which specific field changed. Simpler, and safe:
+  // idempotent regardless of which field originally failed.
+  function retrySave() {
+    if (!openAssessmentId) return;
+    const id = openAssessmentId;
+    queueSave(id, () => ({
+      assessmentDate: draftDate,
+      assessorName: draftAssessor,
+      scores: draftScoresRef.current,
+      domainComments: draftCommentsRef.current,
+    }));
+  }
+
+  function cancelSave() {
+    saveAbortRef.current?.abort();
+  }
+
+  useImperativeHandle(ref, () => ({
+    async flushPendingSave() {
+      const outcome = await saveQueueRef.current;
+      return outcome === "saved";
+    },
+  }));
 
   function handleScoreTap(taskCode: string, value: AflsTaskScore) {
     if (!openAssessmentId) return;
@@ -356,7 +477,7 @@ export function AflsSection({ fbaId }: { fbaId: string }) {
         <div className="flex flex-col gap-3 rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
           <div className="flex items-center justify-between gap-2">
             <p className="font-heading text-base font-bold text-brand-neutral-black">Assessment details</p>
-            <InlineSaveStatus status={status} />
+            <InlineSaveStatus status={status} onRetry={retrySave} onCancel={cancelSave} />
           </div>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div>
@@ -471,4 +592,4 @@ export function AflsSection({ fbaId }: { fbaId: string }) {
       </BottomSheet>
     </div>
   );
-}
+});

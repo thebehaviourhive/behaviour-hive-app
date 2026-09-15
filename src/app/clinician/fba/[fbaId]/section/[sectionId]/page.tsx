@@ -15,7 +15,7 @@ import { TargetBehavioursSection } from "@/components/clinician/fba/sections/Tar
 import { TriggersSettingEventsSection } from "@/components/clinician/fba/sections/TriggersSettingEventsSection";
 import { IndirectAssessmentSection } from "@/components/clinician/fba/sections/IndirectAssessmentSection";
 import { DirectAssessmentSection } from "@/components/clinician/fba/sections/DirectAssessmentSection";
-import { AflsSection } from "@/components/clinician/fba/sections/AflsSection";
+import { AflsSection, type AflsSectionHandle } from "@/components/clinician/fba/sections/AflsSection";
 import { RecommendationsSection } from "@/components/clinician/fba/sections/RecommendationsSection";
 import { ConclusionSection } from "@/components/clinician/fba/sections/ConclusionSection";
 import { ReviewSection } from "@/components/clinician/fba/sections/ReviewSection";
@@ -31,6 +31,11 @@ export default function FbaSectionEditorPage() {
 
   const [content, setContent] = useState<FbaContentData>({});
   const abortRef = useRef<AbortController | null>(null);
+  // AFLS save resilience -- lets flushAndAdvance wait for AFLS's own
+  // (entirely separate) save queue before navigating away from section
+  // 11, same as it already waits for the generic content_data path on
+  // every other section.
+  const aflsRef = useRef<AflsSectionHandle>(null);
 
   // Single source of truth for the save icon's unsaved/saved split,
   // independent of (but reconciled against) the hook's own saveStatus.
@@ -125,28 +130,38 @@ export default function FbaSectionEditorPage() {
   // "leaving" already meant the clinician had left the task, where with
   // Next they're still mid-flow.
   //
-  // AFLS (section.kind === "afls") has no shared `content` to flush --
-  // it manages its own save queue entirely inside AflsSection, with no
-  // state surfaced up to this page (see that component's own comments).
-  // Short-circuits straight to navigation for that section, deliberately
-  // NOT taught to also await AFLS's own queue here -- that would mean
-  // reaching into a different component's private save machinery from
-  // this generic path, exactly the "making the generic path accommodate
-  // it" this was told not to do. AFLS's own save-on-navigate safety is a
-  // separate, real gap, recorded in CLAUDE.md rather than papered over
-  // here.
+  // AFLS save resilience, 15 Sept 2026: AFLS (section.kind === "afls")
+  // has no shared `content` blob at this level -- it manages its own
+  // save queue entirely inside AflsSection. Waits on THAT queue via
+  // aflsRef's own imperative handle instead, rather than reaching into
+  // AflsSection's private machinery from here -- the coupling stays
+  // narrow (one method, one boolean answer), so this generic function
+  // still doesn't need to know anything about AFLS's own save
+  // vocabulary, tokens, or abort controller.
   //
-  // Loops rather than flushing once: a newer edit can land while an
-  // earlier flush's network round trip is still in flight (the same
-  // abort-on-supersede risk triggerSave already handles reactively for
-  // blur/structural saves) -- here it needs to be handled proactively,
-  // since navigating away must mean nothing is left unsaved. Uses ONLY
-  // changeVersionRef/versionAtSaveStartRef (refs, always current) for
-  // the loop's own re-check, never re-reading `isDirty` state after an
-  // await -- a stale closure over `isDirty` would silently under- or
-  // over-flush.
+  // Loops rather than flushing once (generic path only): a newer edit
+  // can land while an earlier flush's network round trip is still in
+  // flight (the same abort-on-supersede risk triggerSave already
+  // handles reactively for blur/structural saves) -- here it needs to
+  // be handled proactively, since navigating away must mean nothing is
+  // left unsaved. Uses ONLY changeVersionRef/versionAtSaveStartRef
+  // (refs, always current) for the loop's own re-check, never
+  // re-reading `isDirty` state after an await -- a stale closure over
+  // `isDirty` would silently under- or over-flush. AFLS's own
+  // flushPendingSave doesn't need an equivalent loop -- its queue
+  // already serialises and coalesces taps internally (see that
+  // component's own comments), so awaiting its current tail is already
+  // complete by construction.
   async function flushAndAdvance(targetHref: string) {
-    if (section?.kind !== "afls" && isDirty) {
+    if (section?.kind === "afls") {
+      setIsNavigating(true);
+      const safeToNavigate = (await aflsRef.current?.flushPendingSave()) ?? true;
+      setIsNavigating(false);
+      if (!safeToNavigate) return; // cancelled or errored -- stay put, AFLS's own inline indicator already shows it
+      router.push(targetHref);
+      return;
+    }
+    if (isDirty) {
       setIsNavigating(true);
       for (;;) {
         const versionAtThisFlush = changeVersionRef.current;
@@ -318,7 +333,7 @@ export default function FbaSectionEditorPage() {
               readOnly={readOnly}
             />
           )}
-          {section.kind === "afls" && <AflsSection fbaId={fbaId} />}
+          {section.kind === "afls" && <AflsSection ref={aflsRef} fbaId={fbaId} />}
           {section.kind === "recommendations" && (
             <RecommendationsSection
               fbaId={fbaId}

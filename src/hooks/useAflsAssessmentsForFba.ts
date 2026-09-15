@@ -2,7 +2,16 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { insertWithOfflineRetry } from "@/lib/waitForReconnect";
 import type { AflsAssessment, AflsScores } from "@/lib/fba/types";
+
+// AFLS save resilience, 15 Sept 2026 -- thrown by updateAssessment when
+// its caller aborts a save via `signal` (e.g. the clinician taps Cancel
+// while it's waiting for connectivity). Deliberately NOT the same as a
+// real failure: AflsSection's own queue catches this specifically to
+// set status back to "idle" rather than "error", same distinction
+// useFbaReport.ts's saveContent already makes for the generic path.
+export class SaveCancelledError extends Error {}
 
 interface AflsAssessmentRow {
   id: string;
@@ -84,6 +93,16 @@ export function useAflsAssessmentsForFba(fbaId: string) {
     return created;
   }
 
+  // AFLS save resilience, 15 Sept 2026 -- brought up to the generic
+  // content_data path's own standard (useFbaReport.ts's saveContent):
+  // same insertWithOfflineRetry, reused rather than reimplemented, so a
+  // clinician on a poor connection in this section is protected exactly
+  // as they already are in the other thirteen. onStatusChange/signal are
+  // both optional so this stays backward compatible with any caller that
+  // doesn't need them (there are none left inside this codebase, but the
+  // shape costs nothing to keep optional). The row insertWithOfflineRetry's
+  // own `attempt` callback would otherwise discard (it only looks at
+  // `error`) is captured into `updatedRow` via closure instead.
   async function updateAssessment(
     id: string,
     patch: Partial<{
@@ -91,7 +110,9 @@ export function useAflsAssessmentsForFba(fbaId: string) {
       assessorName: string;
       scores: AflsScores;
       domainComments: Record<string, string>;
-    }>
+    }>,
+    onStatusChange?: (status: "saving" | "waiting-for-connection") => void,
+    signal?: AbortSignal
   ): Promise<AflsAssessment> {
     const supabase = createClient();
     const dbPatch: Record<string, unknown> = {};
@@ -100,15 +121,21 @@ export function useAflsAssessmentsForFba(fbaId: string) {
     if (patch.scores !== undefined) dbPatch.scores = patch.scores;
     if (patch.domainComments !== undefined) dbPatch.domain_comments = patch.domainComments;
 
-    const { data, error } = await supabase
-      .from("afls_assessments")
-      .update(dbPatch)
-      .eq("id", id)
-      .select("*")
-      .single();
+    let updatedRow: AflsAssessmentRow | null = null;
+    const result = await insertWithOfflineRetry(
+      async () => {
+        const { data, error } = await supabase.from("afls_assessments").update(dbPatch).eq("id", id).select("*").single();
+        if (!error) updatedRow = data as AflsAssessmentRow;
+        return { error };
+      },
+      onStatusChange ?? (() => {}),
+      signal
+    );
 
-    if (error) throw error;
-    const updated = mapRow(data as AflsAssessmentRow);
+    if (result === "cancelled") throw new SaveCancelledError("Save cancelled");
+    if (result) throw new Error(result);
+
+    const updated = mapRow(updatedRow!);
     setAssessments((prev) => prev.map((a) => (a.id === id ? updated : a)));
     return updated;
   }
