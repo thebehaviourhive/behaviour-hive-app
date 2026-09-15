@@ -1561,6 +1561,19 @@ export default function IncidentRecordPage() {
   }
 
   const staffRole = user?.app_metadata?.role as string | undefined;
+  // QA run-through, item 5a: this route is shared across every role
+  // that can view an incident, and the back chevron used to always
+  // land on getPostAuthRedirect(staffRole) -- the role's own dashboard
+  // -- regardless of how the incident was actually reached. Teacher and
+  // SNA have no dedicated incidents list to return to (they browse from
+  // their own dashboard), so dashboard genuinely is "back" for them,
+  // unchanged. A principal reaches every incident through /principal/
+  // incidents specifically -- landing on /principal/dashboard instead
+  // lost their place in that list, which is what read as "the back
+  // chevron doesn't work". Matches the pattern principal/classes/
+  // [classId]/page.tsx already uses: a drill-down's own Back goes to
+  // its real logical parent screen, not a generic role redirect.
+  const backHref = staffRole === "principal" ? "/principal/incidents" : getPostAuthRedirect(staffRole);
   const restraintAction = actionTypes.find((a) => a.isRestraint);
   const hasCpiSelected = Boolean(restraintAction && selectedActionTypeIds.includes(restraintAction.id));
 
@@ -1572,7 +1585,7 @@ export default function IncidentRecordPage() {
       <header className="flex items-center gap-3 px-4 pt-6 pb-4">
         <button
           type="button"
-          onClick={() => router.push(getPostAuthRedirect(staffRole))}
+          onClick={() => router.push(backHref)}
           aria-label="Back"
           className="flex h-8 w-8 flex-shrink-0 items-center justify-center text-2xl leading-none text-brand-prussian-blue"
         >
