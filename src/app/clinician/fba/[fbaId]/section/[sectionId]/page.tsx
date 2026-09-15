@@ -5,7 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { useFbaReport } from "@/hooks/useFbaReport";
-import { getFbaSection } from "@/lib/fba/sections";
+import { FBA_SECTIONS, getFbaSection } from "@/lib/fba/sections";
 import { FbaSectionShell } from "@/components/clinician/fba/FbaSectionShell";
 import { InlineErrorState } from "@/components/ui/InlineErrorState";
 import { ClientProfileSection } from "@/components/clinician/fba/sections/ClientProfileSection";
@@ -42,6 +42,11 @@ export default function FbaSectionEditorPage() {
   const changeVersionRef = useRef(0);
   const versionAtSaveStartRef = useRef(0);
   const [isDirty, setIsDirty] = useState(false);
+
+  // FBA next-section workflow fix: true while Back/Previous/Next is
+  // flushing a pending save before navigating -- disables all three so a
+  // second click can't race the first's own outcome.
+  const [isNavigating, setIsNavigating] = useState(false);
 
   // Seeds local editable state from the loaded report/AFLS row exactly
   // ONCE per mount, not on every `report`/`afls` change -- both
@@ -80,7 +85,11 @@ export default function FbaSectionEditorPage() {
     const controller = new AbortController();
     abortRef.current = controller;
     versionAtSaveStartRef.current = changeVersionRef.current;
-    saveContent(next, controller);
+    // Returned (not fire-and-forget) so flushAndAdvance below can await
+    // it -- every existing caller (handleFieldBlur, handleStructuralChange,
+    // handleFlushSave) already ignores the return value, so this is
+    // additive, not a behaviour change for them.
+    return saveContent(next, controller);
   }
 
   function handleFieldChange(next: FbaContentData) {
@@ -108,8 +117,79 @@ export default function FbaSectionEditorPage() {
     }
   }
 
+  // FBA next-section workflow fix. Flushes any pending edit before
+  // navigating, then navigates -- shared by Back, Previous, and Next
+  // alike, since the risk (navigating away mid-save) is identical for
+  // all three; Daniel's own instinct, confirmed: this was a pre-existing
+  // gap on the back-chevron too, just easier to miss there because
+  // "leaving" already meant the clinician had left the task, where with
+  // Next they're still mid-flow.
+  //
+  // AFLS (section.kind === "afls") has no shared `content` to flush --
+  // it manages its own save queue entirely inside AflsSection, with no
+  // state surfaced up to this page (see that component's own comments).
+  // Short-circuits straight to navigation for that section, deliberately
+  // NOT taught to also await AFLS's own queue here -- that would mean
+  // reaching into a different component's private save machinery from
+  // this generic path, exactly the "making the generic path accommodate
+  // it" this was told not to do. AFLS's own save-on-navigate safety is a
+  // separate, real gap, recorded in CLAUDE.md rather than papered over
+  // here.
+  //
+  // Loops rather than flushing once: a newer edit can land while an
+  // earlier flush's network round trip is still in flight (the same
+  // abort-on-supersede risk triggerSave already handles reactively for
+  // blur/structural saves) -- here it needs to be handled proactively,
+  // since navigating away must mean nothing is left unsaved. Uses ONLY
+  // changeVersionRef/versionAtSaveStartRef (refs, always current) for
+  // the loop's own re-check, never re-reading `isDirty` state after an
+  // await -- a stale closure over `isDirty` would silently under- or
+  // over-flush.
+  async function flushAndAdvance(targetHref: string) {
+    if (section?.kind !== "afls" && isDirty) {
+      setIsNavigating(true);
+      for (;;) {
+        const versionAtThisFlush = changeVersionRef.current;
+        const outcome = await triggerSave(content);
+        if (outcome !== "saved") {
+          // Cancelled (the clinician hit the existing Cancel control
+          // while waiting for connectivity) or errored -- stay put.
+          // Navigating anyway here would be the exact bug this exists
+          // to prevent, just moved one step later. The header's own
+          // SavedStateIndicator (idle/saving/waiting-for-connection/
+          // error) is already visible and already offers retry/cancel;
+          // nothing new needed on top of it.
+          setIsNavigating(false);
+          return;
+        }
+        if (changeVersionRef.current === versionAtThisFlush) break; // caught up
+        // else: a newer edit landed mid-flush -- loop, flush again with
+        // the now-current `content`.
+      }
+      setIsNavigating(false);
+    }
+    router.push(targetHref);
+  }
+
   function handleBack() {
-    router.push(`/clinician/fba/${fbaId}`);
+    flushAndAdvance(`/clinician/fba/${fbaId}`);
+  }
+
+  const sectionIndex = section ? FBA_SECTIONS.findIndex((s) => s.slug === section.slug) : -1;
+  const previousSection = sectionIndex > 0 ? FBA_SECTIONS[sectionIndex - 1] : undefined;
+  // Section 14 (Review & Status) has its own Finalize action instead of
+  // a Next -- no section after it to advance to anyway.
+  const nextSection =
+    sectionIndex >= 0 && sectionIndex < FBA_SECTIONS.length - 1 ? FBA_SECTIONS[sectionIndex + 1] : undefined;
+
+  function handlePrevious() {
+    if (!previousSection) return;
+    flushAndAdvance(`/clinician/fba/${fbaId}/section/${previousSection.slug}`);
+  }
+
+  function handleNext() {
+    if (!nextSection) return;
+    flushAndAdvance(`/clinician/fba/${fbaId}/section/${nextSection.slug}`);
   }
 
   function handleCancelSave() {
@@ -155,6 +235,9 @@ export default function FbaSectionEditorPage() {
       onFlushSave={handleFlushSave}
       onCancelSave={handleCancelSave}
       readOnly={readOnly}
+      onPrevious={previousSection ? handlePrevious : undefined}
+      onNext={nextSection ? handleNext : undefined}
+      isNavigating={isNavigating}
     >
       {isLoading ? (
         <div className="flex flex-col gap-3">

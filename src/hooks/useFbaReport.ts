@@ -73,7 +73,7 @@ export function useFbaReport(fbaId: string) {
   }, [load]);
 
   const saveContent = useCallback(
-    async (nextContent: FbaContentData, controller?: AbortController) => {
+    async (nextContent: FbaContentData, controller?: AbortController): Promise<"saved" | "cancelled" | "error"> => {
       setSaveError(null);
       const supabase = createClient();
 
@@ -93,16 +93,17 @@ export function useFbaReport(fbaId: string) {
 
       if (result === "cancelled") {
         setSaveStatus("idle");
-        return;
+        return "cancelled";
       }
       if (result) {
         setSaveStatus("error");
         setSaveError(result);
-        return;
+        return "error";
       }
 
       setReport((prev) => (prev ? { ...prev, contentData: nextContent, status: nextStatus ?? prev.status } : prev));
       setSaveStatus("saved");
+      return "saved";
     },
     [fbaId, report?.status]
   );
