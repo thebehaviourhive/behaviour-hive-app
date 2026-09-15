@@ -9,7 +9,7 @@ interface AccessibleChildRow {
   child_name: string;
   diagnoses: string[] | null;
   diagnosis_other: string | null;
-  access_source: "direct_grant" | "class_teacher" | "class_sna";
+  access_source: "direct_grant" | "class_teacher" | "sna";
   source_detail: string | null;
 }
 
@@ -21,13 +21,16 @@ export interface TeacherPassport {
   diagnoses: string[] | null;
   diagnosisOther: string | null;
   // Optional -- only get_my_accessible_children()'s own rows carry a
-  // real value. useSnaChildren.ts extends this same interface (SnaChild)
-  // for two OTHER sources this migration didn't touch (temporary class
-  // cover, 1:1 child_assignments) -- it already carries its own
-  // isTemporary/isAssigned flags for those, so leaving these undefined
-  // there is honest, not a gap: neither source maps onto this
-  // three-value vocabulary without inventing a meaning it doesn't have.
-  accessSource?: "direct_grant" | "class_teacher" | "class_sna";
+  // real value. As of 0188, get_my_accessible_children() itself already
+  // covers every has_child_access() branch (including temporary class
+  // cover and 1:1 child_assignments), so this and useSnaChildren.ts's
+  // own isTemporary/isAssigned flags can now legitimately overlap for
+  // the same child -- that's fine, useSnaChildren.ts's merge is
+  // id-keyed and idempotent, not a source of duplicate rows. Still
+  // unused for display anywhere in the client (confirmed 15 Sept 2026)
+  // -- kept as real data, not dead weight, since it's the cheapest place
+  // to eventually surface "why do I have access to this child".
+  accessSource?: "direct_grant" | "class_teacher" | "sna";
   sourceDetail?: string | null;
 }
 

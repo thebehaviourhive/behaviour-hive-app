@@ -10,13 +10,17 @@ import { getTemporaryAccessWindowStatus, todayLocalDateString } from "@/lib/temp
 // ACCESS OR AUTHORITY IS GRANTED, TEST THE DESTINATION") -- an SNA's
 // access to a child has THREE sources (passport_access, Stage 2's
 // child_assignments, Stage 3's temporary_access), but /sna/passports
-// only ever showed the first. This hook merges all three -- it does
-// NOT touch useTeacherPassports itself, which /teacher/dashboard and
-// /teacher/students both still rely on staying scoped to passport_
-// access only (Stage 2's own deliberate separation, "My Class" is the
-// class-derived view for TEACHERS specifically -- this is SNA's
-// equivalent problem, not the same one, and gets its own hook rather
-// than risk that established boundary).
+// only ever showed the first. This hook merges all three on top of
+// whatever useTeacherPassports (get_my_accessible_children()) already
+// returns -- as of migration 0188, that RPC itself covers every
+// has_child_access() branch, including these same two, so the two
+// sources can legitimately overlap for the same child now. That's
+// harmless: the merge below is id-keyed (byId.set(...)), so a child
+// present in both collapses to one entry, never a duplicate. This
+// hook still earns its keep for isTemporary/isAssigned -- flags
+// get_my_accessible_children() has no reason to carry -- and for
+// activeCoverage, not because useTeacherPassports is scoped away from
+// these sources anymore.
 //
 // A temporary-access-derived child is labelled distinctly (isTemporary)
 // so it never reads as permanent, and simply STOPS being returned once
