@@ -218,79 +218,84 @@ export default function ClinicianFbaListPage() {
         </h1>
       </header>
 
-      <div className="flex gap-2 px-4 pt-3">
-        {(["active", "completed"] as const).map((option) => (
-          <button
-            key={option}
-            type="button"
-            onClick={() => setTab(option)}
-            className={`flex-1 rounded-2xl border px-2 py-2.5 text-sm font-semibold capitalize transition-colors ${
-              tab === option
-                ? "border-brand-prussian-blue bg-brand-pastel-blue/30 text-brand-prussian-blue"
-                : "border-black/10 bg-white text-black/60"
-            }`}
-          >
-            {option}
-          </button>
-        ))}
-      </div>
-
-      <main className="flex flex-1 flex-col gap-3 px-4 pt-4">
-        {isLoading ? (
-          <>
-            <FbaCardSkeleton />
-            <FbaCardSkeleton />
-          </>
-        ) : loadError ? (
-          <InlineErrorState message={loadError} onRetry={load} />
-        ) : visibleFbas.length === 0 ? (
-          <div className="mt-2 rounded-2xl border-2 border-dashed border-brand-pastel-blue bg-white/60 p-6 text-center">
-            <p className="text-sm text-brand-neutral-black/70">
-              {tab === "active"
-                ? "No active FBAs yet. Start one below for any case in your caseload."
-                : "Completed FBAs will appear here."}
-            </p>
-          </div>
-        ) : (
-          visibleFbas.map((fba) => (
-            <Link
-              key={fba.fba_id}
-              href={`/clinician/fba/${fba.fba_id}`}
-              className="rounded-2xl border border-black/5 bg-white p-4 shadow-sm"
+      {/* Tab toggle and the card list below share one width cap so they
+          stay visually aligned -- wrapped together, not two independent
+          lg:max-w- calls that could drift apart. */}
+      <div className="lg:max-w-[66.6667%]">
+        <div className="flex gap-2 px-4 pt-3">
+          {(["active", "completed"] as const).map((option) => (
+            <button
+              key={option}
+              type="button"
+              onClick={() => setTab(option)}
+              className={`flex-1 rounded-2xl border px-2 py-2.5 text-sm font-semibold capitalize transition-colors ${
+                tab === option
+                  ? "border-brand-prussian-blue bg-brand-pastel-blue/30 text-brand-prussian-blue"
+                  : "border-black/10 bg-white text-black/60"
+              }`}
             >
-              <div className="flex items-center justify-between gap-2">
-                <h2 className="font-heading text-lg font-bold text-brand-neutral-black">
-                  {fba.child_name}
-                </h2>
-                <span
-                  className={`flex-shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${STATUS_PILL_CLASSES[fba.status]}`}
-                >
-                  {STATUS_LABEL[fba.status]}
-                </span>
-              </div>
-              <p className="mt-1.5 text-xs text-brand-neutral-black/50">
-                Last updated {format(new Date(fba.updated_at), "d MMM yyyy")}
-              </p>
-              {(outstandingCounts[fba.fba_id] ?? 0) > 0 && (
-                <p className="mt-1 text-xs font-semibold text-brand-golden-brown">
-                  {outstandingCounts[fba.fba_id]} questionnaire
-                  {outstandingCounts[fba.fba_id] === 1 ? "" : "s"} outstanding
-                </p>
-              )}
-            </Link>
-          ))
-        )}
+              {option}
+            </button>
+          ))}
+        </div>
 
-        {tab === "active" && (
-          <button
-            type="button"
-            onClick={openPicker}
-            className="mt-2 rounded-2xl border-2 border-dashed border-brand-pastel-blue py-3.5 text-sm font-semibold text-brand-prussian-blue"
-          >
-            + Start New FBA
-          </button>
-        )}
-      </main>
+        <main className="flex flex-1 flex-col gap-3 px-4 pt-4">
+          {isLoading ? (
+            <>
+              <FbaCardSkeleton />
+              <FbaCardSkeleton />
+            </>
+          ) : loadError ? (
+            <InlineErrorState message={loadError} onRetry={load} />
+          ) : visibleFbas.length === 0 ? (
+            <div className="mt-2 rounded-2xl border-2 border-dashed border-brand-pastel-blue bg-white/60 p-6 text-center">
+              <p className="text-sm text-brand-neutral-black/70">
+                {tab === "active"
+                  ? "No active FBAs yet. Start one below for any case in your caseload."
+                  : "Completed FBAs will appear here."}
+              </p>
+            </div>
+          ) : (
+            visibleFbas.map((fba) => (
+              <Link
+                key={fba.fba_id}
+                href={`/clinician/fba/${fba.fba_id}`}
+                className="rounded-2xl border border-black/5 bg-white p-4 shadow-sm"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <h2 className="font-heading text-lg font-bold text-brand-neutral-black">
+                    {fba.child_name}
+                  </h2>
+                  <span
+                    className={`flex-shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${STATUS_PILL_CLASSES[fba.status]}`}
+                  >
+                    {STATUS_LABEL[fba.status]}
+                  </span>
+                </div>
+                <p className="mt-1.5 text-xs text-brand-neutral-black/50">
+                  Last updated {format(new Date(fba.updated_at), "d MMM yyyy")}
+                </p>
+                {(outstandingCounts[fba.fba_id] ?? 0) > 0 && (
+                  <p className="mt-1 text-xs font-semibold text-brand-golden-brown">
+                    {outstandingCounts[fba.fba_id]} questionnaire
+                    {outstandingCounts[fba.fba_id] === 1 ? "" : "s"} outstanding
+                  </p>
+                )}
+              </Link>
+            ))
+          )}
+
+          {tab === "active" && (
+            <button
+              type="button"
+              onClick={openPicker}
+              className="mt-2 rounded-2xl border-2 border-dashed border-brand-pastel-blue py-3.5 text-sm font-semibold text-brand-prussian-blue"
+            >
+              + Start New FBA
+            </button>
+          )}
+        </main>
+      </div>
 
       <ClinicianBottomNav />
 

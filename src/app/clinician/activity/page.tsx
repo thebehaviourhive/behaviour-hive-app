@@ -52,7 +52,7 @@ export default function ClinicianActivityPage() {
         </h1>
       </header>
 
-      <main className="flex-1 px-4 pb-10">
+      <main className="flex-1 px-4 pb-10 lg:max-w-[66.6667%]">
         {isLoading ? (
           <div className="rounded-2xl bg-white p-5 shadow-sm">
             <ActivityRowSkeleton />

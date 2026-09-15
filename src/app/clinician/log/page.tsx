@@ -87,7 +87,7 @@ export default function ClinicianAddLogPage() {
         </h1>
       </header>
 
-      <main className="flex-1 px-4 pb-10">
+      <main className="flex-1 px-4 pb-10 lg:max-w-[66.6667%]">
         {!selectedPassport ? (
           <>
             <p className="mb-4 font-accent text-sm font-bold uppercase tracking-wide text-brand-neutral-black/50">

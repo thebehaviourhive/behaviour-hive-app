@@ -64,7 +64,7 @@ export default function ClinicianInsightsPage() {
         </p>
       </header>
 
-      <main className="flex flex-1 flex-col gap-4 px-4 pt-2">
+      <main className="flex flex-1 flex-col gap-4 px-4 pt-2 lg:max-w-[66.6667%]">
         <div className="flex flex-col gap-3 rounded-2xl border border-black/5 bg-white p-3">
           <div className="flex flex-wrap gap-2">
             {SETTING_OPTIONS.map((option) => (

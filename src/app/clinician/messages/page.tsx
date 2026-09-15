@@ -75,7 +75,7 @@ export default function ClinicianMessagesPage() {
         )}
       </header>
 
-      <main className="flex-1 px-4 py-2">
+      <main className="flex-1 px-4 py-2 lg:max-w-[66.6667%]">
         {error ? (
           <InlineErrorState message="Couldn't load your caseload." onRetry={() => refreshPassports()} />
         ) : passports.length === 0 ? (

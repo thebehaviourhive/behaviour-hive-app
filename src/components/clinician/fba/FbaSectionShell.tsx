@@ -8,6 +8,16 @@ import { SavedStateIndicator } from "./SavedStateIndicator";
 // header (back + title + saved-state), scrollable body. `readOnly` swaps
 // the saved-state indicator for a static badge -- used once an FBA is
 // completed and the whole report becomes a read-only rendering path.
+//
+// Clinician desktop pass, Stage 1: `main` gets the same
+// lg:max-w-[66.6667%] cap as every other page in this pass (School's
+// own precedent). This is the one change point for all fourteen
+// sections -- every section page renders its own fields as this
+// component's `children`, so capping the width here reaches all of
+// them without touching each section's own file. Header stays full
+// width (matches School's header-outside-the-cap pattern) so the
+// sticky back/title/save-state bar doesn't visually shrink alongside
+// the form fields beneath it.
 export function FbaSectionShell({
   title,
   sectionNumber,
@@ -68,7 +78,7 @@ export function FbaSectionShell({
         </div>
       </header>
 
-      <main className="flex-1 px-4 pt-4 pb-10">{children}</main>
+      <main className="flex-1 px-4 pt-4 pb-10 lg:max-w-[66.6667%]">{children}</main>
     </div>
   );
 }

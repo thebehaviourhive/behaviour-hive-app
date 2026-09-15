@@ -72,7 +72,7 @@ export default function FbaWorkspacePage() {
         )}
       </header>
 
-      <main className="flex flex-1 flex-col gap-2 px-4 pt-3">
+      <main className="flex flex-1 flex-col gap-2 px-4 pt-3 lg:max-w-[66.6667%]">
         {isLoading ? (
           <>
             <SectionCardSkeleton />

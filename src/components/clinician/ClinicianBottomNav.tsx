@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { House, FolderOpen, Mail, Menu } from "lucide-react";
-import { AppBottomNav, type NavTab } from "@/components/ui/AppBottomNav";
+import { AppBottomNav } from "@/components/ui/AppBottomNav";
 import { useMessagesAwaitingActionCount } from "@/hooks/useMessagesAwaitingActionCount";
 import { useHasUnreadMessages } from "@/hooks/useHasUnreadMessages";
 import { createClient } from "@/lib/supabase/client";
+import { CLINICIAN_NAV_TABS } from "./clinicianNavTabs";
 
 // Clinician track's tab list. "Passports" owns the caseload list plus any
 // individual case's clinical file; "Messages" owns the cross-caseload
@@ -13,6 +13,16 @@ import { createClient } from "@/lib/supabase/client";
 // (dashboard, its activity history, the Add Log flow, and the
 // dashboard-launched resources) falls back to "Dashboard" as the
 // default.
+//
+// Clinician desktop pass, Stage 1: the TABS list itself moved to
+// clinicianNavTabs.ts, shared with the new ClinicianSidebar so the four
+// destinations are defined in exactly one place -- same move PRD 4,
+// Stage 1 made for the principal track. This component now also hides
+// itself at lg+, where the sidebar (rendered once, from
+// src/app/clinician/layout.tsx) takes over navigation -- the wrap lives
+// here, not inside AppBottomNav itself, matching PrincipalBottomNav's
+// own reasoning: AppBottomNav is shared with tracks that have no
+// sidebar and must keep rendering this bar at every width, unchanged.
 export function ClinicianBottomNav() {
   // Self-contained: see TeacherBottomNav's identical comment -- the nav
   // fetches its own userId rather than threading one through every call
@@ -32,44 +42,13 @@ export function ClinicianBottomNav() {
   }, []);
   const messagesAwaitingCount = useMessagesAwaitingActionCount(userId);
   const hasUnreadMessages = useHasUnreadMessages(userId);
+  const tabs = CLINICIAN_NAV_TABS.map((tab) =>
+    tab.key === "messages" ? { ...tab, badgeCount: messagesAwaitingCount, showUnreadDot: hasUnreadMessages } : tab
+  );
 
-  const TABS: NavTab[] = [
-    {
-      key: "dashboard",
-      label: "Dashboard",
-      icon: House,
-      href: "/clinician/dashboard",
-      isActive: (pathname) =>
-        pathname.startsWith("/clinician") &&
-        !pathname.startsWith("/clinician/passports") &&
-        !pathname.startsWith("/clinician/passport/") &&
-        !pathname.startsWith("/clinician/messages"),
-    },
-    {
-      key: "passports",
-      label: "Passports",
-      icon: FolderOpen,
-      href: "/clinician/passports",
-      isActive: (pathname) =>
-        pathname.startsWith("/clinician/passports") || pathname.startsWith("/clinician/passport/"),
-    },
-    {
-      key: "messages",
-      label: "Messages",
-      icon: Mail,
-      href: "/clinician/messages",
-      isActive: (pathname) => pathname.startsWith("/clinician/messages"),
-      badgeCount: messagesAwaitingCount,
-      showUnreadDot: hasUnreadMessages,
-    },
-    {
-      key: "more",
-      label: "More",
-      icon: Menu,
-      href: "/more",
-      isActive: (pathname) => pathname.startsWith("/more"),
-    },
-  ];
-
-  return <AppBottomNav tabs={TABS} />;
+  return (
+    <div className="lg:hidden">
+      <AppBottomNav tabs={tabs} />
+    </div>
+  );
 }

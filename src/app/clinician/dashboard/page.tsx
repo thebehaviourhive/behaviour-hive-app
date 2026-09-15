@@ -294,7 +294,7 @@ export default function ClinicianDashboardPage() {
           suppressed by that lock state regardless. */}
       <CalmEscalationNoticeList />
       <div className="relative flex-1">
-        <div className={isLocked ? "pointer-events-none select-none" : ""}>
+        <div className={`lg:max-w-[66.6667%] ${isLocked ? "pointer-events-none select-none" : ""}`}>
           <h1 className="mt-6 px-4 font-heading text-2xl font-semibold text-brand-neutral-black">
             {getGreeting()}, {firstName}
           </h1>
