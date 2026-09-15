@@ -7,14 +7,19 @@
 // would silently change what an existing passport's past selection
 // means.
 //
-// Two pre-existing findings, left alone rather than silently resolved:
-// - "Autism" and "ASD (Autism Spectrum Disorder)" are two separate
-//   stored values for what most families mean as the same thing.
-//   Deduping them would be a real data decision (which existing
-//   passports' selections would need remapping), out of scope for a
-//   presentation-only restructure -- "Autism" is the one promoted to
-//   Tier 1 below since it's the shorter, plainer of the two; ASD (...)
-//   stays a distinct, separately-selectable Tier 2 option.
+// One pre-existing finding, resolved (Stage 2, 15 Sept 2026): "Autism"
+// and "ASD (Autism Spectrum Disorder)" were two separate stored values
+// for what most families mean as the same thing -- flagged and
+// deliberately left alone during an earlier presentation-only
+// restructure, now deduped on Daniel's own instruction. Migration 0191
+// remapped every existing passport's stored selection (exactly one, at
+// the time, checked live) from the ASD string to "Autism" -- collapsing
+// to one value on any passport that happened to have both -- before
+// this option was removed below. "Autism" is the one that survives
+// (the shorter, plainer of the two, already Tier 1); the ASD (...)
+// string is gone from this list entirely, not just hidden.
+//
+// One remaining pre-existing finding, still left alone:
 // - "No Formal Diagnosis" already existed and is NOT the same thing as
 //   either new option added here: "Awaiting Diagnosis" (a family
 //   actively pursuing one) and "No diagnosis" (a plain status, added
@@ -25,7 +30,6 @@
 export const DIAGNOSIS_OPTIONS: string[] = [
   "ADHD (Attention Deficit Hyperactivity Disorder)",
   "Anxiety",
-  "ASD (Autism Spectrum Disorder)",
   "Apraxia",
   "Autism",
   "Awaiting Diagnosis",
