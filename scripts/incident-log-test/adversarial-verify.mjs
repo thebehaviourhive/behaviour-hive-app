@@ -8859,6 +8859,27 @@ async function main() {
 
     console.log("NN summary complete.");
 
+    // Found live, 15 Sept 2026: this check creates its passport via the
+    // real create_school_passport() RPC, which atomically links it to
+    // institutionNNId (passport_institution_links, on delete cascade)
+    // and enrols it (enrolments, also on delete cascade) -- but
+    // passports itself has NO institution_id column at all, by design
+    // (school ownership is via the link table, not a direct FK), so
+    // deleting the institution below cascades away the link and the
+    // enrolment but leaves the passports row itself behind, now
+    // orphaned: user_id null, zero guardians, zero links, zero
+    // enrolments. 134 such rows were found live in production,
+    // "NN Child"/"OO Empty Child"/"OO Coexist Child" among them, one
+    // per run of this check with nothing ever sweeping them -- neither
+    // teardown.mjs's own --with-orphaned-passports flag (never invoked
+    // here; this check deletes its institution inline, not through that
+    // tool) nor any suite-level teardown (none exists) can reach a
+    // passport with no institution link left to key a sweep off. Fixed
+    // at the source: delete the passport explicitly, same as every
+    // other check in this suite that calls create_school_passport()
+    // already does (confirmed: NN and OO were the only two exceptions
+    // out of roughly 35 groups).
+    await admin.from("passports").delete().eq("id", passportNNId);
     await admin.from("institutions").delete().in("id", [institutionNNId, institutionNNOtherId]);
     for (const id of [principalNNId, teacherNNId, principalNNOtherId, parentNNId]) {
       await admin.auth.admin.deleteUser(id);
@@ -9004,6 +9025,15 @@ async function main() {
 
     console.log("OO summary complete.");
 
+    // Found live, 15 Sept 2026 -- same gap as CHECK NN immediately
+    // above, same fix: create_school_passport() links these two
+    // passports to institutionOOId via passport_institution_links/
+    // enrolments (both cascade from institutions), but passports itself
+    // has no institution_id column, so deleting the institution below
+    // orphans both rows instead of removing them. See CHECK NN's own
+    // comment for the full explanation (134 such rows found in
+    // production from these two checks specifically).
+    await admin.from("passports").delete().in("id", [childOOEmptyId, childOOId]);
     await admin.from("institutions").delete().eq("id", institutionOOId);
     for (const id of [principalOOId, parentOOId]) {
       await admin.auth.admin.deleteUser(id);

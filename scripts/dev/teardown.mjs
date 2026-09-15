@@ -500,18 +500,151 @@ async function teardownUser(email, force) {
 }
 
 // ---------------------------------------------------------------------
-const [, , mode, identifier, ...rest] = process.argv;
-const force = rest.includes("--force");
-const withOrphanedPassports = rest.includes("--with-orphaned-passports");
+// bare-passports -- found live, 15 Sept 2026: 134 passports with
+// user_id null, zero guardians, zero institution links, and zero
+// enrolments -- the exact shape a direct `.from("passports").insert()`
+// in a test fixture leaves behind when it skips both real production
+// paths (create_school_passport() always makes an institution link;
+// the parent-led self-create path always sets user_id). Every existing
+// cleanup mechanism in this file, including --with-orphaned-passports
+// above, joins THROUGH an institution or a user to find what to delete
+// -- a passport with neither is invisible to both, by construction, no
+// matter how many times either runs. This is the blind spot itself,
+// not a variant of the existing sweep.
+//
+// GUARDED HARD, deliberately more than --force anywhere else in this
+// file: a bug in this query's own WHERE-equivalent logic deletes real
+// children's records, not fixture debris, and nothing about "matches
+// zero guardians/links/enrolments" is scoped to a naming convention the
+// way institution/user mode's own ZZFIXTURE/"zzfixture" checks are --
+// there is no email or institution_code here to gate on. Three layers,
+// not one:
+//   1. Dry run is the DEFAULT with no flags at all -- lists every
+//      matching row (child_name, id, created_at) and the total count,
+//      deletes nothing, always exits 0.
+//   2. --delete is required to do anything destructive.
+//   3. --delete also requires --confirm-count=<N>, and the ACTUAL live
+//      count at delete time must equal N exactly, re-queried fresh (not
+//      trusted from an earlier dry run) -- forces whoever runs this to
+//      have already seen the dry run's own number and explicitly
+//      restate it. A query bug that suddenly matches more rows than
+//      expected (e.g. a broadened join, a dropped NULL check) fails
+//      this comparison and refuses to proceed, rather than silently
+//      deleting whatever the buggy query now matches.
+// Same non-cascading-FK safety net as --with-orphaned-passports above:
+// restrictive_practices/incident_injuries/school_notices don't cascade
+// from passports, so a row still named on real incident data fails
+// loudly per-row instead of succeeding silently. Never overridden.
+async function sweepBareOrphanPassports(shouldDelete, confirmCount) {
+  console.log(`\n=== BARE-PASSPORT SWEEP ${shouldDelete ? "(DELETE)" : "(DRY RUN -- nothing will be deleted)"} ===`);
+
+  const { data: allPassports, error: passErr } = await admin
+    .from("passports")
+    .select("id, child_name, user_id, created_at");
+  if (passErr) fail(`Failed to list passports: ${passErr.message}`);
+
+  const matches = [];
+  for (const p of allPassports ?? []) {
+    if (p.user_id !== null) continue;
+    const [{ count: guardianCount }, { count: linkCount }, { count: enrolmentCount }] = await Promise.all([
+      admin.from("passport_guardians").select("id", { count: "exact", head: true }).eq("passport_id", p.id),
+      admin.from("passport_institution_links").select("id", { count: "exact", head: true }).eq("passport_id", p.id),
+      admin.from("enrolments").select("id", { count: "exact", head: true }).eq("passport_id", p.id),
+    ]);
+    if ((guardianCount ?? 0) === 0 && (linkCount ?? 0) === 0 && (enrolmentCount ?? 0) === 0) {
+      matches.push(p);
+    }
+  }
+
+  console.log(`\nFound ${matches.length} bare passport(s) -- user_id null, zero guardians, zero institution links, zero enrolments:\n`);
+  for (const p of matches) {
+    console.log(`  "${p.child_name}"  id=${p.id}  created=${p.created_at}`);
+  }
+
+  if (!shouldDelete) {
+    console.log(
+      `\nDry run only -- nothing deleted. To actually delete these ${matches.length} row(s), re-run with:\n` +
+        `  node scripts/dev/teardown.mjs bare-passports --delete --confirm-count=${matches.length}\n` +
+        `(the count must match exactly at delete time, re-checked fresh, not reused from this dry run).`
+    );
+    return;
+  }
+
+  if (confirmCount === null) {
+    fail(
+      `Refusing: --delete was passed without --confirm-count=<N>. Run the dry run first (no flags), read the ` +
+        `listing above, then pass --confirm-count=<the exact number it reported>.`
+    );
+  }
+  if (confirmCount !== matches.length) {
+    fail(
+      `Refusing: --confirm-count=${confirmCount} does not match the current live count of ${matches.length}. ` +
+        `Something changed since your dry run (or the number was mistyped) -- re-run without --delete first, read ` +
+        `the fresh listing, then pass the exact number it reports.`
+    );
+  }
+
+  console.log(`\n--confirm-count matched (${confirmCount}). Deleting...\n`);
+  let deleted = 0;
+  let failedCount = 0;
+  for (const p of matches) {
+    const { error: delErr } = await admin.from("passports").delete().eq("id", p.id);
+    if (delErr) {
+      console.log(`  "${p.child_name}"  id=${p.id}  FAILED: ${delErr.message} -- left in place, not overridden`);
+      failedCount++;
+      continue;
+    }
+    console.log(`  "${p.child_name}"  id=${p.id}  deleted`);
+    deleted++;
+  }
+
+  console.log(`\nDeleted ${deleted} of ${matches.length}. ${failedCount > 0 ? `${failedCount} FAILED -- see above, investigate before re-running.` : ""}`);
+
+  // Re-verify: re-run the exact same matching criteria and confirm none
+  // of the just-deleted ids still match (a genuine re-query, not just
+  // trusting the per-row delete results above).
+  const remainingIds = new Set();
+  for (const p of matches) {
+    const { data: still } = await admin.from("passports").select("id").eq("id", p.id).maybeSingle();
+    if (still) remainingIds.add(p.id);
+  }
+  console.log(
+    `\nVerified by direct query: ${matches.length - remainingIds.size} of ${matches.length} confirmed gone, ` +
+      `${remainingIds.size} still present -- ${remainingIds.size === 0 ? "CLEAN" : "NOT CLEAN, investigate before trusting this run"}.`
+  );
+  if (remainingIds.size > 0) process.exit(1);
+}
+
+// ---------------------------------------------------------------------
+// bare-passports takes no identifier (it's a global sweep, not scoped
+// to one institution/user) -- args below is everything after `mode`,
+// undestructured, so a flag like --delete is never accidentally
+// consumed as `identifier` the way a fixed `mode identifier ...rest`
+// shape would do for a mode with no identifier slot. Found live: the
+// first version of this shape DID have that bug -- `--delete` landed in
+// `identifier`, `rest` came back empty, and both the missing-count and
+// wrong-count guards below silently fell through to the dry-run branch
+// instead of refusing. Caught by testing the guards, not by reading the
+// code -- exactly the kind of thing "guard it hard" was asking for.
+const [, , mode, ...args] = process.argv;
+const identifier = args[0];
+const force = args.includes("--force");
+const withOrphanedPassports = args.includes("--with-orphaned-passports");
+const shouldDeleteBarePassports = args.includes("--delete");
+const confirmCountArg = args.find((r) => r.startsWith("--confirm-count="));
+const confirmCount = confirmCountArg ? Number(confirmCountArg.split("=")[1]) : null;
 
 if (mode === "institution" && identifier) {
   await teardownInstitution(identifier, force, withOrphanedPassports);
 } else if (mode === "user" && identifier) {
   await teardownUser(identifier, force);
+} else if (mode === "bare-passports") {
+  await sweepBareOrphanPassports(shouldDeleteBarePassports, confirmCount);
 } else {
   console.log(`Usage:
   node scripts/dev/teardown.mjs institution <institution_code> [--force] [--with-orphaned-passports]
   node scripts/dev/teardown.mjs user <email> [--force]
+  node scripts/dev/teardown.mjs bare-passports [--delete --confirm-count=<N>]
 
 --with-orphaned-passports: also deletes any passport that was linked to
 this institution and, after teardown, has zero remaining institution
@@ -527,9 +660,24 @@ Fails loudly (never silently, never overridden by --force) if the
 passport is still named on real incident data via a non-cascading FK
 (restrictive_practices/incident_injuries/school_notices).
 
+bare-passports: finds passports with user_id null AND zero guardians
+AND zero institution links AND zero enrolments -- the blind spot
+neither institution mode nor --with-orphaned-passports can ever reach,
+since both join THROUGH an institution or a user and this shape has
+neither. No arguments, global (not scoped to a ZZFIXTURE/"zzfixture"
+name, since there's nothing to name-check against here). With no
+flags: dry run, lists every matching row, deletes nothing. To actually
+delete: --delete --confirm-count=<N>, where N must equal the live
+count exactly, re-checked fresh at delete time -- run the dry run
+first, read its count, pass that exact number back. Same non-cascading-
+FK safety net as --with-orphaned-passports: a row still named on real
+incident data fails loudly per-row, never silently, never overridden.
+
 Only tears down fixtures: institution codes must start with ZZFIXTURE,
 user emails must contain "zzfixture". Refuses everything else,
-unconditionally -- BHPS0000 included, no override.
+unconditionally -- BHPS0000 included, no override. (bare-passports is
+the one mode without a name to check -- its own three-layer guard above
+is what stands in for that.)
 
 For a full fixture teardown, run institution FIRST, then each fixture
 user -- institution teardown clears the incident-log rows that would
