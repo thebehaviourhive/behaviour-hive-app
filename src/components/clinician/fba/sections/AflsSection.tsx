@@ -529,7 +529,7 @@ export const AflsSection = forwardRef<AflsSectionHandle, { fbaId: string }>(func
         type="button"
         onClick={handleCreate}
         disabled={isCreating}
-        className="flex w-full items-center justify-center gap-1.5 rounded-2xl border-2 border-dashed border-brand-prussian-blue/30 py-3 text-sm font-semibold text-brand-prussian-blue disabled:opacity-40"
+        className="flex w-full lg:w-auto items-center justify-center gap-1.5 rounded-2xl border-2 border-dashed border-brand-prussian-blue/30 px-6 py-3 text-sm font-semibold text-brand-prussian-blue disabled:opacity-40"
       >
         <Plus className="h-4 w-4" strokeWidth={2.5} aria-hidden="true" />
         {isCreating ? "Creating…" : "Add AFLS Assessment"}

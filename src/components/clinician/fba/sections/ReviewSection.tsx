@@ -188,7 +188,7 @@ export function ReviewSection({
           <FbaNote>This FBA is finalized and locked.</FbaNote>
           <Link
             href={`/passport/fba/${fbaId}/print`}
-            className="block w-full rounded-2xl bg-brand-prussian-blue py-3.5 text-center text-base font-semibold text-white"
+            className="block w-full lg:w-auto rounded-2xl bg-brand-prussian-blue px-8 py-3.5 text-center text-base font-semibold text-white"
           >
             Save as PDF
           </Link>
@@ -206,7 +206,7 @@ export function ReviewSection({
             type="button"
             onClick={() => setIsConfirmOpen(true)}
             disabled={!requiredComplete}
-            className="w-full rounded-2xl bg-brand-prussian-blue py-3.5 text-base font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40"
+            className="w-full lg:w-auto rounded-2xl bg-brand-prussian-blue px-8 py-3.5 text-base font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40"
           >
             Finalize &amp; Lock FBA
           </button>

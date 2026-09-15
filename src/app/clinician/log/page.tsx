@@ -143,25 +143,30 @@ export default function ClinicianAddLogPage() {
               {selectedPassport.child_name}
             </p>
 
-            <div className="flex flex-col gap-3">
+            {/* A 3-way choice, not a data list -- same "equal-weight
+                options share a row at lg+" treatment CountersignCard's
+                own button pair already established (flex-col -> lg:flex-
+                row, each item lg:flex-1), just with three instead of
+                two. Stacked, w-full below lg, unchanged. */}
+            <div className="flex flex-col gap-3 lg:flex-row">
               <button
                 type="button"
                 onClick={() => selectLogType("abc")}
-                className="w-full rounded-2xl border border-black/5 bg-white p-4 text-left text-base font-semibold text-brand-neutral-black shadow-sm"
+                className="w-full lg:flex-1 rounded-2xl border border-black/5 bg-white p-4 text-left text-base font-semibold text-brand-neutral-black shadow-sm"
               >
                 ABC Log
               </button>
               <button
                 type="button"
                 onClick={() => selectLogType("fba")}
-                className="w-full rounded-2xl border border-black/5 bg-white p-4 text-left text-base font-semibold text-brand-neutral-black shadow-sm"
+                className="w-full lg:flex-1 rounded-2xl border border-black/5 bg-white p-4 text-left text-base font-semibold text-brand-neutral-black shadow-sm"
               >
                 FBA Log
               </button>
               <button
                 type="button"
                 onClick={() => selectLogType("bsp")}
-                className="w-full rounded-2xl border border-black/5 bg-white p-4 text-left text-base font-semibold text-brand-neutral-black shadow-sm"
+                className="w-full lg:flex-1 rounded-2xl border border-black/5 bg-white p-4 text-left text-base font-semibold text-brand-neutral-black shadow-sm"
               >
                 BSP Log
               </button>

@@ -297,7 +297,7 @@ export function ClinicianCoverageDetail(props: ClinicianCoverageDetailProps) {
             {lookupError}
           </p>
         )}
-        <Button type="button" onClick={handleLookup} disabled={isLookingUp || !codeInput.trim()} className="mt-4">
+        <Button type="button" onClick={handleLookup} disabled={isLookingUp || !codeInput.trim()} className="mt-4 lg:w-auto">
           {isLookingUp ? "Looking up…" : "Look Up Clinician"}
         </Button>
       </div>
@@ -367,7 +367,7 @@ export function ClinicianCoverageDetail(props: ClinicianCoverageDetailProps) {
             </p>
           )}
 
-          <Button type="button" onClick={handleApply} disabled={!hasChanges || isApplying} className="mt-6">
+          <Button type="button" onClick={handleApply} disabled={!hasChanges || isApplying} className="mt-6 lg:w-auto">
             {isApplying ? "Saving…" : "Save Changes"}
           </Button>
         </>

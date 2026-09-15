@@ -133,7 +133,7 @@ export function TemporaryAccessDetail({
         <button
           type="button"
           onClick={() => setIsRevokeOpen(true)}
-          className="mt-4 block w-full rounded-xl border border-brand-golden-brown py-2.5 text-center font-sans text-body font-semibold text-brand-golden-brown"
+          className="mt-4 block w-full lg:w-auto rounded-xl border border-brand-golden-brown px-6 py-2.5 text-center font-sans text-body font-semibold text-brand-golden-brown"
         >
           Revoke
         </button>

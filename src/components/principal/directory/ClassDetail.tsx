@@ -565,7 +565,7 @@ export function ClassDetail({
             <button
               type="button"
               onClick={() => setIsAddTeacherOpen(true)}
-              className="mt-2 flex min-h-11 w-full items-center justify-center gap-2 rounded-2xl border-[1.5px] border-dashed border-brand-prussian-blue/35 py-3 text-sm font-semibold text-brand-prussian-blue transition-colors hover:border-brand-prussian-blue hover:bg-brand-pastel-blue/10"
+              className="mt-2 flex min-h-11 w-full lg:w-auto items-center justify-center gap-2 rounded-2xl border-[1.5px] border-dashed border-brand-prussian-blue/35 px-6 py-3 text-sm font-semibold text-brand-prussian-blue transition-colors hover:border-brand-prussian-blue hover:bg-brand-pastel-blue/10"
             >
               <PlusIcon className="h-[18px] w-[18px]" />
               Add a teacher
@@ -656,7 +656,7 @@ export function ClassDetail({
             <button
               type="button"
               onClick={() => setIsAssignClassSnaOpen(true)}
-              className="mt-2 flex min-h-11 w-full items-center justify-center gap-2 rounded-2xl border-[1.5px] border-dashed border-brand-prussian-blue/35 py-3 text-sm font-semibold text-brand-prussian-blue transition-colors hover:border-brand-prussian-blue hover:bg-brand-pastel-blue/10"
+              className="mt-2 flex min-h-11 w-full lg:w-auto items-center justify-center gap-2 rounded-2xl border-[1.5px] border-dashed border-brand-prussian-blue/35 px-6 py-3 text-sm font-semibold text-brand-prussian-blue transition-colors hover:border-brand-prussian-blue hover:bg-brand-pastel-blue/10"
             >
               <PlusIcon className="h-[18px] w-[18px]" />
               Assign a class SNA
@@ -793,7 +793,7 @@ export function ClassDetail({
             <button
               type="button"
               onClick={() => setIsAddChildOpen(true)}
-              className="mt-2 flex min-h-11 w-full items-center justify-center gap-2 rounded-2xl border-[1.5px] border-dashed border-brand-prussian-blue/35 py-3 text-sm font-semibold text-brand-prussian-blue transition-colors hover:border-brand-prussian-blue hover:bg-brand-pastel-blue/10"
+              className="mt-2 flex min-h-11 w-full lg:w-auto items-center justify-center gap-2 rounded-2xl border-[1.5px] border-dashed border-brand-prussian-blue/35 px-6 py-3 text-sm font-semibold text-brand-prussian-blue transition-colors hover:border-brand-prussian-blue hover:bg-brand-pastel-blue/10"
             >
               <PlusIcon className="h-[18px] w-[18px]" />
               Add a child
@@ -874,7 +874,7 @@ export function ClassDetail({
             <button
               type="button"
               onClick={() => setIsGrantCoverOpen(true)}
-              className="mt-2 flex min-h-11 w-full items-center justify-center gap-2 rounded-2xl border-[1.5px] border-dashed border-brand-prussian-blue/35 py-3 text-sm font-semibold text-brand-prussian-blue transition-colors hover:border-brand-prussian-blue hover:bg-brand-pastel-blue/10"
+              className="mt-2 flex min-h-11 w-full lg:w-auto items-center justify-center gap-2 rounded-2xl border-[1.5px] border-dashed border-brand-prussian-blue/35 px-6 py-3 text-sm font-semibold text-brand-prussian-blue transition-colors hover:border-brand-prussian-blue hover:bg-brand-pastel-blue/10"
             >
               <PlusIcon className="h-[18px] w-[18px]" />
               Grant cover

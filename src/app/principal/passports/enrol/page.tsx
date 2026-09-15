@@ -99,12 +99,17 @@ export default function EnrolChildPage() {
           </p>
         )}
 
-        <Button type="button" onClick={handleEnrol} disabled={!childName.trim() || isSubmitting} className="mt-6">
+        <Button
+          type="button"
+          onClick={handleEnrol}
+          disabled={!childName.trim() || isSubmitting}
+          className="mt-6 lg:w-auto"
+        >
           {isSubmitting ? "Enrolling…" : "Enrol Child"}
         </Button>
         <Link
           href="/principal/directory?segment=children"
-          className="mt-2 block rounded-2xl border border-black/10 py-3 text-center text-sm font-semibold text-black/60"
+          className="mt-2 block w-full lg:w-auto rounded-2xl border border-black/10 px-6 py-3 text-center text-sm font-semibold text-black/60"
         >
           Cancel
         </Link>

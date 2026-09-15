@@ -128,7 +128,7 @@ export function StaffDetail({
         <button
           type="button"
           onClick={() => setIsReviewOpen(true)}
-          className="mt-4 block w-full rounded-xl bg-brand-prussian-blue py-2.5 text-center font-sans text-body font-semibold text-white"
+          className="mt-4 block w-full lg:w-auto rounded-xl bg-brand-prussian-blue px-6 py-2.5 text-center font-sans text-body font-semibold text-white"
         >
           Review Request
         </button>
@@ -142,7 +142,7 @@ export function StaffDetail({
         <button
           type="button"
           onClick={() => setIsDeactivateOpen(true)}
-          className="mt-4 block w-full rounded-xl border border-brand-golden-brown py-2.5 text-center font-sans text-body font-semibold text-brand-golden-brown"
+          className="mt-4 block w-full lg:w-auto rounded-xl border border-brand-golden-brown px-6 py-2.5 text-center font-sans text-body font-semibold text-brand-golden-brown"
         >
           Deactivate
         </button>

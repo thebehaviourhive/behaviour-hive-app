@@ -108,7 +108,7 @@ export default function PrincipalActivityPage() {
                 type="button"
                 onClick={loadMore}
                 disabled={isLoadingMore}
-                className="mt-2 w-full rounded-2xl border border-brand-prussian-blue/20 bg-white py-3 font-sans text-sm font-bold text-brand-prussian-blue disabled:opacity-50"
+                className="mt-2 w-full lg:w-auto rounded-2xl border border-brand-prussian-blue/20 bg-white px-6 py-3 font-sans text-sm font-bold text-brand-prussian-blue disabled:opacity-50"
               >
                 {isLoadingMore ? "Loading…" : "Load more"}
               </button>

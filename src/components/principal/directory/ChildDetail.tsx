@@ -813,7 +813,7 @@ export function ChildDetail({
                     <button
                       type="button"
                       onClick={() => setClaimCodeRevokeTarget(claimCode)}
-                      className="mt-3 block w-full rounded-xl border border-brand-golden-brown py-2 text-center text-xs font-semibold text-brand-golden-brown"
+                      className="mt-3 block w-full lg:w-auto rounded-xl border border-brand-golden-brown px-4 py-2 text-center text-xs font-semibold text-brand-golden-brown"
                     >
                       Revoke
                     </button>
@@ -825,7 +825,7 @@ export function ChildDetail({
                     type="button"
                     onClick={handleGenerateCode}
                     disabled={isGeneratingCode}
-                    className="mt-2 block w-full rounded-xl border border-brand-prussian-blue py-2 text-center text-xs font-semibold text-brand-prussian-blue disabled:opacity-50"
+                    className="mt-2 block w-full lg:w-auto rounded-xl border border-brand-prussian-blue px-4 py-2 text-center text-xs font-semibold text-brand-prussian-blue disabled:opacity-50"
                   >
                     {isGeneratingCode ? "Generating…" : "+ Generate a code for another guardian"}
                   </button>
@@ -906,7 +906,7 @@ export function ChildDetail({
                               <button
                                 type="button"
                                 onClick={() => setRevokeTarget(a)}
-                                className="mt-3 block w-full rounded-xl border border-brand-golden-brown py-2 text-center text-xs font-semibold text-brand-golden-brown"
+                                className="mt-3 block w-full lg:w-auto rounded-xl border border-brand-golden-brown px-4 py-2 text-center text-xs font-semibold text-brand-golden-brown"
                               >
                                 Revoke access
                               </button>
@@ -1035,7 +1035,7 @@ export function ChildDetail({
                             <button
                               type="button"
                               onClick={() => setClinicianRevokeTarget(c)}
-                              className="mt-3 block w-full rounded-xl border border-brand-golden-brown py-2 text-center text-xs font-semibold text-brand-golden-brown"
+                              className="mt-3 block w-full lg:w-auto rounded-xl border border-brand-golden-brown px-4 py-2 text-center text-xs font-semibold text-brand-golden-brown"
                             >
                               Revoke access
                             </button>
