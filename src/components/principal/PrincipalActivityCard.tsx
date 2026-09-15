@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/client";
 import { useActivityFeed } from "@/hooks/useActivityFeed";
 import { ActivityRow, ActivityRowSkeleton } from "@/components/parent/ActivityRow";
 import { InlineErrorState } from "@/components/ui/InlineErrorState";
+import { getChildDisplayName } from "@/lib/childDisplayName";
 import type { ActivityEventType } from "@/lib/activityEvents";
 
 interface PrincipalActivityEntry {
@@ -13,6 +14,9 @@ interface PrincipalActivityEntry {
   event_type: ActivityEventType;
   event_description: string;
   created_at: string;
+  // Migration 0192 -- null on staff-level/support_alert rows
+  // (institution-wide, not per-child).
+  child_name: string | null;
 }
 
 // Migration 0158, Support Button item 6's dashboard preview. Same
@@ -59,7 +63,7 @@ export function PrincipalActivityCard() {
       ) : entries.length === 0 ? (
         <div className="rounded-xl border-2 border-dashed border-brand-pastel-blue bg-brand-off-white/30 p-4 text-center">
           <p className="font-sans text-sm text-brand-neutral-black/70">
-            Institutional activity -- like Support Button alerts -- will appear here.
+            Activity across your school -- incidents, ABC logs, and Support Button alerts -- will appear here.
           </p>
         </div>
       ) : (
@@ -69,7 +73,12 @@ export function PrincipalActivityCard() {
             entry={{
               id: entry.id,
               event_type: entry.event_type,
-              event_description: entry.event_description,
+              // Migration 0192 -- support_alert/staff-level rows are
+              // institution-wide, not per-child (child_name null); only
+              // prefix rows that actually have one.
+              event_description: entry.child_name
+                ? `${getChildDisplayName(entry.child_name)} — ${entry.event_description}`
+                : entry.event_description,
               created_at: entry.created_at,
             }}
           />

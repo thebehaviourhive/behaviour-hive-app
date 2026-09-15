@@ -7,30 +7,35 @@ import { useRequireRole } from "@/hooks/useRequireRole";
 import { useActivityFeed } from "@/hooks/useActivityFeed";
 import { ActivityRow, ActivityRowSkeleton } from "@/components/parent/ActivityRow";
 import { InlineErrorState } from "@/components/ui/InlineErrorState";
+import { getChildDisplayName } from "@/lib/childDisplayName";
 import type { ActivityEventType } from "@/lib/activityEvents";
 
 const PAGE_SIZE = 20;
 
-// Migration 0158, Support Button item 6, widened by 0171. Institutional/
-// operational events only -- not whole-school-per-child (that's the
-// teacher's own job, and would break the privacy posture the incident
-// work-queue buckets already hold), not narrowly self-only (too thin to
-// mean anything for a role that isn't a participant in most school
-// events the way a parent or teacher is). Support alerts (0158) plus
-// the staff-level roster history (0171: joins, leaves, rejections,
-// handovers, temporary access grants). The per-child half stays
-// deliberately unbuilt -- see CLAUDE.md's own "PRINCIPAL ACTIVITY FEED
-// -- PER-CHILD EVENTS, OPEN" entry.
+// Migration 0158, Support Button item 6, widened by 0171 (staff-level
+// roster history) and 0192 (per-child events -- incidents and ABC
+// logs, institution-wide). This REVERSES the original per-child
+// exclusion -- see CLAUDE.md's own "PRINCIPAL ACTIVITY FEED" entry for
+// both the original reasoning (an institution-wide stream of per-child
+// logging reads as watching staff work) and why it changed (a
+// principal needs to see which CHILDREN are struggling, to direct
+// support -- the opposite concern). THE SAFEGUARD SURVIVES IN A
+// DIFFERENT FORM: no per-staff grouping, ranking, or sorting by who
+// logged what -- child_name identifies the CHILD, never the staff
+// member who logged the entry.
 //
-// Row shape is leaner than the teacher/clinician/parent feeds
-// (id/event_type/event_description/created_at only) -- no passport_id/
-// child_name/incident_id, because nothing in this feed is ever
-// per-child.
+// Row shape now matches the teacher feed exactly (id/event_type/
+// event_description/created_at/child_name/incident_id).
 interface PrincipalActivityEntry {
   id: string;
   event_type: ActivityEventType;
   event_description: string;
   created_at: string;
+  // Migration 0192 -- null on staff-level/support_alert rows
+  // (institution-wide, not per-child).
+  child_name: string | null;
+  // Migration 0192 -- non-null only on event_type "incident".
+  incident_id: string | null;
 }
 
 export default function PrincipalActivityPage() {
@@ -73,7 +78,7 @@ export default function PrincipalActivityPage() {
         ) : groups.length === 0 ? (
           <div className="rounded-xl border-2 border-dashed border-brand-pastel-blue bg-white/60 p-6 text-center">
             <p className="font-sans text-sm text-brand-neutral-black/70">
-              Institutional activity -- like Support Button alerts -- will appear here.
+              Activity across your school -- incidents, ABC logs, and Support Button alerts -- will appear here.
             </p>
           </div>
         ) : (
@@ -90,9 +95,18 @@ export default function PrincipalActivityPage() {
                       entry={{
                         id: entry.id,
                         event_type: entry.event_type,
-                        event_description: entry.event_description,
+                        // Migration 0192 -- support_alert/staff-level
+                        // rows are institution-wide, not per-child
+                        // (child_name is null); prefixing them with the
+                        // child-name fallback would be a nonsense
+                        // sentence, so only child-scoped rows get the
+                        // prefix. Same rule as the teacher feed.
+                        event_description: entry.child_name
+                          ? `${getChildDisplayName(entry.child_name)} — ${entry.event_description}`
+                          : entry.event_description,
                         created_at: entry.created_at,
                       }}
+                      href={entry.incident_id ? `/teacher/incidents/${entry.incident_id}` : undefined}
                     />
                   ))}
                 </div>
