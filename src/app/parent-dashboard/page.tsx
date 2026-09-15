@@ -8,7 +8,6 @@ import { createClient } from "@/lib/supabase/client";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { useMyPassport } from "@/hooks/useMyPassport";
 import { useMessagesAwaitingActionCount } from "@/hooks/useMessagesAwaitingActionCount";
-import { getPassportResumeHref } from "@/lib/getPassportResumeHref";
 import { RecentUpdatesCard } from "@/components/parent/RecentUpdatesCard";
 import { IncidentNoticeCard } from "@/components/parent/IncidentNoticeCard";
 import { PassportCompletionPromptCard } from "@/components/passport/PassportCompletionPromptCard";
@@ -98,12 +97,6 @@ export default function ParentDashboardPage() {
   const childName = resolvedChildName || "your child";
   const [passportStatus, setPassportStatus] = useState<PassportStatus>("not_started");
   const [resumeHref, setResumeHref] = useState("/passport/welcome");
-  // Distinguishes a self-created passport (the full wizard resume-logic
-  // applies) from a claimed one (Section A only -- see the resumeHref
-  // computation below). Section-a/b/c/d have been guardian-aware since
-  // Stage 1 (PRD 3); this flag no longer means "structurally can't
-  // build," only "which resume path applies."
-  const [isSelfCreatedPassport, setIsSelfCreatedPassport] = useState(true);
   const [isSectionAComplete, setIsSectionAComplete] = useState(false);
   const [isLoadingDashboardData, setIsLoadingDashboardData] = useState(true);
   const [todaysCheckin, setTodaysCheckin] = useState<TodaysCheckin | null>(null);
@@ -141,26 +134,14 @@ export default function ParentDashboardPage() {
         return;
       }
 
-      // passportRow: the fields getPassportResumeHref needs beyond what
+      // passportRow: the fields this page needs beyond what
       // get_my_passports() returns (id + child_name only) -- a follow-up
       // .eq("id", ...) read, safe post-migration 0117 (passports' SELECT
-      // policy is owns_passport()-based) for a claimed guardian too, not
-      // just a self-created one.
-      //
-      // sectionB/C/D now read .eq("passport_id", passportId), not
-      // .eq("user_id", user.id) -- PRD 3 Stage 1 (migration 0138) made
-      // these tables guardian-writable, so the old premise here ("a
-      // claimed guardian's passport can never have rows in these
-      // tables") no longer holds. It's not only a claimed-guardian
-      // concern either: this block only runs .eq("user_id", user.id)
-      // under isSelfCreated below, but isSelfCreated just means "I'm the
-      // original creator," not "I'm the only guardian" -- a second
-      // guardian can be added to a self-created passport too (the claim
-      // flow), and last-writer attribution means the row's user_id
-      // reflects whoever saved most recently, not who created the
-      // passport. The original creator's own resumeHref calculation
-      // would silently see a co-guardian's real, complete section as
-      // empty. passport_id is the correct key regardless of authorship.
+      // policy is owns_passport()-based). Stage 2, 15 Sept 2026: self-
+      // creation retired, so this no longer also fetches sectionB/C/D --
+      // those existed here solely to feed getPassportResumeHref's
+      // self-created wizard-walk, which no longer runs (real complexity
+      // this change let us delete, not just leave unreached).
       //
       // PRD 3, Stage 5 -- morning_checkins moves off .eq("user_id", ...)
       // entirely, onto get_todays_checkin(). The RLS widening (0144)
@@ -172,32 +153,11 @@ export default function ParentDashboardPage() {
       // ordering IS the three-state UI CheckInCard renders below: the
       // caller's own row wins if one exists, otherwise the most recent
       // row from any guardian, otherwise nothing.
-      const [
-        { data: passportRow },
-        { data: sectionB },
-        { data: sectionC },
-        { data: sectionD },
-        { data: checkinRows },
-      ] = await Promise.all([
+      const [{ data: passportRow }, { data: checkinRows }] = await Promise.all([
         supabase
           .from("passports")
-          .select("user_id, passport_status, section_a_complete")
+          .select("passport_status, section_a_complete")
           .eq("id", passportId)
-          .maybeSingle(),
-        supabase
-          .from("passport_section_b")
-          .select("okay_signals, hard_signals, hard_triggers, section_b_complete")
-          .eq("passport_id", passportId)
-          .maybeSingle(),
-        supabase
-          .from("passport_section_c")
-          .select("section_c_complete")
-          .eq("passport_id", passportId)
-          .maybeSingle(),
-        supabase
-          .from("passport_section_d")
-          .select("before_behaviour, during_distress, after_distress, section_d_complete")
-          .eq("passport_id", passportId)
           .maybeSingle(),
         // No .maybeSingle() chained -- no precedent for that anywhere
         // else in this codebase's own RPC calls, and get_todays_checkin()
@@ -213,10 +173,8 @@ export default function ParentDashboardPage() {
 
       const status =
         (passportRow?.passport_status as PassportStatus | undefined) ?? "not_started";
-      const isSelfCreated = passportRow?.user_id === user!.id;
 
       setPassportStatus(status);
-      setIsSelfCreatedPassport(isSelfCreated);
       setIsSectionAComplete(Boolean(passportRow?.section_a_complete));
       setTodaysCheckin(
         checkinRow
@@ -265,42 +223,13 @@ export default function ParentDashboardPage() {
           markedAbsent: Boolean(todaysUpdate.marked_absent),
         });
       }
-      setResumeHref(
-        isSelfCreated
-          ? getPassportResumeHref({
-              passportStatus: status,
-              sectionAComplete: Boolean(passportRow?.section_a_complete),
-              sectionB: sectionB
-                ? {
-                    okaySignals: sectionB.okay_signals,
-                    hardSignals: sectionB.hard_signals,
-                    hardTriggers: sectionB.hard_triggers,
-                    complete: sectionB.section_b_complete,
-                  }
-                : null,
-              sectionCComplete: Boolean(sectionC?.section_c_complete),
-              sectionD: sectionD
-                ? {
-                    beforeBehaviour: sectionD.before_behaviour,
-                    duringDistress: sectionD.during_distress,
-                    afterDistress: sectionD.after_distress,
-                    complete: sectionD.section_d_complete,
-                  }
-                : null,
-            })
-          // PRD 3, Stage 3 -- a claimed guardian's own entry point, now
-          // that section-a is guardian-aware (Stage 1). Deliberately not
-          // routed through getPassportResumeHref()'s full A->B->C->D
-          // walk -- that's the self-created wizard's own resume logic,
-          // and for a claimed guardian this card's whole job is "get
-          // them to Section A," not replicate the wizard. Once Section A
-          // is done, the card stops rendering at all (see below); there
-          // is nothing left for this shortcut to resolve to but the
-          // dashboard.
-          : passportRow?.section_a_complete
-            ? "/passport/dashboard"
-            : "/passport/section-a"
-      );
+      // Stage 2, 15 Sept 2026: self-creation retired -- every guardian
+      // reaching this dashboard is now a claimed (or school-created)
+      // one, so this is the only resumeHref shape left. This card's
+      // whole job is "get them to Section A"; once it's done, the card
+      // stops rendering at all (see below), so there's nothing left for
+      // this to resolve to but the dashboard.
+      setResumeHref(passportRow?.section_a_complete ? "/passport/dashboard" : "/passport/section-a");
       setIsLoadingDashboardData(false);
     }
 
@@ -392,7 +321,7 @@ export default function ParentDashboardPage() {
               </div>
             </section>
           )
-        ) : isSelfCreatedPassport || !isSectionAComplete ? (
+        ) : !isSectionAComplete ? (
           // PRD 3, Stage 3 -- a claimed guardian now gets this card too,
           // once Section A is genuinely reachable and writable for them
           // (Stage 1). Closes CLAUDE.md's own "claimed passport can be
@@ -401,7 +330,10 @@ export default function ParentDashboardPage() {
           // never offered the door in. Stops rendering the moment
           // Section A is done -- for a claimed guardian this card's job
           // is specifically getting them there, not replicating the
-          // self-created wizard's full A-through-D walk.
+          // self-created wizard's full A-through-D walk. Stage 2, 15
+          // Sept 2026: this IS the only guardian shape now, since self-
+          // creation is retired -- the isSelfCreatedPassport branch this
+          // condition used to also check is gone, not just unreached.
           <section>
             <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-black/40">
               Get started
@@ -439,17 +371,10 @@ export default function ParentDashboardPage() {
 
         <QuickActionButtons childName={childName} messagesAwaitingCount={messagesAwaitingCount} />
 
-        <section>
-          <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-black/40">
-            Recommended for you
-          </h2>
-          <div className="rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
-            <p className="text-sm font-semibold text-brand-neutral-black">
-              Understanding sensory processing
-            </p>
-            <p className="text-xs text-black/50">Course · 45 min</p>
-          </div>
-        </section>
+        {/* "Recommended for you" removed, Stage 2, 15 Sept 2026 --
+            hardcoded, unconditional, linked nowhere, same fixed course
+            card forever. Same shape as the BSP "Coming Soon" stub: a
+            permanent placeholder for something never built. */}
 
         <YourTeamCard passportId={passportId} />
       </main>

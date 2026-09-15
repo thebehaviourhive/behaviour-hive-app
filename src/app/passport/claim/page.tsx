@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { BrandMark } from "@/components/ui/BrandMark";
@@ -141,12 +140,14 @@ export default function PassportClaimPage() {
             {isSubmitting ? "Checking…" : "Claim passport"}
           </Button>
 
-          <Link
-            href="/passport/welcome"
-            className="mt-4 block text-sm font-semibold text-black/50"
-          >
-            I don&apos;t have a code
-          </Link>
+          {/* Stage 2, 15 Sept 2026: self-creation retired -- there is no
+              longer an alternative path this could route to, so this is
+              now explanatory copy, not a link. Every family gets their
+              code from their child's school. */}
+          <p className="mt-4 text-sm text-black/50">
+            Don&apos;t have a code? Ask your child&apos;s school -- they can
+            generate one for you.
+          </p>
         </div>
       </div>
     </main>

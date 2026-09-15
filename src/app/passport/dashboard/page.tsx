@@ -18,7 +18,6 @@ import { revalidateParentCalmAccess } from "@/hooks/useParentCalmAccess";
 import { createClient } from "@/lib/supabase/client";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { useMyPassport } from "@/hooks/useMyPassport";
-import { getPassportResumeHref } from "@/lib/getPassportResumeHref";
 import { logActivity } from "@/lib/logActivity";
 import { clearPendingLogReminder } from "@/lib/calmCards/logReminder";
 import {
@@ -359,11 +358,10 @@ export default function PassportDashboardPage() {
         }
 
         const supabase = createClient();
-        // The extra fields getPassportResumeHref/this page's own summary
-        // need beyond what get_my_passports() returns (id + child_name
-        // only) -- a follow-up .eq("id", ...) read, safe post-migration
-        // 0117 (passports' SELECT policy is owns_passport()-based) for a
-        // claimed guardian too, not just a self-created one.
+        // The extra fields this page's own summary needs beyond what
+        // get_my_passports() returns (id + child_name only) -- a
+        // follow-up .eq("id", ...) read, safe post-migration 0117
+        // (passports' SELECT policy is owns_passport()-based).
         //
         // sectionB/C/D now read .eq("passport_id", passportId), not
         // .eq("user_id", user.id) -- PRD 3 Stage 1 (migration 0138) made
@@ -413,66 +411,17 @@ export default function PassportDashboardPage() {
 
         if (!isMounted) return;
 
-        // A CLAIMED passport (this parent isn't its passports.user_id --
-        // that's either a different guardian's self-created row, or null
-        // for a school-created one) skips the guided wizard-resume flow:
-        // getPassportResumeHref only ever runs for isSelfCreated. Section
-        // A/B/C/D are all guardian-writable now (PRD 3 Stage 1, migration
-        // 0138) -- a claimed guardian CAN edit every section, just not
-        // through the sequential wizard redirect; the section cards below
-        // link straight to /passport/section-{a,b/1,c,d/1}, which resolve
-        // and save correctly for a claimed guardian too (useMyPassport()-
-        // based, same as this page). Kept this way deliberately, not a
-        // leftover limitation: routing a claimed guardian through
-        // getPassportResumeHref would send a not_started claimed passport
-        // to /passport/welcome, which (now that welcome itself redirects
-        // a parent who already has ANY passport straight back here) is a
-        // genuine infinite redirect loop, not just wrong copy. Found live,
-        // driving this exact case end-to-end, not by inspection. A
-        // claimed guardian always lands on this dashboard itself, however
+        // Stage 2, 15 Sept 2026: self-creation retired -- every passport
+        // reaching this page is now a claimed (or school-created) one, so
+        // the isSelfCreated / getPassportResumeHref wizard-walk branch
+        // this comment used to describe is gone, not just unreached.
+        // A guardian always lands on this dashboard itself, however
         // incomplete the underlying data is -- the section cards below
-        // already have their own "nothing added yet"
-        // empty states for exactly this shape.
-        const isSelfCreated = passport?.user_id === user!.id;
-
-        const resumeHref = isSelfCreated
-          ? getPassportResumeHref({
-              passportStatus:
-                (passport?.passport_status as "not_started" | "in_progress" | "complete" | null) ??
-                null,
-              sectionAComplete: Boolean(passport?.section_a_complete),
-              sectionB: sectionB
-                ? {
-                    okaySignals: sectionB.okay_signals,
-                    hardSignals: sectionB.hard_signals,
-                    hardTriggers: sectionB.hard_triggers,
-                    complete: sectionB.section_b_complete,
-                  }
-                : null,
-              sectionCComplete: Boolean(sectionC?.section_c_complete),
-              sectionD: sectionD
-                ? {
-                    beforeBehaviour: sectionD.before_behaviour,
-                    duringDistress: sectionD.during_distress,
-                    afterDistress: sectionD.after_distress,
-                    complete: sectionD.section_d_complete,
-                  }
-                : null,
-            })
-          : "/passport/dashboard";
-
-        // Compare against the SAME resume calculation used everywhere else,
-        // rather than the raw passport_status flag in isolation. If every
-        // section is actually complete, resumeHref already resolves back to
-        // this page — redirecting there in that case would just replace
-        // this route with itself and never render, leaving a blank screen
-        // that persists across reloads (the flag and the real per-section
-        // completion state can disagree, e.g. right after editing a
-        // completed section).
-        if (resumeHref !== "/passport/dashboard") {
-          router.replace(resumeHref);
-          return;
-        }
+        // already have their own "nothing added yet" empty states for
+        // exactly this shape. Section A/B/C/D are all guardian-writable
+        // (PRD 3 Stage 1, migration 0138); the section cards below link
+        // straight to /passport/section-{a,b/1,c,d/1}, which resolve and
+        // save correctly here (useMyPassport()-based, same as this page).
 
         setSummary({
           passportId,
