@@ -17,6 +17,20 @@ import { ClinicianSidebar } from "@/components/clinician/ClinicianSidebar";
 // hidden there, and lg:pl-64 does nothing below its own breakpoint --
 // so every clinician screen's mobile rendering is unchanged by this
 // file's existence.
+//
+// min-w-0 on the content div, found and fixed in Stage 2 -- without it,
+// this div is a flex ITEM of the row above (`flex min-h-full flex-1`),
+// and a flex item's default min-width is `auto`: it refuses to shrink
+// below its own content's intrinsic width. Any overflow-x-auto scroller
+// inside (a horizontal tab strip, a stat-card carousel) sets that
+// intrinsic width to its own full unscrolled content size, and the
+// WHOLE PAGE grows to match instead of the scroller containing its own
+// overflow -- confirmed live: the plain clinician dashboard already
+// scrolled horizontally at 375px (796px of actual content) before this
+// fix, and Stage 2's eleven-item tab strip made it severe (1128px).
+// This exact pattern was copied verbatim from principal/layout.tsx
+// (PRD 4, Stage 1) -- that file has the identical latent bug, not fixed
+// here since it's outside this stage's scope, flagged separately.
 export default function ClinicianLayout({
   children,
 }: Readonly<{
@@ -25,7 +39,7 @@ export default function ClinicianLayout({
   return (
     <div className="flex min-h-full flex-1">
       <ClinicianSidebar />
-      <div className="flex min-h-full flex-1 flex-col lg:pl-64">{children}</div>
+      <div className="flex min-h-full min-w-0 flex-1 flex-col lg:pl-64">{children}</div>
     </div>
   );
 }
