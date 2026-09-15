@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/Button";
 import { BottomNav } from "@/components/ui/BottomNav";
 import { TeacherBottomNav } from "@/components/teacher/TeacherBottomNav";
 import { ClinicianBottomNav } from "@/components/clinician/ClinicianBottomNav";
+import { ClinicianSidebar } from "@/components/clinician/ClinicianSidebar";
 import { SnaBottomNav } from "@/components/sna/SnaBottomNav";
 import { TrendUpIcon } from "@/components/ui/icons";
 import { getChildFirstName } from "@/lib/childDisplayName";
@@ -153,8 +154,24 @@ export default function MorePage() {
     return null;
   }
 
+  // Stage 3 desktop pass, 15 Sept 2026: /more is a shared top-level
+  // route (every track uses it), so it's never nested under /clinician/
+  // layout.tsx the way every other clinician page is -- confirmed the
+  // only such case (grepped every href/router.push in the clinician
+  // track; everything else stays within /clinician/*). Replicating
+  // that layout's own sidebar + lg:pl-64 shift here, conditionally for
+  // the one role that has a persistent sidebar elsewhere, rather than
+  // moving this page under /clinician/more -- that would duplicate the
+  // settings UI below across two routes instead of duplicating a few
+  // lines of shell markup here.
   return (
-    <div className="flex min-h-full flex-1 flex-col bg-brand-off-white/40 pb-24">
+    <div className="flex min-h-full flex-1">
+      {role === "clinician" && <ClinicianSidebar />}
+      <div
+        className={`flex min-h-full min-w-0 flex-1 flex-col bg-brand-off-white/40 pb-24 ${
+          role === "clinician" ? "lg:pl-64" : ""
+        }`}
+      >
       <header className="px-4 pt-8 pb-2">
         <h1 className="font-heading text-2xl font-semibold text-brand-prussian-blue">
           More
@@ -315,6 +332,7 @@ export default function MorePage() {
       ) : (
         <BottomNav />
       )}
+      </div>
     </div>
   );
 }

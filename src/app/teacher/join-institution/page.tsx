@@ -66,6 +66,7 @@ export default function TeacherJoinInstitutionPage() {
   const [pendingInstitutionName, setPendingInstitutionName] = useState<string | null>(null);
   const [rejectedInfo, setRejectedInfo] = useState<RejectedInfo | null>(null);
   const [isCheckingStatus, setIsCheckingStatus] = useState(false);
+  const [checkStatusMessage, setCheckStatusMessage] = useState<string | null>(null);
   const [hasDismissedRejection, setHasDismissedRejection] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -140,12 +141,23 @@ export default function TeacherJoinInstitutionPage() {
     };
   }, [user, router, staffRole, checkExisting]);
 
+  // Item 14, QA run-through: pressing this while still pending called
+  // setStatus("pending") with the same value it already had -- no
+  // visible change at all, which read as broken rather than "checked,
+  // still waiting". checkStatusMessage is the explicit feedback for
+  // exactly that case, matching the clinician dashboard's own "Check
+  // status" button (checkStatusMessage there, same idea).
   async function handleCheckStatus() {
     setIsCheckingStatus(true);
+    setCheckStatusMessage(null);
     const result = await checkExisting();
     setIsCheckingStatus(false);
     if (result === "active") {
       router.replace(getPostAuthRedirect(staffRole));
+      return;
+    }
+    if (result === "pending") {
+      setCheckStatusMessage("Still pending. We'll let you check again in a moment.");
     }
   }
 
@@ -205,103 +217,136 @@ export default function TeacherJoinInstitutionPage() {
     return null;
   }
 
-  // "rejected" starts locked (the overlay below) and unlocks in place once
-  // dismissed via "Try Again" -- the SAME form beneath, per Daniel's own
-  // decision: re-requesting is just submitting the join form again, old
-  // row untouched, no separate flow needed.
-  const isLocked = status === "pending" || (status === "rejected" && !hasDismissedRejection);
-
-  return (
-    <main className="flex min-h-full flex-1 items-center justify-center bg-brand-off-white/40 px-4 py-10">
-      <div className="relative w-full max-w-sm">
-        <div className={isLocked ? "pointer-events-none select-none" : ""}>
-          <div className="mb-6 flex flex-col items-center gap-3 text-center">
+  // Stage 3 desktop pass, item 3: this used to render the plain join
+  // form UNDER a blur-and-pointer-events-none wrapper, with a small
+  // absolutely-positioned status card floating on top of it, inside the
+  // same narrow max-w-sm column. The blurred region only ever covered
+  // that one small card, not the page -- to a new staff member seeing
+  // this for the first time, it read as a rendering fault, not a
+  // considered state. Rebuilt: "pending" and "rejected" (undismissed)
+  // now render their OWN full, clean screen -- no ghost form behind
+  // them at all -- same "waiting, not locked out" posture as the
+  // parent's own new claim gate: plain language for what's happening
+  // and what happens next, not just a lock icon and a blur.
+  if (status === "pending") {
+    return (
+      <main className="flex min-h-full flex-1 items-center justify-center bg-brand-off-white/40 px-4 py-10">
+        <div className="w-full max-w-sm text-center">
+          <div className="mb-6 flex flex-col items-center gap-3">
             <BrandMark />
-            <h1 className="font-heading text-2xl font-semibold text-brand-neutral-black">
-              Join Your School
-            </h1>
+            <span className="flex h-12 w-12 items-center justify-center rounded-full bg-brand-pastel-blue/40 text-brand-prussian-blue">
+              <LockIcon className="h-6 w-6" />
+            </span>
           </div>
 
           <div className="rounded-3xl border border-black/5 bg-white p-6 shadow-sm">
-            <p className="mb-4 text-sm leading-relaxed text-black/60">
-              Enter the institution code your school shared with you to join
-              your Hive Dashboard.
+            <h1 className="mb-2 font-heading text-xl font-semibold text-brand-neutral-black">
+              Your request is with your principal
+            </h1>
+            <p className="text-sm leading-relaxed text-black/60">
+              {`You asked to join ${pendingInstitutionName ?? "this school"}. They've been notified and can approve you from their own dashboard — there's nothing else for you to do. You'll get access the moment they confirm it.`}
             </p>
-
-            <TextField
-              label="Institution code"
-              type="text"
-              placeholder="e.g. 7F3K9Q"
-              required
-              value={code}
-              onChange={(e) => setCode(e.target.value)}
-              className="uppercase tracking-widest"
-            />
-
-            {error && (
-              <p role="alert" className="mt-4 text-sm font-medium text-red-600">
-                {error}
-              </p>
-            )}
 
             <Button
               type="button"
-              onClick={handleJoin}
-              disabled={!code.trim() || isSaving || isLocked}
+              onClick={handleCheckStatus}
+              disabled={isCheckingStatus}
               className="mt-6"
             >
-              {isSaving ? "Joining…" : "Join Institution"}
+              {isCheckingStatus ? "Checking…" : "Check status"}
+            </Button>
+
+            {checkStatusMessage && (
+              <p className="mt-3 text-sm font-medium text-brand-neutral-black/60">
+                {checkStatusMessage}
+              </p>
+            )}
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  if (status === "rejected" && !hasDismissedRejection) {
+    return (
+      <main className="flex min-h-full flex-1 items-center justify-center bg-brand-off-white/40 px-4 py-10">
+        <div className="w-full max-w-sm text-center">
+          <div className="mb-6 flex flex-col items-center gap-3">
+            <BrandMark />
+            <span className="flex h-12 w-12 items-center justify-center rounded-full bg-brand-pastel-blue/40 text-brand-prussian-blue">
+              <LockIcon className="h-6 w-6" />
+            </span>
+          </div>
+
+          <div className="rounded-3xl border border-black/5 bg-white p-6 shadow-sm">
+            <h1 className="mb-2 font-heading text-xl font-semibold text-brand-neutral-black">
+              {rejectedInfo?.institutionName
+                ? `${rejectedInfo.institutionName} didn't approve your request`
+                : "Your request wasn't approved"}
+            </h1>
+            {rejectedInfo?.reason && (
+              <p className="mb-2 text-sm text-brand-neutral-black/70">
+                &ldquo;{rejectedInfo.reason}&rdquo;
+              </p>
+            )}
+            <p className="text-sm leading-relaxed text-black/60">
+              You can check the institution code with your school and try again.
+            </p>
+
+            <Button
+              type="button"
+              onClick={() => setHasDismissedRejection(true)}
+              className="mt-6"
+            >
+              Try Again
             </Button>
           </div>
         </div>
+      </main>
+    );
+  }
 
-        {status === "pending" && (
-          <div className="absolute inset-0 z-20 flex items-center justify-center bg-white/30 px-2 backdrop-blur-md">
-            <div className="w-full max-w-xs rounded-3xl bg-white p-6 text-center shadow-lg">
-              <span className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-brand-pastel-blue/40 text-brand-prussian-blue">
-                <LockIcon className="h-6 w-6" />
-              </span>
-              <p className="mb-4 text-base font-semibold text-brand-neutral-black">
-                {`Your request to join ${pendingInstitutionName ?? "this school"} is waiting on your principal's approval. You'll get access as soon as they confirm it.`}
-              </p>
-              <button
-                type="button"
-                onClick={handleCheckStatus}
-                disabled={isCheckingStatus}
-                className="block w-full rounded-2xl bg-brand-prussian-blue py-3.5 text-base font-semibold text-white transition-colors disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                {isCheckingStatus ? "Checking…" : "Check status"}
-              </button>
-            </div>
-          </div>
-        )}
+  return (
+    <main className="flex min-h-full flex-1 items-center justify-center bg-brand-off-white/40 px-4 py-10">
+      <div className="w-full max-w-sm">
+        <div className="mb-6 flex flex-col items-center gap-3 text-center">
+          <BrandMark />
+          <h1 className="font-heading text-2xl font-semibold text-brand-neutral-black">
+            Join Your School
+          </h1>
+        </div>
 
-        {status === "rejected" && !hasDismissedRejection && (
-          <div className="absolute inset-0 z-20 flex items-center justify-center bg-white/30 px-2 backdrop-blur-md">
-            <div className="w-full max-w-xs rounded-3xl bg-white p-6 text-center shadow-lg">
-              <span className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-brand-pastel-blue/40 text-brand-prussian-blue">
-                <LockIcon className="h-6 w-6" />
-              </span>
-              <p className="mb-2 text-base font-semibold text-brand-neutral-black">
-                {rejectedInfo?.institutionName
-                  ? `${rejectedInfo.institutionName} didn't approve your request to join.`
-                  : "Your request to join wasn't approved."}
-              </p>
-              {rejectedInfo?.reason && (
-                <p className="mb-4 text-sm text-brand-neutral-black/70">
-                  &ldquo;{rejectedInfo.reason}&rdquo;
-                </p>
-              )}
-              <button
-                type="button"
-                onClick={() => setHasDismissedRejection(true)}
-                className="block w-full rounded-2xl bg-brand-prussian-blue py-3.5 text-base font-semibold text-white"
-              >
-                Try Again
-              </button>
-            </div>
-          </div>
-        )}
+        <div className="rounded-3xl border border-black/5 bg-white p-6 shadow-sm">
+          <p className="mb-4 text-sm leading-relaxed text-black/60">
+            Enter the institution code your school shared with you to join
+            your Hive Dashboard.
+          </p>
+
+          <TextField
+            label="Institution code"
+            type="text"
+            placeholder="e.g. 7F3K9Q"
+            required
+            value={code}
+            onChange={(e) => setCode(e.target.value)}
+            className="uppercase tracking-widest"
+          />
+
+          {error && (
+            <p role="alert" className="mt-4 text-sm font-medium text-red-600">
+              {error}
+            </p>
+          )}
+
+          <Button
+            type="button"
+            onClick={handleJoin}
+            disabled={!code.trim() || isSaving}
+            className="mt-6"
+          >
+            {isSaving ? "Joining…" : "Join Institution"}
+          </Button>
+        </div>
       </div>
     </main>
   );
