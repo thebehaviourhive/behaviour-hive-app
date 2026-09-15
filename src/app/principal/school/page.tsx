@@ -63,6 +63,13 @@ export default function PrincipalSchoolPage() {
   const router = useRouter();
   const { user, isReady } = useRequireRole("principal");
   const [institutionName, setInstitutionName] = useState<string | null>(null);
+  // QA run-through, item 2: nowhere in the app could a principal see
+  // their own institution_code -- every join flow needs it, but it was
+  // only ever handed over manually by Daniel at institution creation.
+  // A principal locked out of onboarding their own staff is a harder
+  // stop than anything else flagged in that pass.
+  const [institutionCode, setInstitutionCode] = useState<string | null>(null);
+  const [isCodeCopied, setIsCodeCopied] = useState(false);
   const [startTime, setStartTime] = useState<string>("07:30:00");
   const [cutoffTime, setCutoffTime] = useState<string>("15:00:00");
   const [staff, setStaff] = useState<StaffRow[]>([]);
@@ -92,7 +99,9 @@ export default function PrincipalSchoolPage() {
 
     const { data: staffRow, error: staffError } = await supabase
       .from("institution_staff")
-      .select("institution_id, institutions(name, temporary_access_start_time, temporary_access_cutoff_time)")
+      .select(
+        "institution_id, institutions(name, institution_code, temporary_access_start_time, temporary_access_cutoff_time)"
+      )
       .eq("user_id", user.id)
       .eq("role", "principal")
       .is("deactivated_at", null)
@@ -106,11 +115,22 @@ export default function PrincipalSchoolPage() {
     }
 
     const institutionRecord = staffRow.institutions as unknown as
-      | { name: string; temporary_access_start_time: string | null; temporary_access_cutoff_time: string | null }
-      | { name: string; temporary_access_start_time: string | null; temporary_access_cutoff_time: string | null }[]
+      | {
+          name: string;
+          institution_code: string;
+          temporary_access_start_time: string | null;
+          temporary_access_cutoff_time: string | null;
+        }
+      | {
+          name: string;
+          institution_code: string;
+          temporary_access_start_time: string | null;
+          temporary_access_cutoff_time: string | null;
+        }[]
       | null;
     const record = Array.isArray(institutionRecord) ? institutionRecord[0] : institutionRecord;
     setInstitutionName(record?.name ?? null);
+    setInstitutionCode(record?.institution_code ?? null);
     setInstitutionId(staffRow.institution_id);
     if (record?.temporary_access_start_time) {
       setStartTime(record.temporary_access_start_time);
@@ -139,6 +159,13 @@ export default function PrincipalSchoolPage() {
   // Same shape as /more's own handleLogout -- signOut(), clear both
   // storages, replace to /login (never push, so Back can't return to a
   // signed-out principal screen).
+  function handleCopyCode() {
+    if (!institutionCode) return;
+    navigator.clipboard.writeText(institutionCode);
+    setIsCodeCopied(true);
+    setTimeout(() => setIsCodeCopied(false), 1500);
+  }
+
   async function handleLogOut() {
     setIsSigningOut(true);
     const supabase = createClient();
@@ -174,6 +201,32 @@ export default function PrincipalSchoolPage() {
           ) : (
             <>
               <section>
+                <h2 className="mb-2 font-accent text-eyebrow font-bold uppercase tracking-wide text-brand-prussian-blue">
+                  School Code
+                </h2>
+                <div className="flex items-center justify-between gap-3 rounded-2xl border border-dashed border-brand-golden-brown/40 bg-brand-safe-ivory/30 px-5 py-4">
+                  {institutionCode ? (
+                    <span className="font-heading text-2xl font-bold tracking-widest text-brand-neutral-black">
+                      {institutionCode}
+                    </span>
+                  ) : (
+                    <span className="font-heading text-lg text-black/40">Not available</span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={handleCopyCode}
+                    disabled={!institutionCode}
+                    className="flex-shrink-0 rounded-full bg-brand-golden-brown px-4 py-2 text-xs font-semibold text-white disabled:opacity-40"
+                  >
+                    {isCodeCopied ? "Copied!" : "Copy Code"}
+                  </button>
+                </div>
+                <p className="mt-2 font-sans text-eyebrow text-brand-neutral-black/50">
+                  Share this with a new class teacher, SNA, or principal so they can join {institutionName ?? "your school"}. They&apos;ll enter it at sign-up -- clinicians connect a different way, with their own code.
+                </p>
+              </section>
+
+              <section className="mt-16">
                 <h2 className="mb-2 font-accent text-eyebrow font-bold uppercase tracking-wide text-brand-prussian-blue">
                   Routine Controls
                 </h2>
