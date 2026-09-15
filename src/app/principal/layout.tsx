@@ -1,4 +1,5 @@
 import { PrincipalSidebar } from "@/components/principal/PrincipalSidebar";
+import { PrincipalSupportAlertProvider } from "@/components/principal/PrincipalSupportAlertProvider";
 
 // PRD 4, Stage 1 -- the first nested layout anywhere in this app.
 // Every other track manages its own full page shell independently,
@@ -45,9 +46,15 @@ export default function PrincipalLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <div className="flex min-h-full flex-1">
-      <PrincipalSidebar />
-      <div className="flex min-h-full min-w-0 flex-1 flex-col lg:pl-64">{children}</div>
-    </div>
+    // Item 7 investigation fix, 15 Sept 2026 -- one poll for the whole
+    // principal session, shared by PrincipalSidebar and every page's own
+    // PrincipalBottomNav via context (see PrincipalSupportAlertProvider's
+    // own header comment). Previously each ran its own.
+    <PrincipalSupportAlertProvider>
+      <div className="flex min-h-full flex-1">
+        <PrincipalSidebar />
+        <div className="flex min-h-full min-w-0 flex-1 flex-col lg:pl-64">{children}</div>
+      </div>
+    </PrincipalSupportAlertProvider>
   );
 }

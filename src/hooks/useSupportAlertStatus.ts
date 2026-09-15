@@ -43,16 +43,27 @@ export function useSupportAlertStatus(institutionId: string | null, userId: stri
   const [status, setStatus] = useState<SupportAlertStatus | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Flagged during the item 7 dashboard-freeze investigation, 15 Sept
+  // 2026: poll() is called directly by setInterval, outside the effect
+  // below whose own isMounted only guards initial()/handleVisibility
+  // Change. A poll in flight when this hook unmounts still calls
+  // setStatus/setIsLoading afterward -- React 18 makes this a silent
+  // no-op rather than the old "state update on an unmounted component"
+  // warning, so it's not the freeze (confirmed nothing crashes), but an
+  // unguarded post-unmount state update isn't something to leave once
+  // noticed.
+  const isMountedRef = useRef(true);
 
   const poll = useCallback(async () => {
     if (!institutionId || !userId) {
-      setIsLoading(false);
+      if (isMountedRef.current) setIsLoading(false);
       return;
     }
     const supabase = createClient();
     const { data, error } = await supabase.rpc("get_my_support_alert_status", {
       p_institution_id: institutionId,
     });
+    if (!isMountedRef.current) return;
     if (error) {
       // Fail quiet -- a single failed poll shouldn't flip the nav to a
       // broken or misleading state. Keep the last-known status; the
@@ -78,6 +89,13 @@ export function useSupportAlertStatus(institutionId: string | null, userId: stri
     );
     setIsLoading(false);
   }, [institutionId, userId]);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     let isMounted = true;

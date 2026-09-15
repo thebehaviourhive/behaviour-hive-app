@@ -1,13 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { BrandMark } from "@/components/ui/BrandMark";
-import { useSupportButtonNavSlots } from "@/hooks/useSupportButtonNavSlots";
+import { usePrincipalSupportAlert } from "@/components/principal/PrincipalSupportAlertProvider";
 import { useMessagesAwaitingActionCount } from "@/hooks/useMessagesAwaitingActionCount";
 import { useHasUnreadMessages } from "@/hooks/useHasUnreadMessages";
-import { createClient } from "@/lib/supabase/client";
 import { CountBadge } from "@/components/ui/CountBadge";
 import { PRINCIPAL_NAV_TABS } from "./principalNavTabs";
 
@@ -33,44 +31,13 @@ export function PrincipalSidebar() {
   const pathname = usePathname();
 
   // Support Button -- a SEPARATE renderer from PrincipalBottomNav, not
-  // the same component CSS-hidden. Both are mounted unconditionally at
-  // every width already (this file's own header comment), so the alert
-  // block below and the bottom nav's own alertSlot are kept in sync by
-  // sharing the same poll (useSupportAlertStatus, via this same hook),
-  // not by being one component -- if this ever needs changing, both
-  // call sites need the change, not just one.
-  const [userId, setUserId] = useState<string | null>(null);
-  const [institutionId, setInstitutionId] = useState<string | null>(null);
-  useEffect(() => {
-    let isMounted = true;
-    createClient()
-      .auth.getUser()
-      .then(({ data }) => {
-        if (isMounted) setUserId(data.user?.id ?? null);
-      });
-    return () => {
-      isMounted = false;
-    };
-  }, []);
-  useEffect(() => {
-    if (!userId) return;
-    let isMounted = true;
-    createClient()
-      .from("institution_staff")
-      .select("institution_id")
-      .eq("user_id", userId)
-      .eq("role", "principal")
-      .is("deactivated_at", null)
-      .not("approved_at", "is", null)
-      .maybeSingle()
-      .then(({ data }) => {
-        if (isMounted) setInstitutionId(data?.institution_id ?? null);
-      });
-    return () => {
-      isMounted = false;
-    };
-  }, [userId]);
-  const { alertSlot } = useSupportButtonNavSlots({ institutionId, userId, role: null });
+  // the same component CSS-hidden. Both used to independently resolve
+  // their own userId/institutionId and run their own poll -- CSS-hidden
+  // is not unmounted, so both loops ran permanently, simultaneously.
+  // Fixed (item 7 investigation, 15 Sept 2026) by hoisting all of that
+  // to PrincipalSupportAlertProvider, mounted once from layout.tsx --
+  // this is now a plain context read, not its own resolution.
+  const { alertSlot, userId } = usePrincipalSupportAlert();
 
   // Migration 0161 -- same hook the bottom nav's own Messages badge
   // uses; kept in sync by sharing that same self-scoped RPC, not by

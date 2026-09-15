@@ -1,11 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { AppBottomNav } from "@/components/ui/AppBottomNav";
-import { useSupportButtonNavSlots } from "@/hooks/useSupportButtonNavSlots";
+import { usePrincipalSupportAlert } from "@/components/principal/PrincipalSupportAlertProvider";
 import { useMessagesAwaitingActionCount } from "@/hooks/useMessagesAwaitingActionCount";
 import { useHasUnreadMessages } from "@/hooks/useHasUnreadMessages";
-import { createClient } from "@/lib/supabase/client";
 import { PRINCIPAL_NAV_TABS } from "./principalNavTabs";
 
 // PRD 2, Stage 1. Matches TeacherBottomNav/ClinicianBottomNav/
@@ -31,44 +29,13 @@ import { PRINCIPAL_NAV_TABS } from "./principalNavTabs";
 // shared with four tracks that have no sidebar and must keep rendering
 // this bar at every width, unchanged.
 export function PrincipalBottomNav() {
-  // Support Button needs a userId/institutionId this component never
-  // fetched before (its own header comment used to say so, genuinely --
-  // no longer true now that this exists). role: null -- a principal
-  // cannot raise (raise_support_alert()'s own role check is class_
-  // teacher/sna only); they can only view and acknowledge, matching
-  // useSupportButtonNavSlots' own handling of a null role.
-  const [userId, setUserId] = useState<string | null>(null);
-  const [institutionId, setInstitutionId] = useState<string | null>(null);
-  useEffect(() => {
-    let isMounted = true;
-    createClient()
-      .auth.getUser()
-      .then(({ data }) => {
-        if (isMounted) setUserId(data.user?.id ?? null);
-      });
-    return () => {
-      isMounted = false;
-    };
-  }, []);
-  useEffect(() => {
-    if (!userId) return;
-    let isMounted = true;
-    createClient()
-      .from("institution_staff")
-      .select("institution_id")
-      .eq("user_id", userId)
-      .eq("role", "principal")
-      .is("deactivated_at", null)
-      .not("approved_at", "is", null)
-      .maybeSingle()
-      .then(({ data }) => {
-        if (isMounted) setInstitutionId(data?.institution_id ?? null);
-      });
-    return () => {
-      isMounted = false;
-    };
-  }, [userId]);
-  const { alertSlot } = useSupportButtonNavSlots({ institutionId, userId, role: null });
+  // Was its own userId/institutionId resolution + its own poll, mounted
+  // per-page -- CSS-hidden at lg+ (below) is not unmounted, so this ran
+  // simultaneously with PrincipalSidebar's own identical copy the whole
+  // time. Fixed (item 7 investigation, 15 Sept 2026) by hoisting all of
+  // it to PrincipalSupportAlertProvider, mounted once from layout.tsx --
+  // this is now a plain context read.
+  const { alertSlot, userId } = usePrincipalSupportAlert();
 
   // Migration 0161 -- same shared hook TeacherBottomNav/ClinicianBottomNav
   // already use for their own Messages badge, "entirely self-scoped
