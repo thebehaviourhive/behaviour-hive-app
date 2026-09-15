@@ -282,10 +282,18 @@ export default function PrincipalSchoolPage() {
                   </p>
                 </button>
 
+                {/* lg:w-auto, unlike "Transfer Principal Role" above --
+                    that row has real description text filling its own
+                    width, matching Routine Controls' own row pattern;
+                    this is a bare seven-character label with nothing
+                    else in it, which read as a mostly-empty 661px-wide
+                    rectangle at lg+ (measured live: both rows sit at
+                    the same 661px, the page's own already-capped
+                    column -- this one just has nothing to fill it). */}
                 <button
                   type="button"
                   onClick={() => setIsLogOutOpen(true)}
-                  className="mt-2 block w-full rounded-2xl border border-black/5 bg-white p-4 text-left shadow-sm"
+                  className="mt-2 block w-full lg:w-auto rounded-2xl border border-black/5 bg-white px-6 py-4 text-left shadow-sm"
                 >
                   <p className="font-sans text-body font-semibold text-brand-neutral-black">Log out</p>
                 </button>
