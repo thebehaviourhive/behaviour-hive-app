@@ -317,7 +317,7 @@ export function ChildrenList({
                 aria-pressed={segment === s.key}
                 className={`rounded-full border px-4 py-2 font-sans text-body font-semibold transition-colors ${
                   segment === s.key
-                    ? "border-brand-pastel-blue bg-brand-pastel-blue text-brand-prussian-blue underline underline-offset-4"
+                    ? "border-brand-pastel-blue bg-brand-pastel-blue text-brand-prussian-blue"
                     : "border-black/10 bg-white text-brand-neutral-black/70"
                 }`}
               >
