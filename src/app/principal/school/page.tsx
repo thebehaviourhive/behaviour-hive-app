@@ -274,7 +274,7 @@ export default function PrincipalSchoolPage() {
                 <button
                   type="button"
                   onClick={() => setIsHandOverOpen(true)}
-                  className="block w-full rounded-2xl border border-brand-prussian-blue bg-white p-4 text-left shadow-sm"
+                  className="block w-full lg:w-auto rounded-2xl border border-brand-prussian-blue bg-white p-4 text-left shadow-sm"
                 >
                   <p className="font-sans text-body font-semibold text-brand-prussian-blue">Transfer Principal Role</p>
                   <p className="mt-0.5 font-sans text-eyebrow text-brand-neutral-black/50">
@@ -282,14 +282,17 @@ export default function PrincipalSchoolPage() {
                   </p>
                 </button>
 
-                {/* lg:w-auto, unlike "Transfer Principal Role" above --
-                    that row has real description text filling its own
-                    width, matching Routine Controls' own row pattern;
-                    this is a bare seven-character label with nothing
-                    else in it, which read as a mostly-empty 661px-wide
-                    rectangle at lg+ (measured live: both rows sit at
-                    the same 661px, the page's own already-capped
-                    column -- this one just has nothing to fill it). */}
+                {/* Desktop-layout audit, 16 Sept 2026: this row's own
+                    lg:w-auto was missing outright until this pass --
+                    measured live at 661px (52% of a 1280px viewport),
+                    notably wider than "Log out" right below it. The
+                    comment that used to sit here justified that gap as
+                    deliberate ("this one just has nothing to fill it")
+                    -- that reasoning was never re-checked after being
+                    written, and was simply wrong: a stretched button
+                    reads as unfinished regardless of what it contains.
+                    Fixed by giving it the same lg:w-auto "Log out" was
+                    already correctly using. */}
                 <button
                   type="button"
                   onClick={() => setIsLogOutOpen(true)}

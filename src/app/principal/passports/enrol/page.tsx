@@ -109,7 +109,7 @@ export default function EnrolChildPage() {
         </Button>
         <Link
           href="/principal/directory?segment=children"
-          className="mt-2 block w-full lg:w-auto rounded-2xl border border-black/10 px-6 py-3 text-center text-sm font-semibold text-black/60"
+          className="mt-2 block w-full lg:inline-block lg:w-auto rounded-2xl border border-black/10 px-6 py-3 text-center text-sm font-semibold text-black/60"
         >
           Cancel
         </Link>

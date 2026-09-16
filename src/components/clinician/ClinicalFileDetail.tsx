@@ -389,7 +389,7 @@ export function ClinicalFileDetail({
           ))}
         </div>
 
-        <main className="flex flex-1 flex-col gap-4 px-4 py-4">
+        <main className="flex min-w-0 flex-1 flex-col gap-4 px-4 py-4">
           {activeTab === "summary" && (
             <>
               <SectionHeading>Profile</SectionHeading>

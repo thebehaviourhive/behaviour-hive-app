@@ -811,7 +811,7 @@ export function ChildDetail({
           horizontal and vertical padding that used to come from
           <main> itself are reproduced here, around the same content
           they used to wrap. */}
-      <div className="flex-1 px-4 py-4">
+      <div className="min-w-0 flex-1 px-4 py-4">
       {isLoading ? (
         <div className="flex flex-col gap-2">
           <div className="h-16 animate-pulse rounded-2xl bg-white" />

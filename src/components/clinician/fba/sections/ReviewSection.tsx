@@ -191,7 +191,7 @@ export function ReviewSection({
           <FbaNote>This FBA is finalised and locked.</FbaNote>
           <Link
             href={`/passport/fba/${fbaId}/print`}
-            className="block w-full lg:w-auto rounded-2xl bg-brand-prussian-blue px-8 py-3.5 text-center text-base font-semibold text-white"
+            className="block w-full lg:inline-block lg:w-auto rounded-2xl bg-brand-prussian-blue px-8 py-3.5 text-center text-base font-semibold text-white"
           >
             Save as PDF
           </Link>
