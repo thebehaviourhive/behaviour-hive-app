@@ -172,12 +172,7 @@ export function DeactivateStaffSheet({ member, isOpen, onClose, onDeactivated }:
 
       {/* Destructive, not "needs attention" -- see ReasonConfirmSheet's
           own comment on this exact pattern. */}
-      <Button
-        type="button"
-        onClick={handleDeactivate}
-        disabled={isSubmitting || isLoadingPreview}
-        className="mt-4 !border-2 !border-brand-neutral-black !bg-white !text-brand-neutral-black hover:!bg-black/5"
-      >
+      <Button type="button" onClick={handleDeactivate} disabled={isSubmitting || isLoadingPreview} className="mt-4">
         {isSubmitting ? "Deactivating…" : "Deactivate"}
       </Button>
       <Button

@@ -135,7 +135,7 @@ export function RequestAttestationsCard({ incidentId, requested, onChange }: Req
             await setAndSave(false);
           }}
           disabled={isSaving}
-          className="mt-6 !border-2 !border-brand-neutral-black !bg-white !text-brand-neutral-black hover:!bg-black/5"
+          className="mt-6"
         >
           Turn off anyway
         </Button>

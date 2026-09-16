@@ -494,12 +494,7 @@ export function BodyMapCard({ injuryId, partyName, canEdit, injuryTypeOptions, r
               <Button type="button" variant="secondary" onClick={() => beginChangeType(selectedMark)} disabled={isSaving}>
                 Change type
               </Button>
-              <Button
-                type="button"
-                onClick={handleRemove}
-                disabled={isSaving}
-                className="!border-2 !border-brand-neutral-black !bg-white !text-brand-neutral-black hover:!bg-black/5"
-              >
+              <Button type="button" onClick={handleRemove} disabled={isSaving}>
                 {isSaving ? "Removing…" : "Remove"}
               </Button>
             </div>
