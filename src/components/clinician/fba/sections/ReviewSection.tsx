@@ -110,17 +110,20 @@ export function ReviewSection({
       return;
     }
 
-    // The Stage 1 completed-lock (USING status <> 'completed') only
-    // blocks updates on an ALREADY-completed row -- this is the one
-    // legitimate transition into it, and completed_at is stamped by the
-    // existing DB trigger, not set here.
-    const { error: updateError } = await supabase
-      .from("fba_reports")
-      .update({ status: "completed" })
-      .eq("id", fbaId);
+    // Stage 7, item 6: strategies publish on finalisation now, not on a
+    // separate parent approval step (see CLAUDE.md's own entry for the
+    // reasoning). finalize_fba_report() (migration 0197) is one atomic
+    // RPC -- it sets status to 'completed' AND extracts triggers/
+    // setting events/strategies into passport_clinical_content in the
+    // same transaction, replacing what used to be a plain client-side
+    // status update here plus a separate parent-triggered
+    // approve_fba_strategies() call from ApprovalBanner (now retired).
+    // completed_at is still stamped by the existing DB trigger, not set
+    // here.
+    const { error: finalizeError } = await supabase.rpc("finalize_fba_report", { p_fba_id: fbaId });
 
-    if (updateError) {
-      console.error("Failed to finalize FBA:", updateError);
+    if (finalizeError) {
+      console.error("Failed to finalize FBA:", finalizeError);
       setIsFinalizing(false);
       setError("Couldn't finalise this FBA. Please try again.");
       return;

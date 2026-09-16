@@ -10,7 +10,6 @@ import { FBA_SECTIONS } from "@/lib/fba/sections";
 import { InlineErrorState } from "@/components/ui/InlineErrorState";
 import { FbaSectionsReadOnly } from "@/components/passport/fba-reader/FbaSectionsReadOnly";
 import { FbaReaderNav } from "@/components/passport/fba-reader/FbaReaderNav";
-import { ApprovalBanner } from "@/components/passport/fba-reader/ApprovalBanner";
 
 export default function FbaReaderPage() {
   const { fbaId } = useParams<{ fbaId: string }>();
@@ -108,12 +107,6 @@ export default function FbaReaderPage() {
           </div>
         )}
       </main>
-
-      {report && report.status === "completed" && (
-        <div className="no-print">
-          <ApprovalBanner fbaId={fbaId} childName={childName} />
-        </div>
-      )}
     </div>
   );
 }
