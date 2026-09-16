@@ -1,6 +1,11 @@
+"use client";
+
+import { useEffect, useState } from "react";
 import { House, BookUser, Menu } from "lucide-react";
 import { AppBottomNav, type NavTab } from "./AppBottomNav";
 import { CalmNavButton } from "@/components/parent/calm/CalmNavButton";
+import { useHasUnreadMessages } from "@/hooks/useHasUnreadMessages";
+import { createClient } from "@/lib/supabase/client";
 
 // Parent track's tab list. "Passport" owns every /passport/* route (the
 // section wizard as well as the dashboard); "More" owns /more; everything
@@ -20,6 +25,28 @@ import { CalmNavButton } from "@/components/parent/calm/CalmNavButton";
 // page that renders <BottomNav> can reproduce a dead Passport tab by
 // simply forgetting to wire this prop.
 export function BottomNav({ passportHref = "/passport/dashboard" }: { passportHref?: string }) {
+  // Stage 5, item 6: a parent's own Messages entry point is the
+  // dashboard's own quick-action tile, below the fold on mobile -- there
+  // was no way to know a message had arrived without scrolling to it.
+  // Same "the nav fetches its own userId" convention TeacherBottomNav/
+  // SnaBottomNav/ClinicianBottomNav/PrincipalBottomNav already establish,
+  // rather than threading it through every page that renders this nav.
+  // useHasUnreadMessages is already role-generic (recipient_id = userId,
+  // RLS does the scoping) -- no changes needed to reuse it here.
+  const [userId, setUserId] = useState<string | null>(null);
+  useEffect(() => {
+    let isMounted = true;
+    createClient()
+      .auth.getUser()
+      .then(({ data }) => {
+        if (isMounted) setUserId(data.user?.id ?? null);
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+  const hasUnreadMessages = useHasUnreadMessages(userId);
+
   const tabs: NavTab[] = [
     {
       key: "home",
@@ -27,6 +54,12 @@ export function BottomNav({ passportHref = "/passport/dashboard" }: { passportHr
       icon: House,
       href: "/parent-dashboard",
       isActive: (pathname) => !pathname.startsWith("/passport") && !pathname.startsWith("/more"),
+      // The parent track has no dedicated Messages tab (unlike teacher/
+      // SNA/clinician/principal) -- messages are reached via the
+      // dashboard's own quick-action tile, so the dot lives on Home, the
+      // one tab that's always visible without scrolling, matching every
+      // other track's own "opposite corner from the numbered badge" dot.
+      showUnreadDot: hasUnreadMessages,
     },
     {
       key: "passport",
