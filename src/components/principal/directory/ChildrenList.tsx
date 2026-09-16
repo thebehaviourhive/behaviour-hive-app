@@ -25,11 +25,37 @@ interface ChildStatusBadges {
 // "what does a grey icon mean without hovering" -- three icons with
 // visible labels, in the same fixed left-to-right order the per-row
 // badges use, seen once rather than re-explained on every card.
+//
+// Follow-up, same stage: the three complete-state fills were all
+// Prussian Blue -- indistinguishable from each other at a glance, the
+// exact thing the legend/aria-label pair exists to make unnecessary to
+// check individually. Now colour-coded (Passport = Golden Brown,
+// Clinician = stays Prussian Blue, Parent = Pastel Blue), each carried
+// as its own `completeClassName` here rather than the one shared string
+// StatusBadge/StatusBadgeLegend used to hard-code, so the card row and
+// the legend can never drift out of sync with each other.
+//
+// Pastel Blue (#BAD9EB) checked for legibility once filled, not
+// assumed: computed contrast of a WHITE icon against that fill is
+// ~1.5:1 -- far below the 3:1 WCAG minimum for a graphical/UI element,
+// and visually confirmed as "barely-there", not "filled". Fixed with
+// the two things Daniel's own brief named as the likely fix -- a
+// darker outline (a solid 2px Prussian Blue border, replacing the
+// implicit borderless fill the other two complete states use) AND a
+// darker icon (Prussian Blue, not white -- computed contrast against
+// the same fill is ~6:1, comfortably over the 3:1 minimum). This is
+// also why Parent's complete state is the one exception with a visible
+// border: it needs one to read as filled at all; Passport and Clinician
+// don't. The shape rule itself (solid fill vs. dashed hollow ring) is
+// untouched by any of this -- still true with three fill colours, not
+// just the original one, since it was never carried by hue to begin
+// with.
 const STATUS_BADGE_DEFS: {
   key: keyof ChildStatusBadges;
   label: string;
   completeLabel: string;
   incompleteLabel: string;
+  completeClassName: string;
   icon: (props: { className?: string }) => React.ReactElement;
 }[] = [
   {
@@ -37,6 +63,7 @@ const STATUS_BADGE_DEFS: {
     label: "Passport",
     completeLabel: "Passport completed",
     incompleteLabel: "Passport not yet completed",
+    completeClassName: "bg-brand-golden-brown text-white",
     icon: (props) => <BookUser {...props} strokeWidth={2} />,
   },
   {
@@ -44,6 +71,7 @@ const STATUS_BADGE_DEFS: {
     label: "Clinician",
     completeLabel: "Clinician connected",
     incompleteLabel: "No clinician connected",
+    completeClassName: "bg-brand-prussian-blue text-white",
     icon: (props) => <ClinicalFileIcon {...props} />,
   },
   {
@@ -51,6 +79,9 @@ const STATUS_BADGE_DEFS: {
     label: "Parent",
     completeLabel: "Parent claimed",
     incompleteLabel: "Not yet claimed by a parent",
+    // Pastel Blue's own low contrast needs both a darker border AND a
+    // darker icon to read as filled -- see the header comment above.
+    completeClassName: "border-2 border-brand-prussian-blue bg-brand-pastel-blue text-brand-prussian-blue",
     icon: (props) => <User {...props} strokeWidth={2} />,
   },
 ];
@@ -69,9 +100,7 @@ function StatusBadge({
       aria-label={isComplete ? def.completeLabel : def.incompleteLabel}
       title={isComplete ? def.completeLabel : def.incompleteLabel}
       className={`flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full ${
-        isComplete
-          ? "bg-brand-prussian-blue text-white"
-          : "border border-dashed border-black/20 bg-transparent text-black/30"
+        isComplete ? def.completeClassName : "border border-dashed border-black/20 bg-transparent text-black/30"
       }`}
     >
       <Icon className="h-3.5 w-3.5" />
@@ -90,7 +119,9 @@ function StatusBadgeRow({ badges }: { badges: ChildStatusBadges | undefined }) {
 }
 
 // Seen once, above the list -- not re-explained per row. Same fixed
-// order as StatusBadgeRow.
+// order as StatusBadgeRow, and now the same per-badge completeClassName
+// too, so the legend's own swatches show the real colour each card
+// badge will actually use rather than a single generic example.
 function StatusBadgeLegend() {
   return (
     <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 font-sans text-xs text-brand-neutral-black/50">
@@ -98,7 +129,9 @@ function StatusBadgeLegend() {
         const Icon = def.icon;
         return (
           <span key={def.key} className="flex items-center gap-1.5">
-            <span className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-brand-prussian-blue text-white">
+            <span
+              className={`flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full ${def.completeClassName}`}
+            >
               <Icon className="h-3 w-3" />
             </span>
             {def.label}
