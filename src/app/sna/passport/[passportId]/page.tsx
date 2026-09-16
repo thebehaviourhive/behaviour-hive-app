@@ -13,15 +13,19 @@ import { ClinicalTeamSection } from "@/components/passport/clinical-team/Clinica
 import { PassportCompletionSection } from "@/components/passport/PassportCompletionSection";
 import { InlineErrorState } from "@/components/ui/InlineErrorState";
 import { ChildIncidentsTab } from "@/components/shared/ChildIncidentsTab";
+import { PassportMessagesTab } from "@/components/passport/PassportMessagesTab";
 
 // SNA's scoped passport view -- a deliberately narrower sibling of
 // /teacher/passport/[passportId], not that page reused wholesale. Same
 // tabs (Summary/Behaviour/Communication/Supports/ABC Logs/Incidents/
 // Clinical Team, all backed by role-blind queries/RPCs that already
-// correctly include SNA per migration 0065), but no Messages tab, no
-// Progress tab, no EOD, and no "+ Add to Ledger" -- all explicitly
-// excluded from the SNA v1 grant list. The footer is just "+ Log ABC
-// Incident".
+// correctly include SNA per migration 0065), plus Messages (Stage 7,
+// item 5 -- child-scoped messaging, decided during the Group B pass,
+// mechanism now live: get_message_recipient_candidates()/
+// can_view_message()/send_message() all gained an SNA branch via
+// has_sna_access(), migration 0196). Still no Progress tab, no EOD, and
+// no "+ Add to Ledger" -- those stay outside the SNA v1 grant list. The
+// footer is just "+ Log ABC Incident".
 //
 // Passport Incidents tabs (migration 0166) -- same mislabelling the
 // teacher track had (an "Incidents" tab that was actually the ABC
@@ -31,7 +35,16 @@ import { ChildIncidentsTab } from "@/components/shared/ChildIncidentsTab";
 // (has_child_access() gated, same as the teacher track -- has_sna_
 // access() is one of that function's own OR-branches, nothing new
 // granted).
-type TabKey = "summary" | "medical" | "behaviour" | "communication" | "supports" | "incidents" | "incidentLog" | "clinicalTeam";
+type TabKey =
+  | "summary"
+  | "medical"
+  | "behaviour"
+  | "communication"
+  | "supports"
+  | "incidents"
+  | "incidentLog"
+  | "clinicalTeam"
+  | "messages";
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: "summary", label: "Summary" },
@@ -42,6 +55,7 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: "incidents", label: "ABC Logs" },
   { key: "incidentLog", label: "Incidents" },
   { key: "clinicalTeam", label: "Clinical Team" },
+  { key: "messages", label: "Messages" },
 ];
 
 const SLEEP_LABELS: Record<string, string> = {
@@ -535,6 +549,15 @@ export default function SnaPassportPage() {
               <ClinicalTeamSection items={clinicalContentItems} viewerRole="sna" />
             )}
           </>
+        )}
+
+        {activeTab === "messages" && user && (
+          <PassportMessagesTab
+            passportId={passportId}
+            childName={profile.childFirstName}
+            userId={user.id}
+            senderRole="sna"
+          />
         )}
       </main>
 
