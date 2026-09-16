@@ -125,6 +125,9 @@ export function RequestAttestationsCard({ incidentId, requested, onChange }: Req
           Turning this off pulls it back to draft -- they won&apos;t be able to see it until you request again, and
           when you do, their attestation will need renewing, the same as if the record itself had changed.
         </p>
+        {/* Destructive (invalidates existing staff attestations), not
+            "needs attention" -- see ReasonConfirmSheet's own comment on
+            this exact pattern. */}
         <Button
           type="button"
           onClick={async () => {
@@ -132,7 +135,7 @@ export function RequestAttestationsCard({ incidentId, requested, onChange }: Req
             await setAndSave(false);
           }}
           disabled={isSaving}
-          className="mt-6 !bg-brand-golden-brown"
+          className="mt-6 !border-2 !border-brand-neutral-black !bg-white !text-brand-neutral-black hover:!bg-black/5"
         >
           Turn off anyway
         </Button>

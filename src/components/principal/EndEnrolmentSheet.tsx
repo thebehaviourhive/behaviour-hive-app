@@ -101,7 +101,14 @@ export function EndEnrolmentSheet({ isOpen, enrolmentId, childName, onClose, onE
         </p>
       )}
 
-      <Button type="button" onClick={handleConfirm} disabled={!reason || isSubmitting} className="mt-5 !bg-brand-golden-brown">
+      {/* Destructive, not "needs attention" -- see ReasonConfirmSheet's
+          own comment on this exact pattern. */}
+      <Button
+        type="button"
+        onClick={handleConfirm}
+        disabled={!reason || isSubmitting}
+        className="mt-5 !border-2 !border-brand-neutral-black !bg-white !text-brand-neutral-black hover:!bg-black/5"
+      >
         {isSubmitting ? "Ending enrolment…" : "End enrolment"}
       </Button>
       <Button type="button" variant="secondary" onClick={close} disabled={isSubmitting} className="mt-2 !border-black/10 !text-black/60">

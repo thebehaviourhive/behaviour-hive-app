@@ -141,11 +141,13 @@ export function ReviewStaffJoinSheet({ member, isOpen, onClose, onResolved }: Re
             </p>
           )}
 
+          {/* Destructive, not "needs attention" -- see
+              ReasonConfirmSheet's own comment on this exact pattern. */}
           <Button
             type="button"
             onClick={handleReject}
             disabled={isSubmitting}
-            className="mt-4 !bg-brand-golden-brown"
+            className="mt-4 !border-2 !border-brand-neutral-black !bg-white !text-brand-neutral-black hover:!bg-black/5"
           >
             {isSubmitting ? "Rejecting…" : "Confirm Rejection"}
           </Button>

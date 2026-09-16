@@ -87,7 +87,20 @@ export function ReasonConfirmSheet({
         </p>
       )}
 
-      <Button type="button" onClick={handleConfirm} disabled={isSubmitting} className="mt-4 !bg-brand-golden-brown">
+      {/* Destructive, not "needs attention" -- Golden Brown is this
+          product's attention token (see CLAUDE.md's own "THE SUPPORT
+          BUTTON IS THE ONE DELIBERATE RED" entry, which draws the same
+          line for red), and a routine removal/revoke/deactivation is
+          neither an outstanding task nor an alarm. Distinguished from
+          Cancel by weight (a solid border, not the light grey outline
+          below) and by its own label doing the actual work, not by
+          colour. */}
+      <Button
+        type="button"
+        onClick={handleConfirm}
+        disabled={isSubmitting}
+        className="mt-4 !border-2 !border-brand-neutral-black !bg-white !text-brand-neutral-black hover:!bg-black/5"
+      >
         {isSubmitting ? submittingLabel : confirmLabel}
       </Button>
       <Button type="button" variant="secondary" onClick={close} disabled={isSubmitting} className="mt-2 !border-black/10 !text-black/60">
