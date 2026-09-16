@@ -4,11 +4,30 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 
+type ChildrenSegment = "active" | "past";
+
+const CHILDREN_SEGMENTS: { key: ChildrenSegment; label: string }[] = [
+  { key: "active", label: "Active" },
+  { key: "past", label: "Past Pupils" },
+];
+
 // PRD 4, Stage 4 -- extracted from principal/passports/page.tsx.
 // "Passports" renamed to "Children" here, per Daniel's confirmation --
 // a rename, in scope, no surface change. Same Link+preventDefault
 // pattern as ClassesList: a real push to /principal/passports/[id]
 // below lg (unchanged), intercepted into onSelect at lg+.
+//
+// Stage 7, item 2 -- Past Pupils was a collapsed accordion under the
+// active list; now a proper second, independently selectable list, same
+// pill-segment pattern the Directory page itself already uses
+// (principal/directory/page.tsx's own Staff/Classes/Children/Temporary
+// Access/Clinicians selector) rather than a third UI convention. Both
+// segments share the one search query already in state -- typing
+// filters whichever list is currently selected, same as before. A past
+// pupil's own file was already confirmed to render correctly
+// (ChildDetail.tsx has no enrolment-status filter on its own roster
+// check, only on its two write actions) -- this is a pure UI
+// restructuring, no data-layer change.
 export function ChildrenList({
   institutionId,
   selectedPassportId,
@@ -22,7 +41,7 @@ export function ChildrenList({
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
-  const [showPast, setShowPast] = useState(false);
+  const [segment, setSegment] = useState<ChildrenSegment>("active");
 
   const load = useCallback(async (instId: string) => {
     setIsLoading(true);
@@ -126,40 +145,48 @@ export function ChildrenList({
         <p className="rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-center font-sans text-body text-brand-neutral-black/60">
           No children linked to this school yet.
         </p>
-      ) : filteredActive.length === 0 && filteredPast.length === 0 ? (
-        <p className="px-1 pt-2 text-center font-sans text-body text-brand-neutral-black/60">No children match &quot;{query}&quot;.</p>
       ) : (
         <>
-          {filteredActive.length > 0 && <div className="flex flex-col gap-2">{filteredActive.map((c) => rowLink(c, false))}</div>}
-
-          {filteredActive.length === 0 && filteredPast.length > 0 && (
-            <p className="px-1 pt-2 text-center font-sans text-body text-brand-neutral-black/60">
-              {query.trim() ? `No currently enrolled children match "${query}".` : "No children currently enrolled."}
-            </p>
-          )}
-
-          {filteredPast.length > 0 && (
-            <div className="mt-4">
+          <div className="mb-4 flex flex-wrap gap-2">
+            {CHILDREN_SEGMENTS.map((s) => (
               <button
+                key={s.key}
                 type="button"
-                onClick={() => setShowPast((v) => !v)}
-                className="flex w-full items-center justify-between rounded-2xl border border-dashed border-black/10 bg-white/60 px-4 py-3 text-left font-accent text-eyebrow font-bold uppercase tracking-wide text-brand-neutral-black/50"
+                onClick={() => setSegment(s.key)}
+                aria-pressed={segment === s.key}
+                className={`rounded-full border px-4 py-2 font-sans text-body font-semibold transition-colors ${
+                  segment === s.key
+                    ? "border-brand-pastel-blue bg-brand-pastel-blue text-brand-prussian-blue underline underline-offset-4"
+                    : "border-black/10 bg-white text-brand-neutral-black/70"
+                }`}
               >
-                <span>Past pupils ({filteredPast.length})</span>
-                <span>{showPast ? "−" : "+"}</span>
+                {s.label} ({s.key === "active" ? filteredActive.length : filteredPast.length})
               </button>
-              {showPast && (
-                <div className="mt-2 flex flex-col gap-2">
-                  {filteredPast.map((c) => (
-                    <div key={c.passport_id}>
-                      {rowLink(c, true)}
-                      <p className="mt-0.5 px-1 font-sans text-eyebrow text-brand-neutral-black/50">
-                        Enrolment ended {formatDate(c.enrolment_ended_at!)}
-                      </p>
-                    </div>
-                  ))}
+            ))}
+          </div>
+
+          {segment === "active" ? (
+            filteredActive.length === 0 ? (
+              <p className="px-1 pt-2 text-center font-sans text-body text-brand-neutral-black/60">
+                {query.trim() ? `No currently enrolled children match "${query}".` : "No children currently enrolled."}
+              </p>
+            ) : (
+              <div className="flex flex-col gap-2">{filteredActive.map((c) => rowLink(c, false))}</div>
+            )
+          ) : filteredPast.length === 0 ? (
+            <p className="px-1 pt-2 text-center font-sans text-body text-brand-neutral-black/60">
+              {query.trim() ? `No past pupils match "${query}".` : "No past pupils."}
+            </p>
+          ) : (
+            <div className="flex flex-col gap-2">
+              {filteredPast.map((c) => (
+                <div key={c.passport_id}>
+                  {rowLink(c, true)}
+                  <p className="mt-0.5 px-1 font-sans text-eyebrow text-brand-neutral-black/50">
+                    Enrolment ended {formatDate(c.enrolment_ended_at!)}
+                  </p>
                 </div>
-              )}
+              ))}
             </div>
           )}
         </>
