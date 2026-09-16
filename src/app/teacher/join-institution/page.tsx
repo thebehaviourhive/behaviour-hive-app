@@ -9,6 +9,7 @@ import { LockIcon } from "@/components/ui/icons";
 import { createClient } from "@/lib/supabase/client";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { getPostAuthRedirect } from "@/lib/roleRedirect";
+import { friendlyJoinError } from "@/lib/friendlyJoinError";
 
 // PRD 2, Stage 1: this used to carry its own local, independent copy of
 // "where does this role's dashboard live" (getStaffDashboardDestination)
@@ -22,24 +23,10 @@ import { getPostAuthRedirect } from "@/lib/roleRedirect";
 // calls actually fire, so the two functions' behavior was already
 // identical for every real case; this just removes the second source
 // of truth, not a behavior change.
-
-// The one-principal-per-institution constraint (migration 0068,
-// deliberately NOT widened for handover -- see 0102's own migration
-// comment) is enforced at the database, not the UI -- a second
-// principal's self-link fails with a raw Postgres unique-violation,
-// which is not something to put in front of someone mid-onboarding.
-// Matched on the constraint NAME (stable, chosen by the migration
-// itself), not by fragile string-matching against Postgres's own
-// message wording. Points at the real mechanism now that Stage 1c
-// (hand_over_principal()) exists -- ask the current principal, or join
-// as staff instead -- rather than "contact support," which is the
-// abandoned-principal path, not the ordinary one.
-function friendlyJoinError(rawMessage: string): string {
-  if (rawMessage.includes("institution_staff_one_principal_per_institution")) {
-    return "This school already has a principal. Ask them to hand over the role to you, or join as a class teacher instead.";
-  }
-  return rawMessage;
-}
+//
+// friendlyJoinError() itself moved to src/lib/friendlyJoinError.ts once
+// the onboarding restructure (Sept 2026) gave role-select/school-staff
+// the identical need for it -- see that file's own comment.
 
 // checkExisting()'s own status, four-way since migration 0100 --
 // mirrors the client-side "what should this person see on landing"

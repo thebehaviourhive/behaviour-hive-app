@@ -1,7 +1,6 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { getPostAuthRedirect } from "@/lib/roleRedirect";
-import { hasConsented } from "@/lib/hasConsented";
+import { resolveOnboardingDestination } from "@/lib/resolveOnboardingDestination";
 
 export default async function RootPage() {
   const supabase = await createClient();
@@ -13,17 +12,9 @@ export default async function RootPage() {
     redirect("/register");
   }
 
-  const role = user.app_metadata?.role;
-
-  // CRITICAL BUG fix: this is the app's PWA start_url, so a force-quit
-  // reopen (and, previously, the privacy policy page's own Back button)
-  // lands here first -- it used to redirect straight to the role's
-  // dashboard on role alone, with no check that consent had ever been
-  // confirmed. A role-having, not-yet-consented user now goes to
-  // /consent instead of skipping past it.
-  if (role && !(await hasConsented(supabase, user.id))) {
-    redirect("/consent");
-  }
-
-  redirect(getPostAuthRedirect(role));
+  // This is the app's PWA start_url, so a force-quit reopen lands here
+  // first -- resolveOnboardingDestination() is the single source of
+  // truth for "role -> joined? -> consented? -> dashboard", shared with
+  // src/lib/supabase/proxy.ts so the two never drift out of sync again.
+  redirect(await resolveOnboardingDestination(supabase, user));
 }

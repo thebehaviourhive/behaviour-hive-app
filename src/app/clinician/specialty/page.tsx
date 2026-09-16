@@ -14,7 +14,12 @@ import {
 
 export default function ClinicianSpecialtyPage() {
   const router = useRouter();
-  const { isReady } = useRequireRole("clinician");
+  // allowBeforeConsent: true -- picking a specialty is this role's own
+  // "joining" moment under the onboarding restructure (Sept 2026),
+  // gated BEFORE consent now, the same way institution-code entry is
+  // for staff. See useRequireRole's own doc comment on this option --
+  // this is the one other call site that carries it.
+  const { isReady } = useRequireRole("clinician", { allowBeforeConsent: true });
   const [pendingSpecialty, setPendingSpecialty] = useState<Specialty | null>(null);
   const [showComingSoon, setShowComingSoon] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -35,7 +40,7 @@ export default function ClinicianSpecialtyPage() {
     }
 
     if (specialty === "behavioural_psychologist") {
-      router.push("/clinician/dashboard");
+      router.push("/consent");
       return;
     }
 
@@ -77,7 +82,7 @@ export default function ClinicianSpecialtyPage() {
         )}
       </div>
 
-      <BottomSheet isOpen={showComingSoon} onClose={() => router.push("/clinician/dashboard")}>
+      <BottomSheet isOpen={showComingSoon} onClose={() => router.push("/consent")}>
         <div className="flex flex-col items-center gap-3 text-center">
           <span className="flex h-16 w-16 items-center justify-center rounded-full bg-brand-pastel-blue/40 text-brand-prussian-blue">
             <svg
@@ -104,7 +109,7 @@ export default function ClinicianSpecialtyPage() {
           </p>
           <button
             type="button"
-            onClick={() => router.push("/clinician/dashboard")}
+            onClick={() => router.push("/consent")}
             className="mt-2 w-full rounded-2xl bg-brand-prussian-blue py-3.5 text-base font-semibold text-white transition-colors"
           >
             Return

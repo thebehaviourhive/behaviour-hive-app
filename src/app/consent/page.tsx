@@ -4,6 +4,8 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { hasConsented } from "@/lib/hasConsented";
+import { hasJoined } from "@/lib/hasJoined";
+import { getPostAuthRedirect } from "@/lib/roleRedirect";
 import { CURRENT_CONSENT_VERSION } from "@/lib/consentVersion";
 import { ParentConsentScreen } from "@/components/consent/ParentConsentScreen";
 import { TeacherAgreementScreen } from "@/components/consent/TeacherAgreementScreen";
@@ -22,14 +24,6 @@ import { Button } from "@/components/ui/Button";
 // verbs," never one component that takes a role prop and swaps text.
 
 type ConsentRole = "parent" | "class_teacher" | "clinician" | "sna" | "principal";
-
-// Where accepting (or resuming with it already given) sends each role
-// next -- unchanged from the previous screen's own routing.
-function getPostConsentDestination(role: ConsentRole): string {
-  if (role === "clinician") return "/clinician/specialty";
-  if (role === "class_teacher" || role === "sna" || role === "principal") return "/teacher/join-institution";
-  return "/parent-dashboard";
-}
 
 export default function ConsentPage() {
   const router = useRouter();
@@ -68,13 +62,30 @@ export default function ConsentPage() {
         return;
       }
 
+      // Onboarding restructure, Sept 2026: consent now sits AFTER
+      // joining, not before -- so this page's own precondition is the
+      // NEW thing to check, not just role. A role-holder who hasn't
+      // entered a code yet (staff) or picked a specialty yet
+      // (clinician) shouldn't be shown consent copy about an
+      // organisation they haven't actually joined; send them back to
+      // finish that first. Parents have no joining precondition, same
+      // as before this change.
+      if (!(await hasJoined(supabase, user.id, userRole))) {
+        if (!isMounted) return;
+        router.replace(userRole === "clinician" ? "/clinician/specialty" : "/role-select");
+        return;
+      }
+
       // Someone who already has a CURRENT-version consents row (real
       // prior completion at the version now live, not a stale one)
       // shouldn't sit through the form again just because they landed
-      // on this URL -- resume sends them straight to their next step.
+      // on this URL -- resume sends them straight to their REAL
+      // dashboard now, not back to code-entry (getPostConsentDestination's
+      // whole reason to exist -- routing PAST consent to code-entry --
+      // is backwards now that code-entry precedes consent; removed).
       if (await hasConsented(supabase, user.id)) {
         if (!isMounted) return;
-        router.replace(getPostConsentDestination(userRole));
+        router.replace(getPostAuthRedirect(userRole));
         return;
       }
 
@@ -111,7 +122,7 @@ export default function ConsentPage() {
       return;
     }
 
-    router.push(getPostConsentDestination(role));
+    router.push(getPostAuthRedirect(role));
   }
 
   if (!isReady || !role) {

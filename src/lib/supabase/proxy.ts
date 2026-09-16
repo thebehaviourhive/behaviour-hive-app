@@ -1,7 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
-import { hasConsented } from "@/lib/hasConsented";
-import { getPostAuthRedirect } from "@/lib/roleRedirect";
+import { resolveOnboardingDestination } from "@/lib/resolveOnboardingDestination";
 
 // Routes reachable without a session. Everything else is treated as an
 // authenticated route group. This is an optimistic, cookie-only check per
@@ -99,8 +98,11 @@ export async function updateSession(request: NextRequest) {
   //
   // The proxy runs before any page rendering begins at all, so a
   // redirect issued here is a real, instant HTTP 307 -- no meta-
-  // refresh tax. This computes the exact same destination
-  // (consent -> role dashboard) src/app/page.tsx already computes, for
+  // refresh tax. resolveOnboardingDestination() computes the exact
+  // same destination src/app/page.tsx computes -- both call the one
+  // shared function now, rather than each hand-copying the same
+  // role/joined/consent branch (see that function's own comment for
+  // why that duplication was the actual risk in this change) -- for
   // both "/" itself and the case of an already-authenticated user
   // landing on /login or /register, sending them straight to their
   // real destination in one hop instead of bouncing through "/" and
@@ -109,13 +111,7 @@ export async function updateSession(request: NextRequest) {
   // doesn't intercept (e.g. Supabase unreachable) -- not deleted, just
   // no longer the only path.
   if (user && (pathname === "/" || pathname === "/login" || pathname === "/register")) {
-    const role = user.app_metadata?.role;
-    let destination: string;
-    if (role && !(await hasConsented(supabase, user.id))) {
-      destination = "/consent";
-    } else {
-      destination = getPostAuthRedirect(role);
-    }
+    const destination = await resolveOnboardingDestination(supabase, user);
     if (destination !== pathname) {
       return withRefreshedCookies(response, NextResponse.redirect(new URL(destination, request.url)));
     }

@@ -13669,6 +13669,101 @@ async function main() {
     }
   }
 
+  console.log(`\n== CHECK RRR: onboarding restructure (Sept 2026) -- consent now sits AFTER institution-code entry, not before. The only enforcement of that ordering is client-side (useRequireRole, src/app/page.tsx, src/lib/supabase/proxy.ts all call the same hasConsented() query) -- nothing in RLS or any RPC constrains write order between institution_staff and consents, confirmed by reading every relevant policy directly. So this check does what CHECK V/W's own resolveStatus() already established as this suite's answer to "the database allows it, does the client actually enforce it": replicate the CLIENT'S OWN query shape against real fixture data, not invent a database-level proxy for a client-side gate. Proves the "joined but not consented" window is both REAL (a genuine staff member can be in it) and DETECTABLE (their own hasConsented() query correctly says so) -- the guarantee this restructure depends on for every dashboard staying shut to someone who hasn't consented yet. ==`);
+  if (shouldRun("RRR")) {
+    const { data: instRRR, error: instRRRErr } = await admin
+      .from("institutions")
+      .insert({ name: "Onboarding Order Test School", institution_code: "RRRONBOARDORDER" + Math.floor(Math.random() * 10000), status: "verified" })
+      .select()
+      .single();
+    if (instRRRErr) throw instRRRErr;
+    const institutionRRRId = instRRR.id;
+
+    const staffRRRId = await createUser("rrr.staff@thebehaviourhive.com", "RRR Staff Joined Not Consented", "class_teacher");
+    const consentedRRRId = await createUser("rrr.consented@thebehaviourhive.com", "RRR Staff Joined And Consented", "class_teacher");
+    const unjoinedRRRId = await createUser("rrr.unjoined@thebehaviourhive.com", "RRR Staff Role Only", "class_teacher");
+
+    // staffRRR: joined (a real institution_staff row -- what role-select/
+    // school-staff's own handleSelect() inserts on a successful code
+    // entry), deliberately NO consents row.
+    const { error: staffRRRJoinErr } = await admin.from("institution_staff").insert({
+      institution_id: institutionRRRId, user_id: staffRRRId, role: "class_teacher",
+    });
+    if (staffRRRJoinErr) throw staffRRRJoinErr;
+
+    // consentedRRR: joined AND consented (positive control).
+    const { error: consentedRRRJoinErr } = await admin.from("institution_staff").insert({
+      institution_id: institutionRRRId, user_id: consentedRRRId, role: "class_teacher",
+    });
+    if (consentedRRRJoinErr) throw consentedRRRJoinErr;
+    // CURRENT_CONSENT_VERSION, src/lib/consentVersion.ts, live value 2 --
+    // hardcoded here the same way this suite hardcodes other schema-level
+    // constants elsewhere, since the .mjs script can't import the app's
+    // own TS module tree directly.
+    const { error: consentedRRRConsentErr } = await admin.from("consents").insert({
+      user_id: consentedRRRId, role: "class_teacher", consent_version: 2, marketing_accepted: false,
+    });
+    if (consentedRRRConsentErr) throw consentedRRRConsentErr;
+
+    // unjoinedRRR: role set, no institution_staff row at all -- never
+    // entered a code. The baseline "not joined" state, kept distinct
+    // from "joined but not consented" so the two are proven separately,
+    // not conflated into one "not consented" bucket.
+
+    const staffRRR = await signedInClient("rrr.staff@thebehaviourhive.com");
+    const consentedRRR = await signedInClient("rrr.consented@thebehaviourhive.com");
+    const unjoinedRRR = await signedInClient("rrr.unjoined@thebehaviourhive.com");
+
+    // The EXACT query hasConsented() runs (src/lib/hasConsented.ts) --
+    // file:line-matched to that function's own shape, not a proxy for it.
+    async function runHasConsentedQuery(client) {
+      const { data, error } = await client
+        .from("consents")
+        .select("id")
+        .gte("consent_version", 2)
+        .limit(1)
+        .maybeSingle();
+      if (error) return null;
+      return data;
+    }
+
+    const staffRRRConsentRow = await runHasConsentedQuery(staffRRR);
+    record(
+      "RRR-1 THE WINDOW ITSELF: a genuinely joined (real institution_staff row) but not-yet-consented staff member's OWN hasConsented() query correctly returns null -- this is what stops every useRequireRole-gated dashboard from admitting them",
+      staffRRRConsentRow === null,
+      JSON.stringify(staffRRRConsentRow)
+    );
+
+    const { data: staffRRRMembership } = await admin.from("institution_staff").select("id").eq("user_id", staffRRRId).eq("institution_id", institutionRRRId).maybeSingle();
+    record(
+      "RRR-2 THE WINDOW IS REAL, NOT JUST 'NOT CONSENTED': the same user genuinely has an institution_staff row -- proving this is the joined-but-unconsented case, not merely an unset role",
+      staffRRRMembership !== null,
+      JSON.stringify(staffRRRMembership)
+    );
+
+    const consentedRRRConsentRow = await runHasConsentedQuery(consentedRRR);
+    record(
+      "RRR-3 (positive control) a joined AND consented staff member's own hasConsented() query correctly returns a row -- confirms RRR-1 isn't vacuously true for every session",
+      consentedRRRConsentRow !== null,
+      JSON.stringify(consentedRRRConsentRow)
+    );
+
+    const { data: unjoinedRRRMembership } = await admin.from("institution_staff").select("id").eq("user_id", unjoinedRRRId).maybeSingle();
+    const unjoinedRRRConsentRow = await runHasConsentedQuery(unjoinedRRR);
+    record(
+      "RRR-4 (negative control) the baseline 'never entered a code' state is genuinely distinct from RRR-1's 'joined, not consented' state -- no institution_staff row at all, and the same not-consented query result",
+      unjoinedRRRMembership === null && unjoinedRRRConsentRow === null,
+      JSON.stringify({ membership: unjoinedRRRMembership, consentRow: unjoinedRRRConsentRow })
+    );
+
+    console.log("RRR summary complete.");
+
+    await admin.from("institutions").delete().eq("id", institutionRRRId);
+    for (const id of [staffRRRId, consentedRRRId, unjoinedRRRId]) {
+      await admin.auth.admin.deleteUser(id);
+    }
+  }
+
   console.log(`\n== Summary ==`);
   const failed = results.filter((r) => !r.pass);
   console.log(`${results.length - failed.length}/${results.length} passed.`);

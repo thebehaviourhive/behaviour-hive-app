@@ -4,98 +4,61 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { BrandMark } from "@/components/ui/BrandMark";
 import { Button } from "@/components/ui/Button";
+import { TextField } from "@/components/ui/TextField";
 import { createClient } from "@/lib/supabase/client";
 
-// "school_staff" is a UI-only sentinel, never written anywhere -- it
-// exists purely to route Continue to the School Staff sub-select
-// instead of calling /api/set-role directly. The two real roles that
-// screen can produce (class_teacher, sna) are the only values that
-// ever reach set-role for this branch. See ROLES below.
-type SelectableValue = "parent" | "school_staff" | "clinician";
-
-const ROLES: {
-  value: SelectableValue;
-  icon: string;
-  title: string;
-  subtitle: string;
-}[] = [
-  {
-    value: "parent",
-    icon: "❤",
-    title: "Parent or carer",
-    subtitle: "Building a passport for my child",
-  },
-  {
-    value: "school_staff",
-    icon: "🏫",
-    title: "School staff",
-    subtitle: "Class teacher or SNA supporting children in school",
-  },
-  {
-    value: "clinician",
-    icon: "🧠",
-    title: "Clinician",
-    subtitle: "BCBA, psychologist, OT, SLT or GP",
-  },
-];
-
-const ROLE_LABELS: Record<SelectableValue, string> = {
-  parent: "parent / carer",
-  school_staff: "school staff",
-  clinician: "clinician",
-};
-
+// Onboarding restructure, Sept 2026: this used to be "who are you"
+// (parent / school staff / clinician), asked before any institution
+// code -- which let someone pick one and then enter the other's code,
+// with nothing to catch the mismatch. Now the code comes first: it
+// resolves a real institution, and everything after (which roles are
+// even offered, what the consent copy says) follows from that
+// institution rather than a self-report. Nobody picks "school" or
+// "clinic" here -- the code already knows.
+//
+// Same lookup teacher/join-institution/page.tsx's own handleJoin()
+// uses (case-insensitive exact match, not a substring search), same
+// two error strings -- this screen and that one now agree on what
+// "not found" and "not verified yet" mean, because the previous
+// version of this file inherited neither check at all (role-select
+// never looked up an institution before).
 export default function RoleSelectPage() {
   const router = useRouter();
-  const [selectedRole, setSelectedRole] = useState<SelectableValue | null>(null);
+  const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   async function handleContinue() {
-    if (!selectedRole) return;
-
-    // School staff never writes a role here -- the sub-select screen is
-    // where the real class_teacher/sna choice happens and set-role gets
-    // called. Never write a placeholder role.
-    if (selectedRole === "school_staff") {
-      router.push("/role-select/school-staff");
-      return;
-    }
+    if (!code.trim()) return;
 
     setError(null);
     setIsSubmitting(true);
 
-    const response = await fetch("/api/set-role", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ role: selectedRole }),
-    });
-
-    if (!response.ok) {
-      const { error: responseError } = await response
-        .json()
-        .catch(() => ({ error: null }));
-      setIsSubmitting(false);
-      setError(responseError ?? "Something went wrong. Please try again.");
-      return;
-    }
-
-    // The role was just written server-side to app_metadata, but the
-    // access token already held by the client keeps its old claims until
-    // refreshed — the institution_staff insert a teacher makes on the
-    // very next screen checks it, which would otherwise still read the
-    // pre-selection role.
     const supabase = createClient();
-    await supabase.auth.refreshSession();
+    const { data: institution, error: lookupError } = await supabase
+      .from("institutions")
+      .select("id, status")
+      .ilike("institution_code", code.trim())
+      .maybeSingle();
 
     setIsSubmitting(false);
 
-    // All roles go through the same consent screen (its own copy and
-    // post-accept destination now branch per role -- see
-    // src/app/consent/page.tsx); teachers previously skipped consent
-    // entirely and went straight to join-institution, which /consent
-    // now forwards them to itself once they accept.
-    router.push("/consent");
+    if (lookupError) {
+      setError(lookupError.message);
+      return;
+    }
+
+    if (!institution) {
+      setError("We couldn't find an institution with that code. Please check and try again.");
+      return;
+    }
+
+    if (institution.status !== "verified") {
+      setError("This institution hasn't been verified yet. Please try again later.");
+      return;
+    }
+
+    router.push(`/role-select/school-staff?institutionId=${institution.id}`);
   }
 
   return (
@@ -104,61 +67,25 @@ export default function RoleSelectPage() {
         <div className="mb-6 flex flex-col items-center gap-3 text-center">
           <BrandMark />
           <h1 className="font-heading text-2xl font-semibold text-brand-neutral-black">
-            Who are you?
+            Enter your organisation&apos;s code
           </h1>
         </div>
 
         <div className="rounded-3xl border border-black/5 bg-white p-6 shadow-sm">
           <p className="mb-4 text-sm leading-relaxed text-black/60">
-            Your role determines what you can see and do on the platform.
+            Your organisation gave you a code when they set up your account. It tells us who you
+            work with and what to show you.
           </p>
 
-          <div className="flex flex-col gap-3">
-            {ROLES.map((role) => {
-              const isSelected = selectedRole === role.value;
-              return (
-                <button
-                  key={role.value}
-                  type="button"
-                  onClick={() => setSelectedRole(role.value)}
-                  className={`flex items-center gap-3 rounded-2xl border p-3 text-left transition-colors ${
-                    isSelected
-                      ? "border-brand-prussian-blue bg-brand-pastel-blue/20"
-                      : "border-black/10 bg-white hover:bg-black/[0.02]"
-                  }`}
-                >
-                  <span
-                    className={`flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full text-lg ${
-                      isSelected
-                        ? "bg-brand-prussian-blue text-white"
-                        : "bg-black/5"
-                    }`}
-                    aria-hidden
-                  >
-                    {role.icon}
-                  </span>
-                  <span className="flex-1">
-                    <span className="block text-sm font-semibold text-brand-neutral-black">
-                      {role.title}
-                    </span>
-                    <span
-                      className={`block text-xs ${isSelected ? "text-brand-prussian-blue" : "text-black/50"}`}
-                    >
-                      {role.subtitle}
-                    </span>
-                  </span>
-                  {isSelected && (
-                    <span
-                      className="text-lg font-semibold text-brand-prussian-blue"
-                      aria-hidden
-                    >
-                      ✓
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
+          <TextField
+            label="Organisation code"
+            type="text"
+            placeholder="e.g. 7F3K9Q"
+            required
+            value={code}
+            onChange={(e) => setCode(e.target.value)}
+            className="uppercase tracking-widest"
+          />
 
           {error && (
             <p role="alert" className="mt-4 text-sm font-medium text-red-600">
@@ -169,17 +96,19 @@ export default function RoleSelectPage() {
           <Button
             type="button"
             onClick={handleContinue}
-            disabled={!selectedRole || isSubmitting}
-            className="mt-5"
+            disabled={!code.trim() || isSubmitting}
+            className="mt-6"
           >
-            {isSubmitting
-              ? "Saving…"
-              : selectedRole === "school_staff"
-                ? "Continue"
-                : selectedRole
-                  ? `Continue as ${ROLE_LABELS[selectedRole]}`
-                  : "Continue"}
+            {isSubmitting ? "Checking…" : "Continue"}
           </Button>
+
+          <button
+            type="button"
+            onClick={() => router.push("/role-select/no-code")}
+            className="mt-4 w-full text-center text-sm font-semibold text-brand-prussian-blue"
+          >
+            I don&apos;t have a code, or I&apos;m a parent
+          </button>
         </div>
       </div>
     </main>

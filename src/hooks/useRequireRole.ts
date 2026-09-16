@@ -7,10 +7,26 @@ import { createClient } from "@/lib/supabase/client";
 import { getPostAuthRedirect } from "@/lib/roleRedirect";
 import { hasConsented } from "@/lib/hasConsented";
 
-export function useRequireRole(role: string | string[]) {
+interface UseRequireRoleOptions {
+  // Named for what it grants, not what it skips -- a page passing this
+  // is declaring "I am part of onboarding itself, reachable before
+  // consent is recorded", not quietly opting out of a check. Onboarding
+  // restructure, Sept 2026: only /clinician/specialty passes this
+  // (picking a specialty is now the clinician's own "joining" moment,
+  // gated BEFORE consent, matching institution-code entry for staff).
+  // Every other call site -- every dashboard, every deeper page,
+  // /teacher/join-institution, /clinician/verify, /passport/welcome,
+  // /passport/claim -- omits it and keeps the full gate. If you're
+  // adding a second call site here, that's the one thing to get right:
+  // this must never reach a page an unconsented user shouldn't see.
+  allowBeforeConsent?: boolean;
+}
+
+export function useRequireRole(role: string | string[], options?: UseRequireRoleOptions) {
   const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
   const [isReady, setIsReady] = useState(false);
+  const allowBeforeConsent = options?.allowBeforeConsent ?? false;
 
   // A caller passing an inline array literal (e.g. useRequireRole(["class_teacher", "sna"]))
   // gets a new array reference every render -- using that directly as a dependency
@@ -50,11 +66,17 @@ export function useRequireRole(role: string | string[]) {
       // checkbox. This is the one gate every role-protected page in the
       // app already goes through, so fixing it here closes every path at
       // once rather than just the one where the bug was first found.
-      const consented = await hasConsented(supabase, user.id);
-      if (!isMounted) return;
-      if (!consented) {
-        router.replace("/consent");
-        return;
+      //
+      // allowBeforeConsent is the one deliberate exception to that --
+      // see the option's own doc comment above for exactly which page
+      // uses it and why.
+      if (!allowBeforeConsent) {
+        const consented = await hasConsented(supabase, user.id);
+        if (!isMounted) return;
+        if (!consented) {
+          router.replace("/consent");
+          return;
+        }
       }
 
       setUser(user);
@@ -65,7 +87,7 @@ export function useRequireRole(role: string | string[]) {
     return () => {
       isMounted = false;
     };
-  }, [router, roleKey]);
+  }, [router, roleKey, allowBeforeConsent]);
 
   return { user, isReady };
 }
