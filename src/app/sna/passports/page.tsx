@@ -10,7 +10,7 @@ import { getChildDisplayName } from "@/lib/childDisplayName";
 import { SnaBottomNav } from "@/components/sna/SnaBottomNav";
 import { SupplyTeacherPassportReviewCard } from "@/components/sna/SupplyTeacherPassportReviewCard";
 import { TemporaryAccessBanner } from "@/components/shared/TemporaryAccessBanner";
-import { AlertTriangleIcon, PeopleIcon } from "@/components/ui/icons";
+import { AlertTriangleIcon, CheckIcon, PeopleIcon } from "@/components/ui/icons";
 import { QuestionnairePromptCard } from "@/components/questionnaire/QuestionnairePromptCard";
 import { AttestationPromptCard } from "@/components/incident-log/AttestationPromptCard";
 
@@ -81,6 +81,16 @@ export default function SnaPassportsPage() {
   });
 
   const [query, setQuery] = useState("");
+
+  // Stage 6, item 2 -- the attestation notification used to sit bare
+  // above the child list with nothing containing it. AttestationPromptCard
+  // itself stays exactly as it is (PRD 4's "do not fork shared
+  // components" rule) -- its own onCountChange prop already exists for
+  // exactly this, built for "the teacher dashboard's own 'Needs your
+  // attention' section" per its own doc comment, just never wired up
+  // here. null = still loading (renders the skeleton, not a premature
+  // "All clear.").
+  const [attestationCount, setAttestationCount] = useState<number | null>(null);
 
   const isLoading = isLoadingPassports || isLoadingCheckins;
 
@@ -164,7 +174,39 @@ export default function SnaPassportsPage() {
       )}
 
       <QuestionnairePromptCard track="sna" className="px-4 pb-4" />
-      <AttestationPromptCard className="px-4 pb-4" />
+
+      {/* Stage 6, item 2 -- same "Needs your attention" container and
+          "All clear." empty state the teacher and principal dashboards
+          use for their own work queues, brought to the one track that
+          didn't have it -- see this file's own header comment on why
+          this reads as floating rather than placed without it. */}
+      <section className="px-4 pb-4">
+        <h2 className="mb-2 font-heading text-sm font-bold uppercase tracking-wide text-brand-neutral-black/60">
+          Needs your attention
+        </h2>
+        {attestationCount === null ? (
+          <div className="flex animate-pulse items-center gap-4 rounded-2xl border border-black/5 bg-white p-4">
+            <div className="h-5 w-[120px] flex-shrink-0 rounded bg-black/10" />
+            <div className="h-4 flex-1 rounded bg-black/5" />
+          </div>
+        ) : attestationCount === 0 ? (
+          <div className="flex flex-col items-center gap-1 rounded-2xl bg-white p-8 text-center shadow-sm">
+            <CheckIcon className="mb-2 h-6 w-6 text-brand-prussian-blue/40" />
+            <p className="font-heading text-h2 font-semibold text-brand-neutral-black">All clear.</p>
+            <p className="font-sans text-body text-brand-neutral-black/60">
+              There are no outstanding actions requiring your attention today.
+            </p>
+          </div>
+        ) : null}
+        {/* Mounted unconditionally, not just in the "has items" branch
+            above -- its own useEffect has to run regardless of what's
+            currently shown, or onCountChange never fires and
+            attestationCount stays null forever. Self-hides via its own
+            "return null while loading or outstandingCount === 0" rule,
+            so this never doubles up with the skeleton/All-clear states
+            above -- exactly one of the three is ever visible. */}
+        <AttestationPromptCard onCountChange={setAttestationCount} />
+      </section>
 
       {children.length > 0 && (
         <div className="sticky top-0 z-[1] bg-brand-off-white/40 px-4 pb-4">
