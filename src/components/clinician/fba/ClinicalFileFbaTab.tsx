@@ -40,9 +40,11 @@ type ViewMode = "clinical" | "family";
 // current report -- rather than an arbitrary one.
 //
 // AFLS REBUILD (migration 0060): no longer fetches AFLS data itself --
-// both ClinicalFileFbaSections (via AflsSection) and FbaSectionsReadOnly
-// self-fetch afls_assessments through their own hook, matching the Calm
-// Cards precedent of independent, un-threaded fetches.
+// both ClinicalFileFbaSections and FbaSectionsReadOnly self-fetch
+// afls_assessments through their own hook, matching the Calm Cards
+// precedent of independent, un-threaded fetches. Both now render
+// AflsResultsGrid (Stage 8 security fix), never the editable
+// AflsSection -- see ClinicalFileFbaSections.tsx's own header comment.
 export function ClinicalFileFbaTab({ passportId, childName }: { passportId: string; childName: string }) {
   const [report, setReport] = useState<FbaReport | null | undefined>(undefined);
   const [loadError, setLoadError] = useState<string | null>(null);

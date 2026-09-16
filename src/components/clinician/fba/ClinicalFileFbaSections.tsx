@@ -6,7 +6,8 @@ import { TargetBehavioursSection } from "@/components/clinician/fba/sections/Tar
 import { TriggersSettingEventsSection } from "@/components/clinician/fba/sections/TriggersSettingEventsSection";
 import { IndirectAssessmentSection } from "@/components/clinician/fba/sections/IndirectAssessmentSection";
 import { DirectAssessmentSection } from "@/components/clinician/fba/sections/DirectAssessmentSection";
-import { AflsSection } from "@/components/clinician/fba/sections/AflsSection";
+import { AflsResultsGrid } from "@/components/clinician/fba/afls-results/AflsResultsGrid";
+import { useAflsAssessmentsForFba } from "@/hooks/useAflsAssessmentsForFba";
 import { RecommendationsSection } from "@/components/clinician/fba/sections/RecommendationsSection";
 import { ConclusionSection } from "@/components/clinician/fba/sections/ConclusionSection";
 import { ReviewSection } from "@/components/clinician/fba/sections/ReviewSection";
@@ -41,11 +42,20 @@ function noOpStructuralChange() {}
 // path to wire up. isClinicianWorkspace=true on Recommendations is what
 // surfaces Fix 1's Calm Card authoring affordances (create/edit/
 // publish/delete) even though the FBA's own content is locked --
-// CalmCardSection has no readOnly gate of its own by design. AFLS
-// (Section 11) gets the exact same treatment: AflsSection is rendered
-// live here too, not the read-only results grid -- the Clinical File
-// is where a clinician most naturally continues transcribing paper
-// assessments after the FBA locks (migration 0060's companion layer).
+// CalmCardSection has no readOnly gate of its own by design, deliberately
+// (migration 0053: a companion layer that only references already-locked
+// conclusions, never constitutes them -- retro-adding a Calm Card to a
+// finalised FBA is a real, wanted feature).
+//
+// AFLS (Section 11) does NOT get that treatment -- security fix, Stage
+// 8. It used to render live here too, on the same "companion layer,
+// same posture as Calm Cards" reasoning migration 0060 used for the
+// database lock. That analogy was wrong: AFLS is scored clinical
+// assessment data feeding the functional analysis, nothing like Calm
+// Cards. Since this tab only ever shows a completed FBA, AFLS renders
+// AflsResultsGrid (the same colour-coded results grid the parent's own
+// reader/PDF export uses, isPrint=false -- already a pure viewer)
+// unconditionally here, never the editor.
 export function ClinicalFileFbaSections({
   fbaId,
   passportId,
@@ -56,6 +66,7 @@ export function ClinicalFileFbaSections({
   report: FbaReport;
 }) {
   const content = report.contentData;
+  const { assessments: aflsAssessments } = useAflsAssessmentsForFba(fbaId);
 
   return (
     <>
@@ -134,7 +145,7 @@ export function ClinicalFileFbaSections({
               readOnly
             />
           )}
-          {section.kind === "afls" && <AflsSection fbaId={fbaId} />}
+          {section.kind === "afls" && <AflsResultsGrid assessments={aflsAssessments} isPrint={false} />}
           {section.kind === "recommendations" && (
             <RecommendationsSection
               fbaId={fbaId}

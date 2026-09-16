@@ -13501,6 +13501,174 @@ async function main() {
     );
   }
 
+  console.log(`\n== CHECK QQQ: Stage 8 security fix (migration 0199) -- the FBA completed-lock, proven for the whole shape in one place: every FBA-related table, a genuinely completed FBA, and a clinician/recipient who would otherwise be fully authorised, refused on each -- plus the one table that must STAY exempt (fba_calm_cards, 0053's own reasoning) and the "whoever holds it needs to see why" requirement for an auto-cancelled instrument request. This is the check that would have caught 0060 silently dropping afls_assessments' own lock, and the one meant to stop the next rebuild doing it again -- see CLAUDE.md's own "A REBUILD CAN SILENTLY DROP A GATE AND CLAIM IT DID NOT" entry. ==`);
+  if (shouldRun("QQQ")) {
+    const { data: instQQQ, error: instQQQErr } = await admin
+      .from("institutions")
+      .insert({ name: "QQQ FBA Lock Test School", institution_code: "QQQFBALOCK" + Math.floor(Math.random() * 10000), status: "verified" })
+      .select()
+      .single();
+    if (instQQQErr) throw instQQQErr;
+    const institutionQQQId = instQQQ.id;
+
+    const principalQQQId = await createUser("qqq.principal@thebehaviourhive.com", "QQQ Principal", "principal");
+    const clinicianQQQId = await createUser("qqq.clinician@thebehaviourhive.com", "QQQ Clinician", "clinician");
+    const recipientQQQId = await createUser("qqq.recipient@thebehaviourhive.com", "QQQ Recipient", "class_teacher");
+    const parentQQQId = await createUser("qqq.parent@thebehaviourhive.com", "QQQ Parent", "parent");
+
+    // Principal auto-approves (0100 derive_staff_join_approval -- no
+    // active principal existed yet in this fresh institution), matching
+    // CORE/CC's own pattern. recipientQQQ doesn't need an
+    // institution_staff row at all -- fba_instrument_requests' own
+    // recipient policy is recipient_id = auth.uid(), nothing more.
+    await admin.from("institution_staff").insert({ institution_id: institutionQQQId, user_id: principalQQQId, role: "principal" });
+
+    await admin.from("clinicians").insert({ user_id: clinicianQQQId, specialty: "behavioural_psychologist", verification_status: "verified" });
+
+    const { data: childQQQ, error: childQQQErr } = await admin
+      .from("passports")
+      .insert({ user_id: parentQQQId, child_name: "QQQ Child", passport_status: "complete" })
+      .select()
+      .single();
+    if (childQQQErr) throw childQQQErr;
+
+    await admin.from("clinician_access").insert({ passport_id: childQQQ.id, clinician_id: clinicianQQQId, is_active: true });
+
+    const { data: fbaQQQ, error: fbaQQQErr } = await admin
+      .from("fba_reports")
+      .insert({ passport_id: childQQQ.id, clinician_id: clinicianQQQId, status: "draft" })
+      .select()
+      .single();
+    if (fbaQQQErr) throw fbaQQQErr;
+
+    const clinicianQQQ = await signedInClient("qqq.clinician@thebehaviourhive.com");
+
+    // ---- QQQ-1/2 (positive controls, while draft): the ordinary write
+    // paths work BEFORE finalisation, proving the refusals below are the
+    // lock, not some unrelated breakage. ----
+    const { data: aflsQQQ, error: aflsQQQCreateErr } = await clinicianQQQ
+      .from("afls_assessments")
+      .insert({ fba_id: fbaQQQ.id, assessment_date: "2026-09-01", assessor_name: "QQQ Clinician", scores: { "1a": 3 } })
+      .select()
+      .single();
+    record("QQQ-1 (positive control, draft) clinician can insert an AFLS assessment on their own draft FBA", !aflsQQQCreateErr, aflsQQQCreateErr?.message);
+
+    const { error: reqQQQCreateErr, data: reqQQQ } = await clinicianQQQ
+      .from("fba_instrument_requests")
+      .insert({ fba_id: fbaQQQ.id, passport_id: childQQQ.id, instrument_type: "qabf", recipient_id: recipientQQQId })
+      .select()
+      .single();
+    record("QQQ-2 (positive control, draft) clinician can create an instrument request on their own draft FBA", !reqQQQCreateErr, reqQQQCreateErr?.message);
+
+    // ---- Finalise, through the real RPC -- the only path that sets
+    // status = 'completed'. ----
+    const { error: finaliseQQQErr } = await clinicianQQQ.rpc("finalize_fba_report", { p_fba_id: fbaQQQ.id });
+    record("QQQ-3 finalize_fba_report() succeeds for the owning clinician", !finaliseQQQErr, finaliseQQQErr?.message);
+
+    const { data: fbaQQQAfter } = await admin.from("fba_reports").select("status").eq("id", fbaQQQ.id).single();
+    record("QQQ-4 fba_reports.status is genuinely 'completed' after finalising (ground truth for every refusal below)", fbaQQQAfter?.status === "completed", JSON.stringify(fbaQQQAfter));
+
+    // ---- QQQ-5: "whoever holds it needs to see why" -- the outstanding
+    // request from QQQ-2 was cancelled IN THE SAME TRANSACTION, not left
+    // to rot unanswerable with no explanation. ----
+    const { data: reqQQQAfter } = await admin.from("fba_instrument_requests").select("status").eq("id", reqQQQ.id).single();
+    record("QQQ-5 the outstanding instrument request from QQQ-2 was auto-cancelled by finalize_fba_report()", reqQQQAfter?.status === "cancelled", JSON.stringify(reqQQQAfter));
+
+    const { data: myReqsQQQ } = await (await signedInClient("qqq.recipient@thebehaviourhive.com")).rpc("get_my_instrument_requests");
+    const cancelledVisibleQQQ = (myReqsQQQ ?? []).some((r) => r.id === reqQQQ.id && r.status === "cancelled");
+    record("QQQ-5b get_my_instrument_requests() still surfaces the cancelled request to its recipient (visible, not vanished)", cancelledVisibleQQQ, JSON.stringify(myReqsQQQ));
+
+    // ---- QQQ-6: the ORIGINAL lock (fba_reports' own UPDATE policy,
+    // live since 0040, untouched by 0199) -- regression anchor, not a
+    // new assertion, kept here so the whole shape is provable in one
+    // place. RLS-on-UPDATE silently filters rather than erroring (this
+    // codebase's own documented gotcha) -- ground truth is the
+    // unchanged row, not the absence of a thrown error. ----
+    const { data: reportsUpdateQQQ } = await clinicianQQQ.from("fba_reports").update({ status: "draft" }).eq("id", fbaQQQ.id).select("id");
+    const { data: fbaQQQStillCompleted } = await admin.from("fba_reports").select("status").eq("id", fbaQQQ.id).single();
+    record(
+      "QQQ-6 fba_reports itself: a completed FBA cannot be reopened by its own clinician (silently filtered, zero rows -- status stays 'completed')",
+      (reportsUpdateQQQ ?? []).length === 0 && fbaQQQStillCompleted?.status === "completed",
+      JSON.stringify({ updated: reportsUpdateQQQ, after: fbaQQQStillCompleted })
+    );
+
+    // ---- QQQ-7/8/9: afls_assessments, all three write paths, the
+    // regression this migration exists to fix. INSERT's own `with check`
+    // throws; UPDATE/DELETE's `using` silently filters -- ground truth
+    // for those two is read back from admin, not the absence of an
+    // error. ----
+    const { error: aflsQQQInsertAfterErr } = await clinicianQQQ
+      .from("afls_assessments")
+      .insert({ fba_id: fbaQQQ.id, assessment_date: "2026-09-16", assessor_name: "Post-lock attempt", scores: {} });
+    record("QQQ-7 afls_assessments INSERT refused once the FBA is completed", Boolean(aflsQQQInsertAfterErr), aflsQQQInsertAfterErr?.message);
+
+    const { data: aflsUpdateQQQ } = await clinicianQQQ
+      .from("afls_assessments")
+      .update({ assessor_name: "Tampered post-lock" })
+      .eq("id", aflsQQQ.id)
+      .select("id");
+    const { data: aflsQQQStill } = await admin.from("afls_assessments").select("assessor_name").eq("id", aflsQQQ.id).single();
+    record(
+      "QQQ-8 afls_assessments UPDATE refused once the FBA is completed -- THE REGRESSION ITSELF: 0060 dropped exactly this guard, and the one real completed FBA in production was genuinely edited this way",
+      (aflsUpdateQQQ ?? []).length === 0 && aflsQQQStill?.assessor_name === "QQQ Clinician",
+      JSON.stringify({ updated: aflsUpdateQQQ, after: aflsQQQStill })
+    );
+
+    const { data: aflsDeleteQQQ } = await clinicianQQQ.from("afls_assessments").delete().eq("id", aflsQQQ.id).select("id");
+    const { data: aflsQQQStillExists } = await admin.from("afls_assessments").select("id").eq("id", aflsQQQ.id).maybeSingle();
+    record(
+      "QQQ-9 afls_assessments DELETE refused once the FBA is completed",
+      (aflsDeleteQQQ ?? []).length === 0 && aflsQQQStillExists !== null,
+      JSON.stringify({ deleted: aflsDeleteQQQ, stillExists: aflsQQQStillExists !== null })
+    );
+
+    // ---- QQQ-10/11: fba_instrument_requests, the two gaps that were
+    // never previously documented as deliberate. ----
+    const { error: reqQQQInsertAfterErr } = await clinicianQQQ
+      .from("fba_instrument_requests")
+      .insert({ fba_id: fbaQQQ.id, passport_id: childQQQ.id, instrument_type: "mas", recipient_id: recipientQQQId });
+    record("QQQ-10 fba_instrument_requests clinician INSERT refused once the FBA is completed", Boolean(reqQQQInsertAfterErr), reqQQQInsertAfterErr?.message);
+
+    const recipientQQQ = await signedInClient("qqq.recipient@thebehaviourhive.com");
+    const { data: reqUpdateQQQ } = await recipientQQQ
+      .from("fba_instrument_requests")
+      .update({ responses_data: { hacked: true } })
+      .eq("id", reqQQQ.id)
+      .select("id");
+    const { data: reqQQQFinal } = await admin.from("fba_instrument_requests").select("status, responses_data").eq("id", reqQQQ.id).single();
+    record(
+      "QQQ-11 fba_instrument_requests recipient UPDATE refused on a cancelled request (gated on the FBA's own status now, not just the request's) -- the second gap this migration closes",
+      (reqUpdateQQQ ?? []).length === 0 && reqQQQFinal?.status === "cancelled" && Object.keys(reqQQQFinal?.responses_data ?? {}).length === 0,
+      JSON.stringify({ updated: reqUpdateQQQ, after: reqQQQFinal })
+    );
+
+    // ---- QQQ-12: the deliberate exception, proven in the SAME check as
+    // the refusals -- fba_calm_cards must stay writable post-completion
+    // (0053's own "retro-add" capability). Asserting only refusals here
+    // would risk a future person "fixing" this table the other way,
+    // exactly what the migration's own header comment warns against. ----
+    const { error: calmCardQQQErr } = await clinicianQQQ.from("fba_calm_cards").insert({
+      fba_id: fbaQQQ.id,
+      strategy_ref: "qqq-verify-strategy",
+      title: "QQQ Calm Card",
+      steps: ["Step one", "Step two"],
+      door_type: "prevention",
+    });
+    record(
+      "QQQ-12 (deliberate exception, NOT a bug) fba_calm_cards stays writable on a completed FBA -- 0053's own retro-add capability, restated in 0199's own header comment",
+      !calmCardQQQErr,
+      calmCardQQQErr?.message
+    );
+
+    console.log("QQQ summary complete.");
+
+    await admin.from("fba_reports").delete().eq("id", fbaQQQ.id);
+    await admin.from("institutions").delete().eq("id", institutionQQQId);
+    for (const id of [principalQQQId, clinicianQQQId, recipientQQQId, parentQQQId]) {
+      await admin.auth.admin.deleteUser(id);
+    }
+  }
+
   console.log(`\n== Summary ==`);
   const failed = results.filter((r) => !r.pass);
   console.log(`${results.length - failed.length}/${results.length} passed.`);

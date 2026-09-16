@@ -16,6 +16,8 @@ import { TriggersSettingEventsSection } from "@/components/clinician/fba/section
 import { IndirectAssessmentSection } from "@/components/clinician/fba/sections/IndirectAssessmentSection";
 import { DirectAssessmentSection } from "@/components/clinician/fba/sections/DirectAssessmentSection";
 import { AflsSection, type AflsSectionHandle } from "@/components/clinician/fba/sections/AflsSection";
+import { AflsResultsGrid } from "@/components/clinician/fba/afls-results/AflsResultsGrid";
+import { useAflsAssessmentsForFba } from "@/hooks/useAflsAssessmentsForFba";
 import { RecommendationsSection } from "@/components/clinician/fba/sections/RecommendationsSection";
 import { ConclusionSection } from "@/components/clinician/fba/sections/ConclusionSection";
 import { ReviewSection } from "@/components/clinician/fba/sections/ReviewSection";
@@ -62,6 +64,12 @@ export const FbaSectionEditor = forwardRef<
   const { isLoading: isLoadingReview, profile: reviewProfile, reviewState, error: reviewError, refresh: refreshReview } =
     useClinicianReviewState(user?.id ?? null);
   const { report, isLoading, loadError, reload, saveContent, saveStatus, saveError } = useFbaReport(fbaId);
+  // Locked-view rendering (Stage 8 security fix): once the FBA is
+  // completed, AFLS renders the same colour-coded results grid the
+  // parent's own reader/PDF export already uses (AflsResultsGrid,
+  // isPrint=false -- already a pure viewer, no edit affordance at all),
+  // rather than a third bespoke read-only presentation.
+  const { assessments: aflsAssessments } = useAflsAssessmentsForFba(fbaId);
 
   const section = getFbaSection(sectionId);
 
@@ -278,10 +286,16 @@ export const FbaSectionEditor = forwardRef<
     );
   }
 
-  // AFLS stays editable even after the FBA is completed -- companion
-  // layer, same posture as Calm Cards (migration 0060/0053): the paper
-  // assessment may be conducted and transcribed after the FBA locks.
-  const readOnly = report?.status === "completed" && section.kind !== "afls";
+  // Security fix, Stage 8: AFLS used to stay editable even after the
+  // FBA was completed, on the reasoning that it's a "companion layer,
+  // same posture as Calm Cards" (migration 0060). That analogy was
+  // wrong -- AFLS is scored clinical assessment data feeding the
+  // functional analysis, nothing like Calm Cards (which only reference
+  // already-locked conclusions, never constitute them). The database
+  // lock on afls_assessments is restored (migration 0199); this is the
+  // matching client-side fix -- readOnly now applies uniformly, no
+  // per-section-kind carve-out.
+  const readOnly = report?.status === "completed";
 
   return (
     <FbaSectionShell
@@ -382,7 +396,12 @@ export const FbaSectionEditor = forwardRef<
               readOnly={readOnly}
             />
           )}
-          {section.kind === "afls" && <AflsSection ref={aflsRef} fbaId={fbaId} />}
+          {section.kind === "afls" &&
+            (readOnly ? (
+              <AflsResultsGrid assessments={aflsAssessments} isPrint={false} />
+            ) : (
+              <AflsSection ref={aflsRef} fbaId={fbaId} />
+            ))}
           {section.kind === "recommendations" && (
             <RecommendationsSection
               fbaId={fbaId}

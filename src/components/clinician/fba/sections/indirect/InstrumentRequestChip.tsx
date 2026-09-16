@@ -8,12 +8,17 @@ const STATUS_LABEL: Record<FbaInstrumentRequest["status"], string> = {
   sent: "🟡 Sent",
   in_progress: "🟡 In progress",
   completed: "🟢 Completed",
+  // Set only by finalize_fba_report() (migration 0199) -- the clinician's
+  // own outstanding request was withdrawn because they finalised the FBA
+  // it belonged to, not because the recipient did anything.
+  cancelled: "⚪ Cancelled (FBA finalised)",
 };
 
 const STATUS_PILL_CLASSES: Record<FbaInstrumentRequest["status"], string> = {
   sent: "bg-brand-golden-brown/15 text-brand-golden-brown",
   in_progress: "bg-brand-golden-brown/15 text-brand-golden-brown",
   completed: "bg-green-100 text-green-700",
+  cancelled: "bg-black/5 text-brand-neutral-black/50",
 };
 
 export function InstrumentRequestChip({
@@ -54,7 +59,7 @@ export function InstrumentRequestChip({
         </span>
       </div>
 
-      {request.status !== "completed" && !readOnly && (
+      {request.status !== "completed" && request.status !== "cancelled" && !readOnly && (
         <div className="mt-3 flex items-center gap-3 border-t border-black/5 pt-3">
           <button
             type="button"

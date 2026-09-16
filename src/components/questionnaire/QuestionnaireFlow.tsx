@@ -163,20 +163,40 @@ export function QuestionnaireFlow({
     : 0;
   const allAnswered = totalItems > 0 && answeredCount === totalItems;
 
+  // Migration 0199 gave the recipient UPDATE policy a real USING-clause
+  // gate for the first time (the FBA's own status, and this row's own
+  // status not being completed/cancelled) -- before that, a write here
+  // could never be silently filtered, so nothing checked for it. Now it
+  // can: the rare case where the clinician finalises (cancelling this
+  // request) in the gap between this screen loading and the recipient
+  // tapping Submit. RLS on UPDATE doesn't error when the WHERE target
+  // fails the policy -- it just touches zero rows, `error: null` -- so
+  // insertWithOfflineRetry's own "no error = success" contract isn't
+  // enough here. Chaining .select() confirms a row actually changed;
+  // and it's not silently trusted either -- see the disagreement check
+  // in handleSubmit/handleSaveAndExit below.
   async function persist(status: "in_progress" | "completed"): Promise<string | null> {
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
     const supabase = createClient();
-    return insertWithOfflineRetry(
+    const result = await insertWithOfflineRetry(
       () =>
         supabase
           .from("fba_instrument_requests")
           .update({ responses_data: answers, status })
-          .eq("id", request.id),
+          .eq("id", request.id)
+          .select("id")
+          .then(({ data, error }) => ({
+            error: error ?? (data && data.length > 0 ? null : { message: "__no_row_updated__" }),
+          })),
       (status) => setIsSaving(status === "saving" || status === "waiting-for-connection"),
       controller.signal
     );
+    if (result === "__no_row_updated__") {
+      return "This request is no longer open -- the assessment it belongs to has since been finalised.";
+    }
+    return result;
   }
 
   async function handleSaveAndExit() {
@@ -233,6 +253,34 @@ export function QuestionnaireFlow({
   // recipient gets the same shortened form here as everywhere else on
   // their track.
   const resolvedInstruction = resolveInstructionText(request.instruction, childLabel);
+
+  // Migration 0199/0197: an outstanding request is cancelled the
+  // moment its own FBA is finalised, rather than silently becoming
+  // unwritable. This is the explanation "whoever holds it" sees -- shown
+  // immediately, ahead of the item-bank/saved-progress loading state,
+  // since neither is needed to explain this.
+  if (request.status === "cancelled") {
+    return (
+      <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center gap-3 bg-white px-8 text-center">
+        <span aria-hidden className="text-4xl">
+          🚫
+        </span>
+        <p className="font-heading text-lg font-semibold text-brand-prussian-blue">This request was cancelled</p>
+        <p className="max-w-xs text-sm text-brand-neutral-black/70">
+          {request.clinicianName}&apos;s {INSTRUMENT_LABELS[request.instrumentType]} assessment for {childLabel} has
+          already been finalised, so this questionnaire is no longer needed. Nothing you entered was lost -- there
+          was simply nothing left to submit it into.
+        </p>
+        <button
+          type="button"
+          onClick={onClose}
+          className="mt-2 rounded-2xl border-2 border-brand-prussian-blue px-6 py-2.5 text-sm font-semibold text-brand-prussian-blue"
+        >
+          Close
+        </button>
+      </div>
+    );
+  }
 
   if (isLoadingItems || isLoadingExisting) {
     return (

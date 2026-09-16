@@ -266,7 +266,12 @@ export type SendableInstrumentType = "qabf" | "mas";
 // completed response doesn't become a type error waiting to happen.
 export type InstrumentRequestType = SendableInstrumentType | "open_ended";
 
-export type InstrumentRequestStatus = "sent" | "in_progress" | "completed";
+// "cancelled" -- migration 0199. Set only by finalize_fba_report(),
+// never by a recipient or clinician directly: an outstanding (sent/
+// in_progress) request is withdrawn the moment its own FBA is
+// finalised, rather than silently becoming unwritable with no
+// explanation.
+export type InstrumentRequestStatus = "sent" | "in_progress" | "completed" | "cancelled";
 
 // FIX (0188): get_fba_recipient_candidates() has returned role='sna'
 // rows since 0065 (its own child_assignments-derived branch) -- this
