@@ -5,39 +5,58 @@ import { useState } from "react";
 import { BrandMark } from "@/components/ui/BrandMark";
 import { createClient } from "@/lib/supabase/client";
 
-// Onboarding restructure, Sept 2026: the second route off role-select
-// ("I don't have a code, or I'm a parent"). Two real, self-service
-// paths live here today -- a parent (the claim-code gate lives later,
-// from their own dashboard) and an independent clinician (self-
-// verifying via PSI/CORU/BACB, never tied to an institution -- see
-// this file's own onboarding-restructure plan for why institution-
-// employed clinician joining is deliberately NOT built here, staying
-// the manual/parked path it already is). Anyone else lands on plain,
-// neutral copy -- never "school", never "clinic": which organisation
-// someone's employer or a clinic is not this screen's business, only
-// that they need a code from whoever runs it.
-type Choice = "parent" | "clinician";
-
+// Onboarding restructure, Sept 2026, corrected same day per Daniel's
+// own model correction: THERE IS NO INDEPENDENT CLINICIAN. Every
+// clinician belongs to an organisation -- a school's in-house BCBA and
+// a clinic's practitioners both join by their organisation's code (the
+// same top-level /role-select entry every school-staff role uses); a
+// clinical director gets a code from us directly, the same manual gate
+// an institution's first principal goes through. A self-service
+// "I'm a clinician, no organisation" tile contradicted that model and
+// would have been something to police later -- removed.
+//
+// This screen is now PARENT ONLY. The specialty-then-verify path at
+// /clinician/specialty -- the one real clinician onboarding that
+// exists today, used by the trial school's own psychologist, approved
+// manually via approve_clinician() -- is NOT deleted and still works
+// exactly as before. It's just no longer reachable by tapping a tile
+// here: reaching it now requires app_metadata.role already being
+// "clinician", which nothing in this app's own UI sets any more (see
+// /api/set-role's own comment -- "clinician" was deliberately dropped
+// from its self-service allow-list in the same change). Getting a
+// specific, vetted person into that state is a manual, one-off
+// Behaviour Hive operation -- scripts/admin/set-clinician-role.mjs --
+// matching the precedent already established for institution creation
+// itself (CLAUDE.md: "institution creation being manual is
+// deliberate"). Once set, their very next sign-in lands them on
+// /clinician/specialty automatically, via the same
+// resolveOnboardingDestination()/useRequireRole gating every other
+// role already goes through -- no separate UI page needed.
+//
+// The copy below stays exactly as neutral as before this correction --
+// never "school", never "clinic": which organisation someone's
+// employer or a clinic is not this screen's business, only that they
+// need a code from whoever runs it.
 export default function NoCodeRoleSelectPage() {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState<Choice | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
-  async function handleSelect(choice: Choice) {
+  async function handleSelectParent() {
     if (submitting) return;
 
     setError(null);
-    setSubmitting(choice);
+    setSubmitting(true);
 
     const response = await fetch("/api/set-role", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ role: choice === "parent" ? "parent" : "clinician" }),
+      body: JSON.stringify({ role: "parent" }),
     });
 
     if (!response.ok) {
       const { error: responseError } = await response.json().catch(() => ({ error: null }));
-      setSubmitting(null);
+      setSubmitting(false);
       setError(responseError ?? "Something went wrong. Please try again.");
       return;
     }
@@ -49,7 +68,7 @@ export default function NoCodeRoleSelectPage() {
     const supabase = createClient();
     await supabase.auth.refreshSession();
 
-    router.push(choice === "parent" ? "/consent" : "/clinician/specialty");
+    router.push("/consent");
   }
 
   return (
@@ -66,8 +85,8 @@ export default function NoCodeRoleSelectPage() {
           <div className="flex flex-col gap-3">
             <button
               type="button"
-              onClick={() => handleSelect("parent")}
-              disabled={submitting !== null}
+              onClick={handleSelectParent}
+              disabled={submitting}
               className="flex items-center gap-3 rounded-2xl border border-black/10 bg-white p-3 text-left transition-colors hover:bg-black/[0.02] disabled:opacity-60"
             >
               <span
@@ -84,33 +103,7 @@ export default function NoCodeRoleSelectPage() {
                   Building a passport for my child
                 </span>
               </span>
-              {submitting === "parent" && (
-                <span className="text-xs font-medium text-brand-prussian-blue">Saving…</span>
-              )}
-            </button>
-
-            <button
-              type="button"
-              onClick={() => handleSelect("clinician")}
-              disabled={submitting !== null}
-              className="flex items-center gap-3 rounded-2xl border border-black/10 bg-white p-3 text-left transition-colors hover:bg-black/[0.02] disabled:opacity-60"
-            >
-              <span
-                className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-black/5 text-lg"
-                aria-hidden
-              >
-                🧠
-              </span>
-              <span className="flex-1">
-                <span className="block text-sm font-semibold text-brand-neutral-black">
-                  I&apos;m a clinician
-                </span>
-                <span className="block text-xs text-black/50">
-                  Independent practitioner -- BCBA, psychologist, OT, SLT or GP, not tied to an
-                  organisation
-                </span>
-              </span>
-              {submitting === "clinician" && (
+              {submitting && (
                 <span className="text-xs font-medium text-brand-prussian-blue">Saving…</span>
               )}
             </button>
@@ -130,7 +123,7 @@ export default function NoCodeRoleSelectPage() {
           <button
             type="button"
             onClick={() => router.push("/role-select")}
-            disabled={submitting !== null}
+            disabled={submitting}
             className="mt-5 w-full text-center text-xs font-semibold text-brand-prussian-blue disabled:opacity-60"
           >
             Back
