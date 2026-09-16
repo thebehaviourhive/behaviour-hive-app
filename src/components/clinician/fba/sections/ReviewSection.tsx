@@ -122,7 +122,7 @@ export function ReviewSection({
     if (updateError) {
       console.error("Failed to finalize FBA:", updateError);
       setIsFinalizing(false);
-      setError("Couldn't finalize this FBA. Please try again.");
+      setError("Couldn't finalise this FBA. Please try again.");
       return;
     }
 
@@ -185,7 +185,7 @@ export function ReviewSection({
 
       {readOnly ? (
         <>
-          <FbaNote>This FBA is finalized and locked.</FbaNote>
+          <FbaNote>This FBA is finalised and locked.</FbaNote>
           <Link
             href={`/passport/fba/${fbaId}/print`}
             className="block w-full lg:w-auto rounded-2xl bg-brand-prussian-blue px-8 py-3.5 text-center text-base font-semibold text-white"
@@ -197,7 +197,7 @@ export function ReviewSection({
         <>
           {!requiredComplete && (
             <FbaNote>
-              Finish the required sections before finalizing: Clinical Overview &amp; Primary Findings,
+              Finish the required sections before finalising: Clinical Overview &amp; Primary Findings,
               Target Behaviours, Hypothesised Behavioural Functions, Recommendations, and Conclusion.
             </FbaNote>
           )}
@@ -208,7 +208,7 @@ export function ReviewSection({
             disabled={!requiredComplete}
             className="w-full lg:w-auto rounded-2xl bg-brand-prussian-blue px-8 py-3.5 text-base font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40"
           >
-            Finalize &amp; Lock FBA
+            Finalise &amp; Lock FBA
           </button>
 
           {error && (
@@ -219,7 +219,7 @@ export function ReviewSection({
 
           <BottomSheet isOpen={isConfirmOpen} onClose={() => !isFinalizing && setIsConfirmOpen(false)}>
             <h2 className="font-heading text-xl font-semibold text-brand-neutral-black">
-              Finalize &amp; Lock?
+              Finalise &amp; Lock?
             </h2>
             <p className="mt-2 text-sm text-brand-neutral-black/70">
               This is permanent. Once locked, the FBA becomes read-only and can never be edited again
@@ -233,7 +233,7 @@ export function ReviewSection({
               disabled={isFinalizing}
               className="mt-6 w-full rounded-2xl bg-brand-prussian-blue py-3.5 text-base font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40"
             >
-              {isFinalizing ? "Finalizing…" : "Finalize & Lock"}
+              {isFinalizing ? "Finalising…" : "Finalise & Lock"}
             </button>
             <button
               type="button"

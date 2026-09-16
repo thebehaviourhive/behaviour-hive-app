@@ -124,7 +124,7 @@ export default function FbaPrintPage() {
     return (
       <div className="flex flex-col items-center gap-3 p-12 text-center">
         <p className="text-sm text-brand-neutral-black/70">
-          This report isn&apos;t available to export -- it must be finalized first.
+          This report isn&apos;t available to export -- it must be finalised first.
         </p>
         <Link href={`/passport/fba/${fbaId}`} className="text-sm font-semibold text-brand-prussian-blue underline underline-offset-2">
           Back
