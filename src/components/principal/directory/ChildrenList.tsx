@@ -2,9 +2,112 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
+import { BookUser, User } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import { ClinicalFileIcon } from "@/components/ui/icons";
 
 type ChildrenSegment = "active" | "past";
+
+interface ChildStatusBadges {
+  sectionAComplete: boolean;
+  hasActiveClinician: boolean;
+  hasClaimedGuardian: boolean;
+}
+
+// Stage 7, item 1 -- at-a-glance status on each card: passport filled,
+// clinician connected, parent claimed. Daniel's own accessibility
+// instruction, built in from the start rather than color alone: a
+// filled disc vs. a hollow ring is a SHAPE difference, not a hue one --
+// readable regardless of colour vision -- and every badge carries an
+// aria-label naming both what it is and its current state, not just an
+// icon a sighted principal has to already know how to read. The one-
+// time legend row above the list (not per-row) is what actually answers
+// "what does a grey icon mean without hovering" -- three icons with
+// visible labels, in the same fixed left-to-right order the per-row
+// badges use, seen once rather than re-explained on every card.
+const STATUS_BADGE_DEFS: {
+  key: keyof ChildStatusBadges;
+  label: string;
+  completeLabel: string;
+  incompleteLabel: string;
+  icon: (props: { className?: string }) => React.ReactElement;
+}[] = [
+  {
+    key: "sectionAComplete",
+    label: "Passport",
+    completeLabel: "Passport completed",
+    incompleteLabel: "Passport not yet completed",
+    icon: (props) => <BookUser {...props} strokeWidth={2} />,
+  },
+  {
+    key: "hasActiveClinician",
+    label: "Clinician",
+    completeLabel: "Clinician connected",
+    incompleteLabel: "No clinician connected",
+    icon: (props) => <ClinicalFileIcon {...props} />,
+  },
+  {
+    key: "hasClaimedGuardian",
+    label: "Parent",
+    completeLabel: "Parent claimed",
+    incompleteLabel: "Not yet claimed by a parent",
+    icon: (props) => <User {...props} strokeWidth={2} />,
+  },
+];
+
+function StatusBadge({
+  def,
+  isComplete,
+}: {
+  def: (typeof STATUS_BADGE_DEFS)[number];
+  isComplete: boolean;
+}) {
+  const Icon = def.icon;
+  return (
+    <span
+      role="img"
+      aria-label={isComplete ? def.completeLabel : def.incompleteLabel}
+      title={isComplete ? def.completeLabel : def.incompleteLabel}
+      className={`flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full ${
+        isComplete
+          ? "bg-brand-prussian-blue text-white"
+          : "border border-dashed border-black/20 bg-transparent text-black/30"
+      }`}
+    >
+      <Icon className="h-3.5 w-3.5" />
+    </span>
+  );
+}
+
+function StatusBadgeRow({ badges }: { badges: ChildStatusBadges | undefined }) {
+  return (
+    <div className="mt-2 flex items-center gap-1.5">
+      {STATUS_BADGE_DEFS.map((def) => (
+        <StatusBadge key={def.key} def={def} isComplete={Boolean(badges?.[def.key])} />
+      ))}
+    </div>
+  );
+}
+
+// Seen once, above the list -- not re-explained per row. Same fixed
+// order as StatusBadgeRow.
+function StatusBadgeLegend() {
+  return (
+    <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 font-sans text-xs text-brand-neutral-black/50">
+      {STATUS_BADGE_DEFS.map((def) => {
+        const Icon = def.icon;
+        return (
+          <span key={def.key} className="flex items-center gap-1.5">
+            <span className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-brand-prussian-blue text-white">
+              <Icon className="h-3 w-3" />
+            </span>
+            {def.label}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
 
 const CHILDREN_SEGMENTS: { key: ChildrenSegment; label: string }[] = [
   { key: "active", label: "Active" },
@@ -38,6 +141,7 @@ export function ChildrenList({
   onSelect: (passportId: string) => void;
 }) {
   const [children, setChildren] = useState<{ passport_id: string; child_name: string; enrolment_ended_at: string | null }[]>([]);
+  const [badgesByPassportId, setBadgesByPassportId] = useState<Map<string, ChildStatusBadges>>(new Map());
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -47,19 +151,42 @@ export function ChildrenList({
     setIsLoading(true);
     setError(null);
     const supabase = createClient();
-    const { data: rosterRows, error: rosterError } = await supabase.rpc("get_institution_child_roster", {
-      p_institution_id: instId,
-    });
-    if (rosterError) {
+    const [rosterResult, badgesResult] = await Promise.all([
+      supabase.rpc("get_institution_child_roster", { p_institution_id: instId }),
+      supabase.rpc("get_institution_child_status_badges", { p_institution_id: instId }),
+    ]);
+    if (rosterResult.error) {
       setError("Could not load the school roster.");
       setIsLoading(false);
       return;
     }
     setChildren(
-      ((rosterRows ?? []) as { passport_id: string; child_name: string; enrolment_ended_at: string | null }[])
+      ((rosterResult.data ?? []) as { passport_id: string; child_name: string; enrolment_ended_at: string | null }[])
         .slice()
         .sort((a, b) => a.child_name.localeCompare(b.child_name))
     );
+    // Secondary read -- a failure here doesn't block the roster itself
+    // from rendering, badges just fall back to "incomplete" (every
+    // StatusBadge already renders its own not-yet state for an unknown
+    // passport id, since badgesByPassportId.get() returns undefined).
+    if (badgesResult.error) {
+      console.error("Failed to load child status badges:", badgesResult.error);
+    } else {
+      const map = new Map<string, ChildStatusBadges>();
+      for (const row of (badgesResult.data ?? []) as {
+        passport_id: string;
+        section_a_complete: boolean;
+        has_active_clinician: boolean;
+        has_claimed_guardian: boolean;
+      }[]) {
+        map.set(row.passport_id, {
+          sectionAComplete: row.section_a_complete,
+          hasActiveClinician: row.has_active_clinician,
+          hasClaimedGuardian: row.has_claimed_guardian,
+        });
+      }
+      setBadgesByPassportId(map);
+    }
     setIsLoading(false);
   }, []);
 
@@ -108,6 +235,7 @@ export function ChildrenList({
         <p className="font-heading text-h2 font-semibold text-brand-prussian-blue lg:text-body lg:font-semibold lg:text-brand-neutral-black">
           {c.child_name}
         </p>
+        <StatusBadgeRow badges={badgesByPassportId.get(c.passport_id)} />
       </Link>
     );
   }
@@ -164,6 +292,8 @@ export function ChildrenList({
               </button>
             ))}
           </div>
+
+          <StatusBadgeLegend />
 
           {segment === "active" ? (
             filteredActive.length === 0 ? (
