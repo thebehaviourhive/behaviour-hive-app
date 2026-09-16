@@ -50,10 +50,13 @@ function buildStrategyHref(viewerRole: MessageRole, passportId: string): string 
   // useRequireRole("clinician") on that route then refused and bounced
   // to the principal's own dashboard, reading as "View strategies goes
   // to my dashboard instead of the child's passport". Principal's own
-  // clinical content lives at /principal/passports/[passportId], tab
-  // key "clinical" (not "clinicalTeam" -- a different route, its own
-  // tab vocabulary, see ChildDetail.tsx's own TabKey).
-  if (viewerRole === "principal") return `/principal/passports/${passportId}?tab=clinical`;
+  // clinical CONTENT (strategies) lives at /principal/passports/
+  // [passportId], tab key "sharedStrategies" -- Stage 4, item 1 split
+  // the old "clinical" tab (which used to hold BOTH the clinician
+  // roster and a hand-rolled copy of this same content) into two: this
+  // link was pointing at the roster tab, not the content it actually
+  // references -- fixed as part of that split, not a separate bug pass.
+  if (viewerRole === "principal") return `/principal/passports/${passportId}?tab=sharedStrategies`;
   // Same fallthrough bug, same fix -- sna/passport/[passportId] already
   // supports this exact tab key (its own TabKey union includes
   // "clinicalTeam"), it just had no branch here either.

@@ -9,24 +9,35 @@ import { fetchApprovedInstitutionPhone } from "@/lib/messages/institutionPhone";
 import { MessageList } from "@/components/messages/MessageList";
 import { ComposeMessageSheet } from "@/components/messages/ComposeMessageSheet";
 import { InlineErrorState } from "@/components/ui/InlineErrorState";
+import type { MessageRole } from "@/types/messages";
 
-// The classroom profile's Messages tab -- "a small entry consistent
-// with that page's structure" (Stage 2 brief): same tab pattern every
-// other Clinical/Classroom File tab already uses, self-contained, no
-// child picker needed since passportId is already fixed by the route.
+// A child's own Messages tab -- "a small entry consistent with that
+// page's structure" (Stage 2 brief): same tab pattern every other
+// Clinical/Classroom File tab already uses, self-contained, no child
+// picker needed since passportId is already fixed by the route.
 // Compose here is pre-selected to this one child, unlike the triage
 // view's own [New] which has to ask first.
-export function TeacherPassportMessagesTab({
+//
+// Originally teacher-only (TeacherPassportMessagesTab); parameterized
+// with senderRole once a principal needed the identical tab (Stage 4,
+// item 1) -- can_view_message()/get_message_recipient_candidates()/
+// send_message() already had a principal branch (0161/0168), and
+// MessageRole already included "principal" end to end, so the only
+// thing hardcoding this to one role was this component's own two
+// "class_teacher" literals below.
+export function PassportMessagesTab({
   passportId,
   childName,
   userId,
+  senderRole,
 }: {
   passportId: string;
   childName: string;
   userId: string;
+  senderRole: MessageRole;
 }) {
   const { messages, candidates, nameById, isLoading, loadError, refresh } = useMessageThread(passportId);
-  const { categories } = useMessageCategories("class_teacher");
+  const { categories } = useMessageCategories(senderRole);
   const [institutionPhone, setInstitutionPhone] = useState<string | null>(null);
   const [isComposeOpen, setIsComposeOpen] = useState(false);
 
@@ -64,7 +75,7 @@ export function TeacherPassportMessagesTab({
           isLoading={isLoading}
           onChanged={refresh}
           childName={childName}
-          viewerRole="class_teacher"
+          viewerRole={senderRole}
         />
       )}
 

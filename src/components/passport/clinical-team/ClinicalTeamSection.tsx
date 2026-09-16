@@ -5,8 +5,11 @@ import { SOURCE_DOCUMENT_LABELS, type ClinicalContentItem } from "@/lib/passport
 // NOTE: "teacher" here (not "class_teacher") predates the SNA role and
 // is a known naming inconsistency versus ABCLoggerRole/institution_staff
 // -- tracked in POLISH.md, not fixed here to avoid an unrelated rename
-// touching every call site of this component.
-export type ClinicalTeamViewerRole = "parent" | "teacher" | "clinician" | "sna";
+// touching every call site of this component. "principal" added Stage
+// 4, item 1 -- grouped with teacher/sna in AttributionLine below (same
+// institutional, non-clinical audience), not given the parent/clinician
+// full source+date attribution.
+export type ClinicalTeamViewerRole = "parent" | "teacher" | "clinician" | "sna" | "principal";
 
 function AttributionLine({
   item,
@@ -27,11 +30,11 @@ function AttributionLine({
     ? formatClinicianReference(item.authorName, item.authorSpecialty)
     : "Your Clinical Team";
 
-  // Confirmed decision: teachers (and, by the same reasoning, SNAs --
-  // same school-context, non-clinical audience) get name (+ specialty)
-  // only -- no source label, no date, nothing that points toward the
-  // underlying document existing.
-  if (viewerRole === "teacher" || viewerRole === "sna") {
+  // Confirmed decision: teachers (and, by the same reasoning, SNAs and
+  // principals -- same school-context, non-clinical audience) get name
+  // (+ specialty) only -- no source label, no date, nothing that points
+  // toward the underlying document existing.
+  if (viewerRole === "teacher" || viewerRole === "sna" || viewerRole === "principal") {
     return <p className="mt-1.5 text-xs text-brand-neutral-black/40">From {authorReference}</p>;
   }
 

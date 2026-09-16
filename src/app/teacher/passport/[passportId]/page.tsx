@@ -1,7 +1,7 @@
 "use client";
 
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { getChildFirstName } from "@/lib/childDisplayName";
@@ -14,12 +14,25 @@ import { ClinicalTeamSection } from "@/components/passport/clinical-team/Clinica
 import { PassportCompletionSection } from "@/components/passport/PassportCompletionSection";
 import { InlineErrorState } from "@/components/ui/InlineErrorState";
 import { ProgressSurface } from "@/components/progress/ProgressSurface";
-import { TeacherPassportMessagesTab } from "@/components/teacher/TeacherPassportMessagesTab";
+import { PassportMessagesTab } from "@/components/passport/PassportMessagesTab";
 import { useMessageRecipientCandidates } from "@/hooks/useMessageRecipientCandidates";
 import { useMessageCategories } from "@/hooks/useMessageCategories";
 import { fetchApprovedInstitutionPhone } from "@/lib/messages/institutionPhone";
 import { ComposeMessageSheet } from "@/components/messages/ComposeMessageSheet";
 import { ChildIncidentsTab } from "@/components/shared/ChildIncidentsTab";
+import {
+  SectionHeading,
+  EmptyCard,
+  TodayContextBlock,
+  ProfileBlock,
+  KeyCommunicationBlock,
+  BehaviourSignalsBlock,
+  CommunicationBlock,
+  SupportsBlock,
+  MedicalCareBlock,
+  withOtherTag,
+  type TodayContext,
+} from "@/components/passport/ClassroomProfileContent";
 
 // Passport Incidents tabs (migration 0166) -- the label collision this
 // page had (an "Incidents" tab that actually showed the ABC timeline)
@@ -55,26 +68,6 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: "messages", label: "Messages" },
   { key: "progress", label: "Progress" },
 ];
-
-const SLEEP_LABELS: Record<string, string> = {
-  slept_through: "Slept through / Well rested",
-  woke_briefly: "Woke up briefly",
-  very_restless: "Very restless / Up multiple times",
-  barely_slept: "Barely slept",
-};
-
-const REGULATION_LABELS: Record<string, string> = {
-  settled: "Settled and Calm",
-  unsettled: "A bit unsettled / Anxious",
-  dysregulated: "Highly dysregulated / Upset",
-};
-
-interface TodayContext {
-  sleepQuality: string | null;
-  regulationState: string | null;
-  stressors: string[] | null;
-  headsUp: string | null;
-}
 
 interface ClassroomProfile {
   childFirstName: string;
@@ -349,13 +342,8 @@ export default function TeacherPassportPage() {
 
   const isAfternoon = new Date().getHours() >= 13;
 
-  const diagnosisTags = profile.diagnoses.includes("Other") && profile.diagnosisOther
-    ? [...profile.diagnoses.filter((d) => d !== "Other"), profile.diagnosisOther]
-    : profile.diagnoses;
-
-  const communicationTags = profile.communicationMethods.includes("Other") && profile.communicationMethodsOther
-    ? [...profile.communicationMethods.filter((m) => m !== "Other"), profile.communicationMethodsOther]
-    : profile.communicationMethods;
+  const diagnosisTags = withOtherTag(profile.diagnoses, profile.diagnosisOther);
+  const communicationTags = withOtherTag(profile.communicationMethods, profile.communicationMethodsOther);
 
   return (
     <div className="flex min-h-full flex-1 flex-col bg-brand-off-white/40 pb-28">
@@ -400,52 +388,9 @@ export default function TeacherPassportPage() {
       <main className="flex flex-1 flex-col gap-4 px-4 py-4">
         {activeTab === "summary" && (
           <>
-            <SectionHeading>Today&apos;s Context</SectionHeading>
-            {profile.todayContext ? (
-              <div className="flex flex-col gap-2 rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
-                <InfoRow
-                  label="Sleep"
-                  value={
-                    profile.todayContext.sleepQuality
-                      ? SLEEP_LABELS[profile.todayContext.sleepQuality]
-                      : "Not specified"
-                  }
-                />
-                <InfoRow
-                  label="Regulation"
-                  value={
-                    profile.todayContext.regulationState
-                      ? REGULATION_LABELS[profile.todayContext.regulationState]
-                      : "Not specified"
-                  }
-                />
-                {profile.todayContext.stressors && profile.todayContext.stressors.length > 0 && (
-                  <div>
-                    <p className="mb-1.5 text-xs font-semibold text-black/40">Stressors</p>
-                    <PillRow items={profile.todayContext.stressors} />
-                  </div>
-                )}
-                {profile.todayContext.headsUp && (
-                  <HeadsUpQuote text={profile.todayContext.headsUp} />
-                )}
-              </div>
-            ) : (
-              <EmptyCard text="No morning check-in received today." />
-            )}
-
-            <SectionHeading>Profile</SectionHeading>
-            {diagnosisTags.length > 0 ? (
-              <PillRow items={diagnosisTags} tone="warm" />
-            ) : (
-              <EmptyCard text="No diagnosis information provided." />
-            )}
-
-            <SectionHeading>Key Communication</SectionHeading>
-            {communicationTags.length > 0 ? (
-              <PillRow items={communicationTags} tone="warm" />
-            ) : (
-              <EmptyCard text="No communication methods provided." />
-            )}
+            <TodayContextBlock context={profile.todayContext} />
+            <ProfileBlock diagnosisTags={diagnosisTags} />
+            <KeyCommunicationBlock communicationTags={communicationTags} />
 
             {/* PRD 3, Stage 3 -- CORRECTED. Not a new content section --
                 the answer is Section A itself, already rendered above
@@ -474,87 +419,47 @@ export default function TeacherPassportPage() {
         )}
 
         {activeTab === "medical" && (
-          <>
-            {profile.sectionEUpdatedAt && (
-              <p className="-mt-2 text-xs font-semibold text-black/40">
-                {formatRelativeDate(profile.sectionEUpdatedAt)}
-              </p>
-            )}
-            <TextCard label="Allergies" text={profile.allergies} />
-            <TextCard label="Medical conditions relevant to daily care" text={profile.medicalConditions} />
-            <TextCard label="Medications" text={profile.medications} />
-            <TextCard label="Emergency protocol" text={profile.emergencyProtocol} />
-            <TextCard label="Intimate care needs" text={profile.intimateCareNeeds} />
-          </>
+          <MedicalCareBlock
+            sectionEUpdatedAtLabel={profile.sectionEUpdatedAt ? formatRelativeDate(profile.sectionEUpdatedAt) : null}
+            allergies={profile.allergies}
+            medicalConditions={profile.medicalConditions}
+            medications={profile.medications}
+            emergencyProtocol={profile.emergencyProtocol}
+            intimateCareNeeds={profile.intimateCareNeeds}
+          />
         )}
 
         {activeTab === "behaviour" && (
-          <>
-            <SectionHeading>The Smoke Signals</SectionHeading>
-            <p className="-mt-2 text-sm text-black/50">
-              Early warning signs that things are getting hard.
-            </p>
-            <CardList
-              items={appendOther(profile.hardSignals, profile.hardSignalsOther)}
-              emptyText="No early warning signs recorded yet."
-            />
-
-            <SectionHeading>The Fuse</SectionHeading>
-            <p className="-mt-2 text-sm text-black/50">Common triggers to watch for.</p>
-            <CardList
-              items={appendOther(profile.hardTriggers, profile.hardTriggersOther)}
-              emptyText="No triggers recorded yet."
-            />
-          </>
+          <BehaviourSignalsBlock
+            hardSignals={profile.hardSignals}
+            hardSignalsOther={profile.hardSignalsOther}
+            hardTriggers={profile.hardTriggers}
+            hardTriggersOther={profile.hardTriggersOther}
+          />
         )}
 
         {activeTab === "communication" && (
-          <>
-            <SectionHeading>Communication Methods</SectionHeading>
-            {communicationTags.length > 0 ? (
-              <PillRow items={communicationTags} tone="warm" />
-            ) : (
-              <EmptyCard text="No communication methods provided." />
-            )}
-
-            <TextCard label="How they show they're happy" text={profile.showsHappy} />
-            <TextCard label="How they show they're anxious" text={profile.showsAnxious} />
-            <TextCard label="Phrases or approaches to avoid" text={profile.phrasesToAvoid} />
-          </>
+          <CommunicationBlock
+            communicationTags={communicationTags}
+            showsHappy={profile.showsHappy}
+            showsAnxious={profile.showsAnxious}
+            phrasesToAvoid={profile.phrasesToAvoid}
+          />
         )}
 
         {activeTab === "supports" && (
-          <>
-            <SectionHeading>What Helps Before</SectionHeading>
-            <CardList
-              items={appendOther(profile.beforeBehaviour, profile.beforeBehaviourOther)}
-              emptyText="Nothing recorded yet."
-            />
-
-            <SectionHeading>What Helps During Distress</SectionHeading>
-            <CardList
-              items={appendOther(profile.duringDistress, profile.duringDistressOther)}
-              emptyText="Nothing recorded yet."
-            />
-
-            <SectionHeading>What Helps After Distress</SectionHeading>
-            <CardList
-              items={appendOther(profile.afterDistress, profile.afterDistressOther)}
-              emptyText="Nothing recorded yet."
-            />
-
-            <SectionHeading>Sensory Seeks</SectionHeading>
-            <CardList
-              items={appendOther(profile.sensorySeeks, profile.sensorySeeksOther)}
-              emptyText="Nothing recorded yet."
-            />
-
-            <SectionHeading>Sensory Avoids</SectionHeading>
-            <CardList
-              items={appendOther(profile.sensoryAvoids, profile.sensoryAvoidsOther)}
-              emptyText="Nothing recorded yet."
-            />
-          </>
+          <SupportsBlock
+            beforeBehaviour={profile.beforeBehaviour}
+            beforeBehaviourOther={profile.beforeBehaviourOther}
+            duringDistress={profile.duringDistress}
+            duringDistressOther={profile.duringDistressOther}
+            afterDistress={profile.afterDistress}
+            afterDistressOther={profile.afterDistressOther}
+            sensorySeeks={profile.sensorySeeks}
+            sensorySeeksOther={profile.sensorySeeksOther}
+            sensoryAvoids={profile.sensoryAvoids}
+            sensoryAvoidsOther={profile.sensoryAvoidsOther}
+          />
         )}
 
         {activeTab === "incidents" && (
@@ -586,10 +491,11 @@ export default function TeacherPassportPage() {
         )}
 
         {activeTab === "messages" && user && (
-          <TeacherPassportMessagesTab
+          <PassportMessagesTab
             passportId={passportId}
             childName={profile.childFirstName}
             userId={user.id}
+            senderRole="class_teacher"
           />
         )}
 
@@ -680,93 +586,3 @@ export default function TeacherPassportPage() {
   );
 }
 
-function appendOther(items: string[], other: string | null): string[] {
-  if (!other) return items;
-  return [...items, other];
-}
-
-function SectionHeading({ children }: { children: ReactNode }) {
-  return (
-    <h2 className="font-heading text-base font-semibold text-brand-neutral-black">
-      {children}
-    </h2>
-  );
-}
-
-function InfoRow({ label, value }: { label: string; value: string }) {
-  return (
-    <p className="text-sm text-black/70">
-      <span className="font-semibold text-black/50">{label}: </span>
-      {value}
-    </p>
-  );
-}
-
-function PillRow({ items, tone = "cool" }: { items: string[]; tone?: "cool" | "warm" }) {
-  return (
-    <div className="flex flex-wrap gap-2">
-      {items.map((item) => (
-        <span
-          key={item}
-          className={`rounded-full px-3 py-1.5 text-xs font-semibold ${
-            tone === "warm"
-              ? "bg-brand-safe-ivory/60 text-brand-neutral-black"
-              : "bg-brand-pastel-blue/20 text-brand-prussian-blue"
-          }`}
-        >
-          {item}
-        </span>
-      ))}
-    </div>
-  );
-}
-
-function CardList({ items, emptyText }: { items: string[]; emptyText: string }) {
-  if (items.length === 0) {
-    return <EmptyCard text={emptyText} />;
-  }
-  return (
-    <div className="flex flex-col gap-2">
-      {items.map((item) => (
-        <div
-          key={item}
-          className="rounded-2xl border border-black/5 bg-white px-4 py-3 text-sm font-medium text-brand-neutral-black shadow-sm"
-        >
-          {item}
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function TextCard({ label, text }: { label: string; text: string | null }) {
-  return (
-    <div className="rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
-      <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-black/40">
-        {label}
-      </p>
-      <p className="text-sm leading-relaxed text-brand-neutral-black">
-        {text || "Not specified"}
-      </p>
-    </div>
-  );
-}
-
-function EmptyCard({ text }: { text: string }) {
-  return (
-    <div className="rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-sm text-black/50">
-      {text}
-    </div>
-  );
-}
-
-function HeadsUpQuote({ text }: { text: string }) {
-  return (
-    <div className="relative mt-1 rounded-xl bg-brand-safe-ivory/50 py-2.5 pl-9 pr-3">
-      <span aria-hidden className="absolute left-2.5 top-2.5 text-sm leading-none">
-        💬
-      </span>
-      <p className="text-xs italic text-brand-neutral-black/80">{text}</p>
-    </div>
-  );
-}

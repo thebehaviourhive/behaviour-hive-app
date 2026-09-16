@@ -92,7 +92,11 @@ export function ProgressSurface({
   const [customRange, setCustomRange] = useState<DateRange | null>(null);
 
   const childFirstName = getChildFirstName(childFullName);
-  const headerName = role === "teacher" ? getChildDisplayName(childFullName) : childFirstName;
+  // principal grouped with teacher -- institutional, professional
+  // audiences get the full display name; parent/clinician get the
+  // warmer first-name-only header.
+  const headerName =
+    role === "teacher" || role === "principal" ? getChildDisplayName(childFullName) : childFirstName;
 
   const morningEntries: DayEntry[] = useMemo(
     () => checkins.map((c) => ({ date: c.date, state: c.state })),

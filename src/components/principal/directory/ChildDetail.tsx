@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { createClient } from "@/lib/supabase/client";
@@ -11,6 +11,24 @@ import { GrantClinicianAccessSheet } from "@/components/principal/GrantClinician
 import { CLINICIAN_SPECIALTY_LABEL, type ClinicianSpecialty } from "@/lib/clinicianSpecialties";
 import { IncidentCard, type InstitutionIncidentRow } from "@/components/principal/IncidentCard";
 import { ABCTimeline } from "@/components/abc-logger/ABCTimeline";
+import { usePassportClinicalContent } from "@/hooks/usePassportClinicalContent";
+import { ClinicalTeamSection } from "@/components/passport/clinical-team/ClinicalTeamSection";
+import { PassportCompletionSection } from "@/components/passport/PassportCompletionSection";
+import { PassportMessagesTab } from "@/components/passport/PassportMessagesTab";
+import { ProgressSurface } from "@/components/progress/ProgressSurface";
+import { InlineErrorState } from "@/components/ui/InlineErrorState";
+import { formatRelativeDate } from "@/lib/relativeDate";
+import {
+  TodayContextBlock,
+  ProfileBlock,
+  KeyCommunicationBlock,
+  BehaviourSignalsBlock,
+  CommunicationBlock,
+  SupportsBlock,
+  MedicalCareBlock,
+  withOtherTag,
+  type TodayContext,
+} from "@/components/passport/ClassroomProfileContent";
 
 // PRD 1, Stage 4, Step 3. Principal's passport detail. PRD 2, Stage 3:
 // rewritten into three tabs (Enrolment / Access / Clinical), reusing
@@ -168,42 +186,50 @@ interface PassportProfile {
   sensoryAvoidsOther: string | null;
 }
 
-// Same shape usePassportClinicalContent.ts already establishes for
-// parent/teacher/clinician -- get_passport_clinical_content() (0160)
-// gained a principal branch rather than a new RPC, since it was already
-// the shared, role-aware read path for this content.
-interface ClinicalContentItem {
-  id: string;
-  itemType: string;
-  title: string;
-  description: string;
-  authorRole: string;
-  authorName: string | null;
-  authorSpecialty: string | null;
-  createdAt: string;
-}
-
-// Passport Incidents tabs (migration 0166) -- this page had no
-// Incidents tab at all before this, the only track missing one
-// entirely rather than mislabelled. get_institution_incidents()
-// already grants a principal every incident at their institution
-// (can_countersign_incident()); p_passport_id is a new filter on that
-// same, already-granted set, not new access.
-type TabKey = "enrolment" | "access" | "clinical" | "passport" | "abcLogs" | "incidents";
+// Stage 4, item 1 -- the full ten-tab classroom profile, reusing the
+// teacher's own components rather than a second hand-rolled version
+// (same discipline as ClinicalFileDetail). Two names that used to
+// collide are now two distinct tabs instead of a naming fix on one:
+// "Clinical Team" is the roster (who is engaged -- unchanged content,
+// just relabelled from "Clinical"), "Shared Strategies" is the content
+// (what they've published -- pulled out of the old "passport" tab's own
+// hand-rolled "From the Clinical Team" section, now the shared
+// ClinicalTeamSection component instead, matching teacher's own
+// "clinicalTeam" tab). "Passport" itself is the one deliberate content
+// merge Daniel kept: teacher's summary/behaviour/communication/supports
+// tabs, consolidated into one tab here rather than four, because a
+// principal is reviewing a record, not working inside it moment to
+// moment. "Medical & Care" (Section E) stays its own tab even though
+// Passport absorbs everything else -- safeguarding-critical content
+// that needs to stay one tap away, not buried in a longer combined page.
+type TabKey =
+  | "enrolment"
+  | "access"
+  | "passport"
+  | "medicalCare"
+  | "incidents"
+  | "abcLogs"
+  | "clinical"
+  | "sharedStrategies"
+  | "progress"
+  | "messages";
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: "enrolment", label: "Enrolment" },
   { key: "access", label: "Access" },
-  { key: "clinical", label: "Clinical" },
   { key: "passport", label: "Passport" },
-  // Added per Daniel's own instruction: a principal should not find ABC
-  // logs somewhere different from where an SNA finds them -- matches
-  // sna/passport/[passportId]/page.tsx's own tab exactly, its own
-  // separate slot from "Incidents" for the same reason SNA's page keeps
-  // them apart (formal incident record vs. day-to-day ABC log -- folding
-  // them together would blur that distinction).
-  { key: "abcLogs", label: "ABC Logs" },
+  { key: "medicalCare", label: "Medical & Care" },
+  // Incidents/ABC Logs keep their existing relative order and exact
+  // keys -- AbcLogReference.tsx deep-links ?tab=abcLogs, and
+  // get_institution_incidents() (this page's own Incidents tab) stays
+  // exactly as it was, not swapped for teacher's narrower RPC just for
+  // symmetry.
   { key: "incidents", label: "Incidents" },
+  { key: "abcLogs", label: "ABC Logs" },
+  { key: "clinical", label: "Clinical Team" },
+  { key: "sharedStrategies", label: "Shared Strategies" },
+  { key: "progress", label: "Progress" },
+  { key: "messages", label: "Messages" },
 ];
 
 const ROLE_LABEL: Record<string, string> = {
@@ -290,9 +316,37 @@ export function ChildDetail({
 
   const [passportProfile, setPassportProfile] = useState<PassportProfile | null>(null);
   const [passportProfileError, setPassportProfileError] = useState<string | null>(null);
-  const [clinicalContent, setClinicalContent] = useState<ClinicalContentItem[]>([]);
-  const [clinicalContentError, setClinicalContentError] = useState<string | null>(null);
   const [showClinicianHistory, setShowClinicianHistory] = useState(false);
+
+  // Stage 4, item 1 -- Shared Strategies tab, same shared hook teacher's
+  // own "clinicalTeam" tab uses (get_passport_clinical_content() already
+  // has a principal branch, 0160). Owns its own load/error state,
+  // independent of this component's own big load() below.
+  const {
+    items: clinicalContentItems,
+    isLoading: isLoadingClinicalContent,
+    loadError: clinicalContentError,
+    reload: reloadClinicalContent,
+  } = usePassportClinicalContent(passportId);
+
+  // Stage 4, item 1 -- Medical & Care tab (Section E). Direct table
+  // read, same shape teacher's own page uses -- passport_section_e
+  // gained a principal SELECT policy (migration 0195) for exactly this.
+  const [medicalCare, setMedicalCare] = useState<{
+    allergies: string | null;
+    medicalConditions: string | null;
+    medications: string | null;
+    emergencyProtocol: string | null;
+    intimateCareNeeds: string | null;
+    sectionEComplete: boolean;
+    updatedAt: string | null;
+  } | null>(null);
+  const [medicalCareError, setMedicalCareError] = useState<string | null>(null);
+
+  // Stage 4, item 1 -- Passport tab's own Today's Context block.
+  // morning_checkins gained a principal SELECT policy (migration 0195)
+  // for exactly this, same shape teacher's page uses (today only).
+  const [todayContext, setTodayContext] = useState<TodayContext | null>(null);
 
   // Passport Incidents tab (migration 0166) -- get_institution_incidents()
   // filtered to this one child via its new p_passport_id param.
@@ -342,6 +396,9 @@ export function ChildDetail({
     }
     setChildName(rosterMatch.child_name);
 
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+
     const [
       accessResult,
       staffRosterResult,
@@ -351,8 +408,9 @@ export function ChildDetail({
       cliniciansResult,
       clinicianHistoryResult,
       passportProfileResult,
-      clinicalContentResult,
       institutionIncidentsResult,
+      medicalCareResult,
+      todayContextResult,
     ] = await Promise.all([
       supabase.rpc("get_passport_access_for_child", { p_passport_id: passportId, p_institution_id: staffRow.institution_id }),
       supabase.rpc("get_institution_staff_roster", { p_institution_id: staffRow.institution_id, p_include_inactive: false, p_include_pending: false }),
@@ -369,8 +427,23 @@ export function ChildDetail({
       supabase.rpc("get_passport_clinicians", { p_passport_id: passportId }),
       supabase.rpc("get_passport_clinician_history", { p_passport_id: passportId, p_institution_id: staffRow.institution_id }),
       supabase.rpc("get_child_passport_profile_for_principal", { p_passport_id: passportId }),
-      supabase.rpc("get_passport_clinical_content", { p_passport_id: passportId }),
       supabase.rpc("get_institution_incidents", { p_institution_id: staffRow.institution_id, p_passport_id: passportId }),
+      // Medical & Care tab -- same field list teacher's own page selects.
+      supabase
+        .from("passport_section_e")
+        .select("allergies, medical_conditions, medications, emergency_protocol, intimate_care_needs, section_e_complete, updated_at")
+        .eq("passport_id", passportId)
+        .maybeSingle(),
+      // Passport tab's Today's Context block -- today only, same shape
+      // teacher's own page selects.
+      supabase
+        .from("morning_checkins")
+        .select("sleep_quality, regulation_state, morning_stressors, heads_up, checked_in_at")
+        .eq("passport_id", passportId)
+        .gte("checked_in_at", startOfToday.toISOString())
+        .order("checked_in_at", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
     ]);
 
     if (institutionIncidentsResult.error) {
@@ -571,34 +644,56 @@ export function ChildDetail({
       );
     }
 
-    if (clinicalContentResult.error) {
-      console.error("Failed to load clinical content:", clinicalContentResult.error);
-      setClinicalContentError("Couldn't load clinical team updates.");
+    // Same secondary-read posture as passportProfile above -- a failure
+    // here doesn't block the rest of the page.
+    if (medicalCareResult.error) {
+      console.error("Failed to load Section E:", medicalCareResult.error);
+      setMedicalCareError("Couldn't load medical & care information.");
+      setMedicalCare(null);
     } else {
-      setClinicalContentError(null);
-      setClinicalContent(
-        (
-          (clinicalContentResult.data ?? []) as {
-            id: string;
-            item_type: string;
-            content: { title?: string; description?: string } | null;
-            author_role: string;
-            author_name: string | null;
-            author_specialty: string | null;
-            created_at: string;
-          }[]
-        ).map((row) => ({
-          id: row.id,
-          itemType: row.item_type,
-          title: row.content?.title ?? "",
-          description: row.content?.description ?? "",
-          authorRole: row.author_role,
-          authorName: row.author_name,
-          authorSpecialty: row.author_specialty,
-          createdAt: row.created_at,
-        }))
+      setMedicalCareError(null);
+      const row = medicalCareResult.data as
+        | {
+            allergies: string | null;
+            medical_conditions: string | null;
+            medications: string | null;
+            emergency_protocol: string | null;
+            intimate_care_needs: string | null;
+            section_e_complete: boolean;
+            updated_at: string | null;
+          }
+        | null;
+      setMedicalCare(
+        row
+          ? {
+              allergies: row.allergies,
+              medicalConditions: row.medical_conditions,
+              medications: row.medications,
+              emergencyProtocol: row.emergency_protocol,
+              intimateCareNeeds: row.intimate_care_needs,
+              sectionEComplete: Boolean(row.section_e_complete),
+              updatedAt: row.updated_at,
+            }
+          : null
       );
     }
+
+    if (todayContextResult.error) {
+      console.error("Failed to load today's check-in:", todayContextResult.error);
+    }
+    const checkin = todayContextResult.data as
+      | { sleep_quality: string | null; regulation_state: string | null; morning_stressors: string[] | null; heads_up: string | null }
+      | null;
+    setTodayContext(
+      checkin
+        ? {
+            sleepQuality: checkin.sleep_quality,
+            regulationState: checkin.regulation_state,
+            stressors: Array.isArray(checkin.morning_stressors) ? checkin.morning_stressors : [],
+            headsUp: checkin.heads_up,
+          }
+        : null
+    );
 
     setIsLoading(false);
   }, [passportId, user]);
@@ -671,8 +766,16 @@ export function ChildDetail({
 
   return (
     <>
+      {/* Stage 4, item 1: ten tabs is too many for a horizontal
+          scroller at 375px (see this file's own build report -- kept
+          as a scroller below lg per Daniel's own instruction, "look at
+          it rather than reason about it"). At lg+, the same pattern
+          ClinicalFileDetail already established for its own eleven-tab
+          strip: a persistent vertical list beside the content, not a
+          scroller at any width. */}
+      <div className="lg:flex lg:items-start lg:gap-4">
       {!isLoading && !error && !notOnRoster && (
-        <div className="flex gap-1 overflow-x-auto border-b border-black/5 px-4">
+        <div className="flex gap-1 overflow-x-auto border-b border-black/5 px-4 lg:w-52 lg:flex-shrink-0 lg:flex-col lg:gap-0.5 lg:overflow-visible lg:border-b-0 lg:border-r lg:border-black/5 lg:px-2 lg:py-2">
           {TABS.map((tab) => (
             <button
               key={tab.key}
@@ -685,10 +788,10 @@ export function ChildDetail({
                   block: "nearest",
                 });
               }}
-              className={`flex-shrink-0 whitespace-nowrap border-b-2 px-3 py-2.5 text-sm font-semibold transition-colors ${
+              className={`flex-shrink-0 whitespace-nowrap border-b-2 px-3 py-2.5 text-left text-sm font-semibold transition-colors lg:w-full lg:flex-shrink lg:whitespace-normal lg:rounded-xl lg:border-b-0 lg:px-3 lg:py-2.5 ${
                 activeTab === tab.key
-                  ? "border-brand-prussian-blue text-brand-prussian-blue"
-                  : "border-transparent text-black/40"
+                  ? "border-brand-prussian-blue text-brand-prussian-blue lg:border-transparent lg:bg-brand-pastel-blue"
+                  : "border-transparent text-black/40 lg:text-brand-neutral-black/70"
               }`}
             >
               {tab.label}
@@ -705,7 +808,7 @@ export function ChildDetail({
           horizontal and vertical padding that used to come from
           <main> itself are reproduced here, around the same content
           they used to wrap. */}
-      <div className="px-4 py-4">
+      <div className="flex-1 px-4 py-4">
       {isLoading ? (
         <div className="flex flex-col gap-2">
           <div className="h-16 animate-pulse rounded-2xl bg-white" />
@@ -1105,6 +1208,12 @@ export function ChildDetail({
             </>
           )}
 
+          {/* Stage 4, item 1: consolidated (Daniel's own kept merge) --
+              teacher's summary/behaviour/communication/supports tabs,
+              one tab here instead of four, plus the two completion-
+              request actions (item 2). Same shared blocks teacher's own
+              page renders -- reused, not re-derived a second time the
+              way this tab's own old flattened content used to be. */}
           {activeTab === "passport" && (
             <>
               {passportProfileError ? (
@@ -1116,106 +1225,98 @@ export function ChildDetail({
                   No passport exists for this child yet.
                 </p>
               ) : (
-                <>
+                <div className="flex flex-col gap-4">
                   {!passportProfile.sectionAComplete && (
-                    <p className="mb-6 rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-center text-sm text-brand-neutral-black/60">
+                    <p className="rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-center text-sm text-brand-neutral-black/60">
                       This family hasn&apos;t completed their passport yet -- what&apos;s shown below is whatever has
                       been saved so far.
                     </p>
                   )}
 
-                  <PassportProfileSection title="Diagnoses">
-                    <PassportPillGroup items={passportProfile.diagnoses} other={passportProfile.diagnosisOther} emptyText="None recorded." />
-                  </PassportProfileSection>
+                  <TodayContextBlock context={todayContext} />
+                  <ProfileBlock diagnosisTags={withOtherTag(passportProfile.diagnoses, passportProfile.diagnosisOther)} />
+                  <KeyCommunicationBlock
+                    communicationTags={withOtherTag(passportProfile.communicationMethods, passportProfile.communicationMethodsOther)}
+                  />
+                  <BehaviourSignalsBlock
+                    hardSignals={passportProfile.hardSignals}
+                    hardSignalsOther={passportProfile.hardSignalsOther}
+                    hardTriggers={passportProfile.hardTriggers}
+                    hardTriggersOther={passportProfile.hardTriggersOther}
+                  />
+                  <CommunicationBlock
+                    communicationTags={withOtherTag(passportProfile.communicationMethods, passportProfile.communicationMethodsOther)}
+                    showsHappy={passportProfile.showsHappy}
+                    showsAnxious={passportProfile.showsAnxious}
+                    phrasesToAvoid={passportProfile.phrasesToAvoid}
+                  />
+                  <SupportsBlock
+                    beforeBehaviour={passportProfile.beforeBehaviour}
+                    beforeBehaviourOther={passportProfile.beforeBehaviourOther}
+                    duringDistress={passportProfile.duringDistress}
+                    duringDistressOther={passportProfile.duringDistressOther}
+                    afterDistress={passportProfile.afterDistress}
+                    afterDistressOther={passportProfile.afterDistressOther}
+                    sensorySeeks={passportProfile.sensorySeeks}
+                    sensorySeeksOther={passportProfile.sensorySeeksOther}
+                    sensoryAvoids={passportProfile.sensoryAvoids}
+                    sensoryAvoidsOther={passportProfile.sensoryAvoidsOther}
+                  />
 
-                  <PassportProfileSection title="Hard Signals & Triggers">
-                    <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-brand-neutral-black/40">Signals</p>
-                    <PassportPillGroup items={passportProfile.hardSignals} other={passportProfile.hardSignalsOther} emptyText="None recorded." />
-                    <p className="mt-3 mb-1 text-xs font-semibold uppercase tracking-wide text-brand-neutral-black/40">Triggers</p>
-                    <PassportPillGroup items={passportProfile.hardTriggers} other={passportProfile.hardTriggersOther} emptyText="None recorded." />
-                  </PassportProfileSection>
+                  {institutionId && (
+                    <>
+                      <h2 className="font-heading text-base font-semibold text-brand-neutral-black">
+                        Passport Completion
+                      </h2>
+                      <PassportCompletionSection
+                        passportId={passportId}
+                        institutionId={institutionId}
+                        targetSection="a"
+                        isSectionComplete={passportProfile.sectionAComplete}
+                      />
 
-                  <PassportProfileSection title="Communication">
-                    <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-brand-neutral-black/40">Methods</p>
-                    <PassportPillGroup
-                      items={passportProfile.communicationMethods}
-                      other={passportProfile.communicationMethodsOther}
-                      emptyText="None recorded."
-                    />
-                    {passportProfile.showsHappy && (
-                      <p className="mt-3 text-sm text-brand-neutral-black">
-                        <span className="font-semibold">Shows happy: </span>
-                        {passportProfile.showsHappy}
-                      </p>
-                    )}
-                    {passportProfile.showsAnxious && (
-                      <p className="mt-2 text-sm text-brand-neutral-black">
-                        <span className="font-semibold">Shows anxious: </span>
-                        {passportProfile.showsAnxious}
-                      </p>
-                    )}
-                    {passportProfile.phrasesToAvoid && (
-                      <p className="mt-2 text-sm text-brand-neutral-black">
-                        <span className="font-semibold">Phrases to avoid: </span>
-                        {passportProfile.phrasesToAvoid}
-                      </p>
-                    )}
-                  </PassportProfileSection>
-
-                  <PassportProfileSection title="Behaviour & Sensory">
-                    <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-brand-neutral-black/40">Before behaviour</p>
-                    <PassportPillGroup items={passportProfile.beforeBehaviour} other={passportProfile.beforeBehaviourOther} emptyText="None recorded." />
-                    <p className="mt-3 mb-1 text-xs font-semibold uppercase tracking-wide text-brand-neutral-black/40">During distress</p>
-                    <PassportPillGroup items={passportProfile.duringDistress} other={passportProfile.duringDistressOther} emptyText="None recorded." />
-                    <p className="mt-3 mb-1 text-xs font-semibold uppercase tracking-wide text-brand-neutral-black/40">After distress</p>
-                    <PassportPillGroup items={passportProfile.afterDistress} other={passportProfile.afterDistressOther} emptyText="None recorded." />
-                    <p className="mt-3 mb-1 text-xs font-semibold uppercase tracking-wide text-brand-neutral-black/40">Sensory seeks</p>
-                    <PassportPillGroup items={passportProfile.sensorySeeks} other={passportProfile.sensorySeeksOther} emptyText="None recorded." />
-                    <p className="mt-3 mb-1 text-xs font-semibold uppercase tracking-wide text-brand-neutral-black/40">Sensory avoids</p>
-                    <PassportPillGroup items={passportProfile.sensoryAvoids} other={passportProfile.sensoryAvoidsOther} emptyText="None recorded." />
-                  </PassportProfileSection>
-
-                  {/* Institution-facing only (strategy_school/strategy_shared/
-                      trigger/setting_event) -- get_passport_clinical_content()'s
-                      own item_type filter, same restriction a class_teacher's
-                      own view already has. strategy_home never reaches here --
-                      CLAUDE.md's own "home logs reach the classroom by design,
-                      via the clinician" rule, unchanged. */}
-                  <section>
-                    <h2 className="mb-2 font-heading text-sm font-bold uppercase tracking-wide text-brand-neutral-black/60">
-                      From the Clinical Team
-                    </h2>
-                    {clinicalContentError ? (
-                      <p className="rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-center text-sm text-brand-neutral-black/60">
-                        {clinicalContentError}
-                      </p>
-                    ) : clinicalContent.length === 0 ? (
-                      <p className="rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-center text-sm text-brand-neutral-black/60">
-                        Nothing shared with the school yet.
-                      </p>
-                    ) : (
-                      <div className="flex flex-col gap-2">
-                        {clinicalContent.map((item) => (
-                          <div key={item.id} className="rounded-2xl border border-black/5 bg-white/60 p-4">
-                            {item.title && <p className="text-sm font-semibold text-brand-neutral-black">{item.title}</p>}
-                            {item.description && (
-                              <p className="mt-1 text-sm text-brand-neutral-black/70">{item.description}</p>
-                            )}
-                            <p className="mt-2 text-xs text-brand-neutral-black/50">
-                              {item.authorName ?? "Clinical team"}
-                              {item.authorSpecialty ? ` · ${item.authorSpecialty}` : ""} · {formatDate(item.createdAt)}
-                            </p>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </section>
-                </>
+                      <h2 className="font-heading text-base font-semibold text-brand-neutral-black">
+                        Medical &amp; Care Needs
+                      </h2>
+                      <PassportCompletionSection
+                        passportId={passportId}
+                        institutionId={institutionId}
+                        targetSection="e"
+                        isSectionComplete={medicalCare?.sectionEComplete ?? false}
+                      />
+                    </>
+                  )}
+                </div>
               )}
             </>
           )}
 
-          {activeTab === "abcLogs" && <ABCTimeline passportId={passportId} viewerRole="principal" />}
+          {/* Section E -- deliberately its own tab, not folded into
+              Passport above, even though behaviour/communication/
+              supports are -- safeguarding-critical content stays one
+              tap away, matching teacher's own separate "medical" tab. */}
+          {activeTab === "medicalCare" && (
+            <>
+              {medicalCareError ? (
+                <p className="rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-center text-sm text-brand-neutral-black/60">
+                  {medicalCareError}
+                </p>
+              ) : !medicalCare ? (
+                <p className="rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-center text-sm text-brand-neutral-black/60">
+                  No medical &amp; care information recorded for this child yet.
+                </p>
+              ) : (
+                <MedicalCareBlock
+                  sectionEUpdatedAtLabel={medicalCare.updatedAt ? formatRelativeDate(medicalCare.updatedAt) : null}
+                  allergies={medicalCare.allergies}
+                  medicalConditions={medicalCare.medicalConditions}
+                  medications={medicalCare.medications}
+                  emergencyProtocol={medicalCare.emergencyProtocol}
+                  intimateCareNeeds={medicalCare.intimateCareNeeds}
+                />
+              )}
+            </>
+          )}
 
           {activeTab === "incidents" && (
             <>
@@ -1236,8 +1337,51 @@ export function ChildDetail({
               )}
             </>
           )}
+
+          {activeTab === "abcLogs" && <ABCTimeline passportId={passportId} viewerRole="principal" />}
+
+          {/* "Shared Strategies" -- the content half of the old
+              "clinical" naming collision. Same shared component and
+              data source teacher's own "clinicalTeam" tab uses
+              (get_passport_clinical_content(), already principal-
+              branched). This used to be a hand-rolled "From the
+              Clinical Team" section duplicated inside the old flattened
+              "passport" tab -- reconciled here, not left as a second
+              copy of the same content. */}
+          {activeTab === "sharedStrategies" && (
+            <>
+              {isLoadingClinicalContent ? (
+                <div className="flex flex-col gap-2">
+                  <div className="h-20 animate-pulse rounded-2xl bg-white" />
+                  <div className="h-20 animate-pulse rounded-2xl bg-white" />
+                </div>
+              ) : clinicalContentError ? (
+                <InlineErrorState message={clinicalContentError} onRetry={reloadClinicalContent} />
+              ) : clinicalContentItems.length === 0 ? (
+                <p className="rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-center text-sm text-brand-neutral-black/60">
+                  Nothing from the clinical team yet.
+                </p>
+              ) : (
+                <ClinicalTeamSection items={clinicalContentItems} viewerRole="principal" />
+              )}
+            </>
+          )}
+
+          {activeTab === "progress" && (
+            <ProgressSurface passportId={passportId} childFullName={childName} role="principal" />
+          )}
+
+          {activeTab === "messages" && user && childName && (
+            <PassportMessagesTab
+              passportId={passportId}
+              childName={childName}
+              userId={user.id}
+              senderRole="principal"
+            />
+          )}
         </>
       )}
+      </div>
       </div>
 
       {institutionId && childName && (
@@ -1352,36 +1496,3 @@ export function ChildDetail({
   );
 }
 
-// Migration 0160's own tab -- small local helpers, same shape as the
-// teacher passport page's own PillRow (src/app/teacher/passport/
-// [passportId]/page.tsx), not shared, since neither is exported there
-// either.
-function PassportProfileSection({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <section className="mb-6">
-      <h2 className="mb-2 font-heading text-sm font-bold uppercase tracking-wide text-brand-neutral-black/60">
-        {title}
-      </h2>
-      <div className="rounded-2xl border border-black/5 bg-white/60 p-4">{children}</div>
-    </section>
-  );
-}
-
-function PassportPillGroup({ items, other, emptyText }: { items: string[]; other?: string | null; emptyText: string }) {
-  const tags = items.includes("Other") && other ? [...items.filter((i) => i !== "Other"), other] : items;
-  if (tags.length === 0) {
-    return <p className="text-sm text-brand-neutral-black/50">{emptyText}</p>;
-  }
-  return (
-    <div className="flex flex-wrap gap-2">
-      {tags.map((item) => (
-        <span
-          key={item}
-          className="rounded-full bg-brand-pastel-blue/20 px-3 py-1.5 text-xs font-semibold text-brand-prussian-blue"
-        >
-          {item}
-        </span>
-      ))}
-    </div>
-  );
-}

@@ -2,6 +2,7 @@ import { buildDateBuckets, entriesInRange, type AbcTrendEntry } from "./abc";
 import { countDataDays, REGULATION_STATE_COLOR, REGULATION_STATE_LABEL, type DayEntry, type RegulationState } from "./regulation";
 import { weekdayIndex, WEEKDAY_SHORT_LABELS, enumerateDates } from "./dateUtils";
 import { densityThreshold, meetsThreshold, type DateRange } from "./range";
+import type { ProgressViewerRole } from "./types";
 
 // The Unified Trends graph (chart evolution brief): one multi-series line
 // graph replacing the old incidents-over-time bars, the incident
@@ -257,7 +258,7 @@ export const TREND_SERIES_META: Record<TrendSeriesId, { label: string; color: st
 // specific series is already their full existing scope (own check-ins,
 // own EOD, the ABC data they already read), so there's no narrower
 // default to apply beyond the school-availability gate itself.
-export function defaultActiveSeries(role: "parent" | "teacher" | "clinician"): TrendSeriesId[] {
+export function defaultActiveSeries(role: ProgressViewerRole): TrendSeriesId[] {
   if (role === "parent") return ["morningRegulation", "incidents"];
   return ["incidents", "morningRegulation", "schoolRegulation"];
 }
