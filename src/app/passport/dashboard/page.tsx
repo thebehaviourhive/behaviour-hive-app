@@ -514,7 +514,7 @@ export default function PassportDashboardPage() {
 
   if (loadError) {
     return (
-      <div className="flex min-h-full flex-1 flex-col items-center justify-center gap-4 bg-brand-safe-ivory px-4 text-center">
+      <div className="flex min-h-full flex-1 flex-col items-center justify-center gap-4 bg-brand-off-white/40 px-4 text-center">
         <p className="text-sm text-brand-neutral-black/70">{loadError}</p>
         <button
           type="button"

@@ -8,7 +8,7 @@ const OUTPUT_ITEMS = ["Identifies triggers", "Creates custom strategies", "Syncs
 export function WhatIsAnFbaSheet({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
   return (
     <BottomSheet isOpen={isOpen} onClose={onClose}>
-      <div className="-m-6 rounded-t-3xl bg-brand-safe-ivory p-6">
+      <div className="-m-6 rounded-t-3xl bg-white p-6">
         <div className="mx-auto mb-4 h-1.5 w-12 rounded-full bg-black/10" />
 
         <div

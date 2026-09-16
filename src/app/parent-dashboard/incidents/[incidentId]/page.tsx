@@ -185,7 +185,7 @@ export default function ParentIncidentDetailPage() {
   }
 
   return (
-    <div className="flex min-h-full flex-1 flex-col bg-brand-safe-ivory">
+    <div className="flex min-h-full flex-1 flex-col bg-brand-off-white/40">
       <header className="flex items-center gap-3 px-4 pt-6 pb-4">
         <Link
           href="/parent-dashboard/incidents"
