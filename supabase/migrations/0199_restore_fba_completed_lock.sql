@@ -328,8 +328,22 @@ grant execute on function public.finalize_fba_report(uuid) to authenticated;
 --    Without this, a request 3d cancels simply vanishes from
 --    QuestionnairePromptCard's own list on the next load -- correct
 --    that it's no longer actionable, wrong that it disappears with no
---    trace. "Whoever holds it needs to see why." Same signature, same
---    return shape -- CREATE OR REPLACE is sufficient.
+--    trace. "Whoever holds it needs to see why."
+--
+--    CORRECTED AFTER A FAILED FIRST RUN: the live signature (0048, not
+--    0041 -- 0048 added `instruction` between clinician_name and
+--    created_at, and nothing since has touched it) carries an
+--    `instruction` column the first version of this migration dropped.
+--    Postgres refused the CREATE OR REPLACE outright (42P13, "cannot
+--    change return type of existing function... Row type defined by
+--    OUT parameters is different") rather than silently applying it --
+--    which is the only reason this was caught before it shipped and
+--    silently blanked every request's own instruction line client-side
+--    (QuestionnairePromptCard.tsx / MyInstrumentRequest.instruction,
+--    both live, both reading this column today). Exactly this file's
+--    own "READ THE LIVE DEFINITION, NOT THE FIRST ONE YOU FOUND"
+--    gotcha -- re-grepped every migration touching this function
+--    (0041, 0048, 0141) before writing the corrected version below.
 -- ============================================================
 
 create or replace function public.get_my_instrument_requests()
@@ -340,6 +354,7 @@ returns table (
   status text,
   child_name text,
   clinician_name text,
+  instruction text,
   created_at timestamptz
 )
 language sql
@@ -354,6 +369,7 @@ as $$
     r.status,
     p.child_name,
     coalesce(cu.raw_user_meta_data ->> 'full_name', cu.raw_app_meta_data ->> 'full_name') as clinician_name,
+    r.instruction,
     r.created_at
   from public.fba_instrument_requests r
   join public.fba_reports fr on fr.id = r.fba_id
