@@ -1795,6 +1795,7 @@ export default function IncidentRecordPage() {
                     value={parentSummary}
                     onChange={(e) => setParentSummary(e.target.value)}
                     rows={3}
+                    placeholder="Brief outline of the incident. This is sent to the child's parent, don't alarm them. If the incident is urgent, call the parents immediately."
                   />
                 </div>
               </section>
