@@ -27,7 +27,14 @@
 -- it stores a role label, not a name). Nothing in either new branch
 -- can be grouped or sorted by staff identity because no staff identity
 -- is carried in the row at all.
-create or replace function public.get_principal_activity_feed(
+--
+-- Return row type widened (3 new columns) -- CREATE OR REPLACE cannot
+-- change a function's OUT-parameter row type (42P13), so the prior
+-- signature is dropped first, same pattern as every other function in
+-- this schema whose shape has grown.
+drop function if exists public.get_principal_activity_feed(integer, integer);
+
+create function public.get_principal_activity_feed(
   p_limit integer default 20, p_offset integer default 0
 )
 returns table (
