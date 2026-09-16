@@ -83,6 +83,14 @@ export default function TeacherClassPage() {
   const [roster, setRoster] = useState<RosterChild[]>([]);
   const [nameMap, setNameMap] = useState<Map<string, string>>(new Map());
   const [assignmentMap, setAssignmentMap] = useState<Map<string, Assignment>>(new Map());
+  // Stage 6, item 1 -- class-tier SNA coverage, per class. A teacher's
+  // own class page never queried this at all before, so a class with a
+  // covering SNA read identically to one with none. Same table,
+  // same read the principal's own ClassDetail.tsx already does -- "Active
+  // staff can view their institution's class SNA rows" (0129) already
+  // permits any active staff member, teacher included, not just a
+  // principal.
+  const [classSnaMap, setClassSnaMap] = useState<Map<string, string[]>>(new Map());
   // Migration 0165 -- passport ids currently recorded as "does not
   // require an SNA" at this institution. A persisted fact, not a
   // per-viewer dismissal, so it's read the same way assignmentMap is:
@@ -139,14 +147,23 @@ export default function TeacherClassPage() {
       return;
     }
 
-    const [classRowsResult, childRowsResult, staffRosterResult, childRosterResult, instResult, coverResult] = await Promise.all([
+    const [classRowsResult, childRowsResult, staffRosterResult, childRosterResult, instResult, coverResult, classSnaResult] = await Promise.all([
       supabase.from("classes").select("id, name").in("id", classIds),
       supabase.from("class_children").select("passport_id, class_id").in("class_id", classIds).is("ended_at", null),
       supabase.rpc("get_institution_staff_roster", { p_institution_id: staffRow.institution_id }),
       supabase.rpc("get_institution_child_roster", { p_institution_id: staffRow.institution_id }),
       supabase.from("institutions").select("temporary_access_start_time, temporary_access_cutoff_time").eq("id", staffRow.institution_id).single(),
       supabase.from("temporary_access").select("id, class_id, granted_to, granted_for_date, reason, revoked_at").in("class_id", classIds).order("granted_for_date", { ascending: false }),
+      supabase.from("class_sna_assignments").select("class_id, user_id").in("class_id", classIds).is("ended_at", null),
     ]);
+
+    const classSnas = new Map<string, string[]>();
+    for (const row of classSnaResult.data ?? []) {
+      const list = classSnas.get(row.class_id) ?? [];
+      list.push(row.user_id);
+      classSnas.set(row.class_id, list);
+    }
+    setClassSnaMap(classSnas);
 
     if (instResult.data?.temporary_access_start_time) {
       setStartTime(instResult.data.temporary_access_start_time);
@@ -313,18 +330,27 @@ export default function TeacherClassPage() {
                     <div className="flex flex-col gap-2">
                       {classRoster.map((c) => {
                         const assignment = assignmentMap.get(c.passportId);
-                        const isNotRequired = !assignment && snaNotRequiredSet.has(c.passportId);
+                        // Same tiered wording and precedence as the
+                        // principal's own ClassDetail.tsx (1:1 takes
+                        // display priority over class SNA when both
+                        // exist) -- reused, not re-derived independently.
+                        const classSnaNames = (classSnaMap.get(cls.id) ?? []).map(
+                          (userId) => nameMap.get(userId) ?? "Unknown"
+                        );
+                        const isNotRequired =
+                          !assignment && classSnaNames.length === 0 && snaNotRequiredSet.has(c.passportId);
                         const isPending = snaNotRequiredPendingId === c.passportId;
+                        const snaLine = assignment
+                          ? `1:1 SNA: ${nameMap.get(assignment.snaUserId) ?? "Unknown"}`
+                          : classSnaNames.length > 0
+                            ? `Class SNA: ${classSnaNames.join(", ")}`
+                            : isNotRequired
+                              ? "No SNA required"
+                              : "No SNA assigned";
                         return (
                           <div key={c.passportId} className="rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
                             <p className="text-sm font-semibold text-brand-neutral-black">{c.childName}</p>
-                            <p className="mt-0.5 text-xs text-brand-neutral-black/50">
-                              {assignment
-                                ? `SNA: ${nameMap.get(assignment.snaUserId) ?? "Unknown"}`
-                                : isNotRequired
-                                  ? "No SNA required"
-                                  : "No SNA assigned"}
-                            </p>
+                            <p className="mt-0.5 text-xs text-brand-neutral-black/50">{snaLine}</p>
                             <button
                               type="button"
                               onClick={() => setAssignSnaTarget(c)}
@@ -337,8 +363,11 @@ export default function TeacherClassPage() {
                                 assignment exists (assign_sna_to_child()
                                 clears it server-side anyway, but there's no
                                 reason to offer either action for a child who
-                                already has an SNA). */}
+                                already has an SNA) -- now also gated on no
+                                class-tier SNA covering them, same reasoning
+                                extended to the new tier. */}
                             {!assignment &&
+                              classSnaNames.length === 0 &&
                               (isNotRequired ? (
                                 <button
                                   type="button"
