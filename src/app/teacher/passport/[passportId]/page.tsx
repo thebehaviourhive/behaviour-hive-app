@@ -20,6 +20,7 @@ import { useMessageCategories } from "@/hooks/useMessageCategories";
 import { fetchApprovedInstitutionPhone } from "@/lib/messages/institutionPhone";
 import { ComposeMessageSheet } from "@/components/messages/ComposeMessageSheet";
 import { ChildIncidentsTab } from "@/components/shared/ChildIncidentsTab";
+import { ScrollFadeEdge } from "@/components/ui/ScrollFadeEdge";
 import {
   SectionHeading,
   EmptyCard,
@@ -361,7 +362,7 @@ export default function TeacherPassportPage() {
         </h1>
       </header>
 
-      <div className="flex gap-1 overflow-x-auto border-b border-black/5 px-4">
+      <div className="relative flex gap-1 overflow-x-auto border-b border-black/5 px-4">
         {TABS.map((tab) => (
           <button
             key={tab.key}
@@ -383,6 +384,7 @@ export default function TeacherPassportPage() {
             {tab.label}
           </button>
         ))}
+        <ScrollFadeEdge />
       </div>
 
       <main className="flex flex-1 flex-col gap-4 px-4 py-4">

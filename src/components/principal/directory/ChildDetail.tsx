@@ -17,6 +17,7 @@ import { PassportCompletionSection } from "@/components/passport/PassportComplet
 import { PassportMessagesTab } from "@/components/passport/PassportMessagesTab";
 import { ProgressSurface } from "@/components/progress/ProgressSurface";
 import { InlineErrorState } from "@/components/ui/InlineErrorState";
+import { ScrollFadeEdge } from "@/components/ui/ScrollFadeEdge";
 import { formatRelativeDate } from "@/lib/relativeDate";
 import {
   TodayContextBlock,
@@ -775,7 +776,7 @@ export function ChildDetail({
           scroller at any width. */}
       <div className="lg:flex lg:items-start lg:gap-4">
       {!isLoading && !error && !notOnRoster && (
-        <div className="flex gap-1 overflow-x-auto border-b border-black/5 px-4 lg:w-52 lg:flex-shrink-0 lg:flex-col lg:gap-0.5 lg:overflow-visible lg:border-b-0 lg:border-r lg:border-black/5 lg:px-2 lg:py-2">
+        <div className="relative flex gap-1 overflow-x-auto border-b border-black/5 px-4 lg:w-52 lg:flex-shrink-0 lg:flex-col lg:gap-0.5 lg:overflow-visible lg:border-b-0 lg:border-r lg:border-black/5 lg:px-2 lg:py-2">
           {TABS.map((tab) => (
             <button
               key={tab.key}
@@ -797,6 +798,8 @@ export function ChildDetail({
               {tab.label}
             </button>
           ))}
+          {/* lg+ becomes a non-scrolling vertical list -- no fade needed there. */}
+          <ScrollFadeEdge className="lg:hidden" />
         </div>
       )}
 
