@@ -148,6 +148,25 @@ interface CoverGrant {
   revokedAt: string | null;
 }
 
+// Stage 7, item 3 -- four sections in one long scroll (Teachers, Class
+// SNA, Roster, Temporary Cover), now pill-selected instead. Temporary
+// Cover doesn't map cleanly onto a Roster/Teachers/SNAs split (it's a
+// class-wide concept, not a teacher or SNA one) -- Daniel's own call:
+// give it a fourth pill rather than force a home for it inside one of
+// the other three. Same pill pattern principal/directory/page.tsx's own
+// top-level Staff/Classes/Children/Temporary Access/Clinicians selector
+// already uses, not a new visual convention. Every section already
+// loads from the one shared load() below -- this is a pure show/hide
+// restructuring, the underlying section blocks are otherwise untouched.
+type ClassDetailSegment = "roster" | "teachers" | "snas" | "cover";
+
+const CLASS_DETAIL_SEGMENTS: { key: ClassDetailSegment; label: string }[] = [
+  { key: "roster", label: "Roster" },
+  { key: "teachers", label: "Teachers" },
+  { key: "snas", label: "SNAs" },
+  { key: "cover", label: "Cover" },
+];
+
 function formatDate(value: string): string {
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return value;
@@ -224,6 +243,7 @@ export function ClassDetail({
 
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [segment, setSegment] = useState<ClassDetailSegment>("roster");
   const [showPastTeachers, setShowPastTeachers] = useState(false);
   const [showPastClassSnas, setShowPastClassSnas] = useState(false);
   const [showPastChildren, setShowPastChildren] = useState(false);
@@ -518,8 +538,27 @@ export function ClassDetail({
         <p className="text-sm text-brand-neutral-black/60">{error}</p>
       ) : (
         <>
-          <p className="mb-6 text-sm text-brand-neutral-black/60">{snapshotLine}</p>
+          <p className="mb-4 text-sm text-brand-neutral-black/60">{snapshotLine}</p>
 
+          <div className="mb-6 flex flex-wrap gap-2">
+            {CLASS_DETAIL_SEGMENTS.map((s) => (
+              <button
+                key={s.key}
+                type="button"
+                onClick={() => setSegment(s.key)}
+                aria-pressed={segment === s.key}
+                className={`rounded-full border px-4 py-2 font-sans text-sm font-semibold transition-colors ${
+                  segment === s.key
+                    ? "border-brand-pastel-blue bg-brand-pastel-blue text-brand-prussian-blue underline underline-offset-4"
+                    : "border-black/10 bg-white text-brand-neutral-black/70"
+                }`}
+              >
+                {s.label}
+              </button>
+            ))}
+          </div>
+
+          {segment === "teachers" && (
           <section className="mb-6">
             <h2 className="mb-2 font-heading text-sm font-bold uppercase tracking-wide text-brand-neutral-black/60">
               Teachers ({teachers.active.length}/3)
@@ -609,7 +648,9 @@ export function ClassDetail({
               </div>
             )}
           </section>
+          )}
 
+          {segment === "snas" && (
           <section className="mb-6">
             <h2 className="mb-2 font-heading text-sm font-bold uppercase tracking-wide text-brand-neutral-black/60">
               Class SNA ({classSnas.active.length})
@@ -695,7 +736,9 @@ export function ClassDetail({
               </div>
             )}
           </section>
+          )}
 
+          {segment === "roster" && (
           <section>
             <h2 className="mb-2 font-heading text-sm font-bold uppercase tracking-wide text-brand-neutral-black/60">
               Roster ({children.active.length})
@@ -829,7 +872,9 @@ export function ClassDetail({
               </div>
             )}
           </section>
+          )}
 
+          {segment === "cover" && (
           <section className="mt-6">
             <h2 className="mb-2 font-heading text-sm font-bold uppercase tracking-wide text-brand-neutral-black/60">
               Temporary Cover
@@ -907,6 +952,7 @@ export function ClassDetail({
               </div>
             )}
           </section>
+          )}
         </>
       )}
 
