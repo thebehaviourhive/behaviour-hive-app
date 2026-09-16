@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { MessageCard } from "@/components/messages/MessageCard";
 import { MessageCardSkeleton } from "@/components/messages/MessageCardSkeleton";
-import { isOpenStatus } from "@/lib/messages/messageStatus";
+import { isOpenForViewer } from "@/lib/messages/messageStatus";
 import type { MessageRole, ThreadMessage } from "@/types/messages";
 
 type View = "open" | "archived";
@@ -32,7 +32,9 @@ export function StaffMessageList({
   const [view, setView] = useState<View>("open");
   const [expandedMessageId, setExpandedMessageId] = useState<string | null>(null);
 
-  const visibleMessages = messages.filter((m) => (view === "open" ? isOpenStatus(m.status) : !isOpenStatus(m.status)));
+  const visibleMessages = messages.filter((m) =>
+    view === "open" ? isOpenForViewer(m, currentUserId) : !isOpenForViewer(m, currentUserId)
+  );
 
   return (
     <div>

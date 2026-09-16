@@ -3,7 +3,7 @@
 import { useState, type ReactNode } from "react";
 import { MessageCard } from "./MessageCard";
 import { MessageCardSkeleton } from "./MessageCardSkeleton";
-import { isOpenStatus } from "@/lib/messages/messageStatus";
+import { isOpenForViewer } from "@/lib/messages/messageStatus";
 import type { MessageRole, ThreadMessage } from "@/types/messages";
 
 type View = "open" | "archived";
@@ -39,7 +39,7 @@ export function MessageList({
   const [expandedMessageId, setExpandedMessageId] = useState<string | null>(null);
 
   const filtered = messages.filter((message) =>
-    view === "open" ? isOpenStatus(message.status) : !isOpenStatus(message.status)
+    view === "open" ? isOpenForViewer(message, currentUserId) : !isOpenForViewer(message, currentUserId)
   );
 
   return (

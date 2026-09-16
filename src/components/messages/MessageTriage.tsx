@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { MessageCard } from "@/components/messages/MessageCard";
 import { MessageCardSkeleton } from "@/components/messages/MessageCardSkeleton";
-import { isOpenStatus } from "@/lib/messages/messageStatus";
+import { isOpenForViewer } from "@/lib/messages/messageStatus";
 import type { TriageGroup } from "@/hooks/useMessageTriage";
 import type { MessageRole } from "@/types/messages";
 
@@ -39,7 +39,9 @@ export function MessageTriage({
   const visibleGroups = groups
     .map((group) => ({
       ...group,
-      messages: group.messages.filter((m) => (view === "open" ? isOpenStatus(m.status) : !isOpenStatus(m.status))),
+      messages: group.messages.filter((m) =>
+        view === "open" ? isOpenForViewer(m, currentUserId) : !isOpenForViewer(m, currentUserId)
+      ),
     }))
     .filter((group) => group.messages.length > 0);
 
