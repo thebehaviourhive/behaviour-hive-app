@@ -6,7 +6,7 @@ import { BrandMark } from "@/components/ui/BrandMark";
 import { Button } from "@/components/ui/Button";
 import { TextField } from "@/components/ui/TextField";
 import { createClient } from "@/lib/supabase/client";
-import { getPostAuthRedirect } from "@/lib/roleRedirect";
+import { resolveOnboardingDestination } from "@/lib/resolveOnboardingDestination";
 import { getAuthErrorMessage } from "@/lib/authErrorMessage";
 
 export function LoginContent() {
@@ -40,7 +40,17 @@ export function LoginContent() {
       return;
     }
 
-    router.push(getPostAuthRedirect(data.user?.app_metadata?.role));
+    // A fourth, independently hand-copied "where does this user go"
+    // path, predating the onboarding restructure -- calling
+    // getPostAuthRedirect() directly skipped the joined/consented
+    // checks entirely, and that function has no case for clinical_lead
+    // or clinic_admin, so both fell through to /role-select with
+    // nothing there to self-correct a role that had already joined and
+    // consented. Found live during PRD 5 Stage 2 consent verification.
+    // Every other role's dashboard page independently re-corrects via
+    // useRequireRole, which is why this went unnoticed until a role
+    // with no dashboard fallback hit it.
+    router.push(await resolveOnboardingDestination(supabase, data.user));
   }
 
   return (
