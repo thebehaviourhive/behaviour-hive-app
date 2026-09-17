@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 import { createClient } from "@/lib/supabase/client";
 import type { MessageCategory, MessageRecipientCandidate } from "@/types/messages";
-import { getRoleLabel } from "@/lib/vocabulary";
+import { getRoleLabel, getCategoryLabel } from "@/lib/vocabulary";
 import { useMessageInstitutionVocabulary } from "@/hooks/useMessageInstitutionVocabulary";
 
 const BODY_MAX = 200;
@@ -196,7 +196,7 @@ export function ComposeMessageSheet({
                     : "border-black/10 bg-white text-brand-neutral-black/70"
                 }`}
               >
-                {category.label}
+                {getCategoryLabel(category.label, institutionType)}
               </button>
             );
           })}

@@ -8,7 +8,7 @@ import { insertWithOfflineRetry } from "@/lib/waitForReconnect";
 import { renderMessageBody } from "@/lib/messages/messageBodyTokens";
 import type { MessageRecipient, MessageRole, ThreadMessage } from "@/types/messages";
 import { AbcLogReference } from "./AbcLogReference";
-import { getRoleLabel, type VocabularyOverrides } from "@/lib/vocabulary";
+import { getRoleLabel, getCategoryLabel, type VocabularyOverrides } from "@/lib/vocabulary";
 import { useMessageInstitutionVocabulary } from "@/hooks/useMessageInstitutionVocabulary";
 import type { InstitutionType } from "@/lib/institutionType";
 
@@ -260,7 +260,7 @@ export function MessageCard({
         )}
         <span aria-hidden className={`h-2 w-2 flex-shrink-0 rounded-full ${status.dotClassName}`} />
         <span className="flex-shrink-0 rounded-full bg-brand-off-white px-2 py-0.5 text-[10px] font-semibold text-brand-neutral-black/70">
-          {message.categoryLabel}
+          {getCategoryLabel(message.categoryLabel, institutionType)}
         </span>
         <span className="min-w-0 flex-1 truncate text-xs text-brand-neutral-black/70">
           <span className={isUnread ? "font-bold text-brand-neutral-black" : "font-medium text-brand-neutral-black/70"}>
@@ -281,7 +281,7 @@ export function MessageCard({
         <div className="border-t border-black/5 px-4 pb-4 pt-3">
           <div className="flex items-center justify-between gap-2">
             <span className="rounded-full bg-brand-off-white px-2.5 py-1 text-xs font-semibold text-brand-neutral-black/70">
-              {message.categoryLabel}
+              {getCategoryLabel(message.categoryLabel, institutionType)}
             </span>
             <div className="flex items-center gap-1.5">
               {/* The read-only rule, made visible: shown whenever the

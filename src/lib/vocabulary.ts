@@ -110,3 +110,29 @@ export function getRoleLabel(
 function isRole(value: string): value is Role {
   return value in ROLE_OVERRIDE_KEY;
 }
+
+// PRD 5 Stage 2: message_categories' own applies_to='staff' rows
+// ("Cover / Rota", "Class / Roster", "General") are stored data, not
+// code (this table's own established convention -- editing the set is
+// a data edit, never a schema change). Two of the three already read
+// fine for a clinic unchanged; "Class / Roster" doesn't. Decided:
+// translate the DISPLAYED label the same way a role's label is
+// translated -- the stored row/value never changes -- rather than
+// building a second, clinic-specific category set. Cheaper, and one
+// mechanism instead of two.
+//
+// Keyed on the CURRENT stored label text, not a stable id/slug --
+// message_categories has no such column, and this table's own rows
+// are edited rarely and deliberately (Behaviour Hive staff, not
+// runtime churn). If a category's stored label is ever renamed, this
+// map's own key needs updating alongside it, the same fragility this
+// codebase already accepts for OTHER_OPTION-style string matching
+// elsewhere -- noted here so it isn't a surprise later.
+const CATEGORY_LABEL_DEFAULT: Partial<Record<string, string>> = {
+  "Class / Roster": "Caseload",
+};
+
+export function getCategoryLabel(storedLabel: string, institutionType: InstitutionType): string {
+  if (institutionType !== "clinic") return storedLabel;
+  return CATEGORY_LABEL_DEFAULT[storedLabel] ?? storedLabel;
+}
