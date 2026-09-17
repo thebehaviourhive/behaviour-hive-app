@@ -12,9 +12,12 @@ import { TeacherAgreementScreen } from "@/components/consent/TeacherAgreementScr
 import { SnaAgreementScreen } from "@/components/consent/SnaAgreementScreen";
 import { PrincipalAgreementScreen } from "@/components/consent/PrincipalAgreementScreen";
 import { ClinicianAgreementScreen } from "@/components/consent/ClinicianAgreementScreen";
+import { ClinicalLeadAgreementScreen } from "@/components/consent/ClinicalLeadAgreementScreen";
+import { ClinicAdminAgreementScreen } from "@/components/consent/ClinicAdminAgreementScreen";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 import { PrivacyPolicyContent } from "@/components/PrivacyPolicyContent";
 import { Button } from "@/components/ui/Button";
+import type { InstitutionType } from "@/lib/institutionType";
 
 // Consent/agreement screens rebuild. This page owns auth/routing/
 // submission only -- no copy, no per-role card/label lookup tables
@@ -22,14 +25,25 @@ import { Button } from "@/components/ui/Button";
 // it). Each role renders its own screen component, each of which
 // hardcodes its own final copy -- "same visual shape, different
 // verbs," never one component that takes a role prop and swaps text.
+// PRD 5 Stage 2: two of those components (clinician, principal) now
+// take an institutionType prop too and pick their own school/clinic
+// variant internally -- still no shared lookup table, each screen
+// still owns its own copy in full, for both variants.
 
-type ConsentRole = "parent" | "class_teacher" | "clinician" | "sna" | "principal";
+type ConsentRole = "parent" | "class_teacher" | "clinician" | "sna" | "principal" | "clinical_lead" | "clinic_admin";
 
 export default function ConsentPage() {
   const router = useRouter();
   const [isReady, setIsReady] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
   const [role, setRole] = useState<ConsentRole | null>(null);
+  // Resolved from whichever institution_staff row this user actually
+  // has, if any -- the record, not the viewer (RoleLabel's own rule,
+  // Stage 1). An independent/manually-verified clinician with no
+  // institution_staff row at all has no clinic to resolve and falls
+  // back to 'school' -- the same copy that's been live and approved
+  // for that path all along.
+  const [institutionType, setInstitutionType] = useState<InstitutionType>("school");
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isPrivacyOpen, setIsPrivacyOpen] = useState(false);
@@ -56,7 +70,9 @@ export default function ConsentPage() {
         userRole !== "clinician" &&
         userRole !== "class_teacher" &&
         userRole !== "sna" &&
-        userRole !== "principal"
+        userRole !== "principal" &&
+        userRole !== "clinical_lead" &&
+        userRole !== "clinic_admin"
       ) {
         router.replace("/");
         return;
@@ -69,12 +85,36 @@ export default function ConsentPage() {
       // (clinician) shouldn't be shown consent copy about an
       // organisation they haven't actually joined; send them back to
       // finish that first. Parents have no joining precondition, same
-      // as before this change.
+      // as before this change. clinical_lead/clinic_admin always join
+      // by institution code (PRD 5 Stage 2) -- no specialty-picker
+      // equivalent exists for either, so both fall to /role-select,
+      // same as class_teacher/sna/principal already do.
       if (!(await hasJoined(supabase, user.id, userRole))) {
         if (!isMounted) return;
         router.replace(userRole === "clinician" ? "/clinician/specialty" : "/role-select");
         return;
       }
+
+      // PRD 5 Stage 2: institutionType is resolved from whichever
+      // institution_staff row this user actually has -- the record,
+      // not the viewer (RoleLabel's own rule, Stage 1). hasJoined()
+      // just confirmed one of two things is true for 'clinician': an
+      // institution_staff row (clinic path) or a clinicians.specialty
+      // (independent/manually-verified path, no institution at all).
+      // Only the first gives an institution to resolve a type from;
+      // the second correctly falls through to the 'school' default
+      // already set above -- the same copy that path has always shown.
+      const { data: staffRow } = await supabase
+        .from("institution_staff")
+        .select("institution_id, institutions(type)")
+        .eq("user_id", user.id)
+        .is("deactivated_at", null)
+        .limit(1)
+        .maybeSingle();
+      if (!isMounted) return;
+      const institutionRecord = staffRow?.institutions as unknown as { type: InstitutionType } | { type: InstitutionType }[] | null;
+      const resolvedType = Array.isArray(institutionRecord) ? institutionRecord[0]?.type : institutionRecord?.type;
+      if (resolvedType) setInstitutionType(resolvedType);
 
       // Someone who already has a CURRENT-version consents row (real
       // prior completion at the version now live, not a stale one)
@@ -148,10 +188,16 @@ export default function ConsentPage() {
       screen = <SnaAgreementScreen {...screenProps} />;
       break;
     case "principal":
-      screen = <PrincipalAgreementScreen {...screenProps} />;
+      screen = <PrincipalAgreementScreen {...screenProps} institutionType={institutionType} />;
       break;
     case "clinician":
-      screen = <ClinicianAgreementScreen {...screenProps} />;
+      screen = <ClinicianAgreementScreen {...screenProps} institutionType={institutionType} />;
+      break;
+    case "clinical_lead":
+      screen = <ClinicalLeadAgreementScreen {...screenProps} />;
+      break;
+    case "clinic_admin":
+      screen = <ClinicAdminAgreementScreen {...screenProps} />;
       break;
   }
 
