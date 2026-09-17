@@ -6058,10 +6058,28 @@ async function main() {
     // (which exists, is approved, and would satisfy a bare "some
     // approved link exists for this passport" check). ----
     {
+      // DD-1a was written against get_teacher_activity_feed()'s own
+      // pre-0188 hand-rolled activity_log branch, which DID join
+      // passport_institution_links directly (confirmed by reading 0155's
+      // body). 0188's Group B pass deliberately replaced that with
+      // has_child_access() as "the one and only authority" -- its own
+      // stated goal, not an accident -- and has_child_access()'s
+      // class-derived branch (has_class_teacher_access(), live since
+      // 0104/0130) has never checked passport_institution_links at all.
+      // teacherDD already has real class-derived access from DD1's own
+      // setup above (add_class_child()), independent of either
+      // institution's link, so the row is correctly INCLUDED here --
+      // matching 0188's deliberate consolidation, not a leak from
+      // institution B. get_message_recipient_candidates() and
+      // send_message() (DD-1b/1c below) were never migrated onto
+      // has_child_access() the same way and still correctly require the
+      // caller's OWN institution's link -- this is not a general
+      // "institution match doesn't matter" finding, it's specific to
+      // this one RPC's own deliberately-changed gate.
       const { data: feedBefore } = await teacherDD.rpc("get_teacher_activity_feed", {});
       record(
-        "DD-1a INSTITUTION-MATCH BITES: get_teacher_activity_feed() does NOT include the row while ONLY institution B's link exists -- institution B's approved link does not stand in for institution A's",
-        !(feedBefore ?? []).some((r) => r.id === alDD.id),
+        "DD-1a get_teacher_activity_feed() INCLUDES the row on class-derived access alone, institution B's link irrelevant either way -- has_child_access() is the one authority (0188), with no passport_institution_links requirement of its own",
+        (feedBefore ?? []).some((r) => r.id === alDD.id),
         JSON.stringify(feedBefore?.length)
       );
 
@@ -11910,10 +11928,22 @@ async function main() {
     // on, nothing else", unaffected by 0162/0163. ----
     const { data: teacherCandidatesEEE } = await teacherEEE.rpc("get_message_recipient_candidates", { p_passport_id: childEEEId });
     const parentForTeacherEEE = (teacherCandidatesEEE ?? []).find((c) => c.role === "parent");
+    // A CHECK CAN BE WRONG FROM THE START AND PASS BY LUCK (CLAUDE.md):
+    // this query used to have no applies_to filter and no ORDER BY --
+    // Postgres gives no row-order guarantee without one, and it happened
+    // to return a child-scoped category first for months. 0168's staff
+    // categories (also carrying 'class_teacher' in allowed_sender_roles)
+    // shifted the unordered result to a staff row first, and
+    // send_message() correctly refused it on a child conversation -- the
+    // RPC was never wrong. Fixed to match useMessageCategories.ts's own
+    // real query shape: an explicit applies_to filter and a
+    // deterministic order, exactly what every real caller already does.
     const { data: teacherCatsEEE } = await teacherEEE
       .from("message_categories")
       .select("id, allowed_sender_roles")
-      .contains("allowed_sender_roles", ["class_teacher"]);
+      .eq("applies_to", "child")
+      .contains("allowed_sender_roles", ["class_teacher"])
+      .order("sort_order", { ascending: true });
     const { data: threadTeacherToParentEEE, error: sendTeacherErr } = await teacherEEE.rpc("send_message", {
       p_passport_id: childEEEId,
       p_category_id: teacherCatsEEE[0].id,
@@ -13059,7 +13089,7 @@ async function main() {
     }
   }
 
-  console.log(`\n== CHECK NNN: SQL for migration 0168 -- staff-to-staff messaging, small version. Proves the new surface end to end and, just as importantly, that it stays inside its own decided boundary. get_institution_staff_candidates(): a real class_teacher sees the active sna/principal at their own institution, excludes self, excludes a PENDING (never-approved) join and a DEACTIVATED former staff member (NNN1). send_message() with p_institution_id: a class_teacher sends a real staff message to the sna and principal, the row lands with institution_id set / passport_id null / sender_role='class_teacher' (NNN2), and the sna's own message_recipients row resolves recipient_role='sna' -- the constraint widening proven end to end, not just that the INSERT didn't throw (NNN3). can_view_message(): both real recipients see it (NNN4), a class_teacher at a DIFFERENT institution sees nothing -- RLS-filtered to zero rows, not an error (NNN5) -- and that same different-institution teacher's own candidate list is entirely disjoint (NNN6). AUTHORIZATION BOUNDARY: a parent (NNN7) and a clinician (NNN8) -- neither ever an institution_staff row -- are both refused sending a staff message outright. THE CONSTRAINT ITSELF: a raw service-role insert with BOTH passport_id and institution_id set, and one with NEITHER, are both refused by messages_exactly_one_scope directly, independent of send_message()'s own application-level check (NNN9). CATEGORIES: a CHILD category ('Wellbeing note') refused on a staff conversation, and a STAFF category ('Cover / Rota') refused on a child conversation, both server-side (NNN10). THE ABC/STRATEGY GUARD: p_abc_log_id and p_strategy_update are each independently refused on a staff conversation (NNN11). get_messages_awaiting_action_count() needed zero code change for this feature (confirmed by reading its body before writing 0168) -- proven empirically here, not just asserted, and delta-based (NNN2's own earlier unacknowledged staff message already sits in this count, so nothing here assumes a baseline of 0): rises by exactly one on the response-required staff send, and drops back to the same baseline once the sna calls acknowledge_message() -- reply_to_message() deliberately NOT used for the drop, since a message with zero replies never enters the RPC's own rr_needs_my_action CTE at all (its inner join to message_replies drops it); acknowledged_at, not the reply, is what actually clears my_recipient_unacked (NNN12). THE DEFERRED HALF, proven still deferred: the sna from this same fixture, holding a REAL 1:1 assignment to a real child (assign_sna_to_child(), the actual production path, principal's own session), is STILL refused sending a CHILD message about that exact child -- the same refusal text as before this migration, proving SNA-on-staff-threads was not accidentally widened into SNA-on-child-threads (NNN13). REGRESSION: an ordinary CHILD message -- send and view -- entirely unaffected by any of the above (NNN14). ==`);
+  console.log(`\n== CHECK NNN: SQL for migration 0168 -- staff-to-staff messaging, small version. Proves the new surface end to end and, just as importantly, that it stays inside its own decided boundary. get_institution_staff_candidates(): a real class_teacher sees the active sna/principal at their own institution, excludes self, excludes a PENDING (never-approved) join and a DEACTIVATED former staff member (NNN1). send_message() with p_institution_id: a class_teacher sends a real staff message to the sna and principal, the row lands with institution_id set / passport_id null / sender_role='class_teacher' (NNN2), and the sna's own message_recipients row resolves recipient_role='sna' -- the constraint widening proven end to end, not just that the INSERT didn't throw (NNN3). can_view_message(): both real recipients see it (NNN4), a class_teacher at a DIFFERENT institution sees nothing -- RLS-filtered to zero rows, not an error (NNN5) -- and that same different-institution teacher's own candidate list is entirely disjoint (NNN6). AUTHORIZATION BOUNDARY: a parent (NNN7) and a clinician (NNN8) -- neither ever an institution_staff row -- are both refused sending a staff message outright. THE CONSTRAINT ITSELF: a raw service-role insert with BOTH passport_id and institution_id set, and one with NEITHER, are both refused by messages_exactly_one_scope directly, independent of send_message()'s own application-level check (NNN9). CATEGORIES: a CHILD category ('Wellbeing note') refused on a staff conversation, and a STAFF category ('Cover / Rota') refused on a child conversation, both server-side (NNN10). THE ABC/STRATEGY GUARD: p_abc_log_id and p_strategy_update are each independently refused on a staff conversation (NNN11). get_messages_awaiting_action_count() needed zero code change for this feature (confirmed by reading its body before writing 0168) -- proven empirically here, not just asserted, and delta-based (NNN2's own earlier unacknowledged staff message already sits in this count, so nothing here assumes a baseline of 0): rises by exactly one on the response-required staff send, and drops back to the same baseline once the sna calls acknowledge_message() -- reply_to_message() deliberately NOT used for the drop, since a message with zero replies never enters the RPC's own rr_needs_my_action CTE at all (its inner join to message_replies drops it); acknowledged_at, not the reply, is what actually clears my_recipient_unacked (NNN12). SNA CHILD-SCOPED MESSAGING, SHIPPED IN 0196 -- originally written here as "the deferred half, proven still deferred" when this block was built for 0168; updated once 0196 shipped the capability itself (0188's own header had already named this "now decided (SNAs get it)... scoped as its own piece"). The sna from this same fixture, holding a REAL 1:1 assignment to a real child (assign_sna_to_child(), the actual production path, principal's own session), can now send a CHILD message about that exact child, and it genuinely reaches its recipient (NNN13). REGRESSION: an ordinary CHILD message -- send and view -- entirely unaffected by any of the above (NNN14). ==`);
   if (shouldRun("NNN")) {
     const { data: instNNN, error: instNNNErr } = await admin
       .from("institutions")
@@ -13276,23 +13306,37 @@ async function main() {
       JSON.stringify({ nnn12BeforeCount, nnn12AfterCount, nnn12FinalCount })
     );
 
-    // NNN13 -- THE DEFERRED HALF, proven still deferred. Real production
-    // path (assign_sna_to_child(), via the principal's own session) --
-    // never a hand-set row (CLAUDE.md's own "fixtures and new lifecycle
+    // NNN13 -- NO LONGER DEFERRED: migration 0196 ("SNA child-scoped
+    // messaging") shipped exactly the capability this check used to
+    // prove was still missing, citing 0188's own header ("now decided
+    // (SNAs get it)... scoped as its own piece") almost verbatim. This
+    // check used to assert a refusal; flipped to prove the now-shipped
+    // behaviour instead, including that the message actually reaches
+    // its recipient -- not just that the send doesn't error, the
+    // stronger claim CLAUDE.md's own "test the destination" entry asks
+    // for whenever access is granted. Real production path
+    // (assign_sna_to_child(), via the principal's own session) -- never
+    // a hand-set row (CLAUDE.md's own "fixtures and new lifecycle
     // state" rule).
     const { error: nnn13AssignErr } = await principalNNN.rpc("assign_sna_to_child", {
       p_passport_id: childNNNId, p_user_id: snaANNNId, p_institution_id: institutionNNNId,
     });
     if (nnn13AssignErr) throw nnn13AssignErr;
 
-    const { error: nnn13Err } = await snaANNN.rpc("send_message", {
-      p_passport_id: childNNNId, p_category_id: childCategoryNNN.id, p_body: "should still fail", p_response_required: false,
+    const { data: nnn13MsgId, error: nnn13Err } = await snaANNN.rpc("send_message", {
+      p_passport_id: childNNNId, p_category_id: childCategoryNNN.id, p_body: "NNN13: sna with real 1:1 access messaging about this child.", p_response_required: false,
       p_recipient_ids: [principalNNNId],
     });
     record(
-      "NNN13 THE DEFERRED HALF: an sna with a REAL 1:1 assignment to this child is STILL refused sending a CHILD message about them -- SNA-on-staff-threads was not accidentally widened into SNA-on-child-threads",
-      Boolean(nnn13Err) && /not authorized to message about this child/.test(nnn13Err?.message ?? ""),
+      "NNN13 SHIPPED (0196): an sna with a REAL 1:1 assignment to this child can now send a CHILD message about them",
+      !nnn13Err && Boolean(nnn13MsgId),
       nnn13Err?.message
+    );
+    const { data: nnn13ViewRows } = await principalNNN.from("messages").select("id").eq("id", nnn13MsgId);
+    record(
+      "NNN13b the message actually reaches its recipient, not just a send with no error",
+      (nnn13ViewRows ?? []).length === 1,
+      JSON.stringify(nnn13ViewRows)
     );
 
     // NNN14 -- REGRESSION: an ordinary CHILD message, entirely
