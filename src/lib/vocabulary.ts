@@ -14,10 +14,21 @@ import type { InstitutionType } from "@/lib/institutionType";
 // importable alongside this one. There is nothing left to copy from.
 //
 // Every institution_staff role value this schema has ever allowed
-// (institution_staff_role_check, migration 0068), plus 'clinician'
-// (tracked separately via the clinicians table, never on
-// institution_staff itself, but displayed in exactly the same places).
-export type Role = "class_teacher" | "sna" | "principal" | "institution_admin" | "clinician";
+// (institution_staff_role_check, migration 0203) -- 'clinician' is on
+// this list too now: PRD 5 Stage 2 resolved that a clinic practitioner
+// IS an institution_staff row (institution_staff.role = 'clinician'),
+// reusing membership exactly as class_teacher/sna already do, not the
+// separate external/per-child clinician_access-only relationship a
+// school's own engaged clinician still uses. 'clinical_lead' and
+// 'clinic_admin' are the two genuinely new values Stage 2 introduced.
+export type Role =
+  | "class_teacher"
+  | "sna"
+  | "principal"
+  | "institution_admin"
+  | "clinician"
+  | "clinical_lead"
+  | "clinic_admin";
 
 export type VocabularyOverrides = Record<string, string>;
 
@@ -32,18 +43,25 @@ const ROLE_OVERRIDE_KEY: Record<Role, string> = {
   principal: "role_principal",
   institution_admin: "role_institution_admin",
   clinician: "role_clinician",
+  clinical_lead: "role_clinical_lead",
+  clinic_admin: "role_clinic_admin",
 };
 
 // The type-driven default. School labels are what every real
 // institution has shown since before this table existed -- unchanged
 // wording, just centralised. Clinic labels are PRD 5's own decided
-// vocabulary (section 9): two roles reused because the shape
-// genuinely matches (principal/clinician), two new stored values
-// (clinical_lead, clinic_admin) NOT added here -- Stage 1 has no new
-// roles, so there is nothing yet for those two keys to translate.
-// institution_admin has no clinic default of its own (the role is a
-// legacy value with no real clinic equivalent named in the PRD) --
-// falls through to its school label at every institution type.
+// vocabulary (section 9), quoted directly, not invented here: two
+// roles reused because the shape genuinely matches (principal/
+// clinician), two roles get real values because forcing them into
+// school words would be wrong (clinical_lead has no school
+// equivalent at all; clinic_admin is not an sna -- "broad access to
+// little" versus "deep access to few"). class_teacher/sna have no
+// clinic default -- PRD section 9's own vocabulary table marks them
+// "not used by clinics"; falling through to the school label for a
+// value that can never exist at a clinic institution is harmless and
+// intentionally left rather than special-cased. institution_admin
+// likewise has no clinic default (a legacy value with no clinic
+// equivalent named in the PRD) -- falls through to its school label.
 const ROLE_LABEL_DEFAULT: Record<InstitutionType, Partial<Record<Role, string>>> = {
   school: {
     class_teacher: "Class Teacher",
@@ -55,6 +73,8 @@ const ROLE_LABEL_DEFAULT: Record<InstitutionType, Partial<Record<Role, string>>>
   clinic: {
     principal: "Clinical Director",
     clinician: "Practitioner",
+    clinical_lead: "Clinical Lead",
+    clinic_admin: "Admin",
   },
 };
 
