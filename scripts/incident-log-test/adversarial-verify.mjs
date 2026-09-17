@@ -20,7 +20,7 @@
 // stage development. Every check from V onward is independently
 // self-contained (own institution, own accounts, own cleanup) and
 // individually selectable: V, W, X, Y, Z, AA, BB, CC, DD, EE, FF, GG,
-// HH, II, JJ, KK, LL, MM, NN, OO, PP, QQ, RR, SS, TT, UU, VV, WW, XX, YY, ZZ, AAA, BBB, CCC, DDD, EEE, FFF, GGG, HHH, III, JJJ, KKK, LLL, MMM, NNN, OOO, PPP. Selecting none of these (ONLY_CHECKS unset) is the full run --
+// HH, II, JJ, KK, LL, MM, NN, OO, PP, QQ, RR, SS, TT, UU, VV, WW, XX, YY, ZZ, AAA, BBB, CCC, DDD, EEE, FFF, GGG, HHH, III, JJJ, KKK, LLL, MMM, NNN, OOO, PPP, QQQ, RRR, SSS. Selecting none of these (ONLY_CHECKS unset) is the full run --
 // the one that gates deploys -- and its behavior is unchanged: same
 // checks, same order, same pass/fail counts. The only observable
 // difference is where the top-level fixture's own cleanup log line
@@ -13816,6 +13816,69 @@ async function main() {
     for (const id of [staffRRRId, consentedRRRId, unjoinedRRRId]) {
       await admin.auth.admin.deleteUser(id);
     }
+  }
+
+  console.log(`\n== CHECK SSS: approve_clinician() end to end -- a function only Behaviour Hive ever calls, by hand, service-role, from the Dashboard SQL editor (never from a client). It has no client caller to exercise it and no RLS policy protects it, so nothing else in this suite ever calls it -- exactly why a real regression sat live in it (PRD 5 Stage 6, 0221 silently reverted 0030's own fix for a PL/pgSQL column/OUT-parameter ambiguity in this exact function) until a one-off verification fixture happened to hit it, not a check. This is that check. Real select_clinician_specialty() calls as the clinician's own session to create each pending row -- the only real path that exists -- then approve_clinician() called the same way Daniel actually calls it: service-role, no session. ==`);
+  if (shouldRun("SSS")) {
+    const clinicianSSSId = await createUser("sss.clinician@thebehaviourhive.com", "SSS Clinician", "clinician");
+    const clinicianSSS = await signedInClient("sss.clinician@thebehaviourhive.com");
+
+    const { error: specialtySSSErr } = await clinicianSSS.rpc("select_clinician_specialty", { p_specialty: "behavioural_psychologist" });
+    if (specialtySSSErr) throw specialtySSSErr;
+
+    const { data: beforeSSS } = await admin.from("clinicians").select("verification_status, verification_route, clinician_code").eq("user_id", clinicianSSSId).single();
+    record("SSS-1 before approval: a genuinely fresh clinician is 'pending', no code, no route", beforeSSS?.verification_status === "pending" && beforeSSS?.clinician_code === null && beforeSSS?.verification_route === null, JSON.stringify(beforeSSS));
+
+    // ---- SSS-2: THE REGRESSION ITSELF. A genuinely NEW clinician --
+    // no existing clinician_code -- forces the code-generation loop,
+    // which is exactly where 0221 silently reverted 0030's fix and
+    // "column reference \"clinician_code\" is ambiguous" fired on every
+    // single call. This is the one assertion that would have caught it
+    // before a fixture had to. ----
+    const { data: approveSSSResult, error: approveSSSErr } = await admin.rpc("approve_clinician", { clinician_email: "sss.clinician@thebehaviourhive.com" });
+    record("SSS-2 approve_clinician() succeeds for a genuinely fresh clinician (forces the code-generation loop -- the exact regression)", !approveSSSErr, approveSSSErr?.message);
+
+    // ---- SSS-3: the return shape itself, table-qualified regression
+    // anchor for 0030's own fix -- the column is named `code`, not
+    // `clinician_code`. A future rewrite that silently reverts this
+    // (as 0221 did) fails here, on the shape, not just on the thrown
+    // error from SSS-2. ----
+    const returnedCodeSSS = approveSSSResult?.[0]?.code;
+    record("SSS-3 the RETURN VALUE carries a `code` column (not `clinician_code`) and it is non-null", typeof returnedCodeSSS === "string" && returnedCodeSSS.length > 0 && approveSSSResult?.[0]?.clinician_code === undefined, JSON.stringify(approveSSSResult));
+
+    const { data: afterSSS } = await admin.from("clinicians").select("verification_status, verification_route, clinician_code").eq("user_id", clinicianSSSId).single();
+    record("SSS-4 persisted: verification_status='verified'", afterSSS?.verification_status === "verified", JSON.stringify(afterSSS));
+    record("SSS-5 persisted: verification_route='behaviour_hive' (the manual-review path, per 0221/0225)", afterSSS?.verification_route === "behaviour_hive", JSON.stringify(afterSSS));
+    record("SSS-6 persisted: clinician_code matches what the RPC returned", afterSSS?.clinician_code === returnedCodeSSS, JSON.stringify({ persisted: afterSSS?.clinician_code, returned: returnedCodeSSS }));
+    record("SSS-7 the generated code matches the expected CL-XXXX shape", /^CL-[A-Z0-9]{4}$/.test(afterSSS?.clinician_code ?? ""), afterSSS?.clinician_code);
+
+    // ---- SSS-8: refuses re-approving someone who is no longer pending
+    // -- a real guard, not just a happy-path RPC. ----
+    const { error: reapproveSSSErr } = await admin.rpc("approve_clinician", { clinician_email: "sss.clinician@thebehaviourhive.com" });
+    record("SSS-8 approve_clinician() refuses a clinician who is already verified (not pending)", Boolean(reapproveSSSErr), reapproveSSSErr?.message);
+
+    // ---- SSS-9: refuses an email with no clinician profile at all. ----
+    const { error: unknownSSSErr } = await admin.rpc("approve_clinician", { clinician_email: "sss.doesnotexist@thebehaviourhive.com" });
+    record("SSS-9 approve_clinician() refuses an email with no clinician profile", Boolean(unknownSSSErr), unknownSSSErr?.message);
+
+    // ---- SSS-10/11: the existing-code branch, combined with 0223's own
+    // route-aware reset -- a behaviour_hive-verified clinician who
+    // changes their specialty genuinely drops back to 'pending' (0223),
+    // and re-approving them from there must REUSE their existing code,
+    // not regenerate a new one (the `if v_code is null` branch's own
+    // other side, otherwise untested by SSS-2 alone). ----
+    const { error: specialtyChangeSSSErr } = await clinicianSSS.rpc("select_clinician_specialty", { p_specialty: "educational_psychologist" });
+    if (specialtyChangeSSSErr) throw specialtyChangeSSSErr;
+    const { data: pendingAgainSSS } = await admin.from("clinicians").select("verification_status, clinician_code").eq("user_id", clinicianSSSId).single();
+    record("SSS-10 changing specialty drops a behaviour_hive-verified clinician back to pending (0223), existing code untouched", pendingAgainSSS?.verification_status === "pending" && pendingAgainSSS?.clinician_code === returnedCodeSSS, JSON.stringify(pendingAgainSSS));
+
+    const { data: reapproveSSSResult, error: reapproveSSS2Err } = await admin.rpc("approve_clinician", { clinician_email: "sss.clinician@thebehaviourhive.com" });
+    record("SSS-11 re-approving from pending succeeds and REUSES the existing code (does not regenerate)", !reapproveSSS2Err && reapproveSSSResult?.[0]?.code === returnedCodeSSS, reapproveSSS2Err?.message ?? JSON.stringify(reapproveSSSResult));
+
+    console.log("SSS summary complete.");
+
+    await admin.from("clinicians").delete().eq("user_id", clinicianSSSId);
+    await admin.auth.admin.deleteUser(clinicianSSSId);
   }
 
   console.log(`\n== Summary ==`);
