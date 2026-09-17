@@ -4088,10 +4088,20 @@ async function main() {
     console.log(`-- input-shape guards beyond the prompt's own 14 -- found while writing the SQL, worth proving directly --`);
     const { error: badOutcomeErr } = await principalA1.rpc("hand_over_principal", { p_successor_user_id: successorAId, p_outcome: "retiring", p_staying_role: null, p_reason: "Bad outcome value." });
     record("X-bonus: an outcome other than 'leaving'/'staying' is refused", Boolean(badOutcomeErr) && /outcome must be/i.test(badOutcomeErr.message), badOutcomeErr?.message);
+    // PRD 5 Stage 2 (0204) made the valid staying-role set type-aware
+    // (school: class_teacher/sna; clinic: three values) and built the
+    // refusal message dynamically via array_to_string(..., ', ') --
+    // better error text than a hardcoded two-item "X or Y" would be,
+    // since it scales to the clinic's three-item list without needing
+    // separate singular/plural grammar. These two checks originally
+    // matched the old hardcoded wording ("class_teacher or sna");
+    // updated to check for the actual role names rather than the exact
+    // glue word between them -- the fix is here, not in the function,
+    // since the new message is the better one.
     const { error: badStayingRoleErr } = await principalA1.rpc("hand_over_principal", { p_successor_user_id: successorAId, p_outcome: "staying", p_staying_role: "principal", p_reason: "Bad staying role value." });
-    record("X-bonus: outcome='staying' with an invalid staying role (e.g. 'principal') is refused", Boolean(badStayingRoleErr) && /class_teacher or sna/i.test(badStayingRoleErr.message), badStayingRoleErr?.message);
+    record("X-bonus: outcome='staying' with an invalid staying role (e.g. 'principal') is refused", Boolean(badStayingRoleErr) && /class_teacher/i.test(badStayingRoleErr.message) && /sna/i.test(badStayingRoleErr.message), badStayingRoleErr?.message);
     const { error: nullStayingRoleErr } = await principalA1.rpc("hand_over_principal", { p_successor_user_id: successorAId, p_outcome: "staying", p_staying_role: null, p_reason: "Null staying role -- the three-valued-logic bug this guard was rewritten to avoid." });
-    record("X-bonus: outcome='staying' with p_staying_role NULL is refused, not silently waved through by SQL's three-valued logic", Boolean(nullStayingRoleErr) && /class_teacher or sna/i.test(nullStayingRoleErr.message), nullStayingRoleErr?.message);
+    record("X-bonus: outcome='staying' with p_staying_role NULL is refused, not silently waved through by SQL's three-valued logic", Boolean(nullStayingRoleErr) && /class_teacher/i.test(nullStayingRoleErr.message) && /sna/i.test(nullStayingRoleErr.message), nullStayingRoleErr?.message);
     const { error: contradictoryStayingRoleErr } = await principalA1.rpc("hand_over_principal", { p_successor_user_id: successorAId, p_outcome: "leaving", p_staying_role: "class_teacher", p_reason: "Providing a staying role while leaving." });
     record("X-bonus: a staying role provided alongside outcome='leaving' is refused as contradictory input", Boolean(contradictoryStayingRoleErr) && /must not be provided/i.test(contradictoryStayingRoleErr.message), contradictoryStayingRoleErr?.message);
 
