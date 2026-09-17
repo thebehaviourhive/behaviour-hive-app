@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { DeactivateStaffSheet } from "@/components/principal/DeactivateStaffSheet";
 import { ReviewStaffJoinSheet } from "@/components/principal/ReviewStaffJoinSheet";
+import { RoleLabel } from "@/components/ui/RoleLabel";
+import { useInstitutionType } from "@/hooks/useInstitutionType";
 
 // PRD 4, Stage 4 -- the Directory split view's right pane for the Staff
 // segment. Content and actions match StaffCard exactly (principal/
@@ -38,13 +40,6 @@ export interface StaffRow {
   deactivation_reason: string | null;
 }
 
-const ROLE_LABEL: Record<string, string> = {
-  class_teacher: "Class Teacher",
-  sna: "SNA",
-  principal: "Principal",
-  institution_admin: "Institution Admin",
-};
-
 function formatDate(value: string): string {
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return value;
@@ -64,6 +59,7 @@ export function StaffDetail({
 }) {
   const [isDeactivateOpen, setIsDeactivateOpen] = useState(false);
   const [isReviewOpen, setIsReviewOpen] = useState(false);
+  const { institutionType, overrides: vocabularyOverrides } = useInstitutionType(institutionId);
   // Seeded from the prop so selecting a row shows something instantly;
   // kept current afterward by this component's own fetch, never by the
   // prop alone -- see the header comment.
@@ -108,7 +104,9 @@ export function StaffDetail({
             {staffRow.full_name}
             {isSelf && <span className="text-brand-neutral-black/50"> (you)</span>}
           </p>
-          <p className="mt-0.5 font-sans text-body text-brand-neutral-black/50">{ROLE_LABEL[staffRow.role] ?? staffRow.role}</p>
+          <p className="mt-0.5 font-sans text-body text-brand-neutral-black/50">
+            <RoleLabel role={staffRow.role} institutionType={institutionType} overrides={vocabularyOverrides} />
+          </p>
         </div>
         {staffRow.deactivated_at && (
           <span className="flex-shrink-0 rounded-full bg-brand-golden-brown/15 px-2.5 py-1 font-accent text-eyebrow font-bold text-brand-golden-brown">
@@ -168,6 +166,8 @@ export function StaffDetail({
           onChanged();
           await refreshAfterMutation();
         }}
+        institutionType={institutionType}
+        overrides={vocabularyOverrides}
       />
     </div>
   );

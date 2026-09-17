@@ -6,8 +6,11 @@ import { format } from "date-fns";
 import { createClient } from "@/lib/supabase/client";
 import { insertWithOfflineRetry } from "@/lib/waitForReconnect";
 import { renderMessageBody } from "@/lib/messages/messageBodyTokens";
-import { ROLE_LABEL, type MessageRecipient, type MessageRole, type ThreadMessage } from "@/types/messages";
+import type { MessageRecipient, MessageRole, ThreadMessage } from "@/types/messages";
 import { AbcLogReference } from "./AbcLogReference";
+import { getRoleLabel, type VocabularyOverrides } from "@/lib/vocabulary";
+import { useMessageInstitutionVocabulary } from "@/hooks/useMessageInstitutionVocabulary";
+import type { InstitutionType } from "@/lib/institutionType";
 
 type AckPhase = "idle" | "saving" | "waiting-for-connection" | "error";
 
@@ -70,10 +73,15 @@ function buildStrategyHref(viewerRole: MessageRole, passportId: string): string 
 // message so a partially-acknowledged thread explains itself on the
 // sender's own expanded card without them needing to parse a
 // per-recipient list.
-function formatRecipientReceipt(recipients: MessageRecipient[], nameById: Map<string, string>): string {
+function formatRecipientReceipt(
+  recipients: MessageRecipient[],
+  nameById: Map<string, string>,
+  institutionType: InstitutionType,
+  overrides: VocabularyOverrides
+): string {
   return recipients
     .map((recipient) => {
-      const name = nameById.get(recipient.recipientId) ?? ROLE_LABEL[recipient.recipientRole];
+      const name = nameById.get(recipient.recipientId) ?? getRoleLabel(recipient.recipientRole, institutionType, overrides);
       return recipient.acknowledgedAt ? `✓ ${name}` : `${name} (not yet)`;
     })
     .join(" · ");
@@ -122,6 +130,7 @@ export function MessageCard({
   const ownRecipient = message.recipients.find((r) => r.recipientId === currentUserId) ?? null;
   const isRecipient = ownRecipient !== null;
   const isParticipant = isSender || isRecipient;
+  const { institutionType, overrides } = useMessageInstitutionVocabulary(message);
 
   const [optimisticAcked, setOptimisticAcked] = useState(false);
   const [ackPhase, setAckPhase] = useState<AckPhase>("idle");
@@ -143,7 +152,7 @@ export function MessageCard({
   const [isClosing, setIsClosing] = useState(false);
   const [closeError, setCloseError] = useState<string | null>(null);
 
-  const senderLabel = isSender ? "You" : (nameById.get(message.senderId) ?? ROLE_LABEL[message.senderRole]);
+  const senderLabel = isSender ? "You" : (nameById.get(message.senderId) ?? getRoleLabel(message.senderRole, institutionType, overrides));
   const status = STATUS_META[message.status];
   const bodyPreview = previewBody(message.body ? renderMessageBody(message.body, childName) : null);
   const isUnread = isRecipient && !ownRecipient?.readAt && !locallyMarkedRead;
@@ -257,7 +266,7 @@ export function MessageCard({
           <span className={isUnread ? "font-bold text-brand-neutral-black" : "font-medium text-brand-neutral-black/70"}>
             {senderLabel}
           </span>
-          <span className="text-brand-neutral-black/40"> · {ROLE_LABEL[message.senderRole]}</span>
+          <span className="text-brand-neutral-black/40"> · {getRoleLabel(message.senderRole, institutionType, overrides)}</span>
           {bodyPreview && <span className="text-brand-neutral-black/50"> — {bodyPreview}</span>}
         </span>
         <span className="flex-shrink-0 text-[10px] text-brand-neutral-black/40">{formatTime(message.createdAt)}</span>
@@ -295,7 +304,7 @@ export function MessageCard({
 
           <p className="mt-2.5 text-sm font-semibold text-brand-neutral-black">
             {senderLabel}
-            <span className="font-normal text-brand-neutral-black/40"> · {ROLE_LABEL[message.senderRole]}</span>
+            <span className="font-normal text-brand-neutral-black/40"> · {getRoleLabel(message.senderRole, institutionType, overrides)}</span>
           </p>
           {message.body && (
             <p className="mt-1 text-sm leading-relaxed text-brand-neutral-black/80">
@@ -341,13 +350,13 @@ export function MessageCard({
             <div className="mt-3 border-t border-black/5 pt-3">
               {message.strategyUpdate || message.recipients.length > 1 ? (
                 <p className="text-xs text-brand-neutral-black/60">
-                  {formatRecipientReceipt(message.recipients, nameById)}
+                  {formatRecipientReceipt(message.recipients, nameById, institutionType, overrides)}
                 </p>
               ) : (
                 <div className="flex flex-col gap-1">
                   {message.recipients.map((recipient) => (
                     <p key={recipient.id} className="text-xs text-brand-neutral-black/50">
-                      {nameById.get(recipient.recipientId) ?? ROLE_LABEL[recipient.recipientRole]}:{" "}
+                      {nameById.get(recipient.recipientId) ?? getRoleLabel(recipient.recipientRole, institutionType, overrides)}:{" "}
                       {recipient.acknowledgedAt ? (
                         <span className="font-medium text-green-700">Acknowledged · {formatTime(recipient.acknowledgedAt)}</span>
                       ) : (

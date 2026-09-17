@@ -3,13 +3,12 @@
 import { useEffect, useRef, useState, type Ref } from "react";
 import { ChevronDown } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
-import {
-  ABC_ROLE_DISPLAY_LABEL,
-  OTHER_OPTION,
-  PERCEIVED_FUNCTION_LABELS,
-  type ABCLoggerRole,
-} from "./roleConfig";
+import { OTHER_OPTION, PERCEIVED_FUNCTION_LABELS, type ABCLoggerRole } from "./roleConfig";
 import { loadDraft } from "./draftStorage";
+import { RoleLabel } from "@/components/ui/RoleLabel";
+import { usePassportInstitutionVocabulary } from "@/hooks/usePassportInstitutionVocabulary";
+import type { InstitutionType } from "@/lib/institutionType";
+import type { VocabularyOverrides } from "@/lib/vocabulary";
 
 interface ABCTimelineProps {
   passportId: string;
@@ -139,6 +138,7 @@ export function ABCTimeline({ passportId, viewerRole, highlightLogId }: ABCTimel
   const [intensityFilter, setIntensityFilter] = useState<IntensityFilter>("all");
   const [reporterFilter, setReporterFilter] = useState<ReporterFilter>("all");
   const highlightRef = useRef<HTMLDivElement | null>(null);
+  const { institutionType, overrides } = usePassportInstitutionVocabulary(passportId);
 
   useEffect(() => {
     let isMounted = true;
@@ -327,6 +327,8 @@ export function ABCTimeline({ passportId, viewerRole, highlightLogId }: ABCTimel
               viewerRole={viewerRole}
               isHighlighted={log.id === highlightLogId}
               cardRef={log.id === highlightLogId ? highlightRef : undefined}
+              institutionType={institutionType}
+              overrides={overrides}
             />
           ))}
         </div>
@@ -340,11 +342,15 @@ function ABCLogCard({
   viewerRole,
   isHighlighted,
   cardRef,
+  institutionType,
+  overrides,
 }: {
   log: ABCLogRow;
   viewerRole: ABCLoggerRole;
   isHighlighted?: boolean;
   cardRef?: Ref<HTMLDivElement>;
+  institutionType: InstitutionType;
+  overrides: VocabularyOverrides;
 }) {
   // Generalised from AbcIncidentCard (the FBA workspace's clinician-only
   // card, which already had this) rather than forked per track -- one
@@ -381,7 +387,7 @@ function ABCLogCard({
         <div className="flex flex-shrink-0 items-center gap-1.5">
           {isSharedWithTeacher && (
             <span className="rounded-full bg-brand-off-white px-2.5 py-1 text-xs font-semibold text-brand-neutral-black/50">
-              Shared by {ABC_ROLE_DISPLAY_LABEL[log.loggedByRole]}
+              Shared by <RoleLabel role={log.loggedByRole} institutionType={institutionType} overrides={overrides} />
             </span>
           )}
           <span
@@ -446,7 +452,7 @@ function ABCLogCard({
 
       <div className="mt-3 flex items-center justify-between gap-2">
         <p className="font-accent text-xs text-brand-neutral-black/60">
-          Logged by {log.loggedByName} ({ABC_ROLE_DISPLAY_LABEL[log.loggedByRole]})
+          Logged by {log.loggedByName} (<RoleLabel role={log.loggedByRole} institutionType={institutionType} overrides={overrides} />)
         </p>
         {log.syncStatus === "pending" && (
           <span className="flex flex-shrink-0 items-center gap-1 text-xs text-brand-neutral-black/50">

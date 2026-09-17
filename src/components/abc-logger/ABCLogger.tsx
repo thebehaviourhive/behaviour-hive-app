@@ -8,7 +8,6 @@ import { useTaskTiming } from "@/hooks/useTaskTiming";
 import { logAppEvent } from "@/lib/logAppEvent";
 import {
   ABC_ROLE_CONFIG,
-  ABC_ROLE_DISPLAY_LABEL,
   OTHER_OPTION,
   PERCEIVED_FUNCTION_OPTIONS,
   PERCEIVED_FUNCTION_QUESTION,
@@ -20,6 +19,8 @@ import { loadDraft, saveDraft, clearDraft, type ABCDraft } from "./draftStorage"
 import { logActivity } from "@/lib/logActivity";
 import { CLINICIAN_SPECIALTY_LABEL, type ClinicianSpecialty } from "@/lib/clinicianSpecialties";
 import { friendlyAccessLapsedMessage } from "@/lib/temporaryAccessTime";
+import { getRoleLabel } from "@/lib/vocabulary";
+import { usePassportInstitutionVocabulary } from "@/hooks/usePassportInstitutionVocabulary";
 
 const TOTAL_STEPS = 4;
 
@@ -122,6 +123,7 @@ export function ABCLogger({
   initialPrefill,
 }: ABCLoggerProps) {
   const config = ABC_ROLE_CONFIG[role];
+  const { institutionType, overrides: vocabularyOverrides } = usePassportInstitutionVocabulary(passportId);
 
   // A synchronous localStorage read, computed once as each piece of
   // initial state resolves -- this component is always mounted fresh per
@@ -391,7 +393,7 @@ export function ABCLogger({
 
       clearDraft(passportId);
 
-      let roleLabel: string = ABC_ROLE_DISPLAY_LABEL[role];
+      let roleLabel: string = getRoleLabel(role, institutionType, vocabularyOverrides);
       if (role === "clinician") {
         const { data: clinicianRow, error: specialtyError } = await supabase
           .from("clinicians")

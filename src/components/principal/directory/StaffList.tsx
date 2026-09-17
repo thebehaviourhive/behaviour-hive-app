@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { DeactivateStaffSheet } from "@/components/principal/DeactivateStaffSheet";
 import { ReviewStaffJoinSheet } from "@/components/principal/ReviewStaffJoinSheet";
+import { RoleLabel } from "@/components/ui/RoleLabel";
+import { useInstitutionType } from "@/hooks/useInstitutionType";
 import type { StaffRow } from "./StaffDetail";
 
 // PRD 4, Stage 4 -- extracted from principal/staff/page.tsx. Below lg,
@@ -27,13 +29,6 @@ interface RejectedRow {
   rejected_by_name: string | null;
   rejection_reason: string;
 }
-
-const ROLE_LABEL: Record<string, string> = {
-  class_teacher: "Class Teacher",
-  sna: "SNA",
-  principal: "Principal",
-  institution_admin: "Institution Admin",
-};
 
 const SEGMENTS: { key: Segment; label: string }[] = [
   { key: "pending", label: "Pending" },
@@ -92,6 +87,7 @@ export function StaffList({
   }, []);
 
   const [institutionId, setInstitutionId] = useState<string | null>(null);
+  const { institutionType, overrides: vocabularyOverrides } = useInstitutionType(institutionId);
 
   useEffect(() => {
     if (!currentUserId) return;
@@ -194,7 +190,7 @@ export function StaffList({
                       {isSelf && <span className="text-brand-neutral-black/50"> (you)</span>}
                     </p>
                     <p className="mt-0.5 font-sans text-body text-brand-neutral-black/50 lg:text-eyebrow">
-                      {ROLE_LABEL[member.role] ?? member.role}
+                      <RoleLabel role={member.role} institutionType={institutionType} overrides={vocabularyOverrides} />
                     </p>
                   </div>
                   {member.deactivated_at && (
@@ -269,7 +265,8 @@ export function StaffList({
                 <div key={row.id} className="rounded-2xl border border-black/5 bg-white/60 p-4">
                   <p className="font-sans text-body font-semibold text-brand-neutral-black">{row.full_name}</p>
                   <p className="mt-0.5 font-sans text-eyebrow text-brand-neutral-black/50">
-                    {ROLE_LABEL[row.role] ?? row.role} · rejected {formatDate(row.rejected_at)}
+                    <RoleLabel role={row.role} institutionType={institutionType} overrides={vocabularyOverrides} /> · rejected{" "}
+                    {formatDate(row.rejected_at)}
                     {row.rejected_by_name ? ` by ${row.rejected_by_name}` : ""}
                   </p>
                   <p className="mt-2 font-sans text-body text-brand-neutral-black/70">&ldquo;{row.rejection_reason}&rdquo;</p>
@@ -304,6 +301,8 @@ export function StaffList({
             setReviewSelfTarget(null);
             if (institutionId) load(institutionId);
           }}
+          institutionType={institutionType}
+          overrides={vocabularyOverrides}
         />
       )}
     </>

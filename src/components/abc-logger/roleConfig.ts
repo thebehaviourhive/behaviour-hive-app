@@ -8,9 +8,11 @@
 // (ChildDetail.tsx's "ABC Logs" tab) -- a principal never AUTHORS an
 // entry (ABCLogger, the creation form, is never opened by this role),
 // so ABC_ROLE_CONFIG's own principal entry below is never actually
-// read; it exists only because this type is a Record key set, and
-// log.loggedByRole (ABC_ROLE_DISPLAY_LABEL's own lookup) can likewise
-// never equal "principal" for the same reason.
+// read; it exists only because this type is a Record key set.
+// Role LABEL display (PRD 5 Stage 1) went through getRoleLabel()/
+// <RoleLabel> instead, once this file's own ABC_ROLE_DISPLAY_LABEL was
+// found to be one of nine independent copies of the same map -- deleted
+// from here, not left importable alongside the shared one.
 export type ABCLoggerRole = "parent" | "class_teacher" | "clinician" | "sna" | "principal";
 
 // Vocabulary refresh (2026-08): every chip step's "Other" option is now
@@ -142,14 +144,6 @@ export const ABC_ROLE_CONFIG: Record<ABCLoggerRole, ABCRoleConfig> = {
     behaviour: UNIFIED_BEHAVIOUR,
     consequence: UNIFIED_CONSEQUENCE,
   },
-};
-
-export const ABC_ROLE_DISPLAY_LABEL: Record<ABCLoggerRole, string> = {
-  parent: "Parent",
-  class_teacher: "Teacher",
-  clinician: "Clinician",
-  sna: "SNA",
-  principal: "Principal",
 };
 
 // ============================================================

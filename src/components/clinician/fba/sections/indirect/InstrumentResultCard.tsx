@@ -3,9 +3,12 @@
 import { useInstrumentItems } from "@/hooks/useInstrumentItems";
 import { getCategoryMaxScores, scoreInstrumentByCategory } from "@/lib/fba/instrumentScoring";
 import { resolveInstructionText } from "@/lib/fba/resolveInstruction";
-import { INSTRUMENT_LABELS, RECIPIENT_ROLE_LABELS, type FbaInstrumentRequest } from "@/lib/fba/types";
+import { INSTRUMENT_LABELS, type FbaInstrumentRequest } from "@/lib/fba/types";
 import { HorizontalBarChart } from "../../charts/HorizontalBarChart";
 import { NarrativeField } from "../../NarrativeField";
+import { RoleLabel } from "@/components/ui/RoleLabel";
+import type { InstitutionType } from "@/lib/institutionType";
+import type { VocabularyOverrides } from "@/lib/vocabulary";
 
 // The parent reader (Part C) reuses this card but has no server-side way
 // to resolve a recipient's name (that join only exists inside the
@@ -28,6 +31,8 @@ export function InstrumentResultCard({
   onInterpretationBlur,
   readOnly,
   showAttribution = true,
+  institutionType,
+  overrides,
 }: {
   request: InstrumentResultRequest;
   // Always the full name -- this is a clinical surface (clinician
@@ -39,6 +44,8 @@ export function InstrumentResultCard({
   onInterpretationBlur: () => void;
   readOnly: boolean;
   showAttribution?: boolean;
+  institutionType: InstitutionType;
+  overrides: VocabularyOverrides;
 }) {
   const { items, isLoading, loadError } = useInstrumentItems(
     request.instrumentType,
@@ -53,7 +60,8 @@ export function InstrumentResultCard({
       </p>
       {showAttribution && request.recipientName && request.recipientRole && (
         <p className="mb-3 text-sm text-brand-neutral-black/60">
-          Completed by {request.recipientName} ({RECIPIENT_ROLE_LABELS[request.recipientRole]})
+          Completed by {request.recipientName} (
+          <RoleLabel role={request.recipientRole} institutionType={institutionType} overrides={overrides} />)
         </p>
       )}
 

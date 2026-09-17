@@ -103,6 +103,13 @@ export function ReaderIndirectAssessment({
               onInterpretationBlur={() => {}}
               readOnly
               showAttribution={false}
+              // PRD 5 Stage 1: safe placeholder, never rendered -- this
+              // reader never has a recipientRole to show in the first
+              // place (see this file's own header comment), and
+              // showAttribution={false} means InstitutionType/overrides
+              // are structurally unreachable here regardless.
+              institutionType="school"
+              overrides={{}}
             />
           ))}
         </div>

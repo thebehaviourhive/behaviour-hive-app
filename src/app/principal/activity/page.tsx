@@ -1,14 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { useActivityFeed } from "@/hooks/useActivityFeed";
 import { ActivityRow, ActivityRowSkeleton } from "@/components/parent/ActivityRow";
 import { InlineErrorState } from "@/components/ui/InlineErrorState";
-import { getChildDisplayName } from "@/lib/childDisplayName";
 import type { ActivityEventType } from "@/lib/activityEvents";
+import { formatActivityDescription } from "@/lib/principalActivityFeed";
+import { useInstitutionType } from "@/hooks/useInstitutionType";
 
 const PAGE_SIZE = 20;
 
@@ -36,10 +37,35 @@ interface PrincipalActivityEntry {
   child_name: string | null;
   // Migration 0192 -- non-null only on event_type "incident".
   incident_id: string | null;
+  // PRD 5 Stage 1, migration 0202 -- see PrincipalActivityCard's own
+  // comment on the identical field.
+  actor_role: string | null;
 }
 
 export default function PrincipalActivityPage() {
-  const { isReady } = useRequireRole("principal");
+  const { isReady, user } = useRequireRole("principal");
+  const [institutionId, setInstitutionId] = useState<string | null>(null);
+  const { institutionType, overrides } = useInstitutionType(institutionId);
+
+  useEffect(() => {
+    if (!user) return;
+    let isMounted = true;
+    const supabase = createClient();
+    supabase
+      .from("institution_staff")
+      .select("institution_id")
+      .eq("user_id", user.id)
+      .eq("role", "principal")
+      .is("deactivated_at", null)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (!isMounted) return;
+        setInstitutionId(data?.institution_id ?? null);
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, [user]);
 
   const fetchPage = useCallback(async (limit: number, offset: number) => {
     const supabase = createClient();
@@ -95,15 +121,7 @@ export default function PrincipalActivityPage() {
                       entry={{
                         id: entry.id,
                         event_type: entry.event_type,
-                        // Migration 0192 -- support_alert/staff-level
-                        // rows are institution-wide, not per-child
-                        // (child_name is null); prefixing them with the
-                        // child-name fallback would be a nonsense
-                        // sentence, so only child-scoped rows get the
-                        // prefix. Same rule as the teacher feed.
-                        event_description: entry.child_name
-                          ? `${getChildDisplayName(entry.child_name)} — ${entry.event_description}`
-                          : entry.event_description,
+                        event_description: formatActivityDescription(entry, institutionType, overrides),
                         created_at: entry.created_at,
                       }}
                       href={entry.incident_id ? `/teacher/incidents/${entry.incident_id}` : undefined}

@@ -37,7 +37,11 @@ export default function RoleSelectPage() {
     const supabase = createClient();
     const { data: institution, error: lookupError } = await supabase
       .from("institutions")
-      .select("id, status")
+      // PRD 5 Stage 1: type included so school-staff/page.tsx's own
+      // role picker can call getInstitutionType() on a real value
+      // (option (a) -- the caller passes it in) instead of the old
+      // always-'school' stub.
+      .select("id, status, type")
       .ilike("institution_code", code.trim())
       .maybeSingle();
 
@@ -58,7 +62,7 @@ export default function RoleSelectPage() {
       return;
     }
 
-    router.push(`/role-select/school-staff?institutionId=${institution.id}`);
+    router.push(`/role-select/school-staff?institutionId=${institution.id}&institutionType=${institution.type}`);
   }
 
   return (

@@ -5,6 +5,8 @@ import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/Button";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 import { AddAmendmentSheet } from "@/components/incident-log/AddAmendmentSheet";
+import { RoleLabel } from "@/components/ui/RoleLabel";
+import { useInstitutionType } from "@/hooks/useInstitutionType";
 
 // Phase 4, piece 3. Rendered for a principal (or countersign_incident
 // grant holder) once the incident is teacher-signed. Self-hides
@@ -176,6 +178,29 @@ export function CountersignCard({
   // new pattern invented for this one screen.
   const [showSuccess, setShowSuccess] = useState(false);
   const [successVisible, setSuccessVisible] = useState(false);
+  const [institutionId, setInstitutionId] = useState<string | null>(null);
+  const { institutionType, overrides } = useInstitutionType(institutionId);
+
+  // PRD 5 Stage 1, same fix as the print page's own identical leak --
+  // this card renders countersigned_role_at_time raw too. incidents'
+  // own SELECT policy (can_view_incident()) covers a direct column
+  // read for anyone who can already load this card's own summary.
+  useEffect(() => {
+    let isMounted = true;
+    const supabase = createClient();
+    supabase
+      .from("incidents")
+      .select("institution_id")
+      .eq("id", incidentId)
+      .maybeSingle()
+      .then(({ data: row }) => {
+        if (!isMounted) return;
+        setInstitutionId(row?.institution_id ?? null);
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, [incidentId]);
 
   // Pure fetch, no setState of its own -- deliberately separated from
   // the setters so both the mount effect and the post-amendment reload
@@ -347,7 +372,12 @@ export function CountersignCard({
       {summary.already_countersigned ? (
         <>
           <p className="rounded-2xl border border-brand-pastel-blue/40 bg-brand-pastel-blue/10 p-4 text-sm text-brand-neutral-black">
-            Countersigned by {summary.countersigned_by_name ?? "someone"} ({summary.countersigned_role_at_time ?? "unknown role"}
+            Countersigned by {summary.countersigned_by_name ?? "someone"} (
+            {summary.countersigned_role_at_time ? (
+              <RoleLabel role={summary.countersigned_role_at_time} institutionType={institutionType} overrides={overrides} />
+            ) : (
+              "unknown role"
+            )}
             {ViaLabel(summary.countersigned_via) && <>, {ViaLabel(summary.countersigned_via)}</>}) on{" "}
             {summary.countersigned_at && formatDateTime(summary.countersigned_at)}.
           </p>

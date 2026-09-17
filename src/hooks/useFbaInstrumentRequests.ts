@@ -5,7 +5,6 @@ import { createClient } from "@/lib/supabase/client";
 import { logActivity } from "@/lib/logActivity";
 import {
   INSTRUMENT_LABELS,
-  RECIPIENT_ROLE_LABELS,
   type FbaInstrumentRequest,
   type FbaRecipientCandidate,
   type InstrumentRequestStatus,
@@ -14,6 +13,8 @@ import {
   type RecipientRole,
   type SendableInstrumentType,
 } from "@/lib/fba/types";
+import { getRoleLabel } from "@/lib/vocabulary";
+import { usePassportInstitutionVocabulary } from "@/hooks/usePassportInstitutionVocabulary";
 
 interface RequestRow {
   id: string;
@@ -69,6 +70,7 @@ const UNIQUE_VIOLATION = "23505";
 // two write actions a clinician can take on this table (send a new
 // request, send a reminder on an existing one).
 export function useFbaInstrumentRequests(fbaId: string, passportId: string | undefined) {
+  const { institutionType, overrides } = usePassportInstitutionVocabulary(passportId);
   const [requests, setRequests] = useState<FbaInstrumentRequest[]>([]);
   const [candidates, setCandidates] = useState<FbaRecipientCandidate[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -147,7 +149,7 @@ export function useFbaInstrumentRequests(fbaId: string, passportId: string | und
         passportId,
         actorId: user.id,
         eventType: "questionnaire_sent",
-        eventDescription: `${INSTRUMENT_LABELS[instrumentType]} sent to ${recipientRole ? RECIPIENT_ROLE_LABELS[recipientRole] : "recipient"}`,
+        eventDescription: `${INSTRUMENT_LABELS[instrumentType]} sent to ${recipientRole ? getRoleLabel(recipientRole, institutionType, overrides) : "recipient"}`,
       });
     }
 

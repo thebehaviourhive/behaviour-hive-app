@@ -18,14 +18,6 @@ export type MessageRole = "parent" | "class_teacher" | "clinician" | "principal"
 
 export type MessageStatus = "open" | "acknowledged" | "in_discussion" | "closed";
 
-export const ROLE_LABEL: Record<MessageRole, string> = {
-  parent: "Parent",
-  class_teacher: "Class Teacher",
-  clinician: "Clinician",
-  principal: "Principal",
-  sna: "SNA",
-};
-
 export interface MessageCategory {
   id: string;
   label: string;

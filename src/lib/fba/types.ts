@@ -275,18 +275,15 @@ export type InstrumentRequestStatus = "sent" | "in_progress" | "completed" | "ca
 
 // FIX (0188): get_fba_recipient_candidates() has returned role='sna'
 // rows since 0065 (its own child_assignments-derived branch) -- this
-// type just never declared that value, so any SNA candidate already
-// silently fell through RECIPIENT_ROLE_LABELS[role] to undefined. 0188
+// type just never declared that value, so any SNA candidate's role
+// fell through to undefined wherever this type gated a lookup. 0188
 // widens the RPC's own SNA coverage further (class_sna_assignments,
 // temporary_access), making this pre-existing gap more reachable, not
 // newly created by it -- fixed alongside since it's the same rows.
+// Own display label went through getRoleLabel()/<RoleLabel> (PRD 5
+// Stage 1) once RECIPIENT_ROLE_LABELS was found to be one of nine
+// independent copies of the same map -- deleted from here.
 export type RecipientRole = "parent" | "class_teacher" | "sna";
-
-export const RECIPIENT_ROLE_LABELS: Record<RecipientRole, string> = {
-  parent: "Parent",
-  class_teacher: "Teacher",
-  sna: "SNA",
-};
 
 // item id -> answer. Rating-scale items store the chosen scale LABEL
 // (e.g. "Often"), not a numeric index -- scoring derives the point

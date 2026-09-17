@@ -11,6 +11,7 @@ import { InstrumentRequestChip } from "./indirect/InstrumentRequestChip";
 import { InstrumentResultCard } from "./indirect/InstrumentResultCard";
 import { FAI_ITEM_IDS, type FaiInterview } from "@/lib/fba/types";
 import type { FbaSectionBodyProps } from "./types";
+import { usePassportInstitutionVocabulary } from "@/hooks/usePassportInstitutionVocabulary";
 
 export function IndirectAssessmentSection({
   fbaId,
@@ -22,6 +23,7 @@ export function IndirectAssessmentSection({
   readOnly,
 }: FbaSectionBodyProps & { fbaId: string; passportId: string }) {
   const router = useRouter();
+  const { institutionType, overrides: vocabularyOverrides } = usePassportInstitutionVocabulary(passportId);
   const { requests, candidates, isLoading, loadError, reload, sendRequest, sendReminder } =
     useFbaInstrumentRequests(fbaId, passportId);
 
@@ -200,6 +202,8 @@ export function IndirectAssessmentSection({
                 request={request}
                 onSendReminder={() => sendReminder(request.id)}
                 readOnly={readOnly}
+                institutionType={institutionType}
+                overrides={vocabularyOverrides}
               />
             ))}
           </div>
@@ -218,6 +222,8 @@ export function IndirectAssessmentSection({
               onInterpretationChange={(value) => updateInterpretation(request.id, value)}
               onInterpretationBlur={onFieldBlur}
               readOnly={readOnly}
+              institutionType={institutionType}
+              overrides={vocabularyOverrides}
             />
           ))}
         </div>
@@ -233,6 +239,8 @@ export function IndirectAssessmentSection({
         requests={requests}
         onSend={sendRequest}
         childName={childName}
+        institutionType={institutionType}
+        overrides={vocabularyOverrides}
       />
     </div>
   );

@@ -18,6 +18,8 @@ import { PassportMessagesTab } from "@/components/passport/PassportMessagesTab";
 import { ProgressSurface } from "@/components/progress/ProgressSurface";
 import { InlineErrorState } from "@/components/ui/InlineErrorState";
 import { ScrollFadeEdge } from "@/components/ui/ScrollFadeEdge";
+import { RoleLabel } from "@/components/ui/RoleLabel";
+import { useInstitutionType } from "@/hooks/useInstitutionType";
 import { formatRelativeDate } from "@/lib/relativeDate";
 import {
   TodayContextBlock,
@@ -233,11 +235,6 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: "messages", label: "Messages" },
 ];
 
-const ROLE_LABEL: Record<string, string> = {
-  class_teacher: "Class Teacher",
-  sna: "SNA",
-};
-
 const END_REASON_LABEL: Record<string, string> = {
   graduated: "Graduated",
   left: "Left the school",
@@ -274,6 +271,7 @@ export function ChildDetail({
 
   const [childName, setChildName] = useState<string | null>(null);
   const [institutionId, setInstitutionId] = useState<string | null>(null);
+  const { institutionType, overrides: vocabularyOverrides } = useInstitutionType(institutionId);
   const [access, setAccess] = useState<{ active: AccessRow[]; past: AccessRow[] }>({ active: [], past: [] });
   const [eligibleStaff, setEligibleStaff] = useState<{ userId: string; fullName: string }[]>([]);
 
@@ -980,7 +978,9 @@ export function ChildDetail({
                           <div className="flex items-start justify-between gap-2">
                             <div>
                               <p className="text-sm font-semibold text-brand-neutral-black">{a.fullName}</p>
-                              <p className="mt-0.5 text-xs text-brand-neutral-black/50">{ROLE_LABEL[a.actorRole] ?? a.actorRole}</p>
+                              <p className="mt-0.5 text-xs text-brand-neutral-black/50">
+                                <RoleLabel role={a.actorRole} institutionType={institutionType} overrides={vocabularyOverrides} />
+                              </p>
                             </div>
                             {/* Two visually distinct kinds of row, per
                                 Daniel's own spec -- a principal must see
@@ -1053,7 +1053,9 @@ export function ChildDetail({
                       {access.past.map((a) => (
                         <div key={a.id} className="rounded-2xl border border-black/5 bg-white/60 p-4">
                           <p className="text-sm font-semibold text-brand-neutral-black">{a.fullName}</p>
-                          <p className="mt-0.5 text-xs text-brand-neutral-black/50">{ROLE_LABEL[a.actorRole] ?? a.actorRole}</p>
+                          <p className="mt-0.5 text-xs text-brand-neutral-black/50">
+                            <RoleLabel role={a.actorRole} institutionType={institutionType} overrides={vocabularyOverrides} />
+                          </p>
                           <p className="mt-2 text-xs text-brand-neutral-black/50">
                             Granted {formatDate(a.linkedAt)}
                             {a.grantedByName ? ` by ${a.grantedByName}` : ""}

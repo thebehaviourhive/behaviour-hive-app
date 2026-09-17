@@ -157,7 +157,11 @@ export default function TeacherJoinInstitutionPage() {
     const supabase = createClient();
     const { data: institution, error: lookupError } = await supabase
       .from("institutions")
-      .select("id, status")
+      // PRD 5 Stage 1: type included for consistency with role-select/
+      // page.tsx's own identical lookup -- not consumed here today
+      // (an already-onboarded staff member re-joining doesn't need a
+      // role picker), but the recon item 1 decision was both lookups.
+      .select("id, status, type")
       .ilike("institution_code", code.trim())
       .maybeSingle();
 

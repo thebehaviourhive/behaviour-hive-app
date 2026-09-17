@@ -8,6 +8,8 @@ import { InlineErrorState } from "@/components/ui/InlineErrorState";
 import { BrandMark } from "@/components/ui/BrandMark";
 import { BodyMapPrintCard, type PrintableMark } from "@/components/incident-log/body-map/BodyMapPrintCard";
 import type { BodyView, Side } from "@/components/incident-log/body-map/bodyMapRegions";
+import { RoleLabel } from "@/components/ui/RoleLabel";
+import { useInstitutionType } from "@/hooks/useInstitutionType";
 
 // Phase 6, Part F. Same pattern as the FBA's own print page: route-
 // independent on role (get_incident_export()'s own can_view_incident()
@@ -227,6 +229,30 @@ export default function IncidentPrintPage() {
   // browser reload, matching the incident page's own fix.
   const [reloadKey, setReloadKey] = useState(0);
   const [isStandalone, setIsStandalone] = useState(false);
+  const [institutionId, setInstitutionId] = useState<string | null>(null);
+  const { institutionType, overrides } = useInstitutionType(institutionId);
+
+  // PRD 5 Stage 1: this page's own institution isn't in get_incident_
+  // export()'s return shape -- incidents has its own SELECT policy
+  // (can_view_incident()), so a direct column read works for anyone
+  // who can already load the export above, no RPC change needed.
+  useEffect(() => {
+    if (!authChecked || !incidentId) return;
+    let isMounted = true;
+    const supabase = createClient();
+    supabase
+      .from("incidents")
+      .select("institution_id")
+      .eq("id", incidentId)
+      .maybeSingle()
+      .then(({ data: row }) => {
+        if (!isMounted) return;
+        setInstitutionId(row?.institution_id ?? null);
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, [authChecked, incidentId]);
 
   useEffect(() => {
     let isMounted = true;
@@ -596,7 +622,12 @@ export default function IncidentPrintPage() {
             {data.countersigned_at ? (
               <>
                 Countersigned by <span className="font-semibold">{data.countersigned_by_name ?? "—"}</span>
-                {data.countersigned_role_at_time && ` (${data.countersigned_role_at_time}`}
+                {data.countersigned_role_at_time && (
+                  <>
+                    {" ("}
+                    <RoleLabel role={data.countersigned_role_at_time} institutionType={institutionType} overrides={overrides} />
+                  </>
+                )}
                 {viaLabel(data.countersigned_via) && `, ${viaLabel(data.countersigned_via)}`}
                 {data.countersigned_role_at_time && ")"} on {formatDateTime(data.countersigned_at)}.
               </>

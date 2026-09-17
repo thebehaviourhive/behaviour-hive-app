@@ -5,6 +5,9 @@ import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/Button";
 import { Textarea } from "@/components/ui/Textarea";
 import { BottomSheet } from "@/components/ui/BottomSheet";
+import { RoleLabel } from "@/components/ui/RoleLabel";
+import type { InstitutionType } from "@/lib/institutionType";
+import type { VocabularyOverrides } from "@/lib/vocabulary";
 
 // Staff Lifecycle Stage 1b, Step 3. Same shape as DeactivateStaffSheet --
 // a name, a decision, a reason where one's required -- but this one has
@@ -24,16 +27,18 @@ interface ReviewStaffJoinSheetProps {
   isOpen: boolean;
   onClose: () => void;
   onResolved: () => void;
+  institutionType: InstitutionType;
+  overrides: VocabularyOverrides;
 }
 
-const ROLE_LABEL: Record<string, string> = {
-  class_teacher: "Class Teacher",
-  sna: "SNA",
-  principal: "Principal",
-  institution_admin: "Institution Admin",
-};
-
-export function ReviewStaffJoinSheet({ member, isOpen, onClose, onResolved }: ReviewStaffJoinSheetProps) {
+export function ReviewStaffJoinSheet({
+  member,
+  isOpen,
+  onClose,
+  onResolved,
+  institutionType,
+  overrides,
+}: ReviewStaffJoinSheetProps) {
   const [mode, setMode] = useState<"choose" | "reject">("choose");
   const [reason, setReason] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -91,7 +96,7 @@ export function ReviewStaffJoinSheet({ member, isOpen, onClose, onResolved }: Re
     >
       <h2 className="font-heading text-xl font-semibold text-brand-neutral-black">{member.full_name}</h2>
       <p className="mt-1 text-sm text-brand-neutral-black/60">
-        Requesting to join as {ROLE_LABEL[member.role] ?? member.role}.
+        Requesting to join as <RoleLabel role={member.role} institutionType={institutionType} overrides={overrides} />.
       </p>
 
       {mode === "choose" ? (

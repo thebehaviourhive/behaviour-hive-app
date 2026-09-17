@@ -2,7 +2,10 @@
 
 import { useState } from "react";
 import { formatDistanceToNow } from "date-fns";
-import { INSTRUMENT_LABELS, RECIPIENT_ROLE_LABELS, type FbaInstrumentRequest } from "@/lib/fba/types";
+import { INSTRUMENT_LABELS, type FbaInstrumentRequest } from "@/lib/fba/types";
+import { RoleLabel } from "@/components/ui/RoleLabel";
+import type { InstitutionType } from "@/lib/institutionType";
+import type { VocabularyOverrides } from "@/lib/vocabulary";
 
 const STATUS_LABEL: Record<FbaInstrumentRequest["status"], string> = {
   sent: "🟡 Sent",
@@ -25,10 +28,14 @@ export function InstrumentRequestChip({
   request,
   onSendReminder,
   readOnly,
+  institutionType,
+  overrides,
 }: {
   request: FbaInstrumentRequest;
   onSendReminder: () => Promise<string | null>;
   readOnly: boolean;
+  institutionType: InstitutionType;
+  overrides: VocabularyOverrides;
 }) {
   const [isSending, setIsSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -49,7 +56,8 @@ export function InstrumentRequestChip({
             {INSTRUMENT_LABELS[request.instrumentType]}
           </p>
           <p className="text-sm text-brand-neutral-black/60">
-            {request.recipientName} · {RECIPIENT_ROLE_LABELS[request.recipientRole]}
+            {request.recipientName} ·{" "}
+            <RoleLabel role={request.recipientRole} institutionType={institutionType} overrides={overrides} />
           </p>
         </div>
         <span

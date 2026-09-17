@@ -6,8 +6,10 @@ import { createClient } from "@/lib/supabase/client";
 import { useActivityFeed } from "@/hooks/useActivityFeed";
 import { ActivityRow, ActivityRowSkeleton } from "@/components/parent/ActivityRow";
 import { InlineErrorState } from "@/components/ui/InlineErrorState";
-import { getChildDisplayName } from "@/lib/childDisplayName";
 import type { ActivityEventType } from "@/lib/activityEvents";
+import type { VocabularyOverrides } from "@/lib/vocabulary";
+import type { InstitutionType } from "@/lib/institutionType";
+import { formatActivityDescription } from "@/lib/principalActivityFeed";
 
 interface PrincipalActivityEntry {
   id: string;
@@ -17,6 +19,12 @@ interface PrincipalActivityEntry {
   // Migration 0192 -- null on staff-level/support_alert rows
   // (institution-wide, not per-child).
   child_name: string | null;
+  // PRD 5 Stage 1, migration 0202 -- non-null only on the "staff
+  // joined" row. event_description no longer bakes in a role label
+  // (that was a tenth, SQL-side copy of the same map every other
+  // surface had); this raw value is formatted below via the shared
+  // vocabulary function instead.
+  actor_role: string | null;
 }
 
 // Migration 0158, Support Button item 6's dashboard preview. Same
@@ -25,7 +33,13 @@ interface PrincipalActivityEntry {
 // the incident list -- see the dashboard's own comment at its call
 // site), so this owns no horizontal margin of its own, matching
 // ClinicianActivityCard's identical convention for the same reason.
-export function PrincipalActivityCard() {
+export function PrincipalActivityCard({
+  institutionType,
+  overrides,
+}: {
+  institutionType: InstitutionType;
+  overrides: VocabularyOverrides;
+}) {
   const fetchPage = useCallback(async (limit: number, offset: number) => {
     const supabase = createClient();
     return supabase.rpc("get_principal_activity_feed", { p_limit: limit, p_offset: offset });
@@ -76,9 +90,7 @@ export function PrincipalActivityCard() {
               // Migration 0192 -- support_alert/staff-level rows are
               // institution-wide, not per-child (child_name null); only
               // prefix rows that actually have one.
-              event_description: entry.child_name
-                ? `${getChildDisplayName(entry.child_name)} — ${entry.event_description}`
-                : entry.event_description,
+              event_description: formatActivityDescription(entry, institutionType, overrides),
               created_at: entry.created_at,
             }}
           />

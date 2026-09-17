@@ -11,6 +11,7 @@ import { PrincipalBottomNav } from "@/components/principal/PrincipalBottomNav";
 import { ReviewStaffJoinSheet } from "@/components/principal/ReviewStaffJoinSheet";
 import { MarkSupportAlertFollowedUpSheet } from "@/components/principal/MarkSupportAlertFollowedUpSheet";
 import { PrincipalActivityCard } from "@/components/principal/PrincipalActivityCard";
+import { useInstitutionType } from "@/hooks/useInstitutionType";
 import { IncidentCard, type InstitutionIncidentRow } from "@/components/principal/IncidentCard";
 import { WorkQueueRow } from "@/components/shared/WorkQueueRow";
 import { formatWaitingSince } from "@/lib/workQueueFormatting";
@@ -179,6 +180,8 @@ function childCountLabel(childIndices: string[] | null): string {
 export default function PrincipalDashboardPage() {
   const { user, isReady } = useRequireRole("principal");
   const [institutionName, setInstitutionName] = useState<string | null>(null);
+  const [institutionId, setInstitutionId] = useState<string | null>(null);
+  const { institutionType, overrides: vocabularyOverrides } = useInstitutionType(institutionId);
   const [incidents, setIncidents] = useState<InstitutionIncidentRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -247,6 +250,7 @@ export default function PrincipalDashboardPage() {
     const institutionRecord = staffRow.institutions as unknown as { name: string } | { name: string }[] | null;
     const name = Array.isArray(institutionRecord) ? institutionRecord[0]?.name : institutionRecord?.name;
     setInstitutionName(name ?? null);
+    setInstitutionId(staffRow.institution_id);
 
     // PRD 1, Stage 3: lazy materialization, best-effort. Its own
     // failure is never allowed to block the page from loading incidents
@@ -625,7 +629,9 @@ export default function PrincipalDashboardPage() {
             Activity now sits above the incident list rather than below
             it -- institution-wide operational context (support alerts
             today) belongs before the incident history, not after it. */}
-        {!isLoading && !error && <PrincipalActivityCard />}
+        {!isLoading && !error && (
+          <PrincipalActivityCard institutionType={institutionType} overrides={vocabularyOverrides} />
+        )}
 
         {!isLoading && !error && (
           <section className="mt-6">
@@ -660,6 +666,8 @@ export default function PrincipalDashboardPage() {
             setReviewTarget(null);
             load();
           }}
+          institutionType={institutionType}
+          overrides={vocabularyOverrides}
         />
       )}
 

@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { BrandMark } from "@/components/ui/BrandMark";
 import { createClient } from "@/lib/supabase/client";
 import { friendlyJoinError } from "@/lib/friendlyJoinError";
-import { getInstitutionType } from "@/lib/institutionType";
+import { getInstitutionType, type InstitutionType } from "@/lib/institutionType";
 
 // Onboarding restructure, Sept 2026: this used to be step two of
 // "who are you" (asked BEFORE any institution code existed). Now it's
@@ -44,10 +44,15 @@ const STAFF_ROLES: {
   },
 ];
 
+function isInstitutionType(value: string | null): value is InstitutionType {
+  return value === "school" || value === "clinic";
+}
+
 export function SchoolStaffRoleSelectContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const institutionId = searchParams.get("institutionId");
+  const institutionTypeParam = searchParams.get("institutionType");
 
   const [error, setError] = useState<string | null>(null);
   const [submittingRole, setSubmittingRole] = useState<StaffRole | null>(null);
@@ -61,22 +66,21 @@ export function SchoolStaffRoleSelectContent() {
   const [showClinicianPlaceholder, setShowClinicianPlaceholder] = useState(false);
 
   useEffect(() => {
-    if (!institutionId) {
+    if (!institutionId || !isInstitutionType(institutionTypeParam)) {
       router.replace("/role-select");
     }
-  }, [institutionId, router]);
+  }, [institutionId, institutionTypeParam, router]);
 
-  if (!institutionId) {
+  if (!institutionId || !isInstitutionType(institutionTypeParam)) {
     return null;
   }
 
-  // PRD 5 GREPPABLE PLACEHOLDER 2: a clinic-typed institution. Dead
-  // code today -- getInstitutionType() cannot return anything but
-  // 'school' without a `type` column this PRD deliberately does not
-  // add (see CLAUDE.md's own account of why) -- but the fork stays in
-  // place so PRD 5 can wire in a real clinic role picker here instead
-  // of discovering this page has no branch for it at all.
-  if (getInstitutionType({ id: institutionId }) === "clinic") {
+  // PRD 5 GREPPABLE PLACEHOLDER 2: a clinic-typed institution. Live now
+  // -- institutions.type is real (migration 0200) and role-select/
+  // page.tsx forwards it here. Still a placeholder screen, not a real
+  // clinic role picker: clinic roles/onboarding are a later PRD 5
+  // stage, not this one.
+  if (getInstitutionType({ type: institutionTypeParam }) === "clinic") {
     return (
       <main className="flex min-h-full flex-1 items-center justify-center bg-brand-off-white/40 px-4 py-10">
         <div className="w-full max-w-sm text-center">

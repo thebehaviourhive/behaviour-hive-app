@@ -7,11 +7,13 @@ import { createClient } from "@/lib/supabase/client";
 import { resolveInstructionText } from "@/lib/fba/resolveInstruction";
 import {
   INSTRUMENT_LABELS,
-  RECIPIENT_ROLE_LABELS,
   type FbaInstrumentRequest,
   type FbaRecipientCandidate,
   type SendableInstrumentType,
 } from "@/lib/fba/types";
+import { RoleLabel } from "@/components/ui/RoleLabel";
+import type { InstitutionType } from "@/lib/institutionType";
+import type { VocabularyOverrides } from "@/lib/vocabulary";
 
 // Open-Ended is deliberately absent -- it's a clinician-transcribed form
 // now (see the FAI interview list further up Section 7), never sent to
@@ -34,6 +36,8 @@ export function SendQuestionnaireSheet({
   // section. Nullable only because the caller's own fetch may not have
   // resolved yet; the preview falls back to "the child" in that case.
   childName,
+  institutionType,
+  overrides,
 }: {
   isOpen: boolean;
   onClose: () => void;
@@ -44,6 +48,8 @@ export function SendQuestionnaireSheet({
   requests: FbaInstrumentRequest[];
   onSend: (instrumentType: SendableInstrumentType, recipientId: string, instruction: string) => Promise<string | null>;
   childName: string | null;
+  institutionType: InstitutionType;
+  overrides: VocabularyOverrides;
 }) {
   const [instrumentType, setInstrumentType] = useState<SendableInstrumentType | null>(null);
   // Set once a recipient is chosen -- from that point the sheet shows
@@ -264,7 +270,7 @@ export function SendQuestionnaireSheet({
                         {candidate.fullName}
                       </span>
                       <span className="block text-xs text-brand-neutral-black/50">
-                        {RECIPIENT_ROLE_LABELS[candidate.role]}
+                        <RoleLabel role={candidate.role} institutionType={institutionType} overrides={overrides} />
                       </span>
                     </span>
                     <span className="flex-shrink-0 text-xs font-semibold text-brand-neutral-black/50">

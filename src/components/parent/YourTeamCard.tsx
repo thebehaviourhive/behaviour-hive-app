@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { PeopleIcon } from "@/components/ui/icons";
 import { InlineErrorState } from "@/components/ui/InlineErrorState";
+import { RoleLabel } from "@/components/ui/RoleLabel";
+import { usePassportInstitutionVocabulary } from "@/hooks/usePassportInstitutionVocabulary";
 
 interface TeamMember {
   teacherId: string;
@@ -14,17 +16,6 @@ interface TeamMember {
 const ROLE_STYLE: Record<string, string> = {
   clinician: "bg-brand-golden-brown/10 text-brand-golden-brown",
 };
-// FIX: 'sna' had no entry here -- get_passport_team has returned real
-// role='sna' rows since migration 0065, but this map's ?? "Teacher"
-// fallback (below) silently mislabeled every SNA team member as
-// "Teacher" instead of "SNA". Caught while verifying the exact card
-// this phase's brief calls out by name.
-const ROLE_LABEL: Record<string, string> = {
-  class_teacher: "Teacher",
-  clinician: "Clinician",
-  sna: "SNA",
-};
-
 function getInitials(fullName: string): string {
   const parts = fullName.trim().split(/\s+/).filter(Boolean);
   if (parts.length === 0) return "?";
@@ -55,6 +46,7 @@ export function YourTeamCard({ passportId }: { passportId: string | null }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const isLoading = isFetching && passportId !== null;
+  const { institutionType, overrides } = usePassportInstitutionVocabulary(passportId);
 
   const load = useCallback(async () => {
     if (!passportId) return;
@@ -140,7 +132,7 @@ export function YourTeamCard({ passportId }: { passportId: string | null }) {
                     "bg-brand-pastel-blue/20 text-brand-prussian-blue"
                   }`}
                 >
-                  {ROLE_LABEL[member.role] ?? "Teacher"}
+                  <RoleLabel role={member.role} institutionType={institutionType} overrides={overrides} />
                 </span>
               </div>
             </div>

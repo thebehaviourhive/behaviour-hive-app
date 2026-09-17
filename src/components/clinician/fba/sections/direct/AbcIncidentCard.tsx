@@ -2,14 +2,12 @@
 
 import { useState } from "react";
 import { ChevronDown } from "lucide-react";
-import {
-  ABC_ROLE_DISPLAY_LABEL,
-  OTHER_OPTION,
-  PERCEIVED_FUNCTION_LABELS,
-  type ABCLoggerRole,
-} from "@/components/abc-logger/roleConfig";
+import { OTHER_OPTION, PERCEIVED_FUNCTION_LABELS } from "@/components/abc-logger/roleConfig";
 import { ABC_FUNCTION_LABELS, ABC_FUNCTION_OPTIONS, type AbcHypothesisedFunction } from "@/lib/fba/types";
 import type { AbcLogSummary } from "@/lib/fba/abcAnalysis";
+import { RoleLabel } from "@/components/ui/RoleLabel";
+import type { InstitutionType } from "@/lib/institutionType";
+import type { VocabularyOverrides } from "@/lib/vocabulary";
 
 function truncate(text: string, max = 30): string {
   return text.length > max ? `${text.slice(0, max)}…` : text;
@@ -55,14 +53,17 @@ export function AbcIncidentCard({
   tag,
   onTagChange,
   readOnly,
+  institutionType,
+  overrides,
 }: {
   log: AbcLogSummary;
   tag: AbcHypothesisedFunction | undefined;
   onTagChange: (tag: AbcHypothesisedFunction | undefined) => void;
   readOnly: boolean;
+  institutionType: InstitutionType;
+  overrides: VocabularyOverrides;
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
-  const roleLabel = ABC_ROLE_DISPLAY_LABEL[log.loggedByRole as ABCLoggerRole] ?? log.loggedByRole;
 
   return (
     <div className="rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
@@ -76,7 +77,7 @@ export function AbcIncidentCard({
             {formatDateTime(log.incidentDate, log.incidentTime)}
           </p>
           <p className="mt-0.5 text-xs text-brand-neutral-black/50">
-            {log.loggedByName} ({roleLabel})
+            {log.loggedByName} (<RoleLabel role={log.loggedByRole} institutionType={institutionType} overrides={overrides} />)
           </p>
         </div>
         <ChevronDown

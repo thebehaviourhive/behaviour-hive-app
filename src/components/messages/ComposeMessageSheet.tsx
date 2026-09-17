@@ -4,7 +4,8 @@ import { useEffect, useState } from "react";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 import { createClient } from "@/lib/supabase/client";
 import type { MessageCategory, MessageRecipientCandidate } from "@/types/messages";
-import { ROLE_LABEL } from "@/types/messages";
+import { getRoleLabel } from "@/lib/vocabulary";
+import { useMessageInstitutionVocabulary } from "@/hooks/useMessageInstitutionVocabulary";
 
 const BODY_MAX = 200;
 
@@ -131,6 +132,10 @@ export function ComposeMessageSheet({
 
   const canSend = Boolean(selectedCategoryId) && selectedRecipientIds.length > 0 && !isSending;
   const isStaffMode = Boolean(institutionId);
+  const { institutionType, overrides } = useMessageInstitutionVocabulary({
+    institutionId: institutionId ?? null,
+    passportId: passportId ?? null,
+  });
 
   return (
     <BottomSheet isOpen={isOpen} onClose={onClose}>
@@ -161,10 +166,10 @@ export function ComposeMessageSheet({
                     : "border-black/10 bg-white text-brand-neutral-black/70"
                 }`}
               >
-                {candidate.fullName ?? ROLE_LABEL[candidate.role]}
+                {candidate.fullName ?? getRoleLabel(candidate.role, institutionType, overrides)}
                 <span className={isSelected ? "text-white/70" : "text-brand-neutral-black/40"}>
                   {" "}
-                  · {ROLE_LABEL[candidate.role]}
+                  · {getRoleLabel(candidate.role, institutionType, overrides)}
                 </span>
               </button>
             );

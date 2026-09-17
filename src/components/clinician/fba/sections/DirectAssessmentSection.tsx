@@ -15,6 +15,7 @@ import { DailyPatternsPanel } from "./direct/DailyPatternsPanel";
 import { IncidentSummaryCard } from "@/components/incident-log/IncidentSummaryCard";
 import type { AbcHypothesisedFunction } from "@/lib/fba/types";
 import type { FbaSectionBodyProps } from "./types";
+import { usePassportInstitutionVocabulary } from "@/hooks/usePassportInstitutionVocabulary";
 
 export function DirectAssessmentSection({
   passportId,
@@ -24,6 +25,7 @@ export function DirectAssessmentSection({
   onStructuralChange,
   readOnly,
 }: FbaSectionBodyProps & { passportId: string }) {
+  const { institutionType, overrides: vocabularyOverrides } = usePassportInstitutionVocabulary(passportId);
   const { logs, isLoading, loadError, refresh: refreshLogs } = useAbcLogs(passportId);
   const {
     incidents,
@@ -204,6 +206,8 @@ export function DirectAssessmentSection({
                   tag={tags[log.id]}
                   onTagChange={(tag) => updateTag(log.id, tag)}
                   readOnly={readOnly}
+                  institutionType={institutionType}
+                  overrides={vocabularyOverrides}
                 />
               ))}
             </div>

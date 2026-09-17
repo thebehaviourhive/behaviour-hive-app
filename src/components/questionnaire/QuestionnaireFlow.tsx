@@ -21,6 +21,22 @@ const HEADER_KEYS = { name: "header-name", date: "header-date" } as const;
 // The activity-log attribution label per track -- SNA gets its own
 // label (not lumped into "Teacher") so the passport's activity history
 // records who actually completed it.
+//
+// PRD 5 Stage 1: deliberately NOT converted to getRoleLabel(), unlike
+// every other role-label map this stage found and consolidated. Two
+// reasons, both real: (1) `track` is "parent"|"teacher"|"sna", a
+// distinct vocabulary from institution_staff.role's "class_teacher" --
+// converting it means mapping "teacher" -> "class_teacher" first, not
+// a direct call; (2) resolving this recipient's own institution would
+// mean querying fba_reports by request.fbaId, and this component runs
+// as the RECIPIENT's own session (parent/teacher/sna filling out a
+// questionnaire about a child, not the clinician who owns the FBA) --
+// fba_reports' own SELECT policy has not been confirmed to allow that
+// read for a recipient, and getting this wrong risks the exact
+// RLS-silent-empty-result gotcha CLAUDE.md already documents, for a
+// write-time audit string with no confirmed on-screen reader. Left
+// alone rather than guessed at; revisit if this string is ever found
+// to actually surface somewhere.
 const TRACK_ACTIVITY_LABEL: Record<"parent" | "teacher" | "sna", string> = {
   parent: "Parent",
   teacher: "Teacher",
