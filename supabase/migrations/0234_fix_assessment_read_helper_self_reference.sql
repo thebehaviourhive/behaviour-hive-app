@@ -55,6 +55,17 @@ $$;
 
 grant execute on function public._assessment_is_readable_by_caller(uuid, uuid) to authenticated;
 
+-- The policy has to repoint to the new two-argument function BEFORE
+-- the old one-argument version can be dropped -- the exact dependency-
+-- ordering trap migration 0226's own header already documents:
+-- dropping a still-referenced overload first fails with "other objects
+-- depend on it" (2BP01), because the policy is a real, tracked
+-- dependency, the same as a view depending on a table. ALTER POLICY
+-- first, THEN drop the now-unreferenced old signature.
+alter policy "Clinicians read their own assessments"
+  on public.assessments
+  using (public._assessment_is_readable_by_caller(clinician_id, passport_id));
+
 -- The old, single-argument, self-referential version is now shadowed
 -- by nothing calling it -- drop it explicitly rather than leave two
 -- overloads of the same name sitting around (the exact overload-
@@ -63,10 +74,6 @@ grant execute on function public._assessment_is_readable_by_caller(uuid, uuid) t
 -- rather than trusting CREATE OR REPLACE to collapse a changed
 -- parameter list onto a shorter one -- it never does).
 drop function if exists public._assessment_is_readable_by_caller(uuid);
-
-alter policy "Clinicians read their own assessments"
-  on public.assessments
-  using (public._assessment_is_readable_by_caller(clinician_id, passport_id));
 
 -- The bridge: resolves the assessment's own clinician_id/passport_id
 -- via a cross-table lookup (assessments, from attachments' or
