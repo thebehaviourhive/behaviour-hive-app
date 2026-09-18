@@ -65,7 +65,22 @@ export function ClinicianAccessGate({
     );
   }
 
-  if (profile.specialty !== "behavioural_psychologist") {
+  // This "not supported yet" branch only ever meant anything for the
+  // INDEPENDENT, behaviour_hive-reviewed path -- behavioural_psychologist
+  // was the one specialty that verification form actually supported.
+  // Organisation-verified practitioners (0222, PRD 5 Stage 6) never go
+  // through that form at all -- their director's own approval IS their
+  // verification, the same zero-extra-review precedent class_teacher/
+  // SNA already have, and their specialty starts at 'unspecified' by
+  // design, a genuine placeholder, not something anyone is ever asked to
+  // pick before being let in. Gating them here on specialty is the exact
+  // same credential-style theatre Stage 6 already decided doesn't apply
+  // to them -- a real, live bug found live: every organisation-verified
+  // practitioner was locked out of the ENTIRE clinician track (dashboard,
+  // caseload, messages, everything ClinicianAccessGate wraps), not just
+  // this one screen, because nothing here was ever updated for the
+  // second verification route Stage 6 introduced.
+  if (profile.verificationRoute !== "organisation" && profile.specialty !== "behavioural_psychologist") {
     return (
       <ClinicianComingSoonPage
         Icon={ClinicalFileIcon}

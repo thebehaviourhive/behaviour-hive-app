@@ -18,6 +18,13 @@ export interface ClinicianReviewProfile {
   specialty: string;
   verificationStatus: "pending" | "verified" | "rejected";
   hasSubmitted: boolean;
+  // "behaviour_hive" | "organisation" | null (0221) -- who verified
+  // this clinician and how. ClinicianAccessGate's own specialty check
+  // only ever meant anything for the independent, behaviour_hive-
+  // reviewed path; carried through here so that gate can tell the two
+  // routes apart instead of treating every non-behavioural_psychologist
+  // specialty as unsupported, regardless of route.
+  verificationRoute: "behaviour_hive" | "organisation" | null;
 }
 
 export function getClinicianReviewState(profile: ClinicianReviewProfile): ClinicianReviewState {
@@ -47,7 +54,7 @@ export function useClinicianReviewState(userId: string | null): UseClinicianRevi
     const supabase = createClient();
     const { data, error: fetchError } = await supabase
       .from("clinicians")
-      .select("specialty, verification_status, full_name")
+      .select("specialty, verification_status, full_name, verification_route")
       .eq("user_id", userId)
       .maybeSingle();
 
@@ -63,6 +70,7 @@ export function useClinicianReviewState(userId: string | null): UseClinicianRevi
             specialty: data.specialty,
             verificationStatus: data.verification_status,
             hasSubmitted: data.full_name !== null,
+            verificationRoute: data.verification_route,
           }
         : null
     );

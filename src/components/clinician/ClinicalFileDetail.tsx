@@ -16,6 +16,7 @@ import { useCalmButtonLiveStatus } from "@/hooks/useCalmButtonLiveStatus";
 import { ClinicalFileFbaTab } from "@/components/clinician/fba/ClinicalFileFbaTab";
 import { ClinicalFileMessagesTab } from "@/components/clinician/ClinicalFileMessagesTab";
 import { ClinicalFileIncidentsTab } from "@/components/clinician/ClinicalFileIncidentsTab";
+import { ClinicalFileSessionNotesTab } from "@/components/clinician/ClinicalFileSessionNotesTab";
 import { EffectivenessSurface } from "@/components/clinician/passport/EffectivenessSurface";
 import { ReasonConfirmSheet } from "@/components/shared/ReasonConfirmSheet";
 
@@ -60,6 +61,7 @@ import { ReasonConfirmSheet } from "@/components/shared/ReasonConfirmSheet";
 // explicitly rather than assuming it's obviously right.
 type TabKey =
   | "summary"
+  | "sessionNotes"
   | "behaviour"
   | "communication"
   | "supports"
@@ -73,6 +75,11 @@ type TabKey =
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: "summary", label: "Summary" },
+  // PRD 6 -- placed second, deliberately: "the highest-frequency
+  // clinical task in the organisation" (PRD 6 section 1) gets the
+  // most prominent slot after the profile summary itself, not buried
+  // among the less-frequent clinical-documentation tabs further down.
+  { key: "sessionNotes", label: "Session Notes" },
   { key: "behaviour", label: "Behaviour Signals" },
   { key: "communication", label: "Communication" },
   { key: "supports", label: "Supports" },
@@ -406,6 +413,10 @@ export function ClinicalFileDetail({
                 <EmptyCard text="No communication methods provided." />
               )}
             </>
+          )}
+
+          {activeTab === "sessionNotes" && user && (
+            <ClinicalFileSessionNotesTab passportId={passportId} clinicianId={user.id} />
           )}
 
           {activeTab === "behaviour" && (

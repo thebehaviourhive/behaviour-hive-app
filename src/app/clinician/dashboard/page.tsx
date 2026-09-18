@@ -17,6 +17,12 @@ interface ClinicianProfile {
   specialty: string;
   verificationStatus: "pending" | "verified" | "rejected";
   hasSubmitted: boolean;
+  // See ClinicianAccessGate.tsx's own identical fix -- this page has its
+  // own separate, un-migrated copy of that gate's logic (never moved
+  // onto useClinicianReviewState despite that hook's header claiming to
+  // have been extracted from here), so it carried the identical
+  // specialty-gate bug independently and needs the identical fix here.
+  verificationRoute: "behaviour_hive" | "organisation" | null;
 }
 
 type ReviewState = "not_submitted" | "pending_review" | "rejected" | "verified";
@@ -63,7 +69,7 @@ async function fetchClinicianProfile(
   const supabase = createClient();
   const { data, error } = await supabase
     .from("clinicians")
-    .select("specialty, verification_status, full_name")
+    .select("specialty, verification_status, full_name, verification_route")
     .eq("user_id", userId)
     .maybeSingle();
 
@@ -79,6 +85,7 @@ async function fetchClinicianProfile(
       specialty: data.specialty,
       verificationStatus: data.verification_status,
       hasSubmitted: data.full_name !== null,
+      verificationRoute: data.verification_route,
     },
     error: false,
   };
@@ -156,7 +163,12 @@ export default function ClinicianDashboardPage() {
   }
 
   const loadStats = useCallback(async () => {
-    if (!user || !profile || profile.specialty !== "behavioural_psychologist") return;
+    if (
+      !user ||
+      !profile ||
+      (profile.verificationRoute !== "organisation" && profile.specialty !== "behavioural_psychologist")
+    )
+      return;
     setIsLoadingStats(true);
     setStatsError(null);
 
@@ -260,7 +272,14 @@ export default function ClinicianDashboardPage() {
     return null;
   }
 
-  if (profile.specialty !== "behavioural_psychologist") {
+  // See ClinicianAccessGate.tsx's own identical fix: this "not
+  // supported yet" branch only ever meant anything for the independent,
+  // behaviour_hive-reviewed path. Organisation-verified practitioners
+  // (PRD 5 Stage 6) never pick a specialty before being let in -- their
+  // director's own approval is their verification -- so gating them
+  // here on specialty locked them out of the dashboard itself, the
+  // first page they land on.
+  if (profile.verificationRoute !== "organisation" && profile.specialty !== "behavioural_psychologist") {
     return (
       <div className="flex min-h-full flex-1 flex-col bg-brand-off-white/40 pb-24">
         <main className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
