@@ -19,8 +19,17 @@ const PLACEMENTS: StrategyPlacement[] = ["home", "school", "shared"];
 // own argument: build the bank first. Starts empty; this page is the
 // mechanism, not the content -- Catherine (or any verified clinician
 // at the clinic) fills it.
+//
+// FOUND LIVE, DURING THIS STAGE'S OWN BROWSER VERIFICATION: gating on
+// role "clinician" alone made this page structurally unreachable by
+// the one role Daniel's own instruction names as the curator --
+// "clinician" (adds) and "principal" (director, retires/curates) are
+// two distinct roles in this app's model, and the RLS backing this
+// page already correctly allows a director's own update -- the client
+// gate was the only thing actually blocking them. Fixed before this
+// stage was called closed, not left as a known gap.
 export default function StrategyBankPage() {
-  const { isReady, user } = useRequireRole("clinician");
+  const { isReady, user } = useRequireRole(["clinician", "principal"]);
   const [institutionId, setInstitutionId] = useState<string | null | undefined>(undefined);
   const [isDirector, setIsDirector] = useState(false);
 
