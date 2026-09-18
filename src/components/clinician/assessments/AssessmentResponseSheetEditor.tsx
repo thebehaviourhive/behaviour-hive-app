@@ -1,17 +1,32 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { SavedStateIndicator } from "@/components/clinician/fba/SavedStateIndicator";
 import { InlineErrorState } from "@/components/ui/InlineErrorState";
+import { BottomSheet } from "@/components/ui/BottomSheet";
+import { Textarea } from "@/components/ui/Textarea";
 import { useAssessment, type SubscaleTotal } from "@/hooks/useAssessment";
 import { AttachmentsSection } from "@/components/clinician/assessments/AttachmentsSection";
+import { createClient } from "@/lib/supabase/client";
 
+// The dishonest three-pill "Sent to X" claim is gone -- nothing was
+// ever sent through this control; it only ever recorded who the
+// clinician was TRANSCRIBING for while typing every row themselves.
+// This is now the label for that manual-transcription case only,
+// worded honestly. Assigning a real respondent (below) is a separate,
+// new action with its own real send mechanism.
 const RESPONDENT_OPTIONS: { value: "parent" | "school_staff" | "interview"; label: string }[] = [
-  { value: "parent", label: "Sent to parent" },
-  { value: "school_staff", label: "Sent to school staff" },
+  { value: "parent", label: "On behalf of a parent" },
+  { value: "school_staff", label: "On behalf of school staff" },
   { value: "interview", label: "Interview" },
 ];
+
+interface Candidate {
+  recipientId: string;
+  fullName: string;
+  role: string;
+}
 
 // PRD 7 Stage 1 -- the response sheet. Per section 13a: numbered rows
 // and a response scale, NO ITEM TEXT -- this component never receives
@@ -26,6 +41,14 @@ const RESPONDENT_OPTIONS: { value: "parent" | "school_staff" | "interview"; labe
 // own number, from the paper's own scoring key) -- the app never infers
 // or computes them, and never even suggests what the subscale names
 // might be.
+//
+// PRD 7 -- respondent completion added. A response sheet can now
+// genuinely be ASSIGNED to a real respondent (a parent or someone on
+// the child's own school team, resolved cross-organisation correctly --
+// see 0239's own migration comment), who fills in `responses` ONLY
+// through their own dedicated flow, never subscale_totals -- 13a's own
+// reasoning holds: the clinician alone enters subscale totals from the
+// paper's own scoring key.
 //
 // LOCAL DRAFT STATE FOR responses/subscaleTotals, NOT read-modify-write
 // off `assessment` directly -- found live during deployed verification:
@@ -46,13 +69,56 @@ export function AssessmentResponseSheetEditor({
   passportId: string;
 }) {
   const router = useRouter();
-  const { assessment, isLoading, loadError, reload, saveField, saveStatus, saveError, complete } =
-    useAssessment(assessmentId);
+  const {
+    assessment,
+    isLoading,
+    loadError,
+    reload,
+    saveField,
+    saveStatus,
+    saveError,
+    complete,
+    assignRespondent,
+    unassignRespondent,
+    remindRespondent,
+  } = useAssessment(assessmentId);
   const [isCompleting, setIsCompleting] = useState(false);
   const [completeError, setCompleteError] = useState<string | null>(null);
 
   const [draftResponses, setDraftResponses] = useState<Record<string, string>>({});
   const [draftSubscaleTotals, setDraftSubscaleTotals] = useState<SubscaleTotal[]>([]);
+
+  const [isAssignOpen, setIsAssignOpen] = useState(false);
+  const [candidates, setCandidates] = useState<Candidate[] | null>(null);
+  const [assignError, setAssignError] = useState<string | null>(null);
+  const [isAssigning, setIsAssigning] = useState(false);
+  const [remindMessage, setRemindMessage] = useState<string | null>(null);
+
+  const loadCandidates = useCallback(async () => {
+    const supabase = createClient();
+    const { data, error } = await supabase.rpc("get_assessment_respondent_candidates", {
+      p_assessment_id: assessmentId,
+    });
+    if (error) {
+      setAssignError(error.message);
+      return;
+    }
+    setCandidates(
+      ((data ?? []) as { recipient_id: string; full_name: string; role: string }[]).map((c) => ({
+        recipientId: c.recipient_id,
+        fullName: c.full_name,
+        role: c.role,
+      }))
+    );
+  }, [assessmentId]);
+
+  // Loaded once, on mount -- also used to resolve the assigned
+  // respondent's own display name, so it's fetched regardless of
+  // whether the picker sheet has been opened yet.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    loadCandidates();
+  }, [loadCandidates]);
 
   // Seeds local draft state from the loaded assessment exactly once --
   // same reasoning as SessionNoteEditor's own hasSeededRef: saveField()
@@ -78,6 +144,29 @@ export function AssessmentResponseSheetEditor({
 
   function handleRespondentPick(value: "parent" | "school_staff" | "interview") {
     saveField({ respondentType: value });
+  }
+
+  async function handleAssign(candidate: Candidate) {
+    setIsAssigning(true);
+    setAssignError(null);
+    const { error } = await assignRespondent(candidate.recipientId);
+    setIsAssigning(false);
+    if (error) {
+      setAssignError(error);
+      return;
+    }
+    setIsAssignOpen(false);
+    setDraftResponses({});
+  }
+
+  async function handleUnassign() {
+    await unassignRespondent();
+  }
+
+  async function handleRemind() {
+    setRemindMessage(null);
+    const { error } = await remindRespondent();
+    setRemindMessage(error ?? "Reminder sent.");
   }
 
   function handleAnswerTap(rowNumber: number, value: string) {
@@ -132,6 +221,11 @@ export function AssessmentResponseSheetEditor({
   const isLocked = !!assessment.completedAt;
   const rowNumbers = Array.from({ length: assessment.instrumentItemCount ?? 0 }, (_, i) => i + 1);
   const scale = assessment.instrumentResponseScale ?? [];
+  const isAssigned = !!assessment.assignedRespondentId;
+  const assignedCandidate = candidates?.find((c) => c.recipientId === assessment.assignedRespondentId);
+  const answeredCount = Object.keys(assessment.responses ?? {}).length;
+  const assignedStatus =
+    answeredCount === 0 ? "Not started" : answeredCount < rowNumbers.length ? "In progress" : "All rows answered";
 
   return (
     <div className="flex min-h-full flex-1 flex-col bg-brand-off-white/40">
@@ -190,29 +284,81 @@ export function AssessmentResponseSheetEditor({
 
           <section>
             <p className="mb-1.5 text-sm font-semibold text-brand-neutral-black">Respondent</p>
-            <div className="flex flex-wrap gap-2">
-              {RESPONDENT_OPTIONS.map((opt) => (
-                <button
-                  key={opt.value}
-                  type="button"
-                  disabled={isLocked}
-                  onClick={() => handleRespondentPick(opt.value)}
-                  className={`rounded-full border px-3.5 py-1.5 text-xs font-semibold transition-colors disabled:cursor-not-allowed ${
-                    assessment.respondentType === opt.value
-                      ? "border-brand-prussian-blue bg-brand-prussian-blue text-white"
-                      : "border-black/10 bg-white text-brand-neutral-black/70"
-                  }`}
-                >
-                  {opt.label}
-                </button>
-              ))}
-            </div>
+
+            {isAssigned ? (
+              <div className="rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
+                <p className="text-sm font-semibold text-brand-neutral-black">
+                  Assigned to {assignedCandidate?.fullName ?? "the assigned respondent"}
+                </p>
+                <p className="mt-1 text-xs text-brand-neutral-black/60">
+                  {assignedStatus}
+                  {assessment.lastRemindedAt &&
+                    ` · Last reminded ${new Date(assessment.lastRemindedAt).toLocaleDateString("en-IE")}`}
+                </p>
+                {!isLocked && (
+                  <div className="mt-3 flex gap-2">
+                    <button
+                      type="button"
+                      onClick={handleRemind}
+                      className="rounded-full border-2 border-brand-prussian-blue px-3.5 py-1.5 text-xs font-bold text-brand-prussian-blue"
+                    >
+                      Remind
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleUnassign}
+                      className="rounded-full border-2 border-black/10 px-3.5 py-1.5 text-xs font-bold text-brand-neutral-black/60"
+                    >
+                      Unassign
+                    </button>
+                  </div>
+                )}
+                {remindMessage && <p className="mt-2 text-xs text-brand-neutral-black/50">{remindMessage}</p>}
+              </div>
+            ) : (
+              <>
+                {!isLocked && (
+                  <button
+                    type="button"
+                    onClick={() => setIsAssignOpen(true)}
+                    className="mb-2 rounded-full bg-brand-prussian-blue px-4 py-2 text-xs font-bold text-white"
+                  >
+                    Assign a respondent
+                  </button>
+                )}
+                <p className="mb-1.5 text-xs text-brand-neutral-black/50">
+                  Or, if you&apos;re transcribing this yourself from a completed paper form:
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {RESPONDENT_OPTIONS.map((opt) => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      disabled={isLocked}
+                      onClick={() => handleRespondentPick(opt.value)}
+                      className={`rounded-full border px-3.5 py-1.5 text-xs font-semibold transition-colors disabled:cursor-not-allowed ${
+                        assessment.respondentType === opt.value
+                          ? "border-brand-prussian-blue bg-brand-prussian-blue text-white"
+                          : "border-black/10 bg-white text-brand-neutral-black/70"
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
           </section>
 
           <section>
-            <p className="mb-1.5 text-sm font-semibold text-brand-neutral-black">
-              Responses ({Object.keys(draftResponses).length}/{rowNumbers.length})
-            </p>
+            <div className="mb-1.5 flex items-center justify-between">
+              <p className="text-sm font-semibold text-brand-neutral-black">
+                Responses ({answeredCount}/{rowNumbers.length})
+              </p>
+              {isAssigned && !isLocked && (
+                <span className="text-xs text-brand-neutral-black/50">Filled in by the assigned respondent</span>
+              )}
+            </div>
             <div className="flex flex-col divide-y divide-black/5 rounded-2xl border border-black/5 bg-white">
               {rowNumbers.map((n) => {
                 const current = draftResponses[String(n)];
@@ -224,7 +370,7 @@ export function AssessmentResponseSheetEditor({
                         <button
                           key={option}
                           type="button"
-                          disabled={isLocked}
+                          disabled={isLocked || isAssigned}
                           onClick={() => handleAnswerTap(n, option)}
                           aria-pressed={current === option}
                           className={`flex h-9 flex-shrink-0 items-center justify-center rounded-xl border px-3 text-xs font-bold transition-colors disabled:cursor-not-allowed ${
@@ -257,7 +403,8 @@ export function AssessmentResponseSheetEditor({
               )}
             </div>
             <p className="-mt-0.5 mb-2 text-xs text-brand-neutral-black/50">
-              Enter each subscale name and total from the paper&apos;s own scoring key. Not computed here.
+              Enter each subscale name and total from the paper&apos;s own scoring key. Not computed here, and never
+              entered by an assigned respondent.
             </p>
 
             {draftSubscaleTotals.length === 0 ? (
@@ -301,6 +448,16 @@ export function AssessmentResponseSheetEditor({
             )}
           </section>
 
+          <section>
+            <Textarea
+              label="Instruction (shown to the respondent, if assigned)"
+              value={assessment.instruction}
+              onChange={(e) => saveField({ instruction: e.target.value })}
+              disabled={isLocked}
+              rows={2}
+            />
+          </section>
+
           <AttachmentsSection
             assessmentId={assessmentId}
             isLocked={isLocked}
@@ -330,6 +487,37 @@ export function AssessmentResponseSheetEditor({
           )}
         </div>
       </main>
+
+      <BottomSheet isOpen={isAssignOpen} onClose={() => setIsAssignOpen(false)}>
+        <h2 className="font-heading text-lg font-semibold text-brand-neutral-black">Assign a respondent</h2>
+        <p className="mt-1 text-sm text-brand-neutral-black/60">
+          They&apos;ll see only the instrument name, the numbered rows, and your own instruction — never your
+          interpretation or scores.
+        </p>
+        <div className="mt-4 flex max-h-[50vh] flex-col gap-2 overflow-y-auto">
+          {candidates === null && <p className="text-sm text-brand-neutral-black/50">Loading…</p>}
+          {candidates !== null && candidates.length === 0 && (
+            <p className="text-sm text-brand-neutral-black/50">No parent or actively-linked staff found for this child.</p>
+          )}
+          {(candidates ?? []).map((c) => (
+            <button
+              key={c.recipientId}
+              type="button"
+              disabled={isAssigning}
+              onClick={() => handleAssign(c)}
+              className="flex items-center justify-between rounded-xl border border-black/10 bg-white p-3 text-left disabled:opacity-50"
+            >
+              <span className="text-sm font-semibold text-brand-neutral-black">{c.fullName}</span>
+              <span className="text-xs text-brand-neutral-black/50">{c.role}</span>
+            </button>
+          ))}
+        </div>
+        {assignError && (
+          <p role="alert" className="mt-2 text-sm font-medium text-red-600">
+            {assignError}
+          </p>
+        )}
+      </BottomSheet>
     </div>
   );
 }

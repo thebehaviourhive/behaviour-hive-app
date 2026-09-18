@@ -12,6 +12,7 @@ import { SupplyTeacherPassportReviewCard } from "@/components/sna/SupplyTeacherP
 import { TemporaryAccessBanner } from "@/components/shared/TemporaryAccessBanner";
 import { AlertTriangleIcon, CheckIcon, PeopleIcon } from "@/components/ui/icons";
 import { QuestionnairePromptCard } from "@/components/questionnaire/QuestionnairePromptCard";
+import { AssessmentRequestPromptCard } from "@/components/questionnaire/AssessmentRequestPromptCard";
 import { AttestationPromptCard } from "@/components/incident-log/AttestationPromptCard";
 
 // SNA's "Passports home" -- per the brief, this single page IS the SNA
@@ -174,6 +175,7 @@ export default function SnaPassportsPage() {
       )}
 
       <QuestionnairePromptCard track="sna" className="px-4 pb-4" />
+      <AssessmentRequestPromptCard className="px-4 pb-4" />
 
       {/* Stage 6, item 2 -- same "Needs your attention" container and
           "All clear." empty state the teacher and principal dashboards

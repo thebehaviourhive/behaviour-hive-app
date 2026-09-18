@@ -5,6 +5,7 @@ import { format } from "date-fns";
 import { createClient } from "@/lib/supabase/client";
 import { formatClinicianReference } from "@/lib/clinicianDisplayName";
 import { QuestionnairePromptCard } from "@/components/questionnaire/QuestionnairePromptCard";
+import { AssessmentRequestPromptCard } from "@/components/questionnaire/AssessmentRequestPromptCard";
 import { ClinicalDocumentCard } from "./ClinicalDocumentCard";
 import { WhatIsAnFbaSheet } from "./WhatIsAnFbaSheet";
 
@@ -156,6 +157,7 @@ export function ClinicalSupportSection({
             px-4 (from the dashboard's <main>) already provides the
             horizontal inset. */}
         <QuestionnairePromptCard track="parent" />
+        <AssessmentRequestPromptCard />
 
         {isLoading || !fbaState ? (
           <div className="h-32 animate-pulse rounded-2xl bg-white" />

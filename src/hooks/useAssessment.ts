@@ -43,6 +43,11 @@ export interface Assessment {
   location: string;
   scores: ScoreEntry[];
   interpretation: string;
+  // Respondent completion (PRD 7 -- the parent/school-facing flow).
+  assignedRespondentId: string | null;
+  assignedAt: string | null;
+  lastRemindedAt: string | null;
+  instruction: string;
 }
 
 interface AssessmentRow {
@@ -61,6 +66,10 @@ interface AssessmentRow {
   location: string | null;
   scores: ScoreEntry[] | null;
   interpretation: string | null;
+  assigned_respondent_id: string | null;
+  assigned_at: string | null;
+  last_reminded_at: string | null;
+  instruction: string | null;
   assessment_instruments: { name: string; item_count: number | null; response_scale: string[] | null } | null;
 }
 
@@ -84,6 +93,10 @@ function mapAssessment(row: AssessmentRow): Assessment {
     location: row.location ?? "",
     scores: row.scores ?? [],
     interpretation: row.interpretation ?? "",
+    assignedRespondentId: row.assigned_respondent_id,
+    assignedAt: row.assigned_at,
+    lastRemindedAt: row.last_reminded_at,
+    instruction: row.instruction ?? "",
   };
 }
 
@@ -98,6 +111,7 @@ type AssessmentFieldPatch = Partial<{
   scores: ScoreEntry[];
   interpretation: string;
   completedAt: string;
+  instruction: string;
 }>;
 
 export function useAssessment(assessmentId: string) {
@@ -147,6 +161,7 @@ export function useAssessment(assessmentId: string) {
       if ("scores" in patch) dbPatch.scores = patch.scores;
       if ("interpretation" in patch) dbPatch.interpretation = patch.interpretation;
       if ("completedAt" in patch) dbPatch.completed_at = patch.completedAt;
+      if ("instruction" in patch) dbPatch.instruction = patch.instruction;
 
       const run = async (): Promise<"saved" | "cancelled" | "error"> => {
         setSaveError(null);
@@ -195,5 +210,53 @@ export function useAssessment(assessmentId: string) {
     return { error: null };
   }, [assessmentId, load]);
 
-  return { assessment, isLoading, loadError, reload: load, saveField, saveStatus, saveError, complete };
+  // Respondent completion -- three thin RPC wrappers, each re-fetching
+  // afterward rather than trusting the write landed, same discipline as
+  // complete() above. All three route through SECURITY DEFINER RPCs,
+  // never a raw client update -- assigned_respondent_id/assigned_at/
+  // last_reminded_at have no client-facing UPDATE grant at all (0239),
+  // so a raw .update() targeting them would silently touch nothing.
+  const assignRespondent = useCallback(
+    async (respondentId: string): Promise<{ error: string | null }> => {
+      const supabase = createClient();
+      const { error } = await supabase.rpc("assign_assessment_respondent", {
+        p_assessment_id: assessmentId,
+        p_respondent_id: respondentId,
+      });
+      if (error) return { error: error.message };
+      await load();
+      return { error: null };
+    },
+    [assessmentId, load]
+  );
+
+  const unassignRespondent = useCallback(async (): Promise<{ error: string | null }> => {
+    const supabase = createClient();
+    const { error } = await supabase.rpc("unassign_assessment_respondent", { p_assessment_id: assessmentId });
+    if (error) return { error: error.message };
+    await load();
+    return { error: null };
+  }, [assessmentId, load]);
+
+  const remindRespondent = useCallback(async (): Promise<{ error: string | null }> => {
+    const supabase = createClient();
+    const { error } = await supabase.rpc("remind_assessment_respondent", { p_assessment_id: assessmentId });
+    if (error) return { error: error.message };
+    await load();
+    return { error: null };
+  }, [assessmentId, load]);
+
+  return {
+    assessment,
+    isLoading,
+    loadError,
+    reload: load,
+    saveField,
+    saveStatus,
+    saveError,
+    complete,
+    assignRespondent,
+    unassignRespondent,
+    remindRespondent,
+  };
 }
