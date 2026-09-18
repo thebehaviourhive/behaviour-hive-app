@@ -104,9 +104,9 @@ export function AssessmentResponseSheetEditor({
       return;
     }
     setCandidates(
-      ((data ?? []) as { recipient_id: string; full_name: string; role: string }[]).map((c) => ({
+      ((data ?? []) as { recipient_id: string; full_name: string | null; role: string }[]).map((c) => ({
         recipientId: c.recipient_id,
-        fullName: c.full_name,
+        fullName: c.full_name ?? "Unknown",
         role: c.role,
       }))
     );
