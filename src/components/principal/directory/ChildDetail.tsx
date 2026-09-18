@@ -13,6 +13,7 @@ import { IncidentCard, type InstitutionIncidentRow } from "@/components/principa
 import { ABCTimeline } from "@/components/abc-logger/ABCTimeline";
 import { usePassportClinicalContent } from "@/hooks/usePassportClinicalContent";
 import { ClinicalTeamSection } from "@/components/passport/clinical-team/ClinicalTeamSection";
+import { DirectorSessionNotesTab } from "@/components/principal/directory/DirectorSessionNotesTab";
 import { PassportCompletionSection } from "@/components/passport/PassportCompletionSection";
 import { PassportMessagesTab } from "@/components/passport/PassportMessagesTab";
 import { ProgressSurface } from "@/components/progress/ProgressSurface";
@@ -213,6 +214,7 @@ type TabKey =
   | "incidents"
   | "abcLogs"
   | "clinical"
+  | "sessionNotes"
   | "sharedStrategies"
   | "progress"
   | "messages";
@@ -230,6 +232,13 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: "incidents", label: "Incidents" },
   { key: "abcLogs", label: "ABC Logs" },
   { key: "clinical", label: "Clinical Team" },
+  // PRD 6 Stage 4 -- clinic only (filtered out below for a school
+  // principal, not merely empty for one: get_session_notes_for_director()
+  // already returns nothing for a school-type institution's own
+  // director, since its own check requires inst.type = 'clinic', but a
+  // tab that's always empty for 9 out of 10 principals is clutter, not
+  // information).
+  { key: "sessionNotes", label: "Session Notes" },
   { key: "sharedStrategies", label: "Shared Strategies" },
   { key: "progress", label: "Progress" },
   { key: "messages", label: "Messages" },
@@ -775,7 +784,7 @@ export function ChildDetail({
       <div className="lg:flex lg:items-start lg:gap-4">
       {!isLoading && !error && !notOnRoster && (
         <div className="relative flex gap-1 overflow-x-auto border-b border-black/5 px-4 lg:w-52 lg:flex-shrink-0 lg:flex-col lg:gap-0.5 lg:overflow-visible lg:border-b-0 lg:border-r lg:border-black/5 lg:px-2 lg:py-2">
-          {TABS.map((tab) => (
+          {TABS.filter((tab) => tab.key !== "sessionNotes" || institutionType === "clinic").map((tab) => (
             <button
               key={tab.key}
               type="button"
@@ -1211,6 +1220,10 @@ export function ChildDetail({
                 )}
               </section>
             </>
+          )}
+
+          {activeTab === "sessionNotes" && institutionType === "clinic" && (
+            <DirectorSessionNotesTab passportId={passportId} />
           )}
 
           {/* Stage 4, item 1: consolidated (Daniel's own kept merge) --
