@@ -14,6 +14,7 @@ import { InlineErrorState } from "@/components/ui/InlineErrorState";
 import { ProgressSurface } from "@/components/progress/ProgressSurface";
 import { useCalmButtonLiveStatus } from "@/hooks/useCalmButtonLiveStatus";
 import { ClinicalFileFbaTab } from "@/components/clinician/fba/ClinicalFileFbaTab";
+import { ClinicalFileBspTab } from "@/components/clinician/bsp/ClinicalFileBspTab";
 import { ClinicalFileMessagesTab } from "@/components/clinician/ClinicalFileMessagesTab";
 import { ClinicalFileIncidentsTab } from "@/components/clinician/ClinicalFileIncidentsTab";
 import { ClinicalFileSessionNotesTab } from "@/components/clinician/ClinicalFileSessionNotesTab";
@@ -71,6 +72,7 @@ type TabKey =
   | "incidentLog"
   | "clinicalTeam"
   | "fba"
+  | "bsp"
   | "messages"
   | "progress"
   | "effectiveness";
@@ -101,6 +103,10 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: "incidentLog", label: "Incident Log" },
   { key: "clinicalTeam", label: "Clinical Team" },
   { key: "fba", label: "FBA" },
+  // PRD 7 Stage 4 -- a separate, standalone Silo-2 document, not a
+  // replacement for FBA's own Section 12 recommendations. Placed right
+  // after FBA since a plan is typically built from one.
+  { key: "bsp", label: "BSP" },
   { key: "messages", label: "Messages" },
   { key: "progress", label: "Progress" },
   { key: "effectiveness", label: "Effectiveness" },
@@ -529,6 +535,10 @@ export function ClinicalFileDetail({
 
           {activeTab === "fba" && (
             <ClinicalFileFbaTab passportId={passportId} childName={profile.childFullName} />
+          )}
+
+          {activeTab === "bsp" && (
+            <ClinicalFileBspTab passportId={passportId} childName={profile.childFullName} />
           )}
 
           {activeTab === "messages" && user && (

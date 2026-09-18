@@ -3,6 +3,7 @@ import {
   ChatBubbleIcon,
   ClinicalFileIcon,
   ClipboardIcon,
+  DocumentIcon,
   LightbulbIcon,
   OpenBookIcon,
   TrendUpIcon,
@@ -16,6 +17,9 @@ const ACTIONS = [
   { label: "Add Log", href: "/clinician/log", Icon: ClipboardIcon },
   { label: "FBAs", href: "/clinician/fba", Icon: ClinicalFileIcon },
   { label: "Strategy Insights", href: "/clinician/insights", Icon: TrendUpIcon },
+  // PRD 7 Stage 4 -- institution-scoped, caseload-wide, not per-child --
+  // same reasoning as "FBAs" itself, not a per-passport tile.
+  { label: "Strategy Bank", href: "/clinician/strategy-bank", Icon: DocumentIcon },
 ];
 
 export function ClinicianQuickActions({

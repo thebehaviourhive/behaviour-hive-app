@@ -66,6 +66,14 @@ export default function ClinicianAddLogPage() {
       router.push("/clinician/fba");
       return;
     }
+    // PRD 7 Stage 4 -- BSP creation/continuation lives on the Clinical
+    // File's own "bsp" tab (ClinicalFileBspTab), not a caseload-wide
+    // route like FBA -- a plan is a per-child document, started from
+    // the case already selected on this page.
+    if (logType === "bsp" && selectedPassport) {
+      router.push(`/clinician/passport/${selectedPassport.passport_id}?tab=bsp`);
+      return;
+    }
     setShowAdvancedComingSoon(true);
   }
 
