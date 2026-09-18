@@ -14,6 +14,8 @@ import { TrendUpIcon } from "@/components/ui/icons";
 import { getChildFirstName } from "@/lib/childDisplayName";
 import { useRegions } from "@/hooks/useRegions";
 import { RegionMultiSelect } from "@/components/ui/RegionMultiSelect";
+import { CLINICIAN_SPECIALTY_LABEL, type ClinicianSpecialty } from "@/lib/clinicianSpecialties";
+import { CLINICAL_DOMAIN_LABEL, type ClinicalDomain } from "@/lib/clinicalDomains";
 
 const CADENCE_OPTIONS = [14, 30, 60, 90] as const;
 
@@ -33,6 +35,8 @@ export default function MorePage() {
   const [operatingCounties, setOperatingCounties] = useState<string[]>([]);
   const [isSavingCounties, setIsSavingCounties] = useState(false);
   const [countiesError, setCountiesError] = useState<string | null>(null);
+  const [specialty, setSpecialty] = useState<ClinicianSpecialty | null>(null);
+  const [domainTags, setDomainTags] = useState<ClinicalDomain[]>([]);
   const { regions } = useRegions();
 
   useEffect(() => {
@@ -58,7 +62,7 @@ export default function MorePage() {
       if (userRole === "clinician") {
         const { data: clinician } = await supabase
           .from("clinicians")
-          .select("clinician_code, review_cadence_days, operating_counties, verification_route")
+          .select("clinician_code, review_cadence_days, operating_counties, verification_route, specialty, domain_tags")
           .eq("user_id", user.id)
           .maybeSingle();
 
@@ -67,6 +71,8 @@ export default function MorePage() {
           setReviewCadenceDays(clinician.review_cadence_days);
           setOperatingCounties(clinician.operating_counties ?? []);
           setVerificationRoute(clinician.verification_route);
+          setSpecialty(clinician.specialty);
+          setDomainTags(clinician.domain_tags ?? []);
         }
       } else if (userRole === "parent") {
         // Parent (the only track this More page adds a Progress entry
@@ -249,6 +255,54 @@ export default function MorePage() {
               <p role="alert" className="mt-2 text-sm font-medium text-red-600">
                 {countiesError}
               </p>
+            )}
+
+            <div className="my-4 h-px bg-black/10" />
+
+            <p className="mb-1 font-accent text-xs font-bold uppercase tracking-wide text-brand-neutral-black/50">
+              Specialty & Clinical Domains
+            </p>
+            {domainTags.length === 0 ? (
+              // A real, functional nudge, not cosmetic -- PRD 7 Stage 3's
+              // domain-tag layer only means anything once a practitioner
+              // has declared their own domains; until then it falls
+              // through to reachability alone for them, silently.
+              // Golden Brown is this app's own attention colour, used
+              // deliberately here to read as an outstanding task, which
+              // this genuinely is.
+              <div className="rounded-xl border-l-4 border-brand-golden-brown bg-brand-safe-ivory/30 p-3">
+                <p className="text-sm font-semibold text-brand-neutral-black">
+                  {specialty ? "You haven't declared your clinical domains yet." : "You haven't declared your specialty or clinical domains yet."}
+                </p>
+                <p className="mt-1 text-xs text-brand-neutral-black/60">
+                  This helps colleagues on a shared case find what&apos;s theirs to read. Nobody needs to verify it.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => router.push("/clinician/specialty")}
+                  className="mt-3 rounded-full bg-brand-golden-brown px-4 py-2 text-xs font-semibold text-white"
+                >
+                  Declare now
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => router.push("/clinician/specialty")}
+                className="flex w-full items-center justify-between rounded-xl border border-black/10 bg-white p-3 text-left"
+              >
+                <span>
+                  <span className="block text-sm font-semibold text-brand-neutral-black">
+                    {specialty ? CLINICIAN_SPECIALTY_LABEL[specialty] : "Not set"}
+                  </span>
+                  <span className="mt-1 block text-xs text-brand-neutral-black/60">
+                    {domainTags.map((d) => CLINICAL_DOMAIN_LABEL[d]).join(", ")}
+                  </span>
+                </span>
+                <span aria-hidden className="text-black/30">
+                  ›
+                </span>
+              </button>
             )}
           </section>
         )}
