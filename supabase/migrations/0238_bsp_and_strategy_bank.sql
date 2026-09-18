@@ -274,6 +274,28 @@ create policy "Directors can curate or retire their own clinic's strategies"
 -- No DELETE policy -- retiring is is_active=false, never removal.
 
 -- ===========================================================================
+-- 3b. A scalar wrapper for bsp's own domain_tags default -- 0235's own
+-- lesson (0236's fix), caught before making the identical mistake a
+-- second time rather than after: a column DEFAULT can never contain a
+-- subquery, even a scalar one wrapping a single function call. DEFAULT
+-- may call a plain function freely, so the lookup is wrapped here
+-- rather than inlined directly on the bsp table below.
+-- ===========================================================================
+
+create or replace function public._bsp_default_domain_tags()
+returns public.clinical_domain[]
+language sql
+security definer
+set search_path = public
+stable
+as $$
+  select coalesce(r.default_domain_tags, '{}'::public.clinical_domain[])
+  from public.resolve_clinical_artefact_type('bsp', null) r;
+$$;
+
+grant execute on function public._bsp_default_domain_tags() to authenticated;
+
+-- ===========================================================================
 -- 4. bsp -- the plan itself. Child-keyed (passport_id), Silo 2, a real
 -- clinical_artefact_types row, domain_tags + the SAME colleague-read
 -- composition assessments/fba_reports already have (Stage 3 was scoped
@@ -322,10 +344,7 @@ create table public.bsp (
   clinician_id uuid not null references auth.users (id) on delete cascade,
   source_fba_id uuid references public.fba_reports (id),
   status text not null default 'draft' check (status in ('draft', 'active', 'superseded')),
-  domain_tags public.clinical_domain[] not null default (
-    select coalesce(r.default_domain_tags, '{}'::public.clinical_domain[])
-    from public.resolve_clinical_artefact_type('bsp', null) r
-  ),
+  domain_tags public.clinical_domain[] not null default public._bsp_default_domain_tags(),
   -- Carried from the source FBA at creation (or from the prior version
   -- at revision) -- a COPY, never a live reference. Structured arrays,
   -- matching fba_reports.content_data's own shape for these same keys
