@@ -17,6 +17,7 @@ import { ClinicalFileFbaTab } from "@/components/clinician/fba/ClinicalFileFbaTa
 import { ClinicalFileMessagesTab } from "@/components/clinician/ClinicalFileMessagesTab";
 import { ClinicalFileIncidentsTab } from "@/components/clinician/ClinicalFileIncidentsTab";
 import { ClinicalFileSessionNotesTab } from "@/components/clinician/ClinicalFileSessionNotesTab";
+import { ClinicalFileAssessmentsTab } from "@/components/clinician/assessments/ClinicalFileAssessmentsTab";
 import { EffectivenessSurface } from "@/components/clinician/passport/EffectivenessSurface";
 import { ReasonConfirmSheet } from "@/components/shared/ReasonConfirmSheet";
 
@@ -62,6 +63,7 @@ import { ReasonConfirmSheet } from "@/components/shared/ReasonConfirmSheet";
 type TabKey =
   | "summary"
   | "sessionNotes"
+  | "assessments"
   | "behaviour"
   | "communication"
   | "supports"
@@ -80,6 +82,11 @@ const TABS: { key: TabKey; label: string }[] = [
   // most prominent slot after the profile summary itself, not buried
   // among the less-frequent clinical-documentation tabs further down.
   { key: "sessionNotes", label: "Session Notes" },
+  // PRD 7 Stage 1 -- alongside Session Notes, not buried further down:
+  // both are the clinician's own standalone clinical documentation
+  // entry points from this file, distinct from "FBA" below (which reads
+  // a completed FBA, not create one).
+  { key: "assessments", label: "Assessments" },
   { key: "behaviour", label: "Behaviour Signals" },
   { key: "communication", label: "Communication" },
   { key: "supports", label: "Supports" },
@@ -417,6 +424,10 @@ export function ClinicalFileDetail({
 
           {activeTab === "sessionNotes" && user && (
             <ClinicalFileSessionNotesTab passportId={passportId} clinicianId={user.id} />
+          )}
+
+          {activeTab === "assessments" && user && (
+            <ClinicalFileAssessmentsTab passportId={passportId} clinicianId={user.id} />
           )}
 
           {activeTab === "behaviour" && (
