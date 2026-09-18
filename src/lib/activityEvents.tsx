@@ -52,7 +52,14 @@ export type ActivityEventType =
   | "staff_deactivated"
   | "staff_join_rejected"
   | "principal_handover"
-  | "temporary_access_grant";
+  | "temporary_access_grant"
+  // Migration 0228 -- session_notes' own share/edit-after-share
+  // tracking trigger. Same shape as clinical_content_added: the feed
+  // says something arrived or changed, the passport
+  // (SharedSessionNotesSection, passport/dashboard) is where you read
+  // it. No href on either -- non-linking rows, matching that precedent.
+  | "session_note_shared"
+  | "session_note_updated";
 
 export interface ActivityLogEntry {
   id: string;
@@ -89,6 +96,8 @@ export const ACTIVITY_EVENT_ICON: Record<
   fba_started: ClinicalFileIcon,
   fba_completed: ClinicalFileIcon,
   clinical_content_added: LightbulbIcon,
+  session_note_shared: ClinicalFileIcon,
+  session_note_updated: ClinicalFileIcon,
   // Clinician-feed-only (see the visibility matrix in migration 0049) --
   // never rendered on the parent or teacher tracks, but still needs an
   // icon since ACTIVITY_EVENT_ICON is a Record over every event type.

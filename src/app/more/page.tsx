@@ -25,6 +25,7 @@ export default function MorePage() {
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [clinicianCode, setClinicianCode] = useState<string | null>(null);
+  const [verificationRoute, setVerificationRoute] = useState<"behaviour_hive" | "organisation" | null>(null);
   const [reviewCadenceDays, setReviewCadenceDays] = useState<number | null>(null);
   const [isSavingCadence, setIsSavingCadence] = useState(false);
   const [cadenceError, setCadenceError] = useState<string | null>(null);
@@ -57,7 +58,7 @@ export default function MorePage() {
       if (userRole === "clinician") {
         const { data: clinician } = await supabase
           .from("clinicians")
-          .select("clinician_code, review_cadence_days, operating_counties")
+          .select("clinician_code, review_cadence_days, operating_counties, verification_route")
           .eq("user_id", user.id)
           .maybeSingle();
 
@@ -65,6 +66,7 @@ export default function MorePage() {
           setClinicianCode(clinician.clinician_code);
           setReviewCadenceDays(clinician.review_cadence_days);
           setOperatingCounties(clinician.operating_counties ?? []);
+          setVerificationRoute(clinician.verification_route);
         }
       } else if (userRole === "parent") {
         // Parent (the only track this More page adds a Progress entry
@@ -187,6 +189,17 @@ export default function MorePage() {
             {clinicianCode ? (
               <p className="font-heading text-2xl font-bold tracking-widest text-brand-prussian-blue">
                 {clinicianCode}
+              </p>
+            ) : verificationRoute === "organisation" ? (
+              // A director-approved clinic practitioner never gets a
+              // code -- their director assigns their caseload directly
+              // from the clinic's own roster (bulk_grant_clinician_
+              // access()'s p_roster_user_id path, PRD 5 Stage 6), so
+              // "will appear once verified" would be a promise this
+              // account can never keep -- confirmed a real, live-since-
+              // Stage-6 source of confusion, not a hypothetical.
+              <p className="text-sm text-brand-neutral-black/60">
+                You don&apos;t need a code — your director assigns your caseload directly.
               </p>
             ) : (
               <p className="text-sm text-brand-neutral-black/60">

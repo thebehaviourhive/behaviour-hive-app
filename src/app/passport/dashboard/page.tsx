@@ -31,6 +31,7 @@ import { fetchApprovedInstitutionPhone } from "@/lib/messages/institutionPhone";
 import { ComposeMessageSheet } from "@/components/messages/ComposeMessageSheet";
 import { IMPORTANT_PEOPLE_TITLE } from "@/lib/passportCopy";
 import { PassportIncidentsSection } from "@/components/parent/PassportIncidentsSection";
+import { SharedSessionNotesSection } from "@/components/parent/SharedSessionNotesSection";
 
 interface ApprovedInstitution {
   institutionId: string;
@@ -1070,6 +1071,12 @@ export default function PassportDashboardPage() {
             </ErrorBoundary>
           )}
         </div>
+
+        <div aria-hidden className="h-px bg-black/5" />
+
+        <ErrorBoundary fallback={fallbackCard}>
+          <SharedSessionNotesSection passportId={summary.passportId} />
+        </ErrorBoundary>
 
         <ErrorBoundary fallback={fallbackCard}>
           <section className="mt-2 mb-6">
