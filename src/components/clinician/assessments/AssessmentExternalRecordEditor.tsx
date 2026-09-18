@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { SavedStateIndicator } from "@/components/clinician/fba/SavedStateIndicator";
 import { InlineErrorState } from "@/components/ui/InlineErrorState";
@@ -22,12 +22,60 @@ import { useAssessment, type ScoreEntry } from "@/hooks/useAssessment";
 // No attachment field or upload control -- file storage (PRD 7 section
 // 14) is its own, not-yet-built piece of infrastructure. The note below
 // says so plainly rather than showing a control that doesn't work.
+//
+// LOCAL DRAFT STATE FOR `scores`, controlled (value/onChange), NOT
+// read-modify-write off `assessment.scores` on each field's own onBlur
+// -- found live during deployed verification: a row's label and value
+// are two sibling fields, and blurring them in quick succession could
+// each read `assessment.scores` before the FIRST edit's own round trip
+// had updated it, silently losing that edit when the second one's save
+// landed. Local state updates synchronously on every keystroke,
+// independent of the round trip, so this can't happen -- same fix,
+// same reasoning, as AssessmentResponseSheetEditor's own subscale
+// totals.
+//
+// ISDIRTY, TRACKED FOR REAL, for the plain onBlur text fields (Version/
+// Administrator/Location/Interpretation) -- these previously hard-coded
+// isDirty={false}, which meant "Saved" could show even for a value
+// that had been typed but not yet blurred. changeVersionRef/
+// versionAtSaveStartRef is the same discipline FbaSectionEditor and
+// SessionNoteEditor already use for their own single shared indicator.
 export function AssessmentExternalRecordEditor({ assessmentId, passportId }: { assessmentId: string; passportId: string }) {
   const router = useRouter();
   const { assessment, isLoading, loadError, reload, saveField, saveStatus, saveError, complete } =
     useAssessment(assessmentId);
   const [isCompleting, setIsCompleting] = useState(false);
   const [completeError, setCompleteError] = useState<string | null>(null);
+
+  const [draftScores, setDraftScores] = useState<ScoreEntry[]>([]);
+
+  const hasSeededRef = useRef(false);
+  useEffect(() => {
+    if (assessment && !hasSeededRef.current) {
+      hasSeededRef.current = true;
+      setDraftScores(assessment.scores);
+    }
+  }, [assessment]);
+
+  const changeVersionRef = useRef(0);
+  const versionAtSaveStartRef = useRef(0);
+  const [isDirty, setIsDirty] = useState(false);
+
+  useEffect(() => {
+    if (saveStatus === "saved" && versionAtSaveStartRef.current === changeVersionRef.current) {
+      setIsDirty(false);
+    }
+  }, [saveStatus]);
+
+  function markChanged() {
+    changeVersionRef.current += 1;
+    setIsDirty(true);
+  }
+
+  function commitSave(patch: Parameters<typeof saveField>[0]) {
+    versionAtSaveStartRef.current = changeVersionRef.current;
+    saveField(patch);
+  }
 
   async function handleComplete() {
     setIsCompleting(true);
@@ -38,19 +86,21 @@ export function AssessmentExternalRecordEditor({ assessmentId, passportId }: { a
   }
 
   function handleAddScore() {
-    if (!assessment) return;
-    saveField({ scores: [...assessment.scores, { label: "", value: "" }] });
+    const next = [...draftScores, { label: "", value: "" }];
+    setDraftScores(next);
+    saveField({ scores: next });
   }
 
   function handleScoreChange(index: number, patch: Partial<ScoreEntry>) {
-    if (!assessment) return;
-    const next = assessment.scores.map((row, i) => (i === index ? { ...row, ...patch } : row));
+    const next = draftScores.map((row, i) => (i === index ? { ...row, ...patch } : row));
+    setDraftScores(next);
     saveField({ scores: next });
   }
 
   function handleRemoveScore(index: number) {
-    if (!assessment) return;
-    saveField({ scores: assessment.scores.filter((_, i) => i !== index) });
+    const next = draftScores.filter((_, i) => i !== index);
+    setDraftScores(next);
+    saveField({ scores: next });
   }
 
   if (isLoading) {
@@ -103,7 +153,7 @@ export function AssessmentExternalRecordEditor({ assessmentId, passportId }: { a
           <div className="flex-shrink-0">
             <SavedStateIndicator
               status={saveStatus}
-              isDirty={false}
+              isDirty={isDirty}
               hasLoaded
               error={saveError}
               onFlush={() => {}}
@@ -128,7 +178,8 @@ export function AssessmentExternalRecordEditor({ assessmentId, passportId }: { a
                 defaultValue={assessment.instrumentVersion}
                 disabled={isLocked}
                 placeholder="e.g. UK edition, 2016"
-                onBlur={(e) => saveField({ instrumentVersion: e.target.value })}
+                onChange={markChanged}
+                onBlur={(e) => commitSave({ instrumentVersion: e.target.value })}
                 className="w-full rounded-xl border border-black/10 bg-white px-3 py-2 text-sm text-brand-neutral-black disabled:bg-black/5"
               />
             </Field>
@@ -147,7 +198,8 @@ export function AssessmentExternalRecordEditor({ assessmentId, passportId }: { a
                 defaultValue={assessment.administratorName}
                 disabled={isLocked}
                 placeholder="Who administered it"
-                onBlur={(e) => saveField({ administratorName: e.target.value })}
+                onChange={markChanged}
+                onBlur={(e) => commitSave({ administratorName: e.target.value })}
                 className="w-full rounded-xl border border-black/10 bg-white px-3 py-2 text-sm text-brand-neutral-black disabled:bg-black/5"
               />
             </Field>
@@ -157,7 +209,8 @@ export function AssessmentExternalRecordEditor({ assessmentId, passportId }: { a
                 defaultValue={assessment.location}
                 disabled={isLocked}
                 placeholder="Where it took place"
-                onBlur={(e) => saveField({ location: e.target.value })}
+                onChange={markChanged}
+                onBlur={(e) => commitSave({ location: e.target.value })}
                 className="w-full rounded-xl border border-black/10 bg-white px-3 py-2 text-sm text-brand-neutral-black disabled:bg-black/5"
               />
             </Field>
@@ -176,28 +229,28 @@ export function AssessmentExternalRecordEditor({ assessmentId, passportId }: { a
               Composites, indices, percentiles, confidence intervals -- whatever the report gives.
             </p>
 
-            {assessment.scores.length === 0 ? (
+            {draftScores.length === 0 ? (
               <p className="rounded-xl border border-dashed border-black/10 bg-white/60 p-4 text-center text-sm text-brand-neutral-black/50">
                 No scores recorded yet.
               </p>
             ) : (
               <div className="flex flex-col gap-2">
-                {assessment.scores.map((row, i) => (
+                {draftScores.map((row, i) => (
                   <div key={i} className="flex items-center gap-2">
                     <input
                       type="text"
-                      defaultValue={row.label}
+                      value={row.label}
                       disabled={isLocked}
                       placeholder="e.g. FSIQ"
-                      onBlur={(e) => handleScoreChange(i, { label: e.target.value })}
+                      onChange={(e) => handleScoreChange(i, { label: e.target.value })}
                       className="min-w-0 flex-1 rounded-xl border border-black/10 bg-white px-3 py-2 text-sm text-brand-neutral-black disabled:bg-black/5"
                     />
                     <input
                       type="text"
-                      defaultValue={row.value}
+                      value={row.value}
                       disabled={isLocked}
                       placeholder="e.g. 87"
-                      onBlur={(e) => handleScoreChange(i, { value: e.target.value })}
+                      onChange={(e) => handleScoreChange(i, { value: e.target.value })}
                       className="w-28 flex-shrink-0 rounded-xl border border-black/10 bg-white px-3 py-2 text-sm text-brand-neutral-black disabled:bg-black/5"
                     />
                     {!isLocked && (
@@ -222,7 +275,8 @@ export function AssessmentExternalRecordEditor({ assessmentId, passportId }: { a
               disabled={isLocked}
               rows={6}
               placeholder="Your own reading of the results, in your own words…"
-              onBlur={(e) => saveField({ interpretation: e.target.value })}
+              onChange={markChanged}
+              onBlur={(e) => commitSave({ interpretation: e.target.value })}
               className="w-full rounded-xl border border-black/10 bg-white px-4 py-3 text-sm text-brand-neutral-black placeholder:text-black/30 disabled:bg-black/5"
             />
           </Field>

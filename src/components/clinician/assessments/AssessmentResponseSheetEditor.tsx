@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { SavedStateIndicator } from "@/components/clinician/fba/SavedStateIndicator";
 import { InlineErrorState } from "@/components/ui/InlineErrorState";
@@ -25,6 +25,18 @@ const RESPONDENT_OPTIONS: { value: "parent" | "school_staff" | "interview"; labe
 // own number, from the paper's own scoring key) -- the app never infers
 // or computes them, and never even suggests what the subscale names
 // might be.
+//
+// LOCAL DRAFT STATE FOR responses/subscaleTotals, NOT read-modify-write
+// off `assessment` directly -- found live during deployed verification:
+// two sibling edits in quick succession (e.g. typing a subscale label
+// then immediately its total) can each read `assessment.subscaleTotals`
+// before the FIRST edit's own round trip has updated it, so the second
+// save silently overwrites the first. Local state updates synchronously
+// on every edit, independent of the network round trip, so the second
+// edit's own patch is always built from the first edit's own latest
+// value -- the same reason SessionNoteEditor keeps local draft state
+// rather than reading straight off the hook's own (round-trip-delayed)
+// object.
 export function AssessmentResponseSheetEditor({
   assessmentId,
   passportId,
@@ -37,6 +49,23 @@ export function AssessmentResponseSheetEditor({
     useAssessment(assessmentId);
   const [isCompleting, setIsCompleting] = useState(false);
   const [completeError, setCompleteError] = useState<string | null>(null);
+
+  const [draftResponses, setDraftResponses] = useState<Record<string, string>>({});
+  const [draftSubscaleTotals, setDraftSubscaleTotals] = useState<SubscaleTotal[]>([]);
+
+  // Seeds local draft state from the loaded assessment exactly once --
+  // same reasoning as SessionNoteEditor's own hasSeededRef: saveField()
+  // returns a new assessment object on every successful save, which
+  // would otherwise re-fire a naive effect and stomp an in-progress
+  // edit made in the gap between kicking a save off and it resolving.
+  const hasSeededRef = useRef(false);
+  useEffect(() => {
+    if (assessment && !hasSeededRef.current) {
+      hasSeededRef.current = true;
+      setDraftResponses(assessment.responses);
+      setDraftSubscaleTotals(assessment.subscaleTotals);
+    }
+  }, [assessment]);
 
   async function handleComplete() {
     setIsCompleting(true);
@@ -51,25 +80,27 @@ export function AssessmentResponseSheetEditor({
   }
 
   function handleAnswerTap(rowNumber: number, value: string) {
-    if (!assessment) return;
-    const next = { ...assessment.responses, [String(rowNumber)]: value };
+    const next = { ...draftResponses, [String(rowNumber)]: value };
+    setDraftResponses(next);
     saveField({ responses: next });
   }
 
   function handleAddSubscaleTotal() {
-    if (!assessment) return;
-    saveField({ subscaleTotals: [...assessment.subscaleTotals, { label: "", total: "" }] });
+    const next = [...draftSubscaleTotals, { label: "", total: "" }];
+    setDraftSubscaleTotals(next);
+    saveField({ subscaleTotals: next });
   }
 
   function handleSubscaleTotalChange(index: number, patch: Partial<SubscaleTotal>) {
-    if (!assessment) return;
-    const next = assessment.subscaleTotals.map((row, i) => (i === index ? { ...row, ...patch } : row));
+    const next = draftSubscaleTotals.map((row, i) => (i === index ? { ...row, ...patch } : row));
+    setDraftSubscaleTotals(next);
     saveField({ subscaleTotals: next });
   }
 
   function handleRemoveSubscaleTotal(index: number) {
-    if (!assessment) return;
-    saveField({ subscaleTotals: assessment.subscaleTotals.filter((_, i) => i !== index) });
+    const next = draftSubscaleTotals.filter((_, i) => i !== index);
+    setDraftSubscaleTotals(next);
+    saveField({ subscaleTotals: next });
   }
 
   if (isLoading) {
@@ -179,11 +210,11 @@ export function AssessmentResponseSheetEditor({
 
           <section>
             <p className="mb-1.5 text-sm font-semibold text-brand-neutral-black">
-              Responses ({Object.keys(assessment.responses).length}/{rowNumbers.length})
+              Responses ({Object.keys(draftResponses).length}/{rowNumbers.length})
             </p>
             <div className="flex flex-col divide-y divide-black/5 rounded-2xl border border-black/5 bg-white">
               {rowNumbers.map((n) => {
-                const current = assessment.responses[String(n)];
+                const current = draftResponses[String(n)];
                 return (
                   <div key={n} className="flex flex-col gap-1.5 px-4 py-2.5">
                     <span className="font-accent text-xs font-bold text-brand-neutral-black/40">Row {n}</span>
@@ -228,13 +259,13 @@ export function AssessmentResponseSheetEditor({
               Enter each subscale name and total from the paper&apos;s own scoring key. Not computed here.
             </p>
 
-            {assessment.subscaleTotals.length === 0 ? (
+            {draftSubscaleTotals.length === 0 ? (
               <p className="rounded-xl border border-dashed border-black/10 bg-white/60 p-4 text-center text-sm text-brand-neutral-black/50">
                 No subscale totals recorded yet.
               </p>
             ) : (
               <div className="flex flex-col gap-2">
-                {assessment.subscaleTotals.map((row, i) => (
+                {draftSubscaleTotals.map((row, i) => (
                   <div key={i} className="flex items-center gap-2">
                     <input
                       type="text"
