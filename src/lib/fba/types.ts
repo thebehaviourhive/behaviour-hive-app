@@ -10,6 +10,14 @@ export interface TargetBehaviourEntry {
   name: string;
   operationalDefinition: string;
   howItPresents: string;
+  // Additive, PRD 7 Stage 4 -- a function is a property of a SPECIFIC
+  // behaviour, not the case as a whole (unlike hypothesisedFunctions
+  // below, which stays a single whole-FBA narrative). Optional so
+  // every existing FBA, which has none, stays valid -- nothing
+  // migrates. This is what a BSP built from this FBA carries over per
+  // behaviour; hypothesisedFunctions never carries over at that
+  // granularity because it was never captured at that granularity.
+  function?: string;
 }
 
 export interface TriggerEntry {

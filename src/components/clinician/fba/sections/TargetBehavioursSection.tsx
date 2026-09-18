@@ -21,7 +21,7 @@ export function TargetBehavioursSection({
   function addEntry() {
     const next: TargetBehaviourEntry[] = [
       ...entries,
-      { id: crypto.randomUUID(), name: "", operationalDefinition: "", howItPresents: "" },
+      { id: crypto.randomUUID(), name: "", operationalDefinition: "", howItPresents: "", function: "" },
     ];
     onStructuralChange({ ...content, targetBehaviours: next });
   }
@@ -48,6 +48,11 @@ export function TargetBehavioursSection({
             {entry.howItPresents && (
               <p className="mt-1 text-sm text-brand-neutral-black/70">{entry.howItPresents}</p>
             )}
+            {entry.function && (
+              <p className="mt-1 text-sm font-medium text-brand-prussian-blue">
+                Function: {entry.function}
+              </p>
+            )}
           </div>
         ) : (
           <div className="flex flex-col gap-3">
@@ -70,6 +75,13 @@ export function TargetBehavioursSection({
               onChange={(e) => updateEntry(index, { howItPresents: e.target.value })}
               onBlur={onFieldBlur}
               rows={3}
+            />
+            <Textarea
+              label="Function"
+              value={entry.function ?? ""}
+              onChange={(e) => updateEntry(index, { function: e.target.value })}
+              onBlur={onFieldBlur}
+              rows={2}
             />
           </div>
         )
