@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { SavedStateIndicator } from "@/components/clinician/fba/SavedStateIndicator";
 import { InlineErrorState } from "@/components/ui/InlineErrorState";
 import { useAssessment, type ScoreEntry } from "@/hooks/useAssessment";
+import { AttachmentsSection } from "@/components/clinician/assessments/AttachmentsSection";
 
 // PRD 7 Stage 1 -- the external record. Per section 13: the instrument
 // is copyrighted, the results are not -- this holds only the outcome
@@ -281,9 +282,12 @@ export function AssessmentExternalRecordEditor({ assessmentId, passportId }: { a
             />
           </Field>
 
-          <p className="rounded-xl bg-black/5 px-4 py-3 text-xs text-brand-neutral-black/50">
-            Attaching the full report isn&apos;t available yet -- record the scores and your interpretation here for now.
-          </p>
+          <AttachmentsSection
+            assessmentId={assessmentId}
+            isLocked={isLocked}
+            title="Report"
+            helpText="Attach the full report PDF, or a photo of it."
+          />
 
           {!isLocked && (
             <section>

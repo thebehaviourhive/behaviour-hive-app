@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { SavedStateIndicator } from "@/components/clinician/fba/SavedStateIndicator";
 import { InlineErrorState } from "@/components/ui/InlineErrorState";
 import { useAssessment, type SubscaleTotal } from "@/hooks/useAssessment";
+import { AttachmentsSection } from "@/components/clinician/assessments/AttachmentsSection";
 
 const RESPONDENT_OPTIONS: { value: "parent" | "school_staff" | "interview"; label: string }[] = [
   { value: "parent", label: "Sent to parent" },
@@ -299,6 +300,13 @@ export function AssessmentResponseSheetEditor({
               </div>
             )}
           </section>
+
+          <AttachmentsSection
+            assessmentId={assessmentId}
+            isLocked={isLocked}
+            title="Completed paper form"
+            helpText="Attach the paper form once it's been filled in, as the source document."
+          />
 
           {!isLocked && (
             <section>
