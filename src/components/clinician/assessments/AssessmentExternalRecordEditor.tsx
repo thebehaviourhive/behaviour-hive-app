@@ -283,7 +283,8 @@ export function AssessmentExternalRecordEditor({ assessmentId, passportId }: { a
           </Field>
 
           <AttachmentsSection
-            assessmentId={assessmentId}
+            artefactId={assessmentId}
+            artefactType="assessment"
             isLocked={isLocked}
             title="Report"
             helpText="Attach the full report PDF, or a photo of it."

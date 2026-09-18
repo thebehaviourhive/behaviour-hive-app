@@ -15,6 +15,7 @@ import { ProgressSurface } from "@/components/progress/ProgressSurface";
 import { useCalmButtonLiveStatus } from "@/hooks/useCalmButtonLiveStatus";
 import { ClinicalFileFbaTab } from "@/components/clinician/fba/ClinicalFileFbaTab";
 import { ClinicalFileBspTab } from "@/components/clinician/bsp/ClinicalFileBspTab";
+import { ClinicalFilePlansTab } from "@/components/clinician/plans/ClinicalFilePlansTab";
 import { ClinicalFileMessagesTab } from "@/components/clinician/ClinicalFileMessagesTab";
 import { ClinicalFileIncidentsTab } from "@/components/clinician/ClinicalFileIncidentsTab";
 import { ClinicalFileSessionNotesTab } from "@/components/clinician/ClinicalFileSessionNotesTab";
@@ -73,6 +74,7 @@ type TabKey =
   | "clinicalTeam"
   | "fba"
   | "bsp"
+  | "plans"
   | "messages"
   | "progress"
   | "effectiveness";
@@ -107,6 +109,10 @@ const TABS: { key: TabKey; label: string }[] = [
   // replacement for FBA's own Section 12 recommendations. Placed right
   // after FBA since a plan is typically built from one.
   { key: "bsp", label: "BSP" },
+  // Silo 2 placeholders -- crisis management, sensory diet, AAC/
+  // communication, care plans, student support plans. Placed right
+  // after BSP, the closest existing Silo-2 sibling.
+  { key: "plans", label: "Plans" },
   { key: "messages", label: "Messages" },
   { key: "progress", label: "Progress" },
   { key: "effectiveness", label: "Effectiveness" },
@@ -539,6 +545,10 @@ export function ClinicalFileDetail({
 
           {activeTab === "bsp" && (
             <ClinicalFileBspTab passportId={passportId} childName={profile.childFullName} />
+          )}
+
+          {activeTab === "plans" && (
+            <ClinicalFilePlansTab passportId={passportId} childName={profile.childFullName} />
           )}
 
           {activeTab === "messages" && user && (

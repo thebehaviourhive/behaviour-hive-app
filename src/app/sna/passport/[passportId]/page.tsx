@@ -10,6 +10,7 @@ import { ABCLogger } from "@/components/abc-logger/ABCLogger";
 import { ABCTimeline } from "@/components/abc-logger/ABCTimeline";
 import { usePassportClinicalContent } from "@/hooks/usePassportClinicalContent";
 import { ClinicalTeamSection } from "@/components/passport/clinical-team/ClinicalTeamSection";
+import { ClinicalPlansSection } from "@/components/passport/clinical-team/ClinicalPlansSection";
 import { PassportCompletionSection } from "@/components/passport/PassportCompletionSection";
 import { InlineErrorState } from "@/components/ui/InlineErrorState";
 import { ChildIncidentsTab } from "@/components/shared/ChildIncidentsTab";
@@ -548,6 +549,7 @@ export default function SnaPassportPage() {
             ) : (
               <ClinicalTeamSection items={clinicalContentItems} viewerRole="sna" />
             )}
+            <ClinicalPlansSection passportId={passportId} />
           </>
         )}
 

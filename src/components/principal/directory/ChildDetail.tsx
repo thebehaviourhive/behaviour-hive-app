@@ -13,6 +13,7 @@ import { IncidentCard, type InstitutionIncidentRow } from "@/components/principa
 import { ABCTimeline } from "@/components/abc-logger/ABCTimeline";
 import { usePassportClinicalContent } from "@/hooks/usePassportClinicalContent";
 import { ClinicalTeamSection } from "@/components/passport/clinical-team/ClinicalTeamSection";
+import { ClinicalPlansSection } from "@/components/passport/clinical-team/ClinicalPlansSection";
 import { DirectorSessionNotesTab } from "@/components/principal/directory/DirectorSessionNotesTab";
 import { PassportCompletionSection } from "@/components/passport/PassportCompletionSection";
 import { PassportMessagesTab } from "@/components/passport/PassportMessagesTab";
@@ -1382,6 +1383,7 @@ export function ChildDetail({
               ) : (
                 <ClinicalTeamSection items={clinicalContentItems} viewerRole="principal" />
               )}
+              <ClinicalPlansSection passportId={passportId} />
             </>
           )}
 

@@ -459,7 +459,8 @@ export function AssessmentResponseSheetEditor({
           </section>
 
           <AttachmentsSection
-            assessmentId={assessmentId}
+            artefactId={assessmentId}
+            artefactType="assessment"
             isLocked={isLocked}
             title="Completed paper form"
             helpText="Attach the paper form once it's been filled in, as the source document."

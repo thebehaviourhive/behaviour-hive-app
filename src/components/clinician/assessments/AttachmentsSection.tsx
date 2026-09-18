@@ -1,27 +1,30 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { useAttachments, type Attachment } from "@/hooks/useAttachments";
+import { useAttachments, type Attachment, type AttachmentArtefactType } from "@/hooks/useAttachments";
 
-// PRD 7 Stage 2 -- the upload/list/view control shared by both editors.
-// "View" fetches the file itself (via useAttachments' own fetch-with-
-// retry, never a bare window.open(signedUrl)) so a failed or expired
-// attempt can actually be detected and retried once with a fresh URL --
-// see that hook's own comment for why the retry exists and why it
-// isn't a security smell.
+// PRD 7 Stage 2 -- the upload/list/view control shared by both
+// assessment editors, and (Silo 2 placeholders) the clinical plan
+// editor. "View" fetches the file itself (via useAttachments' own
+// fetch-with-retry, never a bare window.open(signedUrl)) so a failed
+// or expired attempt can actually be detected and retried once with a
+// fresh URL -- see that hook's own comment for why the retry exists
+// and why it isn't a security smell.
 export function AttachmentsSection({
-  assessmentId,
+  artefactId,
+  artefactType,
   isLocked,
   title = "Attachments",
   helpText,
 }: {
-  assessmentId: string;
+  artefactId: string;
+  artefactType: AttachmentArtefactType;
   isLocked: boolean;
   title?: string;
   helpText?: string;
 }) {
   const { attachments, loadError, reload, upload, isUploading, uploadError, remove, fetchAttachment } =
-    useAttachments(assessmentId);
+    useAttachments(artefactId, artefactType);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [viewingId, setViewingId] = useState<string | null>(null);
   const [viewingError, setViewingError] = useState<string | null>(null);

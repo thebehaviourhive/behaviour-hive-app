@@ -8,8 +8,14 @@ import { createClient } from "@/lib/supabase/client";
 // artefact_id -- but this hook doesn't need to be; a future artefact
 // type gets its own hook, or this one grows a second entry point, when
 // that artefact exists to attach to).
+//
+// PRD 7, Silo 2 placeholders -- the second entry point, exactly as
+// anticipated above: artefactType is now a real parameter, not a
+// hardcoded constant. clinical_plans (0244) is the second artefact_
+// type the attachments bridge itself supports; this hook just needed
+// to stop assuming there would only ever be one.
 const BUCKET = "clinical-attachments";
-const ARTEFACT_TYPE = "assessment" as const;
+export type AttachmentArtefactType = "assessment" | "clinical_plan";
 const SIGNED_URL_TTL_SECONDS = 300;
 
 export interface Attachment {
@@ -41,7 +47,7 @@ function mapAttachment(row: AttachmentRow): Attachment {
   };
 }
 
-export function useAttachments(assessmentId: string) {
+export function useAttachments(artefactId: string, artefactType: AttachmentArtefactType) {
   const [attachments, setAttachments] = useState<Attachment[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
@@ -53,8 +59,8 @@ export function useAttachments(assessmentId: string) {
     const { data, error } = await supabase
       .from("attachments")
       .select("id, storage_path, original_filename, content_type, size_bytes, uploaded_at")
-      .eq("artefact_type", ARTEFACT_TYPE)
-      .eq("artefact_id", assessmentId)
+      .eq("artefact_type", artefactType)
+      .eq("artefact_id", artefactId)
       .order("uploaded_at", { ascending: false });
 
     if (error) {
@@ -65,7 +71,7 @@ export function useAttachments(assessmentId: string) {
     }
 
     setAttachments((data as AttachmentRow[]).map(mapAttachment));
-  }, [assessmentId]);
+  }, [artefactId, artefactType]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -98,7 +104,7 @@ export function useAttachments(assessmentId: string) {
       }
 
       const safeName = file.name.replace(/[^\w.\- ]/g, "_");
-      const path = `${ARTEFACT_TYPE}/${assessmentId}/${crypto.randomUUID()}-${safeName}`;
+      const path = `${artefactType}/${artefactId}/${crypto.randomUUID()}-${safeName}`;
 
       const { error: uploadErr } = await supabase.storage.from(BUCKET).upload(path, file, {
         contentType: file.type || "application/octet-stream",
@@ -116,8 +122,8 @@ export function useAttachments(assessmentId: string) {
       // explicitly (found live, verification: a missing uploaded_by
       // fails the policy's own WITH CHECK, not a bare NOT NULL error).
       const { error: insertErr } = await supabase.from("attachments").insert({
-        artefact_type: ARTEFACT_TYPE,
-        artefact_id: assessmentId,
+        artefact_type: artefactType,
+        artefact_id: artefactId,
         storage_path: path,
         original_filename: file.name,
         content_type: file.type || "application/octet-stream",
@@ -137,7 +143,7 @@ export function useAttachments(assessmentId: string) {
       await load();
       return { error: null };
     },
-    [assessmentId, load]
+    [artefactId, artefactType, load]
   );
 
   // Delete: storage object first -- if that succeeds but the metadata

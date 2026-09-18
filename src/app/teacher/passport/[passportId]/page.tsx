@@ -11,6 +11,7 @@ import { ABCLogger } from "@/components/abc-logger/ABCLogger";
 import { ABCTimeline } from "@/components/abc-logger/ABCTimeline";
 import { usePassportClinicalContent } from "@/hooks/usePassportClinicalContent";
 import { ClinicalTeamSection } from "@/components/passport/clinical-team/ClinicalTeamSection";
+import { ClinicalPlansSection } from "@/components/passport/clinical-team/ClinicalPlansSection";
 import { PassportCompletionSection } from "@/components/passport/PassportCompletionSection";
 import { InlineErrorState } from "@/components/ui/InlineErrorState";
 import { ProgressSurface } from "@/components/progress/ProgressSurface";
@@ -489,6 +490,7 @@ export default function TeacherPassportPage() {
             ) : (
               <ClinicalTeamSection items={clinicalContentItems} viewerRole="teacher" />
             )}
+            <ClinicalPlansSection passportId={passportId} />
           </>
         )}
 
