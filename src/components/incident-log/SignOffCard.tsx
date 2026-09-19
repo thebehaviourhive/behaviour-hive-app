@@ -16,13 +16,25 @@ import { BottomSheet } from "@/components/ui/BottomSheet";
 // cannot drift apart.
 //
 // Blocking and non-blocking are kept visually AND textually separate, per
-// the brief: a missing attestation and an unanswered "was anyone
-// injured" are listed but never block; a stale/withdrawn attestation, an
-// outstanding required debrief, and the three consistency checks do. A
-// teacher should never hit a sign-off error they couldn't see coming
-// here first, and should never be scared off by something that isn't
-// actually stopping them -- hence two clearly labelled boxes, not one
+// the brief: a missing attestation, an unanswered "was anyone injured",
+// and no category are listed but never block; a stale/withdrawn
+// attestation, an outstanding required debrief, the three consistency
+// checks, and (as of migration 0254) a missing narrative do. A teacher
+// should never hit a sign-off error they couldn't see coming here first,
+// and should never be scared off by something that isn't actually
+// stopping them -- hence two clearly labelled boxes, not one
 // undifferentiated list.
+//
+// NARRATIVE BLOCKS, CATEGORY WARNS (0254, found live during the school
+// trial smoke test): an incident could previously be signed off and
+// countersigned with no account of what happened at all -- nothing
+// anywhere flagged it, not the database, not the "Missing Info" status
+// (which structurally can't catch a post-signoff gap -- see CLAUDE.md),
+// not this card. The narrative IS the record; a category is only a
+// classification. Narrative's own blocking message needs no special
+// rendering here -- it's just another entry in incident_signoff_issues()'s
+// jsonb array, so the existing generic "Blocking sign-off" list below
+// already renders it, unmodified.
 //
 // CONFIRM-SHEET REWORK (Daniel's own finding: "generic permanence copy
 // in front of a button labelled the same as the one that opened it is
@@ -91,6 +103,10 @@ interface SignoffSummary {
   staff_attestations: StaffAttestation[];
   attestations_requested: boolean;
   anyone_injured: { value: boolean | null; note: string | null };
+  // Warns, never blocks -- a classification, not the record itself. The
+  // narrative (below) is what blocks: see incident_signoff_issues()'s
+  // own 'narrative_required' code, migration 0254.
+  category: { value: string | null; note: string | null };
 }
 
 interface SignOffCardProps {
@@ -260,7 +276,8 @@ export function SignOffCard({
   // in favour of naming the actual people below -- more actionable than
   // "1 staff member(s)" when the summary already knows exactly who.
   const nonStaffBlockingIssues = summary.blocking_issues.filter((i) => i.code !== "stale_or_withdrawn_attestation");
-  const hasNonBlockingNotes = notYetAttested.length > 0 || summary.anyone_injured.note !== null;
+  const hasNonBlockingNotes =
+    notYetAttested.length > 0 || summary.anyone_injured.note !== null || summary.category.note !== null;
   const hasBlockingContent = nonStaffBlockingIssues.length > 0 || otherBlockingStaff.length > 0;
 
   return (
@@ -276,6 +293,7 @@ export function SignOffCard({
             {summary.anyone_injured.note && (
               <li>&quot;Was a student or staff member injured?&quot; -- not recorded</li>
             )}
+            {summary.category.note && <li>Category -- not recorded</li>}
             {notYetAttested.map((s) => (
               <li key={s.incident_staff_id}>
                 {s.name} -- {s.status_label}

@@ -935,7 +935,11 @@ async function main() {
       p_institution_id: institutionId, p_occurred_at: new Date().toISOString(), p_location_id: loc.id,
       p_child_passport_ids: [child1], p_staff: [],
     });
-    await teacherA.from("incidents").update({ debrief_required: true }).eq("id", reqIncidentId);
+    // 0254: narrative now blocks sign-off too -- set here so (d)'s own
+    // "succeeds once the debrief is marked complete" assertion tests
+    // ONLY the debrief gate, its actual subject, not an incidental
+    // second reason to be blocked.
+    await teacherA.from("incidents").update({ debrief_required: true, narrative: "CHECK I fixture narrative." }).eq("id", reqIncidentId);
 
     const { error: signNoDebriefErr } = await teacherA
       .from("incidents")
@@ -1002,6 +1006,9 @@ async function main() {
     });
     const { data: notReqRow } = await admin.from("incidents").select("debrief_required").eq("id", notReqIncidentId).single();
     record("debrief_required defaults to false", notReqRow.debrief_required === false, notReqRow.debrief_required);
+    // 0254: narrative now blocks sign-off -- set so this stays a test of
+    // the debrief gate alone, not narrative too.
+    await teacherA.from("incidents").update({ narrative: "CHECK I(e) fixture narrative." }).eq("id", notReqIncidentId);
 
     const { error: signNotRequiredErr } = await teacherA
       .from("incidents")
@@ -1103,6 +1110,9 @@ async function main() {
       p_institution_id: institutionJId, p_occurred_at: new Date().toISOString(), p_location_id: locJ.id,
       p_child_passport_ids: [childJ.id], p_staff: [],
     });
+    // 0254: sign-off is setup here, not the thing under test (the grant/
+    // countersign mechanics are) -- give it a real narrative first.
+    await teacherOrd.from("incidents").update({ narrative: "CHECK J(d) fixture narrative." }).eq("id", incidentAId);
     await teacherOrd.from("incidents").update({ teacher_signed_at: new Date().toISOString(), teacher_signed_by: teacherOrdId }).eq("id", incidentAId);
 
     // RLS on UPDATE silently filters, it doesn't error -- a blocked write
@@ -1182,6 +1192,8 @@ async function main() {
       p_institution_id: institutionJId, p_occurred_at: new Date().toISOString(), p_location_id: locJ.id,
       p_child_passport_ids: [childJ.id], p_staff: [],
     });
+    // 0254: same reason as incident A's own fixture above.
+    await teacherOrd.from("incidents").update({ narrative: "CHECK J(g) fixture narrative." }).eq("id", incidentBId);
     await teacherOrd.from("incidents").update({ teacher_signed_at: new Date().toISOString(), teacher_signed_by: teacherOrdId }).eq("id", incidentBId);
 
     const { error: revokedDpCountersignErr } = await teacherDP
@@ -1512,6 +1524,10 @@ async function main() {
     // purely to let sign-off through; 0083 itself is covered on its own
     // terms in CHECK N below.
     await teacherA.from("incident_actions").insert({ incident_id: kIncidentId, action_type_id: restraintAction.id });
+    // 0254: narrative now blocks sign-off too -- set here so this
+    // fixture reaches the real post-signoff state the (e) test needs,
+    // rather than falling into its own "didn't reach sign-off" branch.
+    await teacherA.from("incidents").update({ narrative: "CHECK K(e) fixture narrative." }).eq("id", kIncidentId);
     await teacherA.from("incidents").update({ teacher_signed_at: new Date().toISOString(), teacher_signed_by: teacherAId }).eq("id", kIncidentId);
     const { data: kSignedCheck } = await admin.from("incidents").select("teacher_signed_at").eq("id", kIncidentId).single();
     if (kSignedCheck.teacher_signed_at) {
@@ -1623,7 +1639,12 @@ async function main() {
       p_institution_id: institutionId, p_occurred_at: new Date().toISOString(), p_location_id: loc.id,
       p_child_passport_ids: [child1], p_staff: [],
     });
-    await teacherA.from("incidents").update({ anyone_injured: true }).eq("id", nAId);
+    // 0254: a real narrative throughout CHECK N -- these six incidents
+    // are testing the injury/CPI consistency gates specifically; N1b/
+    // N2b/N3/N4b/N5b/N6b all expect a genuine sign-off success once
+    // their own gate is satisfied, which narrative must not collaterally
+    // block.
+    await teacherA.from("incidents").update({ anyone_injured: true, narrative: "CHECK N1 fixture narrative." }).eq("id", nAId);
     const { error: nAErr1 } = await teacherA.from("incidents").update({ teacher_signed_at: new Date().toISOString(), teacher_signed_by: teacherAId }).eq("id", nAId);
     const { data: nAAfter1 } = await admin.from("incidents").select("teacher_signed_at").eq("id", nAId).single();
     record(
@@ -1648,7 +1669,8 @@ async function main() {
       p_institution_id: institutionId, p_occurred_at: new Date().toISOString(), p_location_id: loc.id,
       p_child_passport_ids: [child1], p_staff: [],
     });
-    await teacherA.from("incidents").update({ anyone_injured: false }).eq("id", nBId);
+    // 0254: see CHECK N1's own comment above -- same reason.
+    await teacherA.from("incidents").update({ anyone_injured: false, narrative: "CHECK N2 fixture narrative." }).eq("id", nBId);
     const { data: nBInjury } = await teacherA
       .from("incident_injuries")
       .insert({ incident_id: nBId, injured_party_type: "student", passport_id: child1 })
@@ -1679,6 +1701,8 @@ async function main() {
       p_institution_id: institutionId, p_occurred_at: new Date().toISOString(), p_location_id: loc.id,
       p_child_passport_ids: [child1], p_staff: [],
     });
+    // 0254: see CHECK N1's own comment above -- same reason.
+    await teacherA.from("incidents").update({ narrative: "CHECK N3 fixture narrative." }).eq("id", nCId);
     await teacherA.from("incident_injuries").insert({ incident_id: nCId, injured_party_type: "student", passport_id: child1 });
     const { data: nCRow } = await admin.from("incidents").select("anyone_injured").eq("id", nCId).single();
     record("N3 setup: anyone_injured is genuinely null on this incident (never answered)", nCRow.anyone_injured === null, nCRow.anyone_injured);
@@ -1701,6 +1725,8 @@ async function main() {
       p_institution_id: institutionId, p_occurred_at: new Date().toISOString(), p_location_id: loc.id,
       p_child_passport_ids: [child1], p_staff: [],
     });
+    // 0254: see CHECK N1's own comment above -- same reason.
+    await teacherA.from("incidents").update({ narrative: "CHECK N4 fixture narrative." }).eq("id", nDId);
     const { data: nDInjury } = await teacherA
       .from("incident_injuries")
       .insert({ incident_id: nDId, injured_party_type: "student", passport_id: child1 })
@@ -1743,6 +1769,8 @@ async function main() {
       p_institution_id: institutionId, p_occurred_at: new Date().toISOString(), p_location_id: loc.id,
       p_child_passport_ids: [child1], p_staff: [],
     });
+    // 0254: see CHECK N1's own comment above -- same reason.
+    await teacherA.from("incidents").update({ narrative: "CHECK N5 fixture narrative." }).eq("id", nEId);
     await teacherA.from("incident_actions").insert({ incident_id: nEId, action_type_id: restraintAction.id });
     const { error: nEErr1 } = await teacherA.from("incidents").update({ teacher_signed_at: new Date().toISOString(), teacher_signed_by: teacherAId }).eq("id", nEId);
     const { data: nEAfter1 } = await admin.from("incidents").select("teacher_signed_at").eq("id", nEId).single();
@@ -1769,6 +1797,8 @@ async function main() {
       p_institution_id: institutionId, p_occurred_at: new Date().toISOString(), p_location_id: loc.id,
       p_child_passport_ids: [child1], p_staff: [],
     });
+    // 0254: see CHECK N1's own comment above -- same reason.
+    await teacherA.from("incidents").update({ narrative: "CHECK N6 fixture narrative." }).eq("id", nFId);
     await teacherA.from("restrictive_practices").insert({ incident_id: nFId, passport_id: child1, planning_status: "not_planned" });
     const { error: nFErr1 } = await teacherA.from("incidents").update({ teacher_signed_at: new Date().toISOString(), teacher_signed_by: teacherAId }).eq("id", nFId);
     const { data: nFAfter1 } = await admin.from("incidents").select("teacher_signed_at").eq("id", nFId).single();
@@ -1808,6 +1838,11 @@ async function main() {
       p_institution_id: institutionId, p_occurred_at: new Date().toISOString(), p_location_id: loc.id,
       p_child_passport_ids: [child1], p_staff: [],
     });
+    // 0254: narrative now blocks sign-off -- irrelevant to what O1/O1b are
+    // actually testing (spoofing vs. correct self-attribution), so set a
+    // real one up front rather than let it become an incidental second
+    // reason for either assertion.
+    await teacherA.from("incidents").update({ narrative: "O1/O1b fixture narrative." }).eq("id", oSpoofId);
     const { error: spoofErr } = await teacherA
       .from("incidents")
       .update({ teacher_signed_at: new Date().toISOString(), teacher_signed_by: teacherBId })
@@ -1841,6 +1876,10 @@ async function main() {
       p_institution_id: institutionId, p_occurred_at: new Date().toISOString(), p_location_id: loc.id,
       p_child_passport_ids: [child1], p_staff: [],
     });
+    // 0254: O2c below expects a genuine success -- give it a real
+    // narrative so the RPC's own success path is what's tested, not an
+    // incidental narrative refusal.
+    await teacherA.from("incidents").update({ narrative: "CHECK O2 fixture narrative." }).eq("id", oCleanId);
     const { error: notOwnerErr } = await teacherB.rpc("sign_off_incident", { p_incident_id: oCleanId });
     record(
       "O2b: sign_off_incident() called by someone who can VIEW but isn't creator/owning teacher gives a distinct 'not permitted' error",
@@ -1889,6 +1928,11 @@ async function main() {
       p_institution_id: institutionId, p_occurred_at: new Date().toISOString(), p_location_id: loc.id,
       p_child_passport_ids: [child1], p_staff: [],
     });
+    // 0254: a real narrative from the start -- O4f/O5 below expect a
+    // genuine success once the CPI/RP mismatch is resolved, testing
+    // THAT gate specifically, not narrative too. O4b/O4c's own .some()
+    // checks for the cpi/anyone_injured codes are unaffected either way.
+    await teacherA.from("incidents").update({ narrative: "CHECK O3c/O4/O5 fixture narrative." }).eq("id", oCpiId);
     await teacherA.from("incident_actions").insert({ incident_id: oCpiId, action_type_id: restraintAction.id });
     const { error: oCpiErr } = await teacherA.rpc("sign_off_incident", { p_incident_id: oCpiId });
     record("O3c: CPI-consistency gate still blocks sign_off_incident() (via the refactored trigger)", Boolean(oCpiErr) && /restrictive practice/i.test(oCpiErr?.message ?? ""), oCpiErr?.message);
@@ -2218,6 +2262,11 @@ async function main() {
       p_institution_id: institutionId, p_occurred_at: new Date().toISOString(), p_location_id: loc.id,
       p_child_passport_ids: [child1], p_staff: [{ user_id: teacherBId, involvement: "witnessed" }],
     });
+    // 0254: Q10 below expects a genuine sign-off success -- give it a
+    // real narrative up front, well before Q10, so nothing this check is
+    // actually about (status derivation, the attestation-reset gate) is
+    // collaterally blocked by it.
+    await teacherA.from("incidents").update({ narrative: "CHECK Q fixture narrative." }).eq("id", qIncidentId);
     const { data: qStaffRow } = await admin.from("incident_staff").select("id").eq("incident_id", qIncidentId).eq("user_id", teacherBId).single();
 
     // -- Q1: fresh incident derives 'draft'; named staff cannot see it yet. --
@@ -2319,6 +2368,9 @@ async function main() {
       p_institution_id: institutionId, p_occurred_at: new Date().toISOString(), p_location_id: loc.id,
       p_child_passport_ids: [child1], p_staff: [],
     });
+    // 0254: sign-off is setup here, not the thing under test (countersign
+    // is) -- give it a real narrative so it actually reaches sign-off.
+    await teacherA.from("incidents").update({ narrative: "CHECK R1 fixture narrative." }).eq("id", rIncidentId);
     await teacherA.rpc("sign_off_incident", { p_incident_id: rIncidentId });
 
     // -- R2: teacherB has real, otherwise-unrelated visibility into this --
@@ -2383,6 +2435,8 @@ async function main() {
       p_institution_id: institutionId, p_occurred_at: new Date().toISOString(), p_location_id: loc.id,
       p_child_passport_ids: [child1], p_staff: [],
     });
+    // 0254: same reason as R1's own fixture above.
+    await teacherA.from("incidents").update({ narrative: "CHECK R9 fixture narrative." }).eq("id", rGrantId);
     await teacherA.rpc("sign_off_incident", { p_incident_id: rGrantId });
     const { error: rGrantInsertErr } = await principal.from("institution_permissions").insert({ institution_id: institutionId, user_id: teacherBId, permission: "countersign_incident", granted_by: principalId });
     record("R9a: principal CAN grant countersign_incident to teacherB (ordinary class_teacher)", !rGrantInsertErr, rGrantInsertErr?.message);
@@ -2414,6 +2468,8 @@ async function main() {
       p_institution_id: institutionId, p_occurred_at: new Date().toISOString(), p_location_id: loc.id,
       p_child_passport_ids: [child1], p_staff: [],
     });
+    // 0254: same reason as R1's own fixture above.
+    await teacherA.from("incidents").update({ narrative: "CHECK R11 fixture narrative." }).eq("id", rSpoofId);
     await teacherA.rpc("sign_off_incident", { p_incident_id: rSpoofId });
     const { error: rSpoofErr } = await principal
       .from("incidents")
@@ -2521,6 +2577,9 @@ async function main() {
       p_institution_id: institutionId, p_occurred_at: new Date().toISOString(), p_location_id: loc.id,
       p_child_passport_ids: [child1], p_staff: [{ user_id: teacherBId, involvement: "witnessed" }],
     });
+    // 0254: sign-off is setup here (for the countersign summary check
+    // below), not the thing under test.
+    await teacherA.from("incidents").update({ narrative: "CHECK R (sequence) fixture narrative." }).eq("id", rSeqId);
     const { data: rSeqStaffRow } = await admin.from("incident_staff").select("id").eq("incident_id", rSeqId).eq("user_id", teacherBId).single();
     await teacherB.rpc("attest_to_incident", { p_incident_staff_id: rSeqStaffRow.id, p_addendum: "First attestation." });
     await teacherB.rpc("withdraw_attestation", { p_incident_staff_id: rSeqStaffRow.id, p_reason: "Need to check something first." });
@@ -2608,6 +2667,11 @@ async function main() {
       p_child_passport_ids: [child1S.id, child2S.id],
       p_staff: [{ user_id: snaSId, involvement: "witnessed" }],
     });
+    // 0254: S4a below expects a genuine sign-off success -- give it a
+    // real narrative from the start, well before it's needed, so nothing
+    // else in CHECK S (parent-notification staging, cross-child
+    // isolation) is collaterally blocked by it.
+    await teacherS.from("incidents").update({ narrative: "CHECK S fixture narrative." }).eq("id", sIncidentId);
 
     const { data: sChildRows } = await admin.from("incident_children").select("id, passport_id, parent_notified_at, parent_notified_by, parent_notification_blocked_reason").eq("incident_id", sIncidentId);
     const sChild1Row = sChildRows.find((r) => r.passport_id === child1S.id);
@@ -2769,6 +2833,9 @@ async function main() {
       p_institution_id: institutionSId, p_occurred_at: new Date().toISOString(), p_location_id: loc.id,
       p_child_passport_ids: [child1S.id, child2S.id], p_staff: [],
     });
+    // 0254: sign-off below is setup for the clinician-notice checks, not
+    // the thing under test.
+    await teacherS.from("incidents").update({ narrative: "CHECK S9 fixture narrative." }).eq("id", sClinIncidentId);
 
     const { data: sClinPreSignoff } = await clinicianS.from("clinician_incident_notices").select("id").eq("incident_id", sClinIncidentId);
     record("S9a: clinician gets NOTHING pre-signoff (not before, per spec)", (sClinPreSignoff?.length ?? 0) === 0, `rows=${sClinPreSignoff?.length}`);
@@ -4042,6 +4109,10 @@ async function main() {
       p_institution_id: institutionXLeavingId, p_occurred_at: new Date().toISOString(), p_location_id: globalLocX.id,
       p_child_passport_ids: [cXL1.id], p_staff: [],
     });
+    // 0254: sign-off below is setup for the handover/countersign checks
+    // further down, not the thing under test -- and this one THROWS on
+    // any error, so a missing narrative would crash the whole run.
+    await extraTeacherLeaving.from("incidents").update({ narrative: "CHECK X fixture narrative." }).eq("id", xIncidentId);
     const { error: xSignOffErr } = await extraTeacherLeaving.rpc("sign_off_incident", { p_incident_id: xIncidentId });
     if (xSignOffErr) throw xSignOffErr;
 
@@ -5324,6 +5395,10 @@ async function main() {
       });
       if (supplyStampErr) throw supplyStampErr;
       incidentOwnedBySupply = supplyIncidentId;
+      // 0254: AA-8c3 (much further down) expects a genuine sign-off
+      // success once ownership transfers to the principal -- give it a
+      // real narrative from the start.
+      await admin.from("incidents").update({ narrative: "CHECK AA fixture narrative." }).eq("id", supplyIncidentId);
       const { data: supplyIncidentRow } = await admin.from("incidents").select("owning_teacher_id, created_by").eq("id", supplyIncidentId).single();
       record("AA-6a THE WIDENING: an sna-role creator with a currently-active temporary grant auto-owns the incident they start", supplyIncidentRow?.owning_teacher_id === newSupplyAAId, JSON.stringify(supplyIncidentRow));
 
@@ -5490,6 +5565,8 @@ async function main() {
         p_institution_id: institutionAAId, p_occurred_at: new Date().toISOString(), p_location_id: locForSignoff.id, p_child_passport_ids: [childAA1], p_staff: [],
       });
       if (signoffStampErr) throw signoffStampErr;
+      // 0254: AA-8f-setup2 below expects a genuine sign-off success.
+      await admin.from("incidents").update({ narrative: "CHECK AA-8f fixture narrative." }).eq("id", signoffIncidentId);
       const { data: preSignoffOwnerCheck } = await admin.from("incidents").select("owning_teacher_id").eq("id", signoffIncidentId).single();
       record("AA-8f-setup: the fresh incident is owned by snaAA1 while their grant is active (same widening as AA-6a)", preSignoffOwnerCheck?.owning_teacher_id === snaAA1Id, preSignoffOwnerCheck);
 
@@ -7003,6 +7080,10 @@ async function main() {
     // One state each is enough: the mechanism is identical to GG-5's,
     // this proves it fires on the right transition and writes the same
     // corrected values, not a second full enumeration. ----
+    // 0254: narrative now blocks sign-off -- GG-6 needs the transition to
+    // actually happen for its own assertions below to mean anything.
+    await teacherGG.from("incidents").update({ narrative: "CHECK GG-6 fixture narrative." }).eq("id", incidentGGReachable);
+    await teacherGG.from("incidents").update({ narrative: "CHECK GG-6 fixture narrative." }).eq("id", incidentGGNoGuardian);
     await teacherGG.from("incidents").update({ teacher_signed_at: new Date().toISOString(), teacher_signed_by: teacherGGId }).eq("id", incidentGGReachable);
     await teacherGG.from("incidents").update({ teacher_signed_at: new Date().toISOString(), teacher_signed_by: teacherGGId }).eq("id", incidentGGNoGuardian);
     {
@@ -10577,6 +10658,10 @@ async function main() {
     const onTeacherNotSignedBefore = (mineWW4Before ?? []).some((r) => r.incident_id === incidentWW4Id && !r.teacher_signed_at);
     record("WW-4b STATE B (unsigned): DOES appear on the teacher's own 'not signed off' filter", onTeacherNotSignedBefore, JSON.stringify((mineWW4Before ?? []).find((r) => r.incident_id === incidentWW4Id)));
 
+    // 0254: narrative now blocks sign-off -- WW-4c/WW-4d need the real
+    // transition to happen for the "same incident, opposite states"
+    // proof to mean anything.
+    await teacher1WW.from("incidents").update({ narrative: "CHECK WW-4 fixture narrative." }).eq("id", incidentWW4Id);
     // Now sign it off -- State A.
     await teacher1WW.from("incidents").update({ teacher_signed_at: new Date().toISOString(), teacher_signed_by: teacher1WWId }).eq("id", incidentWW4Id);
 
