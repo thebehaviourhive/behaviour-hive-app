@@ -73,11 +73,14 @@ export default function ClinicianExportPage() {
     }
     setAllowed(true);
 
-    const [{ data: passport }, exportData] = await Promise.all([
-      supabase.from("passports").select("child_name").eq("id", passportId).maybeSingle(),
+    // passports has no policy granting institution staff a direct read
+    // of the row -- same fix as the principal-side export screen, found
+    // in that one's own live browser pass.
+    const [{ data: name }, exportData] = await Promise.all([
+      supabase.rpc("get_child_name_for_linked_institution_staff", { p_passport_id: passportId }),
       fetchClinicExportDataForPractitioner(passportId, user.id),
     ]);
-    setChildName(passport?.child_name ?? null);
+    setChildName(name ?? null);
     setData(exportData);
 
     if (!recorded) {

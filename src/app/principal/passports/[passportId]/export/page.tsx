@@ -80,8 +80,13 @@ export default function PrincipalExportPage() {
     }
     setInstitutionName(institution.name);
 
-    const { data: passport } = await supabase.from("passports").select("child_name").eq("id", passportId).maybeSingle();
-    setChildName(passport?.child_name ?? null);
+    // passports has no policy granting institution staff a direct read
+    // of the row (this schema's own standing rule: roster-scoped child
+    // names resolve through a dedicated RPC, never a direct passports()
+    // read) -- found live, in the browser pass, as a blank name in this
+    // very header.
+    const { data: name } = await supabase.rpc("get_child_name_for_linked_institution_staff", { p_passport_id: passportId });
+    setChildName(name ?? null);
 
     if (institution.type === "clinic") {
       setDirection("clinic");
