@@ -16,6 +16,11 @@ export interface ClinicianRow {
   fullName: string;
   specialty: string;
   coveredChildCount: number;
+  // PRD 9, Stage 1 -- always null for a school-engaged clinician
+  // (set_clinician_workspace_email() refuses to write it for anything
+  // but a clinic institution). Threaded through so ClinicianCoverageDetail
+  // can show/edit it without a second round-trip.
+  workspaceEmail: string | null;
 }
 
 export function ClinicianList({
@@ -47,12 +52,19 @@ export function ClinicianList({
     }
     setClinicians(
       (
-        (data ?? []) as { clinician_id: string; full_name: string; specialty: string; covered_child_count: number }[]
+        (data ?? []) as {
+          clinician_id: string;
+          full_name: string;
+          specialty: string;
+          covered_child_count: number;
+          workspace_email: string | null;
+        }[]
       ).map((r) => ({
         clinicianId: r.clinician_id,
         fullName: r.full_name,
         specialty: r.specialty,
         coveredChildCount: r.covered_child_count,
+        workspaceEmail: r.workspace_email,
       }))
     );
     setIsLoading(false);

@@ -6,6 +6,8 @@ import { Button } from "@/components/ui/Button";
 import { Checkbox } from "@/components/ui/Checkbox";
 import { ReasonConfirmSheet } from "@/components/shared/ReasonConfirmSheet";
 import { CLINICIAN_SPECIALTY_LABEL, type ClinicianSpecialty } from "@/lib/clinicianSpecialties";
+import { useInstitutionType } from "@/hooks/useInstitutionType";
+import { SetClinicianWorkspaceEmailSheet } from "./SetClinicianWorkspaceEmailSheet";
 import type { ClinicianRow } from "./ClinicianList";
 
 // Directory's fifth segment -- right pane. One screen, two ways in:
@@ -65,13 +67,15 @@ type ClinicianCoverageDetailProps =
 
 export function ClinicianCoverageDetail(props: ClinicianCoverageDetailProps) {
   const { institutionId, onCoverageChanged } = props;
+  const { institutionType } = useInstitutionType(institutionId);
+  const [isWorkspaceEmailSheetOpen, setIsWorkspaceEmailSheetOpen] = useState(false);
 
   // "new" mode starts with no resolved clinician -- a code-entry step
   // fills this in, then the rest of the component behaves identically
   // to "existing" mode, just remembering the code instead of nothing.
-  const [resolved, setResolved] = useState<{ clinicianId: string; fullName: string; specialty: string; code: string | null } | null>(
-    props.mode === "existing" ? { ...props.clinician, code: null } : null
-  );
+  const [resolved, setResolved] = useState<
+    { clinicianId: string; fullName: string; specialty: string; code: string | null; workspaceEmail: string | null } | null
+  >(props.mode === "existing" ? { ...props.clinician, code: null } : null);
 
   const [codeInput, setCodeInput] = useState("");
   const [isLookingUp, setIsLookingUp] = useState(false);
@@ -162,6 +166,11 @@ export function ClinicianCoverageDetail(props: ClinicianCoverageDetailProps) {
       fullName: clinician.full_name ?? "This clinician",
       specialty: clinician.specialty,
       code: codeInput.trim(),
+      // lookup_clinician_by_code() doesn't return workspace_email --
+      // a freshly-engaged clinician's mapping (if any already exists)
+      // is picked up on their next visit here via ClinicianList's own
+      // get_institution_clinicians() read, not this one-off lookup.
+      workspaceEmail: null,
     });
   }
 
@@ -311,6 +320,30 @@ export function ClinicianCoverageDetail(props: ClinicianCoverageDetailProps) {
         {CLINICIAN_SPECIALTY_LABEL[resolved.specialty as ClinicianSpecialty] ?? resolved.specialty}
       </p>
 
+      {/* PRD 9, Stage 1 -- clinic-only. Scheduling has no school-side
+          concept of Workspace email at all, so a school principal must
+          never see this, even though this component is shared. */}
+      {institutionType === "clinic" && (
+        <div className="mt-3 flex items-center justify-between gap-3 rounded-xl bg-brand-off-white/50 px-4 py-3">
+          <div>
+            <p className="font-accent text-eyebrow font-bold uppercase tracking-wide text-brand-neutral-black/50">
+              Workspace email
+            </p>
+            <p className="mt-0.5 font-sans text-body text-brand-neutral-black">
+              {resolved.workspaceEmail ?? <span className="text-brand-golden-brown">Not set -- can&apos;t be booked yet</span>}
+            </p>
+          </div>
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => setIsWorkspaceEmailSheetOpen(true)}
+            className="!w-auto shrink-0 !border-black/10 !px-4 !py-2 !text-eyebrow"
+          >
+            {resolved.workspaceEmail ? "Change" : "Set"}
+          </Button>
+        </div>
+      )}
+
       {isLoading ? (
         <div className="mt-6 flex flex-col gap-2">
           <div className="h-10 animate-pulse rounded-xl bg-brand-off-white" />
@@ -383,6 +416,21 @@ export function ClinicianCoverageDetail(props: ClinicianCoverageDetailProps) {
           onClose={() => setIsRemoveConfirmOpen(false)}
           onConfirm={applyWithRemovals}
           onConfirmed={() => setIsRemoveConfirmOpen(false)}
+        />
+      )}
+
+      {institutionType === "clinic" && (
+        <SetClinicianWorkspaceEmailSheet
+          isOpen={isWorkspaceEmailSheetOpen}
+          institutionId={institutionId}
+          clinicianUserId={resolved.clinicianId}
+          clinicianName={resolved.fullName}
+          currentWorkspaceEmail={resolved.workspaceEmail}
+          onClose={() => setIsWorkspaceEmailSheetOpen(false)}
+          onSaved={(newWorkspaceEmail) => {
+            setResolved((prev) => (prev ? { ...prev, workspaceEmail: newWorkspaceEmail } : prev));
+            setIsWorkspaceEmailSheetOpen(false);
+          }}
         />
       )}
     </div>
