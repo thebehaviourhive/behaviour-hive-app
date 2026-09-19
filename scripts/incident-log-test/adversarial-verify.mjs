@@ -2820,33 +2820,56 @@ async function main() {
     const { data: sNoticesAfterRp } = await admin.from("school_notices").select("id").eq("incident_id", sIncidentId).eq("notice_type", "incident_parent_call");
     record("S8c: exactly one incident_parent_call notice raised from the RP path", (sNoticesAfterRp?.length ?? 0) === 1, `rows=${sNoticesAfterRp?.length}`);
 
-    // -- S9: clinician_incident_notices (migration 0094) -- a fresh --
-    // incident so the signoff transition is clean. Child1S gets a
+    // -- S9: clinician_incident_notices (migration 0094, moved onto --
+    // countersign by PRD 8 Stage 1 / migration 0245 -- see that entry's
+    // own "THE TIMING FINDING" for the full reasoning: notify_clinicians_
+    // of_incident_signoff() now fires on countersigned_at, not teacher_
+    // signed_at, and skips a withheld incident entirely). Rewritten,
+    // 0254, to assert the CURRENT gate directly rather than the pre-
+    // PRD-8 one this check originally encoded (sign-off alone used to be
+    // enough) -- three real checks: nothing at sign-off, something real
+    // at countersign, and nothing at all when withheld. Child1S gets a
     // linked, verified clinician; child2S deliberately gets none, to
     // prove no orphaned row is created when nobody can see it.
     const clinicianSId = await createUser("checks.clinician@thebehaviourhive.com", "Check S Clinician", "clinician");
     await admin.from("clinicians").insert({ user_id: clinicianSId, specialty: "behavioural_psychologist", verification_status: "verified" });
     await admin.from("clinician_access").insert({ passport_id: child1S.id, clinician_id: clinicianSId, is_active: true });
     const clinicianS = await signedInClient("checks.clinician@thebehaviourhive.com");
+    const principalSForS9 = await signedInClient("checks.principal@thebehaviourhive.com");
 
     const { data: sClinIncidentId } = await teacherS.rpc("create_incident_stamp", {
       p_institution_id: institutionSId, p_occurred_at: new Date().toISOString(), p_location_id: loc.id,
       p_child_passport_ids: [child1S.id, child2S.id], p_staff: [],
     });
-    // 0254: sign-off below is setup for the clinician-notice checks, not
+    // 0254: narrative is setup for the clinician-notice checks below, not
     // the thing under test.
     await teacherS.from("incidents").update({ narrative: "CHECK S9 fixture narrative." }).eq("id", sClinIncidentId);
 
     const { data: sClinPreSignoff } = await clinicianS.from("clinician_incident_notices").select("id").eq("incident_id", sClinIncidentId);
-    record("S9a: clinician gets NOTHING pre-signoff (not before, per spec)", (sClinPreSignoff?.length ?? 0) === 0, `rows=${sClinPreSignoff?.length}`);
+    record("S9a: clinician gets NOTHING pre-signoff", (sClinPreSignoff?.length ?? 0) === 0, `rows=${sClinPreSignoff?.length}`);
 
     await teacherS.rpc("sign_off_incident", { p_incident_id: sClinIncidentId });
 
-    const { data: sClinPostSignoff } = await clinicianS.from("clinician_incident_notices").select("notice_type, passport_id");
+    // -- S9a2, 0254: THE ACTUAL GATE, PROVEN DIRECTLY -- teacher sign-off --
+    // alone still raises NOTHING. This is the case CHECK S9 originally
+    // got wrong (it asserted a notice existed at this exact point,
+    // matching the pre-PRD-8 teacher_signed_at gate) -- proving the
+    // negative here first is what makes S9b's own positive proof mean
+    // the gate is countersign specifically, not merely "eventually".
+    const { data: sClinAfterSignoffOnly } = await clinicianS.from("clinician_incident_notices").select("id").eq("incident_id", sClinIncidentId);
     record(
-      "S9b: clinician notified at teacher sign-off, exactly one notice, for child1S only (their own case), never child2S",
-      sClinPostSignoff.length === 1 && sClinPostSignoff[0].passport_id === child1S.id && sClinPostSignoff[0].notice_type === "incident_summary_ready",
-      JSON.stringify(sClinPostSignoff)
+      "S9a2: teacher sign-off ALONE still raises nothing -- the gate moved to countersign (PRD 8 Stage 1, migration 0245), not teacher_signed_at",
+      (sClinAfterSignoffOnly?.length ?? 0) === 0,
+      `rows=${sClinAfterSignoffOnly?.length}`
+    );
+
+    await principalSForS9.rpc("countersign_incident", { p_incident_id: sClinIncidentId, p_withhold_from_clinic: false, p_withhold_reason: null });
+
+    const { data: sClinPostCountersign } = await clinicianS.from("clinician_incident_notices").select("notice_type, passport_id");
+    record(
+      "S9b: clinician notified at COUNTERSIGN (not withheld), exactly one notice, for child1S only (their own case), never child2S",
+      sClinPostCountersign.length === 1 && sClinPostCountersign[0].passport_id === child1S.id && sClinPostCountersign[0].notice_type === "incident_summary_ready",
+      JSON.stringify(sClinPostCountersign)
     );
 
     const { data: sOrphanCheck } = await admin.from("clinician_incident_notices").select("id").eq("incident_id", sClinIncidentId).eq("passport_id", child2S.id);
@@ -2856,6 +2879,32 @@ async function main() {
     record("S9d: ordinary staff (SNA, not a clinician) sees nothing via this table's own RLS", (sSnaClinAttempt?.length ?? 0) === 0, `rows=${sSnaClinAttempt?.length}`);
 
     await admin.from("incidents").delete().eq("id", sClinIncidentId);
+
+    // -- S9e/S9f, 0254: THE WITHHOLD HALF OF THE SAME GATE -- a second, --
+    // separate incident, countersigned WITH withhold_from_clinic=true.
+    // notify_clinicians_of_incident_signoff()'s own WHERE clause skips
+    // a withheld incident outright ("and not new.withheld_from_clinic"),
+    // so the clinician should get NOTHING here, ever -- not delayed,
+    // not eventually, genuinely absent.
+    const { data: sWithheldIncidentId } = await teacherS.rpc("create_incident_stamp", {
+      p_institution_id: institutionSId, p_occurred_at: new Date().toISOString(), p_location_id: loc.id,
+      p_child_passport_ids: [child1S.id], p_staff: [],
+    });
+    await teacherS.from("incidents").update({ narrative: "CHECK S9e/f fixture narrative -- withheld." }).eq("id", sWithheldIncidentId);
+    await teacherS.rpc("sign_off_incident", { p_incident_id: sWithheldIncidentId });
+    await principalSForS9.rpc("countersign_incident", { p_incident_id: sWithheldIncidentId, p_withhold_from_clinic: true, p_withhold_reason: "CHECK S9f: verification fixture." });
+
+    const { data: sWithheldRow } = await admin.from("incidents").select("countersigned_at, withheld_from_clinic").eq("id", sWithheldIncidentId).single();
+    record("S9e setup: the second incident is genuinely countersigned AND withheld", sWithheldRow.countersigned_at !== null && sWithheldRow.withheld_from_clinic === true, JSON.stringify(sWithheldRow));
+
+    const { data: sClinWithheldAttempt } = await clinicianS.from("clinician_incident_notices").select("id").eq("incident_id", sWithheldIncidentId);
+    record(
+      "S9f: a countersigned but WITHHELD incident raises NOTHING for the linked clinician, ever -- withholding is genuinely absolute, not a delay",
+      (sClinWithheldAttempt?.length ?? 0) === 0,
+      `rows=${sClinWithheldAttempt?.length}`
+    );
+
+    await admin.from("incidents").delete().eq("id", sWithheldIncidentId);
     await admin.auth.admin.deleteUser(clinicianSId);
 
     await admin.from("institutions").delete().eq("id", institutionSId);
@@ -2910,6 +2959,7 @@ async function main() {
     const parent1T = await signedInClient("checkt.parent1@thebehaviourhive.com");
     const parent2T = await signedInClient("checkt.parent2@thebehaviourhive.com");
     const clinicianT = await signedInClient("checkt.clinician@thebehaviourhive.com");
+    const principalT = await signedInClient("checkt.principal@thebehaviourhive.com");
 
     const { data: tIncidentId } = await teacherT.rpc("create_incident_stamp", {
       p_institution_id: institutionTId, p_occurred_at: new Date().toISOString(), p_location_id: loc.id,
@@ -2923,15 +2973,21 @@ async function main() {
     await teacherT.from("incident_children").update({ distress_level: "yes_definitely", remained_on_site: true }).eq("incident_id", tIncidentId).eq("passport_id", child1T.id);
     await teacherT.from("incident_children").update({ distress_level: "slightly", remained_on_site: false, remained_detail: "CHILD TWO ONLY: collected early by guardian." }).eq("incident_id", tIncidentId).eq("passport_id", child2T.id);
 
-    // -- T1: clinician sees FULL content (narrative included) even --
-    // pre-signoff -- confirms the gate is status<>'draft' like
-    // can_view_incident()'s own clinician branch, not teacher_signed_at.
+    // -- T1, 0254 REWRITE: the CURRENT gate (PRD 8 Stage 1, migration --
+    // 0245) is countersigned_at is not null, not status<>'draft' -- this
+    // check originally asserted the pre-PRD-8 gate directly (a real
+    // "check encoding superseded behaviour" instance, CLAUDE.md) and
+    // has been rewritten to prove the actual, current boundary instead
+    // of the one PRD 8 deliberately replaced. attestations_requested
+    // still moves status out of 'draft' here specifically because that
+    // continues to matter for T6's own parent-gate proof below -- it is
+    // no longer what the clinician's own gate depends on.
     await teacherT.from("incidents").update({ attestations_requested: true }).eq("id", tIncidentId);
-    const { data: tClinPre, error: tClinPreErr } = await clinicianT.rpc("get_clinician_incidents", { p_passport_id: child1T.id });
+    const { data: tClinPreStatusChange, error: tClinPreErr } = await clinicianT.rpc("get_clinician_incidents", { p_passport_id: child1T.id });
     record(
-      "T1: clinician sees full content pre-signoff (narrative present), correct child_index/distress_level for THEIR linked child",
-      !tClinPreErr && tClinPre?.length === 1 && tClinPre[0].narrative?.includes("STAFF-ONLY NARRATIVE") && tClinPre[0].child_index === "A" && tClinPre[0].distress_level === "yes_definitely",
-      `err=${tClinPreErr?.message}, ${JSON.stringify(tClinPre)}`
+      "T1: clinician sees NOTHING even once status has left 'draft' -- status alone was never the gate, and isn't now either",
+      !tClinPreErr && (tClinPreStatusChange?.length ?? 0) === 0,
+      `err=${tClinPreErr?.message}, rows=${tClinPreStatusChange?.length}`
     );
 
     // -- T2: clinician NOT linked to child2 gets nothing for child2, --
@@ -2977,6 +3033,16 @@ async function main() {
 
     await teacherT.rpc("sign_off_incident", { p_incident_id: tIncidentId });
 
+    // -- T6c, 0254: teacher sign-off ALONE still raises nothing for the --
+    // clinician -- the second half of proving the gate is countersign
+    // specifically (T1 proved status leaving 'draft' isn't it either).
+    const { data: tClinAfterSignoffOnly } = await clinicianT.rpc("get_clinician_incidents", { p_passport_id: child1T.id });
+    record(
+      "T6c: clinician still sees NOTHING once the teacher has signed off, before countersign -- teacher_signed_at was never the gate either",
+      (tClinAfterSignoffOnly?.length ?? 0) === 0,
+      `rows=${tClinAfterSignoffOnly?.length}`
+    );
+
     // -- T7: post-signoff, each parent sees exactly their own child's --
     // fields, correctly distinct (yes_definitely/true for child1,
     // slightly/false/the child2-only remained_detail for child2), and
@@ -3012,15 +3078,43 @@ async function main() {
     const { data: tParent1CrossAttempt } = await parent1T.rpc("get_parent_incidents", { p_passport_id: child2T.id });
     record("T7e: parent1T explicitly calling for child2's passport_id gets nothing (RLS-equivalent owns_passport check, not client trust)", (tParent1CrossAttempt?.length ?? 0) === 0, `rows=${tParent1CrossAttempt?.length}`);
 
-    // -- T8: clinician post-signoff -- still full, still correctly --
-    // scoped, narrative still present (the gate never narrowed).
+    // -- T8, 0254 REWRITE: THE ACTUAL POSITIVE CASE -- a real countersign --
+    // (not withheld) is what finally opens the clinician's own read.
+    // Previously this checked "post-signoff" and treated that as
+    // already-open (the pre-PRD-8 gate) -- now the countersign step
+    // itself is the thing proven, not assumed.
+    await principalT.rpc("countersign_incident", { p_incident_id: tIncidentId, p_withhold_from_clinic: false, p_withhold_reason: null });
     const { data: tClinPost } = await clinicianT.rpc("get_clinician_incidents", { p_passport_id: child1T.id });
     record(
-      "T8: clinician post-signoff still sees full content, narrative present, actions array present (structurally, even if empty)",
+      "T8: clinician sees full content once COUNTERSIGNED (not withheld) -- narrative present, actions array present (structurally, even if empty)",
       tClinPost?.[0]?.narrative?.includes("STAFF-ONLY NARRATIVE") && Array.isArray(tClinPost?.[0]?.actions),
       JSON.stringify(tClinPost)
     );
 
+    // -- T9, 0254: THE WITHHOLD HALF, on the READ path specifically -- --
+    // CHECK S9 (above) already proves clinician_incident_notices never
+    // fires for a withheld incident; this proves the clinician's own
+    // read RPC independently refuses it too, on a fresh second incident
+    // so it isn't entangled with tIncidentId's own already-open state.
+    const { data: tWithheldIncidentId } = await teacherT.rpc("create_incident_stamp", {
+      p_institution_id: institutionTId, p_occurred_at: new Date().toISOString(), p_location_id: loc.id,
+      p_child_passport_ids: [child1T.id], p_staff: [],
+    });
+    await teacherT.from("incidents").update({ narrative: "CHECK T9 fixture narrative -- withheld." }).eq("id", tWithheldIncidentId);
+    await teacherT.rpc("sign_off_incident", { p_incident_id: tWithheldIncidentId });
+    await principalT.rpc("countersign_incident", { p_incident_id: tWithheldIncidentId, p_withhold_from_clinic: true, p_withhold_reason: "CHECK T9: verification fixture." });
+
+    const { data: tWithheldRow } = await admin.from("incidents").select("countersigned_at, withheld_from_clinic").eq("id", tWithheldIncidentId).single();
+    record("T9 setup: the second incident is genuinely countersigned AND withheld", tWithheldRow.countersigned_at !== null && tWithheldRow.withheld_from_clinic === true, JSON.stringify(tWithheldRow));
+
+    const { data: tClinWithheldAttempt } = await clinicianT.rpc("get_clinician_incidents", { p_passport_id: child1T.id });
+    record(
+      "T9: a countersigned but WITHHELD incident is genuinely absent from get_clinician_incidents() -- the linked clinician sees only the non-withheld one (tIncidentId), never this one",
+      (tClinWithheldAttempt?.length ?? 0) === 1 && tClinWithheldAttempt[0].incident_id === tIncidentId,
+      JSON.stringify(tClinWithheldAttempt)
+    );
+
+    await admin.from("incidents").delete().eq("id", tWithheldIncidentId);
     await admin.from("incidents").delete().eq("id", tIncidentId);
     await admin.from("institutions").delete().eq("id", institutionTId);
     for (const id of [principalTId, teacherTId, snaTId, parent1TId, parent2TId, clinicianTId]) {
