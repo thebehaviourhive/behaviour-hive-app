@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/Button";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 import { AddAmendmentSheet } from "@/components/incident-log/AddAmendmentSheet";
 import { RoleLabel } from "@/components/ui/RoleLabel";
+import { Textarea } from "@/components/ui/Textarea";
 import { useInstitutionType } from "@/hooks/useInstitutionType";
 
 // Phase 4, piece 3. Rendered for a principal (or countersign_incident
@@ -64,6 +65,11 @@ interface CountersignSummary {
   countersigned_by_name: string | null;
   countersigned_role_at_time: string | null;
   countersigned_via: string | null;
+  // PRD 8 section 12 / migration 0245: whether there's even a clinician
+  // to withhold from, and (once already countersigned) what was decided.
+  has_engaged_clinic: boolean;
+  withheld_from_clinic: boolean;
+  withheld_from_clinic_reason: string | null;
 }
 
 const STATUS_PILL_CLASS: Record<string, string> = {
@@ -170,6 +176,12 @@ export function CountersignCard({
   const [isSigning, setIsSigning] = useState(false);
   const [signError, setSignError] = useState<string | null>(null);
   const [isAmendOpen, setIsAmendOpen] = useState(false);
+  // PRD 8 section 12 / migration 0245: withholding is decided here, once,
+  // and is not available afterwards -- see this card's own withhold
+  // section below for why the reason is required and the consequence is
+  // spelled out rather than left to a bare checkbox label.
+  const [withholdFromClinic, setWithholdFromClinic] = useState(false);
+  const [withholdReason, setWithholdReason] = useState("");
   // The signature moment (Daniel's own framing): "the last irreversible
   // act on a legal document... should feel like a signature, not a
   // dismissal." A brief, unmissable success state inside the sheet
@@ -251,10 +263,18 @@ export function CountersignCard({
   }, [incidentId]);
 
   async function handleConfirmCountersign() {
+    if (withholdFromClinic && withholdReason.trim() === "") {
+      setSignError("A reason is required to withhold this incident from the clinic.");
+      return;
+    }
     setIsSigning(true);
     setSignError(null);
     const supabase = createClient();
-    const { error } = await supabase.rpc("countersign_incident", { p_incident_id: incidentId });
+    const { error } = await supabase.rpc("countersign_incident", {
+      p_incident_id: incidentId,
+      p_withhold_from_clinic: withholdFromClinic,
+      p_withhold_reason: withholdFromClinic ? withholdReason.trim() : null,
+    });
     setIsSigning(false);
     if (error) {
       setSignError(error.message);
@@ -289,6 +309,8 @@ export function CountersignCard({
       setSuccessVisible(false);
       setShowSuccess(false);
       setIsConfirmOpen(false);
+      setWithholdFromClinic(false);
+      setWithholdReason("");
       onCountersigned();
     }, 1400);
     return () => {
@@ -381,6 +403,21 @@ export function CountersignCard({
             {ViaLabel(summary.countersigned_via) && <>, {ViaLabel(summary.countersigned_via)}</>}) on{" "}
             {summary.countersigned_at && formatDateTime(summary.countersigned_at)}.
           </p>
+
+          {/* PRD 8 section 12: the decision made at countersign, stated
+              plainly afterwards -- not just recorded silently. Golden
+              Brown, matching this app's own "fact worth attention, not
+              an alarm" register elsewhere on this card. */}
+          {summary.withheld_from_clinic && (
+            <div className="rounded-2xl border border-brand-golden-brown/30 bg-brand-golden-brown/10 p-4">
+              <p className="text-sm font-semibold text-brand-golden-brown">
+                Withheld from this child&apos;s engaged clinician.
+              </p>
+              {summary.withheld_from_clinic_reason && (
+                <p className="mt-1 text-sm italic text-brand-neutral-black">&quot;{summary.withheld_from_clinic_reason}&quot;</p>
+              )}
+            </div>
+          )}
 
           {/* THE PERSISTENT SURFACE (CLAUDE.md, amendment access
               lockdown, migration 0180). Before this, "Add amendment"
@@ -496,19 +533,70 @@ export function CountersignCard({
               still be added afterwards.
             </p>
 
+            {/* PRD 8 section 12: decided here, once, and not available
+                afterwards -- so the consequence has to be plain at the
+                moment of choosing, not a bare checkbox someone could tick
+                without registering what it does. Only shown when there's
+                actually a clinician engaged for this child -- otherwise
+                the control means nothing and is just noise. */}
+            {summary.has_engaged_clinic && (
+              <div className="mt-3 rounded-2xl border border-black/10 bg-black/[0.02] p-3.5">
+                <label className="flex items-start gap-3">
+                  <input
+                    type="checkbox"
+                    checked={withholdFromClinic}
+                    onChange={(e) => {
+                      setWithholdFromClinic(e.target.checked);
+                      if (!e.target.checked) setSignError(null);
+                    }}
+                    className="mt-0.5 h-5 w-5 flex-shrink-0 rounded border-black/20 text-brand-golden-brown focus:ring-brand-golden-brown"
+                  />
+                  <span className="text-sm font-semibold text-brand-neutral-black">
+                    Withhold this incident from this child&apos;s engaged clinician
+                  </span>
+                </label>
+
+                {withholdFromClinic && (
+                  <div className="mt-3 flex flex-col gap-3 rounded-xl border border-brand-golden-brown/30 bg-brand-golden-brown/10 p-3">
+                    <p className="text-sm font-semibold text-brand-golden-brown">
+                      A clinician working with {childNames.length > 0 ? childNames.join(", ") : "this child"}&apos;s behaviour
+                      will not see what happened here. Once you countersign, this cannot be changed -- reversed, or added
+                      later.
+                    </p>
+                    <Textarea
+                      label="Why is this being withheld? (required)"
+                      value={withholdReason}
+                      onChange={(e) => setWithholdReason(e.target.value)}
+                      rows={2}
+                    />
+                  </div>
+                )}
+              </div>
+            )}
+
             {signError && (
               <p role="alert" className="mt-3 text-sm font-medium text-red-600">
                 {signError}
               </p>
             )}
 
-            <Button type="button" onClick={handleConfirmCountersign} disabled={isSigning} className="mt-6">
+            <Button
+              type="button"
+              onClick={handleConfirmCountersign}
+              disabled={isSigning || (withholdFromClinic && withholdReason.trim() === "")}
+              className="mt-6"
+            >
               {isSigning ? "Countersigning…" : "Countersign"}
             </Button>
             <Button
               type="button"
               variant="secondary"
-              onClick={() => setIsConfirmOpen(false)}
+              onClick={() => {
+                setIsConfirmOpen(false);
+                setWithholdFromClinic(false);
+                setWithholdReason("");
+                setSignError(null);
+              }}
               disabled={isSigning}
               className="mt-2 !border-black/10 !text-black/60"
             >
