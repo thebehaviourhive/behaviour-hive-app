@@ -1,5 +1,9 @@
 @AGENTS.md
 
+# Standing rules
+
+- **THE FBA IS NOT TO BE TOUCHED. Daniel's own instruction, PRD 8 Stage 2, 19 Sept 2026.** It works, it is verified, it is the clinician track's centrepiece. No changes to its components, its sections, its rendering, its save paths, or its data shape — not for export polish, not for consistency, not as a side effect of anything else. This came up directly during Stage 2's own export build: the natural-looking move would have been to reuse `FbaSectionsReadOnly` (the FBA reader/print's own component) for the export screen's FBA rendering, and it was rejected specifically because that component's AFLS sub-section does its own live fetch against the current viewer's session (`useAflsAssessmentsForFba(fbaId)`) — reusing it for a director exporting a colleague's FBA would have meant either silently broken AFLS content, or extending `afls_assessments` with a new director-read branch nobody asked for, to make an unrelated screen's own borrowed component behave. The export screen was built with its own generic, purpose-built rendering instead (dumps `content_data` by key, excludes `afls` entirely) — see `clinicalExportRenderers.tsx`'s own header for the full reasoning. **If a future piece of work appears to need an FBA change, STOP and say so rather than making it. The answer is almost certainly to build around it, the way export did.**
+
 # Supabase / Postgres gotchas
 
 Learned the hard way, on the School Incident Log build. Read before writing any code that touches RLS.
