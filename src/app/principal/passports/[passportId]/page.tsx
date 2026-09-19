@@ -24,7 +24,13 @@ export default function PrincipalPassportDetailPage() {
         >
           ‹
         </Link>
-        <h1 className="font-heading text-xl font-bold text-brand-prussian-blue">{childName ?? "Child"}</h1>
+        <h1 className="flex-1 font-heading text-xl font-bold text-brand-prussian-blue">{childName ?? "Child"}</h1>
+        <Link
+          href={`/principal/passports/${passportId}/export`}
+          className="flex-shrink-0 rounded-full border-2 border-brand-prussian-blue px-3 py-1 text-xs font-semibold text-brand-prussian-blue"
+        >
+          Export
+        </Link>
       </header>
 
       {/* No px-4 here -- ChildDetail owns its own horizontal padding on

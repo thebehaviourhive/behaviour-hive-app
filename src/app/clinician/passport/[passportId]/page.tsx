@@ -24,13 +24,21 @@ export default function ClinicianPassportPage() {
   return (
     <div className="flex min-h-full flex-1 flex-col bg-brand-off-white/40 pb-28">
       <header className="px-4 pt-6 pb-3">
-        <Link
-          href="/clinician/passports"
-          aria-label="Back"
-          className="mb-2 block w-fit text-2xl leading-none text-brand-prussian-blue"
-        >
-          ‹
-        </Link>
+        <div className="mb-2 flex items-center justify-between">
+          <Link
+            href="/clinician/passports"
+            aria-label="Back"
+            className="block w-fit text-2xl leading-none text-brand-prussian-blue"
+          >
+            ‹
+          </Link>
+          <Link
+            href={`/clinician/passport/${passportId}/export`}
+            className="rounded-full border-2 border-brand-prussian-blue px-3 py-1 text-xs font-semibold text-brand-prussian-blue"
+          >
+            Export
+          </Link>
+        </div>
         <h1 className="font-heading text-2xl font-semibold text-brand-neutral-black">
           {childName ? `${childName}'s Clinical File` : "Clinical File"}
         </h1>
