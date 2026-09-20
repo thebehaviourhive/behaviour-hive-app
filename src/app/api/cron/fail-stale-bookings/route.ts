@@ -13,15 +13,13 @@ import { createAdminClient } from "@/lib/supabase/admin";
 // get_my_bookings_needing_attention() with no separate mechanism
 // needed.
 //
-// Same shape as /api/cron/purge-app-events -- NOT wired into
-// vercel.json yet. To activate: add {"path":
-// "/api/cron/fail-stale-bookings", "schedule": "*/5 * * * *"} to
-// vercel.json's crons array (this one wants minutes, not once a day --
-// a pending row should never realistically survive more than a few
-// seconds, so five minutes is already a generous margin, not a tight
-// one) and confirm CRON_SECRET is set (already required by the
-// app-events route above, reused here rather than adding a second
-// secret for the same purpose).
+// Wired into vercel.json ("*/5 * * * *" -- this one wants minutes, not
+// once a day: a pending row should never realistically survive more
+// than a few seconds, so five minutes is already a generous margin,
+// not a tight one). CRON_SECRET is the same one purge-app-events
+// already requires, reused here rather than adding a second secret for
+// the same purpose -- confirm it's set on Vercel before this can fire
+// for real.
 const STALE_AFTER_MINUTES = 5;
 
 export async function GET(request: Request) {

@@ -17,13 +17,11 @@ import { deleteCalendarEvent } from "@/lib/google/calendarEvents";
 // mark_booking_sync_failed(), the same clinician queue every other
 // sync problem already reaches.
 //
-// NOT yet wired into vercel.json -- same inert-until-activated posture
-// as fail-stale-bookings and purge-app-events. To activate: add
-// {"path": "/api/cron/sweep-discharged-bookings", "schedule": "0 3 * * *"}
-// (once a day is plenty -- a discharge ending up to a day before its
-// future bookings are cleaned is a low-stakes delay, not a safety
-// issue) and confirm CRON_SECRET is set (already required by the other
-// two cron routes, reused here).
+// Wired into vercel.json ("0 3 * * *" -- once a day is plenty, a
+// discharge ending up to a day before its future bookings are cleaned
+// is a low-stakes delay, not a safety issue). CRON_SECRET is the same
+// one the other two cron routes already require -- confirm it's set on
+// Vercel before this can fire for real.
 export async function GET(request: Request) {
   const authHeader = request.headers.get("authorization");
   if (!process.env.CRON_SECRET || authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
