@@ -22,13 +22,14 @@ interface EligibleSuccessor {
 interface HandOverPrincipalSheetProps {
   isOpen: boolean;
   onClose: () => void;
+  institutionId: string;
   eligibleSuccessors: EligibleSuccessor[];
   onHandedOver: (outcome: Outcome, stayingRole: "class_teacher" | "sna" | null) => void;
 }
 
 type Outcome = "leaving" | "staying";
 
-export function HandOverPrincipalSheet({ isOpen, onClose, eligibleSuccessors, onHandedOver }: HandOverPrincipalSheetProps) {
+export function HandOverPrincipalSheet({ isOpen, onClose, institutionId, eligibleSuccessors, onHandedOver }: HandOverPrincipalSheetProps) {
   const [mode, setMode] = useState<"form" | "confirm">("form");
   const [successorId, setSuccessorId] = useState("");
   const [outcome, setOutcome] = useState<Outcome>("leaving");
@@ -60,6 +61,7 @@ export function HandOverPrincipalSheet({ isOpen, onClose, eligibleSuccessors, on
     setSubmitError(null);
     const supabase = createClient();
     const { error } = await supabase.rpc("hand_over_principal", {
+      p_institution_id: institutionId,
       p_successor_user_id: successorId,
       p_outcome: outcome,
       p_staying_role: outcome === "staying" ? stayingRole : null,

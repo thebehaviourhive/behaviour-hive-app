@@ -364,21 +364,24 @@ export default function PrincipalClinicPage() {
         </div>
       </BottomSheet>
 
-      <HandOverPrincipalSheet
-        isOpen={isHandOverOpen}
-        onClose={() => setIsHandOverOpen(false)}
-        eligibleSuccessors={staff
-          .filter((m) => m.is_active && m.role !== "principal")
-          .map((m) => ({ userId: m.user_id, fullName: m.full_name }))}
-        onHandedOver={(outcome, stayingRole) => {
-          setIsHandOverOpen(false);
-          if (outcome === "staying" && stayingRole) {
-            router.push(getPostAuthRedirect(stayingRole));
-          } else {
-            router.push("/teacher/join-institution");
-          }
-        }}
-      />
+      {institutionId && (
+        <HandOverPrincipalSheet
+          isOpen={isHandOverOpen}
+          onClose={() => setIsHandOverOpen(false)}
+          institutionId={institutionId}
+          eligibleSuccessors={staff
+            .filter((m) => m.is_active && m.role !== "principal")
+            .map((m) => ({ userId: m.user_id, fullName: m.full_name }))}
+          onHandedOver={(outcome, stayingRole) => {
+            setIsHandOverOpen(false);
+            if (outcome === "staying" && stayingRole) {
+              router.push(getPostAuthRedirect(stayingRole));
+            } else {
+              router.push("/teacher/join-institution");
+            }
+          }}
+        />
+      )}
 
       {institutionId && (
         <SetClinicHoursSheet

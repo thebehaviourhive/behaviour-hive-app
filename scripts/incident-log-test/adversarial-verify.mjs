@@ -20,7 +20,7 @@
 // stage development. Every check from V onward is independently
 // self-contained (own institution, own accounts, own cleanup) and
 // individually selectable: V, W, X, Y, Z, AA, BB, CC, DD, EE, FF, GG,
-// HH, II, JJ, KK, LL, MM, NN, OO, PP, QQ, RR, SS, TT, UU, VV, WW, XX, YY, ZZ, AAA, BBB, CCC, DDD, EEE, FFF, GGG, HHH, III, JJJ, KKK, LLL, MMM, NNN, OOO, PPP, QQQ, RRR, SSS. Selecting none of these (ONLY_CHECKS unset) is the full run --
+// HH, II, JJ, KK, LL, MM, NN, OO, PP, QQ, RR, SS, TT, UU, VV, WW, XX, YY, ZZ, AAA, BBB, CCC, DDD, EEE, FFF, GGG, HHH, III, JJJ, KKK, LLL, MMM, NNN, OOO, PPP, QQQ, RRR, SSS, TTT. Selecting none of these (ONLY_CHECKS unset) is the full run --
 // the one that gates deploys -- and its behavior is unchanged: same
 // checks, same order, same pass/fail counts. The only observable
 // difference is where the top-level fixture's own cleanup log line
@@ -4213,18 +4213,18 @@ async function main() {
     console.log(`-- negative guards, run BEFORE any real handover executes, against principalA1/principalA2 who both remain genuinely active principals throughout this block --`);
 
     console.log(`-- item 5: a non-principal cannot call it --`);
-    const { error: nonPrincipalHandoverErr } = await extraTeacherLeaving.rpc("hand_over_principal", { p_successor_user_id: successorAId, p_outcome: "leaving", p_staying_role: null, p_reason: "Attempting as a non-principal." });
+    const { error: nonPrincipalHandoverErr } = await extraTeacherLeaving.rpc("hand_over_principal", { p_institution_id: institutionXLeavingId, p_successor_user_id: successorAId, p_outcome: "leaving", p_staying_role: null, p_reason: "Attempting as a non-principal." });
     record("X5: an active, otherwise-legitimate class_teacher cannot call hand_over_principal()", Boolean(nonPrincipalHandoverErr) && /only an active principal/i.test(nonPrincipalHandoverErr.message), nonPrincipalHandoverErr?.message);
 
     console.log(`-- item 7: cannot hand over to someone who is not staff at that institution --`);
     // principalOtherId, not a dedicated otherStaff account -- it's a
     // genuine, active, approved staff member of a DIFFERENT institution,
     // which is all X7 actually needs.
-    const { error: notStaffHereErr } = await principalA1.rpc("hand_over_principal", { p_successor_user_id: principalOtherId, p_outcome: "leaving", p_staying_role: null, p_reason: "Attempting to hand over to a stranger to this school." });
+    const { error: notStaffHereErr } = await principalA1.rpc("hand_over_principal", { p_institution_id: institutionXLeavingId, p_successor_user_id: principalOtherId, p_outcome: "leaving", p_staying_role: null, p_reason: "Attempting to hand over to a stranger to this school." });
     record("X7: cannot hand over to someone active at a DIFFERENT institution", Boolean(notStaffHereErr) && /active staff member at this institution/i.test(notStaffHereErr.message), notStaffHereErr?.message);
 
     console.log(`-- item 8 (+ item 11, atomicity): cannot hand over to a deactivated staff member, and nothing persists from the attempt --`);
-    const { error: deactivatedSuccessorErr } = await principalA1.rpc("hand_over_principal", { p_successor_user_id: deactivatedCandidateId, p_outcome: "leaving", p_staying_role: null, p_reason: "Attempting to hand over to someone deactivated." });
+    const { error: deactivatedSuccessorErr } = await principalA1.rpc("hand_over_principal", { p_institution_id: institutionXLeavingId, p_successor_user_id: deactivatedCandidateId, p_outcome: "leaving", p_staying_role: null, p_reason: "Attempting to hand over to someone deactivated." });
     record("X8: cannot hand over to a deactivated staff member", Boolean(deactivatedSuccessorErr) && /active staff member at this institution/i.test(deactivatedSuccessorErr.message), deactivatedSuccessorErr?.message);
 
     const { data: x11HandoverRows } = await admin.from("principal_handovers").select("id").eq("institution_id", institutionXLeavingId);
@@ -4241,17 +4241,17 @@ async function main() {
     );
 
     console.log(`-- item 9: cannot hand over to yourself --`);
-    const { error: selfHandoverErr } = await principalA1.rpc("hand_over_principal", { p_successor_user_id: principalA1Id, p_outcome: "leaving", p_staying_role: null, p_reason: "Attempting to hand over to myself." });
+    const { error: selfHandoverErr } = await principalA1.rpc("hand_over_principal", { p_institution_id: institutionXLeavingId, p_successor_user_id: principalA1Id, p_outcome: "leaving", p_staying_role: null, p_reason: "Attempting to hand over to myself." });
     record("X9: cannot hand over to yourself", Boolean(selfHandoverErr) && /cannot hand over.*to yourself/i.test(selfHandoverErr.message), selfHandoverErr?.message);
 
     console.log(`-- item 10: reason is required --`);
-    const { error: emptyReasonHandoverErr } = await principalA1.rpc("hand_over_principal", { p_successor_user_id: successorAId, p_outcome: "leaving", p_staying_role: null, p_reason: "" });
+    const { error: emptyReasonHandoverErr } = await principalA1.rpc("hand_over_principal", { p_institution_id: institutionXLeavingId, p_successor_user_id: successorAId, p_outcome: "leaving", p_staying_role: null, p_reason: "" });
     record("X10a: empty reason refused", Boolean(emptyReasonHandoverErr) && /reason is required/i.test(emptyReasonHandoverErr.message), emptyReasonHandoverErr?.message);
-    const { error: nullReasonHandoverErr } = await principalA1.rpc("hand_over_principal", { p_successor_user_id: successorAId, p_outcome: "leaving", p_staying_role: null, p_reason: null });
+    const { error: nullReasonHandoverErr } = await principalA1.rpc("hand_over_principal", { p_institution_id: institutionXLeavingId, p_successor_user_id: successorAId, p_outcome: "leaving", p_staying_role: null, p_reason: null });
     record("X10b: null reason refused", Boolean(nullReasonHandoverErr) && /reason is required/i.test(nullReasonHandoverErr.message), nullReasonHandoverErr?.message);
 
     console.log(`-- input-shape guards beyond the prompt's own 14 -- found while writing the SQL, worth proving directly --`);
-    const { error: badOutcomeErr } = await principalA1.rpc("hand_over_principal", { p_successor_user_id: successorAId, p_outcome: "retiring", p_staying_role: null, p_reason: "Bad outcome value." });
+    const { error: badOutcomeErr } = await principalA1.rpc("hand_over_principal", { p_institution_id: institutionXLeavingId, p_successor_user_id: successorAId, p_outcome: "retiring", p_staying_role: null, p_reason: "Bad outcome value." });
     record("X-bonus: an outcome other than 'leaving'/'staying' is refused", Boolean(badOutcomeErr) && /outcome must be/i.test(badOutcomeErr.message), badOutcomeErr?.message);
     // PRD 5 Stage 2 (0204) made the valid staying-role set type-aware
     // (school: class_teacher/sna; clinic: three values) and built the
@@ -4263,11 +4263,11 @@ async function main() {
     // updated to check for the actual role names rather than the exact
     // glue word between them -- the fix is here, not in the function,
     // since the new message is the better one.
-    const { error: badStayingRoleErr } = await principalA1.rpc("hand_over_principal", { p_successor_user_id: successorAId, p_outcome: "staying", p_staying_role: "principal", p_reason: "Bad staying role value." });
+    const { error: badStayingRoleErr } = await principalA1.rpc("hand_over_principal", { p_institution_id: institutionXLeavingId, p_successor_user_id: successorAId, p_outcome: "staying", p_staying_role: "principal", p_reason: "Bad staying role value." });
     record("X-bonus: outcome='staying' with an invalid staying role (e.g. 'principal') is refused", Boolean(badStayingRoleErr) && /class_teacher/i.test(badStayingRoleErr.message) && /sna/i.test(badStayingRoleErr.message), badStayingRoleErr?.message);
-    const { error: nullStayingRoleErr } = await principalA1.rpc("hand_over_principal", { p_successor_user_id: successorAId, p_outcome: "staying", p_staying_role: null, p_reason: "Null staying role -- the three-valued-logic bug this guard was rewritten to avoid." });
+    const { error: nullStayingRoleErr } = await principalA1.rpc("hand_over_principal", { p_institution_id: institutionXLeavingId, p_successor_user_id: successorAId, p_outcome: "staying", p_staying_role: null, p_reason: "Null staying role -- the three-valued-logic bug this guard was rewritten to avoid." });
     record("X-bonus: outcome='staying' with p_staying_role NULL is refused, not silently waved through by SQL's three-valued logic", Boolean(nullStayingRoleErr) && /class_teacher/i.test(nullStayingRoleErr.message) && /sna/i.test(nullStayingRoleErr.message), nullStayingRoleErr?.message);
-    const { error: contradictoryStayingRoleErr } = await principalA1.rpc("hand_over_principal", { p_successor_user_id: successorAId, p_outcome: "leaving", p_staying_role: "class_teacher", p_reason: "Providing a staying role while leaving." });
+    const { error: contradictoryStayingRoleErr } = await principalA1.rpc("hand_over_principal", { p_institution_id: institutionXLeavingId, p_successor_user_id: successorAId, p_outcome: "leaving", p_staying_role: "class_teacher", p_reason: "Providing a staying role while leaving." });
     record("X-bonus: a staying role provided alongside outcome='leaving' is refused as contradictory input", Boolean(contradictoryStayingRoleErr) && /must not be provided/i.test(contradictoryStayingRoleErr.message), contradictoryStayingRoleErr?.message);
 
     console.log(`-- seeding successorA's OWN auth claim with GoTrue's real keys before the real handover -- provider, providers, AND an arbitrary extra key, deliberately, so the "other keys survive" proof below is adversarial, not a fixture that happens to only have 'role' to begin with --`);
@@ -4279,7 +4279,7 @@ async function main() {
 
     console.log(`-- THE REAL HANDOVER, outcome='leaving' --`);
     const { data: handoverLeavingResult, error: handoverLeavingErr } = await principalA1.rpc("hand_over_principal", {
-      p_successor_user_id: successorAId, p_outcome: "leaving", p_staying_role: null, p_reason: "Retiring from the school.",
+      p_institution_id: institutionXLeavingId, p_successor_user_id: successorAId, p_outcome: "leaving", p_staying_role: null, p_reason: "Retiring from the school.",
     });
     record("X-leaving: hand_over_principal() succeeds for a genuinely eligible caller/successor pair", !handoverLeavingErr, handoverLeavingErr?.message);
 
@@ -4328,7 +4328,7 @@ async function main() {
     );
 
     console.log(`-- item 6: a deactivated principal cannot call it again --`);
-    const { error: deactivatedPrincipalCallErr } = await principalA1.rpc("hand_over_principal", { p_successor_user_id: extraTeacherLeavingId, p_outcome: "leaving", p_staying_role: null, p_reason: "Attempting again after already handing over." });
+    const { error: deactivatedPrincipalCallErr } = await principalA1.rpc("hand_over_principal", { p_institution_id: institutionXLeavingId, p_successor_user_id: extraTeacherLeavingId, p_outcome: "leaving", p_staying_role: null, p_reason: "Attempting again after already handing over." });
     record("X6: the now-deactivated predecessor (role still 'principal' on their closed row) cannot call hand_over_principal() again", Boolean(deactivatedPrincipalCallErr) && /only an active principal/i.test(deactivatedPrincipalCallErr.message), deactivatedPrincipalCallErr?.message);
 
     console.log(`-- item 13: the new principal can countersign, the old one cannot -- same incident, order matters --`);
@@ -4369,7 +4369,7 @@ async function main() {
 
     console.log(`-- item 2 + item 4b: THE REAL HANDOVER, outcome='staying' --`);
     const { data: handoverStayingResult, error: handoverStayingErr } = await principalA2.rpc("hand_over_principal", {
-      p_successor_user_id: successorBId, p_outcome: "staying", p_staying_role: "class_teacher", p_reason: "Stepping back to focus on teaching.",
+      p_institution_id: institutionXStayingId, p_successor_user_id: successorBId, p_outcome: "staying", p_staying_role: "class_teacher", p_reason: "Stepping back to focus on teaching.",
     });
     record("X-staying: hand_over_principal() succeeds with outcome='staying'", !handoverStayingErr, handoverStayingErr?.message);
 
@@ -11809,7 +11809,7 @@ async function main() {
     // get_institution_incidents()'s own weaker gate actually does
     // something, not just decoration. ====
     const { error: handoverErr } = await principalCCC.rpc("hand_over_principal", {
-      p_successor_user_id: teacherCCCId, p_outcome: "leaving", p_staying_role: null, p_reason: "CCC test handover.",
+      p_institution_id: institutionCCCId, p_successor_user_id: teacherCCCId, p_outcome: "leaving", p_staying_role: null, p_reason: "CCC test handover.",
     });
     if (handoverErr) throw handoverErr;
 
@@ -14058,6 +14058,201 @@ async function main() {
 
     await admin.from("clinicians").delete().eq("user_id", clinicianSSSId);
     await admin.auth.admin.deleteUser(clinicianSSSId);
+  }
+
+  console.log(`\n== CHECK TTT: the unordered-SELECT-INTO-against-institution_staff pattern, enumerated -- CLAUDE.md's own "AN UNORDERED SELECT INTO..." entry. Four real instances of this shape have been found by accident across this build (derive_countersign_fields twice, create_bsp, hand_over_principal, send_message), three fixed in the same pass this check was written for. This does not detect a NEW, unknown instance of the pattern (that would need static analysis of the SQL itself, not a behavioural check) -- it proves each of the three JUST-FIXED functions genuinely resolves the correct row for a real caller who holds more than one qualifying institution_staff row at once, and will catch a regression the same way CHECK X caught 0245 silently reverting 0103's own fix for the fourth instance. Each sub-check gives the caller a real SECOND qualifying row -- a different institution for create_bsp/hand_over_principal, an old deactivated row alongside a new active one for send_message -- and asserts the function picked the CORRECT one, not an arbitrary one. ==`);
+  if (shouldRun("TTT")) {
+    const rand = () => Math.floor(Math.random() * 100000);
+
+    // -------------------------------------------------------------------
+    // TTT-A -- create_bsp(): a clinician on staff at TWO clinics,
+    // engaged via clinician_access to a specific child at only ONE of
+    // them. institution_id must resolve to the clinic that actually
+    // engaged this clinician for THIS child, never an arbitrary one of
+    // the clinician's own memberships.
+    // -------------------------------------------------------------------
+    const { data: clinicTTTA } = await admin.from("institutions").insert({ name: "TTT Clinic A", institution_code: "TTTCLINICA" + rand(), status: "verified", type: "clinic" }).select("id").single();
+    const { data: clinicTTTB } = await admin.from("institutions").insert({ name: "TTT Clinic B", institution_code: "TTTCLINICB" + rand(), status: "verified", type: "clinic" }).select("id").single();
+    const { data: schoolTTT } = await admin.from("institutions").insert({ name: "TTT School", institution_code: "TTTSCHOOL" + rand(), status: "verified", type: "school" }).select("id").single();
+
+    const directorATTTId = await createUser("ttt.directora@thebehaviourhive.com", "TTT Director A", "principal");
+    const directorBTTTId = await createUser("ttt.directorb@thebehaviourhive.com", "TTT Director B", "principal");
+    const schoolPrincipalTTTId = await createUser("ttt.schoolprincipal@thebehaviourhive.com", "TTT School Principal", "principal");
+    const clinicianTTTId = await createUser("ttt.clinician@thebehaviourhive.com", "TTT Dual Clinic Clinician", "clinician");
+
+    await admin.from("institution_staff").insert({ institution_id: clinicTTTA.id, user_id: directorATTTId, role: "principal", approved_at: new Date().toISOString(), approval_source: "bootstrap" });
+    await admin.from("institution_staff").insert({ institution_id: clinicTTTB.id, user_id: directorBTTTId, role: "principal", approved_at: new Date().toISOString(), approval_source: "bootstrap" });
+    await admin.from("institution_staff").insert({ institution_id: schoolTTT.id, user_id: schoolPrincipalTTTId, role: "principal", approved_at: new Date().toISOString(), approval_source: "bootstrap" });
+
+    const directorATTT = await signedInClient("ttt.directora@thebehaviourhive.com");
+    const directorBTTT = await signedInClient("ttt.directorb@thebehaviourhive.com");
+    const schoolPrincipalTTT = await signedInClient("ttt.schoolprincipal@thebehaviourhive.com");
+    const clinicianTTT = await signedInClient("ttt.clinician@thebehaviourhive.com");
+
+    // The clinician joins and is approved at BOTH clinics -- the real
+    // self-link + approve_staff_join() flow, same as any real multi-
+    // clinic practitioner, not a shortcut. Joined at Clinic A FIRST --
+    // the exact ordering that made the old, unfixed create_bsp() pick
+    // Clinic A regardless of which clinic actually engaged the clinician
+    // for the child in question.
+    await clinicianTTT.from("institution_staff").insert({ institution_id: clinicTTTA.id, user_id: clinicianTTTId, role: "clinician" });
+    {
+      const { data: staffRow } = await admin.from("institution_staff").select("id").eq("institution_id", clinicTTTA.id).eq("user_id", clinicianTTTId).single();
+      const { error } = await directorATTT.rpc("approve_staff_join", { p_institution_staff_id: staffRow.id });
+      if (error) throw error;
+    }
+    await clinicianTTT.from("institution_staff").insert({ institution_id: clinicTTTB.id, user_id: clinicianTTTId, role: "clinician" });
+    {
+      const { data: staffRow } = await admin.from("institution_staff").select("id").eq("institution_id", clinicTTTB.id).eq("user_id", clinicianTTTId).single();
+      const { error } = await directorBTTT.rpc("approve_staff_join", { p_institution_staff_id: staffRow.id });
+      if (error) throw error;
+    }
+
+    const { data: passportTTT, error: passportTTTErr } = await schoolPrincipalTTT.rpc("create_school_passport", { p_institution_id: schoolTTT.id, p_child_name: "TTT Dual Clinic Child" });
+    if (passportTTTErr) throw passportTTTErr;
+    await admin.from("passport_institution_links").insert({ passport_id: passportTTT, institution_id: clinicTTTB.id, approved_by_parent: true });
+    await admin.from("episodes_of_care").insert({ passport_id: passportTTT, institution_id: clinicTTTB.id, started_by: directorBTTTId });
+    {
+      const { data, error } = await directorBTTT.rpc("bulk_grant_clinician_access", { p_institution_id: clinicTTTB.id, p_passport_ids: [passportTTT], p_roster_user_id: clinicianTTTId });
+      if (error) throw error;
+      if (data?.[0]?.status !== "granted") throw new Error(`bulk_grant_clinician_access did not grant: ${JSON.stringify(data)}`);
+    }
+
+    const { data: bspTTTId, error: bspTTTErr } = await clinicianTTT.rpc("create_bsp", { p_passport_id: passportTTT, p_source_fba_id: null });
+    record("TTT-A1 create_bsp() succeeds for a clinician who is staff at TWO clinics", !bspTTTErr, bspTTTErr?.message);
+    if (bspTTTId) {
+      const { data: bspRow } = await admin.from("bsp").select("institution_id").eq("id", bspTTTId).single();
+      record(
+        "TTT-A2 institution_id resolves to Clinic B (the clinic that actually engaged this clinician for THIS child) -- Clinic A was joined first and would have won under the old, unscoped query",
+        bspRow?.institution_id === clinicTTTB.id,
+        JSON.stringify({ resolved: bspRow?.institution_id, expectedB: clinicTTTB.id, wrongA: clinicTTTA.id })
+      );
+    }
+
+    // -------------------------------------------------------------------
+    // TTT-B -- hand_over_principal(): one person, active and approved as
+    // principal at TWO different institutions AT ONCE. Handing over one
+    // must never touch the other -- proven both directions on the same
+    // dual-principal person.
+    // -------------------------------------------------------------------
+    const { data: instTTTX } = await admin.from("institutions").insert({ name: "TTT Institution X", institution_code: "TTTINSTX" + rand(), status: "verified", type: "school" }).select("id").single();
+    const { data: instTTTY } = await admin.from("institutions").insert({ name: "TTT Institution Y", institution_code: "TTTINSTY" + rand(), status: "verified", type: "school" }).select("id").single();
+
+    const dualPrincipalTTTId = await createUser("ttt.dualprincipal@thebehaviourhive.com", "TTT Dual Principal", "principal");
+    const successorXTTTId = await createUser("ttt.successorx@thebehaviourhive.com", "TTT Successor X", "class_teacher");
+    const successorYTTTId = await createUser("ttt.successory@thebehaviourhive.com", "TTT Successor Y", "class_teacher");
+
+    // The adversarial precondition itself: active, approved principal at
+    // BOTH institutions simultaneously -- confirmed in recon as a state
+    // this schema's own constraints permit (institution_staff_one_
+    // principal_per_institution is scoped to ONE institution_id, not
+    // global).
+    const { data: predecessorXStaff } = await admin.from("institution_staff").insert({ institution_id: instTTTX.id, user_id: dualPrincipalTTTId, role: "principal", approved_at: new Date().toISOString(), approval_source: "bootstrap" }).select("id").single();
+    const { data: predecessorYStaff } = await admin.from("institution_staff").insert({ institution_id: instTTTY.id, user_id: dualPrincipalTTTId, role: "principal", approved_at: new Date().toISOString(), approval_source: "bootstrap" }).select("id").single();
+    await admin.from("institution_staff").insert({ institution_id: instTTTX.id, user_id: successorXTTTId, role: "class_teacher", approved_at: new Date().toISOString(), approval_source: "bootstrap" });
+    await admin.from("institution_staff").insert({ institution_id: instTTTY.id, user_id: successorYTTTId, role: "class_teacher", approved_at: new Date().toISOString(), approval_source: "bootstrap" });
+
+    const dualPrincipalTTT = await signedInClient("ttt.dualprincipal@thebehaviourhive.com");
+
+    const { data: handoverXResult, error: handoverXErr } = await dualPrincipalTTT.rpc("hand_over_principal", {
+      p_institution_id: instTTTX.id, p_successor_user_id: successorXTTTId, p_outcome: "leaving", p_staying_role: null, p_reason: "TTT-B: handing over X specifically.",
+    });
+    record("TTT-B1 hand_over_principal() succeeds, explicit p_institution_id = X", !handoverXErr, handoverXErr?.message);
+
+    const { data: xPredecessorAfter } = await admin.from("institution_staff").select("deactivated_at").eq("id", predecessorXStaff.id).single();
+    record("TTT-B2 the predecessor's OWN row at X is deactivated", xPredecessorAfter?.deactivated_at !== null, xPredecessorAfter);
+
+    const { data: yPredecessorUnaffected } = await admin.from("institution_staff").select("deactivated_at, role").eq("id", predecessorYStaff.id).single();
+    record(
+      "TTT-B3 THE POINT OF THIS CHECK: the SAME person's own principal row at Y is COMPLETELY UNAFFECTED by handing over X -- the old, unscoped query could have picked Y instead of X here",
+      yPredecessorUnaffected?.deactivated_at === null && yPredecessorUnaffected?.role === "principal",
+      yPredecessorUnaffected
+    );
+
+    const { data: xNewPrincipal } = await admin.from("institution_staff").select("role, deactivated_at").eq("institution_id", instTTTX.id).eq("user_id", successorXTTTId).eq("role", "principal").maybeSingle();
+    record("TTT-B4 the real successor is now principal at X", xNewPrincipal !== null && xNewPrincipal.deactivated_at === null, xNewPrincipal);
+
+    // The other direction, on the same person, proving it wasn't a
+    // one-off ordering coincidence: Y is still theirs to hand over.
+    const { data: handoverYResult, error: handoverYErr } = await dualPrincipalTTT.rpc("hand_over_principal", {
+      p_institution_id: instTTTY.id, p_successor_user_id: successorYTTTId, p_outcome: "leaving", p_staying_role: null, p_reason: "TTT-B: now handing over Y too.",
+    });
+    record("TTT-B5 the SAME person can still hand over Y afterward, explicitly, correctly -- proves both directions, not just one lucky pick", !handoverYErr, handoverYErr?.message);
+
+    const { data: yNewPrincipal } = await admin.from("institution_staff").select("role, deactivated_at").eq("institution_id", instTTTY.id).eq("user_id", successorYTTTId).eq("role", "principal").maybeSingle();
+    record("TTT-B6 the real successor at Y is now principal there", yNewPrincipal !== null && yNewPrincipal.deactivated_at === null, yNewPrincipal);
+
+    // -------------------------------------------------------------------
+    // TTT-C -- send_message(): one person, an OLD deactivated
+    // institution_staff row (class_teacher) plus a NEW active row with a
+    // DIFFERENT role (principal) at the SAME institution -- the real
+    // rejoin shape 0103/0256's own derive_countersign_fields fix already
+    // proved matters. sender_role must reflect the CURRENT row, and it
+    // is permanently written into messages.sender_role as attribution.
+    // -------------------------------------------------------------------
+    const { data: instTTTC } = await admin.from("institutions").insert({ name: "TTT Institution C", institution_code: "TTTINSTC" + rand(), status: "verified", type: "school" }).select("id").single();
+    const rejoinedTTTId = await createUser("ttt.rejoined@thebehaviourhive.com", "TTT Rejoined Staff", "principal");
+    const recipientTTTId = await createUser("ttt.recipient@thebehaviourhive.com", "TTT Recipient", "class_teacher");
+
+    // Old row: class_teacher, since deactivated (left).
+    await admin.from("institution_staff").insert({
+      institution_id: instTTTC.id, user_id: rejoinedTTTId, role: "class_teacher",
+      approved_at: new Date(Date.now() - 86400000 * 30).toISOString(), approval_source: "bootstrap",
+      deactivated_at: new Date(Date.now() - 86400000 * 10).toISOString(), deactivation_reason: "TTT fixture: left.",
+    });
+    // New row: rejoined as principal, currently active.
+    await admin.from("institution_staff").insert({ institution_id: instTTTC.id, user_id: rejoinedTTTId, role: "principal", approved_at: new Date().toISOString(), approval_source: "bootstrap" });
+    await admin.from("institution_staff").insert({ institution_id: instTTTC.id, user_id: recipientTTTId, role: "class_teacher", approved_at: new Date().toISOString(), approval_source: "bootstrap" });
+
+    const rejoinedTTT = await signedInClient("ttt.rejoined@thebehaviourhive.com");
+
+    // The real client's own query shape (useMessageCategories.ts) --
+    // explicit applies_to filter, ordered -- not the unordered-fixture
+    // mistake CLAUDE.md's own EEE4a entry already warns about.
+    const { data: categoryTTT } = await admin.from("message_categories").select("id").eq("applies_to", "staff").eq("is_active", true).order("sort_order").limit(1).single();
+
+    const { data: messageTTTId, error: messageTTTErr } = await rejoinedTTT.rpc("send_message", {
+      p_passport_id: null, p_category_id: categoryTTT.id, p_body: "TTT-C test message.", p_response_required: false,
+      p_recipient_ids: [recipientTTTId], p_institution_id: instTTTC.id,
+    });
+    record("TTT-C1 send_message() succeeds for a rejoined staff member (old deactivated row + new active row, same institution)", !messageTTTErr, messageTTTErr?.message);
+
+    if (messageTTTId) {
+      const { data: messageRow } = await admin.from("messages").select("sender_role").eq("id", messageTTTId).single();
+      record(
+        "TTT-C2 THE POINT OF THIS CHECK: sender_role stamped on the message is 'principal' (the CURRENT active row), never 'class_teacher' (the stale, deactivated one) -- and this is permanent attribution, not just a gate",
+        messageRow?.sender_role === "principal",
+        messageRow
+      );
+    }
+
+    console.log("TTT summary complete.");
+
+    // -------------------------------------------------------------------
+    // Teardown -- everything this check created.
+    // -------------------------------------------------------------------
+    await admin.from("bsp_strategies").delete().in("bsp_id", (await admin.from("bsp").select("id").eq("passport_id", passportTTT)).data?.map((b) => b.id) ?? []);
+    await admin.from("bsp").delete().eq("passport_id", passportTTT);
+    await admin.from("clinician_access").delete().eq("passport_id", passportTTT);
+    await admin.from("episodes_of_care").delete().eq("passport_id", passportTTT);
+    await admin.from("passport_institution_links").delete().eq("passport_id", passportTTT);
+    await admin.from("passports").delete().eq("id", passportTTT);
+
+    await admin.from("messages").delete().eq("institution_id", instTTTC.id);
+
+    for (const instId of [clinicTTTA.id, clinicTTTB.id, schoolTTT.id, instTTTX.id, instTTTY.id, instTTTC.id]) {
+      await admin.from("principal_handovers").delete().eq("institution_id", instId);
+      await admin.from("institution_staff").delete().eq("institution_id", instId);
+      await admin.from("institutions").delete().eq("id", instId);
+    }
+    for (const id of [
+      directorATTTId, directorBTTTId, schoolPrincipalTTTId, clinicianTTTId,
+      dualPrincipalTTTId, successorXTTTId, successorYTTTId,
+      rejoinedTTTId, recipientTTTId,
+    ]) {
+      await admin.from("clinicians").delete().eq("user_id", id);
+      await admin.auth.admin.deleteUser(id);
+    }
   }
 
   console.log(`\n== Summary ==`);
