@@ -3,11 +3,11 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { BrandMark } from "@/components/ui/BrandMark";
-import { usePrincipalSupportAlert } from "@/components/principal/PrincipalSupportAlertProvider";
+import { usePrincipalSupportAlert, usePrincipalInstitutionType } from "@/components/principal/PrincipalSupportAlertProvider";
 import { useMessagesAwaitingActionCount } from "@/hooks/useMessagesAwaitingActionCount";
 import { useHasUnreadMessages } from "@/hooks/useHasUnreadMessages";
 import { CountBadge } from "@/components/ui/CountBadge";
-import { PRINCIPAL_NAV_TABS } from "./principalNavTabs";
+import { getPrincipalNavTabs } from "./principalNavTabs";
 
 // PRD 4, Stage 1 -- the principal track's first responsive breakpoint,
 // and this app's first anywhere: recon for this stage found zero
@@ -45,6 +45,14 @@ export function PrincipalSidebar() {
   const messagesAwaitingCount = useMessagesAwaitingActionCount(userId);
   const hasUnreadMessages = useHasUnreadMessages(userId);
 
+  // Clinical director's dashboard, Step 0 recon -- the nav's own
+  // destinations now depend on institution type (see
+  // principalNavTabs.ts's own header). Defaults to the school set while
+  // this resolves, matching useInstitutionType's own established
+  // default-while-loading convention used everywhere else in this app.
+  const { institutionType } = usePrincipalInstitutionType();
+  const navTabs = getPrincipalNavTabs(institutionType);
+
   return (
     <aside className="hidden lg:fixed lg:inset-y-0 lg:left-0 lg:z-10 lg:flex lg:w-64 lg:flex-col lg:border-r lg:border-black/5 lg:bg-brand-off-white lg:px-4 lg:py-6">
       <div className="flex items-center gap-2 px-2 pb-6">
@@ -57,7 +65,7 @@ export function PrincipalSidebar() {
       {alertSlot && <div className="mb-4 rounded-2xl bg-brand-support-red px-3 py-2.5">{alertSlot}</div>}
 
       <nav className="flex flex-col gap-1">
-        {PRINCIPAL_NAV_TABS.map((tab) => {
+        {navTabs.map((tab) => {
           const isActive = tab.isActive(pathname);
           const Icon = tab.icon;
 

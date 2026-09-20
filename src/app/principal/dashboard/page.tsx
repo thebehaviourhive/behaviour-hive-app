@@ -11,6 +11,7 @@ import { PrincipalBottomNav } from "@/components/principal/PrincipalBottomNav";
 import { ReviewStaffJoinSheet } from "@/components/principal/ReviewStaffJoinSheet";
 import { MarkSupportAlertFollowedUpSheet } from "@/components/principal/MarkSupportAlertFollowedUpSheet";
 import { PrincipalActivityCard } from "@/components/principal/PrincipalActivityCard";
+import { ClinicDirectorDashboard } from "@/components/principal/ClinicDirectorDashboard";
 import { useInstitutionType } from "@/hooks/useInstitutionType";
 import { IncidentCard, type InstitutionIncidentRow } from "@/components/principal/IncidentCard";
 import { WorkQueueRow } from "@/components/shared/WorkQueueRow";
@@ -211,7 +212,7 @@ export default function PrincipalDashboardPage() {
     // reachable rather than need a second pass then.
     const { data: staffRow, error: staffError } = await supabase
       .from("institution_staff")
-      .select("institution_id, institutions(name)")
+      .select("institution_id, institutions(name, type)")
       .eq("user_id", user.id)
       .eq("role", "principal")
       .is("deactivated_at", null)
@@ -247,10 +248,27 @@ export default function PrincipalDashboardPage() {
       return;
     }
 
-    const institutionRecord = staffRow.institutions as unknown as { name: string } | { name: string }[] | null;
-    const name = Array.isArray(institutionRecord) ? institutionRecord[0]?.name : institutionRecord?.name;
-    setInstitutionName(name ?? null);
+    const institutionRecord = staffRow.institutions as unknown as
+      | { name: string; type: string }
+      | { name: string; type: string }[]
+      | null;
+    const record = Array.isArray(institutionRecord) ? institutionRecord[0] : institutionRecord;
+    setInstitutionName(record?.name ?? null);
     setInstitutionId(staffRow.institution_id);
+
+    // Clinical director's dashboard, Step 0 recon: every RPC below this
+    // point is incident/class-shaped and can never be true for a
+    // clinic (create_incident_stamp() has required class-teacher/SNA
+    // access since migration 0069) -- firing all nine anyway would just
+    // be wasted network activity, since ClinicDirectorDashboard is what
+    // actually renders once institutionType (below, via
+    // useInstitutionType) resolves to 'clinic'. Checked directly off
+    // this same query's own institutions.type, not the hook's async
+    // state, which wouldn't have caught up yet inside this function.
+    if (record?.type === "clinic") {
+      setIsLoading(false);
+      return;
+    }
 
     // PRD 1, Stage 3: lazy materialization, best-effort. Its own
     // failure is never allowed to block the page from loading incidents
@@ -364,6 +382,21 @@ export default function PrincipalDashboardPage() {
 
   if (!isReady) {
     return null;
+  }
+
+  // Clinical director's dashboard, Step 0 recon. Everything below this
+  // point (the eight incident/class-derived buckets, the full incident
+  // list) is the SCHOOL dashboard, entirely unchanged -- left untouched
+  // rather than refactored, since none of it needed to change, only to
+  // not run for a clinic. institutionType defaults to "school" while it
+  // resolves (useInstitutionType's own established convention), so a
+  // real clinic director briefly sees this branch evaluate false before
+  // self-correcting -- the same accepted tradeoff this page's own
+  // vocabulary-swapping already relies on.
+  if (institutionType === "clinic") {
+    return institutionId ? (
+      <ClinicDirectorDashboard institutionId={institutionId} institutionName={institutionName} />
+    ) : null;
   }
 
   const awaitingSignoff = incidents.filter((i) => i.teacher_signed_at && !i.countersigned_at);

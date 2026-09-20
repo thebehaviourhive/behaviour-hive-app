@@ -1,17 +1,29 @@
-import { House, Mail, TriangleAlert, Users, School as SchoolIcon } from "lucide-react";
+import { House, Mail, TriangleAlert, Users, School as SchoolIcon, Stethoscope } from "lucide-react";
 import type { NavTab } from "@/components/ui/AppBottomNav";
+import type { InstitutionType } from "@/lib/institutionType";
 
-// PRD 4, Stage 1 -- the one place the principal track's four top-level
+// PRD 4, Stage 1 -- the one place the principal track's top-level
 // destinations are defined. PrincipalBottomNav (375px) and
 // PrincipalSidebar (1280px, new this stage) both import this instead
-// of each hardcoding their own copy of the same four hrefs and
-// isActive matchers -- Stage 1's own recon found back-chevrons and a
+// of each hardcoding their own copy of the same hrefs and isActive
+// matchers -- Stage 1's own recon found back-chevrons and a
 // landing-route hardcoded in more than one place already (CLAUDE.md);
-// a second nav surface duplicating these four by hand would be that
-// same pattern again. Content and matchers unchanged from
-// PrincipalBottomNav's own pre-Stage-1 definition -- lifted out, not
-// altered.
-export const PRINCIPAL_NAV_TABS: NavTab[] = [
+// a second nav surface duplicating these by hand would be that same
+// pattern again.
+//
+// Clinical director's dashboard, Step 0 recon (Sept 2026): this used to
+// be one flat, institution-type-agnostic array. Daniel's own framing --
+// "the vocabulary translation handles labels, not destinations" -- is
+// why that was wrong, not just incomplete: Incidents is not a concept a
+// clinic can ever produce (create_incident_stamp() has required
+// class-teacher/SNA access since 0069; a clinic institution will show
+// "no incidents," forever, for real), and School's own settings
+// (temporary cover start/cutoff time, incident locations) are
+// school-day concepts with no clinic meaning at all. Two genuinely
+// different destination sets now, not one set with relabelled tiles --
+// the first time this file needs an institution type as an input,
+// rather than a page one level down handling it alone.
+export const PRINCIPAL_NAV_TABS_SCHOOL: NavTab[] = [
   {
     key: "dashboard",
     label: "Dashboard",
@@ -59,3 +71,44 @@ export const PRINCIPAL_NAV_TABS: NavTab[] = [
     isActive: (pathname) => pathname.startsWith("/principal/messages"),
   },
 ];
+
+// Four items, not five: Incidents is dropped entirely -- not reduced,
+// not shown empty, absent. "Clinic" replaces "School" as the settings
+// destination -- institution code, clinic-wide scheduling settings
+// (PRD 9's set_clinic_hours/set_booking_buffer_minutes/set_booking_
+// window_days, which had working RPCs and no UI home anywhere until
+// this), and account administration.
+export const PRINCIPAL_NAV_TABS_CLINIC: NavTab[] = [
+  {
+    key: "dashboard",
+    label: "Dashboard",
+    icon: House,
+    href: "/principal/dashboard",
+    isActive: (pathname) => pathname === "/principal/dashboard",
+  },
+  {
+    key: "directory",
+    label: "Directory",
+    icon: Users,
+    href: "/principal/directory",
+    isActive: (pathname) => pathname.startsWith("/principal/directory") || pathname.startsWith("/principal/passports"),
+  },
+  {
+    key: "clinic",
+    label: "Clinic",
+    icon: Stethoscope,
+    href: "/principal/clinic",
+    isActive: (pathname) => pathname.startsWith("/principal/clinic"),
+  },
+  {
+    key: "messages",
+    label: "Messages",
+    icon: Mail,
+    href: "/principal/messages",
+    isActive: (pathname) => pathname.startsWith("/principal/messages"),
+  },
+];
+
+export function getPrincipalNavTabs(institutionType: InstitutionType): NavTab[] {
+  return institutionType === "clinic" ? PRINCIPAL_NAV_TABS_CLINIC : PRINCIPAL_NAV_TABS_SCHOOL;
+}

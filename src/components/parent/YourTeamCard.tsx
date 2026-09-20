@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { PeopleIcon } from "@/components/ui/icons";
@@ -47,6 +48,15 @@ export function YourTeamCard({ passportId }: { passportId: string | null }) {
   const [error, setError] = useState<string | null>(null);
   const isLoading = isFetching && passportId !== null;
   const { institutionType, overrides } = usePassportInstitutionVocabulary(passportId);
+  // PRD 9, Stage 2 -- which team members are actually bookable. A
+  // second, small get_passport_clinicians() call, since get_passport_
+  // team() doesn't return engaged_by at all (it mixes school staff and
+  // clinicians into one generic "role" list) -- the contextual "Book"
+  // button, per Daniel's own instruction, is worth having precisely
+  // because a parent looking at their clinician's name is exactly when
+  // the thought happens; it only makes sense for engaged_by ===
+  // 'institution' (PRD 9 section 4), never a parent-engaged one.
+  const [bookableClinicianIds, setBookableClinicianIds] = useState<Set<string>>(new Set());
 
   const load = useCallback(async () => {
     if (!passportId) return;
@@ -72,6 +82,15 @@ export function YourTeamCard({ passportId }: { passportId: string | null }) {
     );
     setMembers(sortTeam(rows));
     setIsFetching(false);
+
+    const { data: clinicianRows } = await supabase.rpc("get_passport_clinicians", { p_passport_id: passportId });
+    setBookableClinicianIds(
+      new Set(
+        ((clinicianRows ?? []) as { clinician_id: string; engaged_by: string }[])
+          .filter((row) => row.engaged_by === "institution")
+          .map((row) => row.clinician_id)
+      )
+    );
   }, [passportId]);
 
   // Fetches on mount and whenever `load`'s identity changes -- a genuine
@@ -117,24 +136,34 @@ export function YourTeamCard({ passportId }: { passportId: string | null }) {
           {visibleMembers.map((member) => (
             <div
               key={member.teacherId}
-              className="flex items-center gap-4 border-b border-brand-off-white/50 py-3 last:border-0"
+              className="flex items-center justify-between gap-4 border-b border-brand-off-white/50 py-3 last:border-0"
             >
-              <span className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-brand-pastel-blue/40 font-heading text-lg font-bold text-brand-prussian-blue">
-                {getInitials(member.fullName)}
-              </span>
-              <div>
-                <p className="font-sans text-base font-bold text-brand-neutral-black">
-                  {member.fullName}
-                </p>
-                <span
-                  className={`mt-1 inline-block w-max rounded-full px-2 py-0.5 font-accent text-[10px] font-bold uppercase tracking-wide ${
-                    ROLE_STYLE[member.role] ??
-                    "bg-brand-pastel-blue/20 text-brand-prussian-blue"
-                  }`}
-                >
-                  <RoleLabel role={member.role} institutionType={institutionType} overrides={overrides} />
+              <div className="flex items-center gap-4">
+                <span className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-brand-pastel-blue/40 font-heading text-lg font-bold text-brand-prussian-blue">
+                  {getInitials(member.fullName)}
                 </span>
+                <div>
+                  <p className="font-sans text-base font-bold text-brand-neutral-black">
+                    {member.fullName}
+                  </p>
+                  <span
+                    className={`mt-1 inline-block w-max rounded-full px-2 py-0.5 font-accent text-[10px] font-bold uppercase tracking-wide ${
+                      ROLE_STYLE[member.role] ??
+                      "bg-brand-pastel-blue/20 text-brand-prussian-blue"
+                    }`}
+                  >
+                    <RoleLabel role={member.role} institutionType={institutionType} overrides={overrides} />
+                  </span>
+                </div>
               </div>
+              {bookableClinicianIds.has(member.teacherId) && (
+                <Link
+                  href={`/passport/book?clinicianId=${member.teacherId}`}
+                  className="flex-shrink-0 rounded-full border border-brand-prussian-blue px-3 py-1.5 font-sans text-xs font-bold text-brand-prussian-blue"
+                >
+                  Book
+                </Link>
+              )}
             </div>
           ))}
 

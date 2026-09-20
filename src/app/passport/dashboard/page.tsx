@@ -12,6 +12,7 @@ import { ABCLogger } from "@/components/abc-logger/ABCLogger";
 import { ABCTimeline } from "@/components/abc-logger/ABCTimeline";
 import { PassportAccordion } from "@/components/passport/PassportAccordion";
 import { ClinicalTeamSection } from "@/components/passport/clinical-team/ClinicalTeamSection";
+import { BookingHistorySection } from "@/components/passport/BookingHistorySection";
 import { usePassportClinicalContent } from "@/hooks/usePassportClinicalContent";
 import { useStrategyEffectiveness } from "@/hooks/useStrategyEffectiveness";
 import { revalidateParentCalmAccess } from "@/hooks/useParentCalmAccess";
@@ -848,6 +849,13 @@ export default function PassportDashboardPage() {
         </div>
 
         <div aria-hidden className="h-px bg-black/5" />
+
+        {/* Renders nothing (and no divider mismatch) when there's no
+            history yet -- BookingHistorySection returns null itself
+            rather than an empty card, so the single divider above still
+            correctly separates Clinical Team from whatever section
+            follows either way. */}
+        <BookingHistorySection passportId={passportId} />
 
         {/* Fetches "From your Clinical Team" content once, headlessly --
             always mounted once summary is ready (independent of whether

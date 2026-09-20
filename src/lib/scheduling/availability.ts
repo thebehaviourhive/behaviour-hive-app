@@ -4,7 +4,11 @@ import type { BusyInterval } from "@/lib/google/freebusy";
 export type BookableSessionType = "online" | "in_person";
 
 const SESSION_MINUTES = 60;
-const TRAVEL_MINUTES = 30;
+// Exported -- PRD 9, Stage 2's own booking route needs this exact same
+// constant to compute travel-block bounds server-side (never trusting
+// a client-supplied travel window), so both files share one number
+// rather than risking two copies quietly drifting apart.
+export const TRAVEL_MINUTES = 30;
 const SLOT_STEP_MINUTES = 30; // slots offered on a half-hour grid, not only on the hour
 
 export interface AvailabilityInput {
@@ -108,6 +112,25 @@ export function computeAvailableSlots(input: AvailabilityInput): AvailableSlot[]
   }
 
   return slots;
+}
+
+// PRD 9, Stage 2 -- the first-come-first-served re-check at the moment
+// of booking (PRD section 5) needs the EXACT same "is this candidate
+// window clear" logic computeAvailableSlots() already uses internally,
+// applied to one specific window instead of scanned across a whole
+// rolling range. Same buffer-padding rule (applies to every busy block
+// uniformly -- see computeAvailableSlots' own header for why), so a
+// slot the parent was just shown as free and a slot the booking route
+// re-confirms as free can never quietly disagree because the two used
+// different padding.
+export function hasConflict(busyIntervals: BusyInterval[], candidateStartISO: string, candidateEndISO: string, bufferMinutes: number): boolean {
+  const candidateStart = new Date(candidateStartISO);
+  const candidateEnd = new Date(candidateEndISO);
+  return busyIntervals.some((b) => {
+    const paddedStart = addMinutes(new Date(b.start), -bufferMinutes);
+    const paddedEnd = addMinutes(new Date(b.end), bufferMinutes);
+    return isBefore(paddedStart, candidateEnd) && isAfter(paddedEnd, candidateStart);
+  });
 }
 
 function offerSlotsInGap(

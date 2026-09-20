@@ -102,8 +102,8 @@ export function ReviewStaffJoinSheet({
       {mode === "choose" ? (
         <>
           <p className="mt-4 text-sm leading-relaxed text-brand-neutral-black/70">
-            Approving gives them immediate access to this school. Rejecting keeps them out -- they can request again
-            later, and this decision stays on record either way.
+            Approving gives them immediate access to {institutionType === "clinic" ? "your clinic" : "this school"}.
+            Rejecting keeps them out -- they can request again later, and this decision stays on record either way.
           </p>
 
           {submitError && (

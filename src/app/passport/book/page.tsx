@@ -1,0 +1,446 @@
+"use client";
+
+import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
+import { useSearchParams } from "next/navigation";
+import { useRequireRole } from "@/hooks/useRequireRole";
+import { useMyPassport } from "@/hooks/useMyPassport";
+import { createClient } from "@/lib/supabase/client";
+import { CLINICIAN_SPECIALTY_LABEL, type ClinicianSpecialty } from "@/lib/clinicianSpecialties";
+import { Button } from "@/components/ui/Button";
+import { CheckIcon } from "@/components/ui/icons";
+
+// PRD 9, Stage 2 -- the parent-facing booking flow. Lives under
+// /passport/* deliberately, not as a fourth nav tab: this app's own
+// nav is three tabs (Home/Passport/More, BottomNav.tsx), and booking is
+// an action a parent initiates, not a record they review -- the
+// Home/Passport split this project already established decides that,
+// it doesn't need a new destination. /passport/book is a mild routing
+// hack, worth saying plainly rather than leaving someone to wonder why
+// a booking FLOW sits under the RECORD's own route prefix: it's here
+// only so BottomNav's own isActive matcher (pathname.startsWith
+// "/passport")) correctly highlights "Passport" as the active tab
+// while a parent is mid-booking, at zero cost to the nav itself -- no
+// new tab, no new matcher, nothing else changes.
+//
+// Reached two ways, both real: a "Book a Session" tile on Home
+// (QuickActionButtons, no clinicianId -- shows the picker below) or a
+// contextual "Book" button beside a specific clinician's name in
+// YourTeamCard (?clinicianId=... -- skips straight to session type).
+// Both are legitimate, per Daniel's own instruction: the contextual one
+// is free and it's where the thought happens ("I should book"); the
+// tile is there for a parent who starts from intent rather than from
+// looking at a clinician's name.
+//
+// Five steps: clinician (skipped if arriving with one already) -> type
+// -> slot -> policy consent -> confirm. Type chosen before availability
+// is computed (PRD 9 section 3a) -- the API boundary already refuses
+// school_observation; this UI never offers it as an option at all.
+
+interface BookableClinician {
+  clinicianId: string;
+  fullName: string;
+  specialty: string;
+}
+
+interface AvailableSlot {
+  startISO: string;
+  endISO: string;
+}
+
+type SessionType = "online" | "in_person";
+type Step = "clinician" | "type" | "slot" | "consent" | "confirmed";
+
+function groupSlotsByDay(slots: AvailableSlot[]): { dateLabel: string; slots: AvailableSlot[] }[] {
+  const groups = new Map<string, AvailableSlot[]>();
+  for (const slot of slots) {
+    const date = new Date(slot.startISO);
+    const key = date.toDateString();
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key)!.push(slot);
+  }
+  return Array.from(groups.entries()).map(([key, daySlots]) => ({
+    dateLabel: new Date(key).toLocaleDateString([], { weekday: "long", day: "numeric", month: "long" }),
+    slots: daySlots,
+  }));
+}
+
+function formatSlotTime(iso: string): string {
+  return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+export default function BookSessionPage() {
+  const searchParams = useSearchParams();
+  const { user, isReady } = useRequireRole("parent");
+  const { passportId, childName, isLoading: isPassportLoading } = useMyPassport(user?.id);
+
+  const preselectedClinicianId = searchParams.get("clinicianId");
+
+  const [step, setStep] = useState<Step>(preselectedClinicianId ? "type" : "clinician");
+  const [clinicians, setClinicians] = useState<BookableClinician[]>([]);
+  const [isLoadingClinicians, setIsLoadingClinicians] = useState(false);
+  const [cliniciansError, setCliniciansError] = useState<string | null>(null);
+
+  const [selectedClinicianId, setSelectedClinicianId] = useState<string | null>(preselectedClinicianId);
+  const [selectedClinicianName, setSelectedClinicianName] = useState<string | null>(null);
+  const [sessionType, setSessionType] = useState<SessionType | null>(null);
+
+  const [slots, setSlots] = useState<AvailableSlot[]>([]);
+  const [isLoadingSlots, setIsLoadingSlots] = useState(false);
+  const [slotsError, setSlotsError] = useState<string | null>(null);
+  const [cancellationNoticeHours, setCancellationNoticeHours] = useState(24);
+  const [cancellationPolicyText, setCancellationPolicyText] = useState<string | null>(null);
+
+  const [selectedSlot, setSelectedSlot] = useState<AvailableSlot | null>(null);
+  const [hasAgreedToPolicy, setHasAgreedToPolicy] = useState(false);
+
+  const [isBooking, setIsBooking] = useState(false);
+  const [bookingError, setBookingError] = useState<string | null>(null);
+  const [confirmedSummary, setConfirmedSummary] = useState<{
+    clinicianName: string;
+    sessionType: SessionType;
+    startISO: string;
+    endISO: string;
+  } | null>(null);
+
+  useEffect(() => {
+    if (step !== "clinician" || !passportId) return;
+    let isMounted = true;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setIsLoadingClinicians(true);
+    setCliniciansError(null);
+    const supabase = createClient();
+    supabase
+      .rpc("get_passport_clinicians", { p_passport_id: passportId })
+      .then(({ data, error }: { data: unknown; error: { message: string } | null }) => {
+        if (!isMounted) return;
+        if (error) {
+          setCliniciansError("Couldn't load your clinical team.");
+          setIsLoadingClinicians(false);
+          return;
+        }
+        const rows = (data ?? []) as { clinician_id: string; full_name: string; specialty: string; engaged_by: string }[];
+        // Only institution-engaged clinicians are bookable this way --
+        // a parent-engaged clinician (connected by the parent's own
+        // code) is never on a clinic caseload for scheduling purposes,
+        // matching get_bookable_clinician_details()'s own gate exactly.
+        const bookable = rows
+          .filter((row) => row.engaged_by === "institution")
+          .map((row) => ({ clinicianId: row.clinician_id, fullName: row.full_name, specialty: row.specialty }));
+        setClinicians(bookable);
+        setIsLoadingClinicians(false);
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, [step, passportId]);
+
+  const loadSlots = useCallback(async () => {
+    if (!passportId || !selectedClinicianId || !sessionType) return;
+    setIsLoadingSlots(true);
+    setSlotsError(null);
+    setSelectedSlot(null);
+    try {
+      const params = new URLSearchParams({ passportId, clinicianId: selectedClinicianId, sessionType });
+      const response = await fetch(`/api/scheduling/availability?${params.toString()}`);
+      const data = await response.json();
+      if (!response.ok) {
+        setSlotsError(data.error ?? "Couldn't load availability.");
+        setIsLoadingSlots(false);
+        return;
+      }
+      setSlots(data.slots ?? []);
+      setCancellationNoticeHours(data.cancellationNoticeHours ?? 24);
+      setCancellationPolicyText(data.cancellationPolicyText ?? null);
+      setSelectedClinicianName((prev) => prev ?? data.clinicianName ?? null);
+      setIsLoadingSlots(false);
+    } catch {
+      setSlotsError("Couldn't load availability.");
+      setIsLoadingSlots(false);
+    }
+  }, [passportId, selectedClinicianId, sessionType]);
+
+  useEffect(() => {
+    if (step === "slot") {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      loadSlots();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, selectedClinicianId, sessionType]);
+
+  function pickClinician(clinician: BookableClinician) {
+    setSelectedClinicianId(clinician.clinicianId);
+    setSelectedClinicianName(clinician.fullName);
+    setStep("type");
+  }
+
+  function pickType(type: SessionType) {
+    setSessionType(type);
+    setStep("slot");
+  }
+
+  function pickSlot(slot: AvailableSlot) {
+    setSelectedSlot(slot);
+    setHasAgreedToPolicy(false);
+    setBookingError(null);
+    setStep("consent");
+  }
+
+  async function confirmBooking() {
+    if (!passportId || !selectedClinicianId || !sessionType || !selectedSlot) return;
+    setIsBooking(true);
+    setBookingError(null);
+    try {
+      const response = await fetch("/api/scheduling/book", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          passportId,
+          clinicianId: selectedClinicianId,
+          sessionType,
+          sessionStartISO: selectedSlot.startISO,
+          sessionEndISO: selectedSlot.endISO,
+        }),
+      });
+      const data = await response.json();
+      setIsBooking(false);
+      if (!response.ok) {
+        // First come, first served -- if someone else got there first,
+        // say so plainly and send the parent back to a freshly-loaded
+        // slot list, never a silent retry.
+        setBookingError(data.error ?? "Something went wrong. Please try again.");
+        if (response.status === 409) {
+          setStep("slot");
+          loadSlots();
+        }
+        return;
+      }
+      setConfirmedSummary({
+        clinicianName: data.clinicianName,
+        sessionType: data.sessionType,
+        startISO: data.sessionStartISO,
+        endISO: data.sessionEndISO,
+      });
+      setStep("confirmed");
+    } catch {
+      setIsBooking(false);
+      setBookingError("Something went wrong. Please try again.");
+    }
+  }
+
+  function back() {
+    if (step === "type" && !preselectedClinicianId) setStep("clinician");
+    else if (step === "slot") setStep("type");
+    else if (step === "consent") setStep("slot");
+  }
+
+  if (!isReady || isPassportLoading) {
+    return null;
+  }
+
+  if (!passportId) {
+    return (
+      <div className="flex min-h-full flex-1 flex-col items-center justify-center bg-brand-off-white/40 p-6 text-center">
+        <p className="font-sans text-body text-brand-neutral-black/60">Couldn&apos;t find your child&apos;s passport.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex min-h-full flex-1 flex-col bg-brand-off-white/40 pb-24">
+      <header className="flex items-center gap-3 px-4 pt-6 pb-4">
+        {step !== "clinician" && step !== "confirmed" && (
+          <button type="button" onClick={back} aria-label="Back" className="text-brand-prussian-blue">
+            ←
+          </button>
+        )}
+        <div>
+          <h1 className="font-heading text-h1 font-bold text-brand-prussian-blue">Book a Session</h1>
+          {childName && <p className="mt-0.5 font-sans text-body text-brand-neutral-black/60">{childName}</p>}
+        </div>
+      </header>
+
+      <main className="flex-1 px-4">
+        <div className="lg:max-w-[66.6667%]">
+          {step === "clinician" && (
+            <>
+              {isLoadingClinicians ? (
+                <div className="flex flex-col gap-2">
+                  <div className="h-16 animate-pulse rounded-2xl bg-white" />
+                  <div className="h-16 animate-pulse rounded-2xl bg-white" />
+                </div>
+              ) : cliniciansError ? (
+                <p className="font-sans text-body text-brand-neutral-black/60">{cliniciansError}</p>
+              ) : clinicians.length === 0 ? (
+                <p className="rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-center font-sans text-body text-brand-neutral-black/60">
+                  There&apos;s no clinician assigned by your clinic to book with yet.
+                </p>
+              ) : (
+                <div className="flex flex-col gap-2">
+                  <p className="mb-2 font-sans text-body text-brand-neutral-black/60">Who would you like to book with?</p>
+                  {clinicians.map((clinician) => (
+                    <button
+                      key={clinician.clinicianId}
+                      type="button"
+                      onClick={() => pickClinician(clinician)}
+                      className="rounded-2xl border border-black/5 bg-white p-4 text-left shadow-sm"
+                    >
+                      <p className="font-sans text-body font-semibold text-brand-neutral-black">{clinician.fullName}</p>
+                      <p className="mt-0.5 font-sans text-eyebrow text-brand-neutral-black/50">
+                        {CLINICIAN_SPECIALTY_LABEL[clinician.specialty as ClinicianSpecialty] ?? clinician.specialty}
+                      </p>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+
+          {step === "type" && (
+            <div className="flex flex-col gap-2">
+              <p className="mb-2 font-sans text-body text-brand-neutral-black/60">
+                {selectedClinicianName ? `Booking with ${selectedClinicianName}. ` : ""}What kind of session?
+              </p>
+              <button
+                type="button"
+                onClick={() => pickType("online")}
+                className="rounded-2xl border border-black/5 bg-white p-4 text-left shadow-sm"
+              >
+                <p className="font-sans text-body font-semibold text-brand-neutral-black">Online</p>
+                <p className="mt-0.5 font-sans text-eyebrow text-brand-neutral-black/50">One hour, by video call</p>
+              </button>
+              <button
+                type="button"
+                onClick={() => pickType("in_person")}
+                className="rounded-2xl border border-black/5 bg-white p-4 text-left shadow-sm"
+              >
+                <p className="font-sans text-body font-semibold text-brand-neutral-black">In-person</p>
+                <p className="mt-0.5 font-sans text-eyebrow text-brand-neutral-black/50">One hour, at the clinic</p>
+              </button>
+            </div>
+          )}
+
+          {step === "slot" && (
+            <>
+              {bookingError && (
+                <p role="alert" className="mb-3 rounded-xl bg-brand-golden-brown/10 px-4 py-3 font-sans text-body font-medium text-brand-golden-brown">
+                  {bookingError}
+                </p>
+              )}
+              {isLoadingSlots ? (
+                <div className="flex flex-col gap-2">
+                  <div className="h-10 animate-pulse rounded-xl bg-white" />
+                  <div className="h-10 animate-pulse rounded-xl bg-white" />
+                </div>
+              ) : slotsError ? (
+                <p className="font-sans text-body text-brand-neutral-black/60">{slotsError}</p>
+              ) : slots.length === 0 ? (
+                <p className="rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-center font-sans text-body text-brand-neutral-black/60">
+                  No availability found in the current booking window. Please try again later.
+                </p>
+              ) : (
+                <div className="flex flex-col gap-4">
+                  {groupSlotsByDay(slots).map((group) => (
+                    <div key={group.dateLabel}>
+                      <p className="mb-2 font-accent text-eyebrow font-bold uppercase tracking-wide text-brand-neutral-black/50">
+                        {group.dateLabel}
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        {group.slots.map((slot) => (
+                          <button
+                            key={slot.startISO}
+                            type="button"
+                            onClick={() => pickSlot(slot)}
+                            className="rounded-xl border border-brand-prussian-blue px-4 py-2 font-sans text-body font-semibold text-brand-prussian-blue"
+                          >
+                            {formatSlotTime(slot.startISO)}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+
+          {step === "consent" && selectedSlot && (
+            <div className="flex flex-col gap-4">
+              <div className="rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
+                <p className="font-sans text-body font-semibold text-brand-neutral-black">
+                  {sessionType === "online" ? "Online" : "In-person"} with {selectedClinicianName}
+                </p>
+                <p className="mt-0.5 font-sans text-body text-brand-neutral-black/60">
+                  {new Date(selectedSlot.startISO).toLocaleDateString([], { weekday: "long", day: "numeric", month: "long" })}
+                  {" · "}
+                  {formatSlotTime(selectedSlot.startISO)}–{formatSlotTime(selectedSlot.endISO)}
+                </p>
+              </div>
+
+              <div className="rounded-2xl bg-brand-safe-ivory/40 p-4">
+                <p className="font-accent text-eyebrow font-bold uppercase tracking-wide text-brand-neutral-black/50">
+                  Cancellation Policy
+                </p>
+                {cancellationPolicyText ? (
+                  <>
+                    <p className="mt-2 font-sans text-body text-brand-neutral-black/80">{cancellationPolicyText}</p>
+                    <p className="mt-2 font-sans text-eyebrow text-brand-neutral-black/50">
+                      Please give at least {cancellationNoticeHours} hours&apos; notice to cancel or change this session.
+                    </p>
+                  </>
+                ) : (
+                  <p className="mt-2 font-sans text-body text-brand-neutral-black/60">
+                    Your clinic hasn&apos;t set a cancellation policy yet.
+                  </p>
+                )}
+              </div>
+
+              <label className="flex items-start gap-3">
+                <input
+                  type="checkbox"
+                  checked={hasAgreedToPolicy}
+                  onChange={(e) => setHasAgreedToPolicy(e.target.checked)}
+                  className="mt-1 h-5 w-5 flex-shrink-0"
+                />
+                <span className="font-sans text-body text-brand-neutral-black/80">I agree to this cancellation policy.</span>
+              </label>
+
+              {bookingError && (
+                <p role="alert" className="font-sans text-body font-medium text-brand-golden-brown">
+                  {bookingError}
+                </p>
+              )}
+
+              <Button type="button" onClick={confirmBooking} disabled={!hasAgreedToPolicy || isBooking}>
+                {isBooking ? "Booking…" : "Book Session"}
+              </Button>
+            </div>
+          )}
+
+          {step === "confirmed" && confirmedSummary && (
+            <div className="flex flex-col items-center gap-2 rounded-2xl bg-white p-8 text-center shadow-sm">
+              <CheckIcon className="mb-2 h-8 w-8 text-brand-prussian-blue" />
+              <p className="font-heading text-h2 font-semibold text-brand-neutral-black">Booked.</p>
+              <p className="font-sans text-body text-brand-neutral-black/70">
+                {confirmedSummary.sessionType === "online" ? "Online" : "In-person"} with {confirmedSummary.clinicianName}
+                <br />
+                {new Date(confirmedSummary.startISO).toLocaleDateString([], { weekday: "long", day: "numeric", month: "long" })}
+                {" · "}
+                {formatSlotTime(confirmedSummary.startISO)}–{formatSlotTime(confirmedSummary.endISO)}
+              </p>
+              <p className="mt-2 font-sans text-eyebrow text-brand-neutral-black/50">
+                A calendar invite has been sent to your email.
+              </p>
+              <Link
+                href="/parent-dashboard"
+                className="mt-4 rounded-2xl bg-brand-prussian-blue px-6 py-3 font-sans text-body font-semibold text-white"
+              >
+                Done
+              </Link>
+            </div>
+          )}
+        </div>
+      </main>
+    </div>
+  );
+}

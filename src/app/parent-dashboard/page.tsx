@@ -14,6 +14,7 @@ import { PassportCompletionPromptCard } from "@/components/passport/PassportComp
 import { ClinicalSupportSection } from "@/components/parent/ClinicalSupportSection";
 import { QuickActionButtons } from "@/components/parent/QuickActionButtons";
 import { YourTeamCard } from "@/components/parent/YourTeamCard";
+import { UpcomingBookingsCard } from "@/components/parent/UpcomingBookingsCard";
 import { CalmLogReminderCard } from "@/components/parent/calm/CalmLogReminderCard";
 
 type PassportStatus = "not_started" | "in_progress" | "complete";
@@ -367,9 +368,11 @@ export default function ParentDashboardPage() {
 
         <ClinicalSupportSection passportId={passportId} childName={childName} />
 
+        <UpcomingBookingsCard passportId={passportId} />
+
         <RecentUpdatesCard passportId={passportId} />
 
-        <QuickActionButtons childName={childName} messagesAwaitingCount={messagesAwaitingCount} />
+        <QuickActionButtons childName={childName} messagesAwaitingCount={messagesAwaitingCount} passportId={passportId} />
 
         {/* "Recommended for you" removed, Stage 2, 15 Sept 2026 --
             hardcoded, unconditional, linked nowhere, same fixed course

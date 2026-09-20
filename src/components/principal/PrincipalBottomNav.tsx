@@ -1,10 +1,10 @@
 "use client";
 
 import { AppBottomNav } from "@/components/ui/AppBottomNav";
-import { usePrincipalSupportAlert } from "@/components/principal/PrincipalSupportAlertProvider";
+import { usePrincipalSupportAlert, usePrincipalInstitutionType } from "@/components/principal/PrincipalSupportAlertProvider";
 import { useMessagesAwaitingActionCount } from "@/hooks/useMessagesAwaitingActionCount";
 import { useHasUnreadMessages } from "@/hooks/useHasUnreadMessages";
-import { PRINCIPAL_NAV_TABS } from "./principalNavTabs";
+import { getPrincipalNavTabs } from "./principalNavTabs";
 
 // PRD 2, Stage 1. Matches TeacherBottomNav/ClinicianBottomNav/
 // SnaBottomNav's own established shape exactly -- a thin per-track
@@ -44,7 +44,11 @@ export function PrincipalBottomNav() {
   // for this specific count.
   const messagesAwaitingCount = useMessagesAwaitingActionCount(userId);
   const hasUnreadMessages = useHasUnreadMessages(userId);
-  const tabs = PRINCIPAL_NAV_TABS.map((tab) =>
+  // Clinical director's dashboard, Step 0 recon -- see PrincipalSidebar's
+  // own identical comment; same shared context, same default-while-
+  // loading convention.
+  const { institutionType } = usePrincipalInstitutionType();
+  const tabs = getPrincipalNavTabs(institutionType).map((tab) =>
     tab.key === "messages" ? { ...tab, badgeCount: messagesAwaitingCount, showUnreadDot: hasUnreadMessages } : tab
   );
 

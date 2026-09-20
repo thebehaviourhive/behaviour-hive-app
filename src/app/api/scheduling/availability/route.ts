@@ -74,5 +74,11 @@ export async function GET(request: Request) {
     clinicianName: details.full_name,
     clinicianSpecialty: details.specialty,
     slots,
+    // Stage 2's own consent step needs these to show the parent what
+    // they're agreeing to -- returned here rather than a second round
+    // trip back through get_bookable_clinician_details(), since this
+    // route already has the same result in hand.
+    cancellationNoticeHours: details.cancellation_notice_hours ?? 24,
+    cancellationPolicyText: details.cancellation_policy_text ?? null,
   });
 }

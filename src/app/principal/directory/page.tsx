@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { useRequireRole } from "@/hooks/useRequireRole";
+import { useInstitutionType } from "@/hooks/useInstitutionType";
 import { PrincipalBottomNav } from "@/components/principal/PrincipalBottomNav";
 import { StaffList } from "@/components/principal/directory/StaffList";
 import { StaffDetail, type StaffRow } from "@/components/principal/directory/StaffDetail";
@@ -72,6 +73,17 @@ const SEGMENTS: { key: Segment; label: string }[] = [
   { key: "clinicians", label: "Clinicians" },
 ];
 
+// Clinical director's dashboard, Step 0 recon: pulled for a clinic, not
+// just flagged this time. Classes and Temporary Access are both real
+// only for a school -- a class is a school-day grouping of enrolled
+// pupils, and temporary access is specifically day-scoped SUPPLY COVER
+// for a school day, with no clinic equivalent at all (a clinic's own
+// caseload assignment already lives in the Clinicians segment). Dead
+// segments in a screen a director opens daily are worse than a dead
+// nav item they'd learn to ignore -- the same disease as the old nav,
+// one level down.
+const CLINIC_SEGMENTS: Segment[] = ["staff", "children", "clinicians"];
+
 export default function PrincipalDirectoryPage() {
   const { user, isReady } = useRequireRole("principal");
   // Clinicians' detail has two render sites (mobile-stacked, desktop-
@@ -84,6 +96,8 @@ export default function PrincipalDirectoryPage() {
     return SEGMENTS.some((s) => s.key === requested) ? (requested as Segment) : "staff";
   });
   const [institutionId, setInstitutionId] = useState<string | null>(null);
+  const { institutionType } = useInstitutionType(institutionId);
+  const visibleSegments = SEGMENTS.filter((s) => institutionType !== "clinic" || CLINIC_SEGMENTS.includes(s.key));
 
   const [selectedStaff, setSelectedStaff] = useState<StaffRow | null>(null);
   const [selectedClassId, setSelectedClassId] = useState<string | null>(null);
@@ -127,6 +141,15 @@ export default function PrincipalDirectoryPage() {
       isMounted = false;
     };
   }, [user]);
+
+  // A deep link (?segment=classes) or a stale selection can land on a
+  // segment that's since been filtered out for a clinic -- clamp back
+  // to Staff rather than leaving the pill row showing nothing selected.
+  useEffect(() => {
+    if (institutionType === "clinic" && !CLINIC_SEGMENTS.includes(segment)) {
+      switchSegment("staff");
+    }
+  }, [institutionType, segment]);
 
   function switchSegment(next: Segment) {
     setSegment(next);
@@ -176,7 +199,7 @@ export default function PrincipalDirectoryPage() {
             this above it as ordinary block content, sidesteps that
             entirely rather than chasing the specific Safari sizing bug. */}
         <div className="mb-4 flex flex-wrap gap-2">
-          {SEGMENTS.map((s) => (
+          {visibleSegments.map((s) => (
             <button
               key={s.key}
               type="button"
