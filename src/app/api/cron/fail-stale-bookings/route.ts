@@ -13,13 +13,30 @@ import { createAdminClient } from "@/lib/supabase/admin";
 // get_my_bookings_needing_attention() with no separate mechanism
 // needed.
 //
-// Wired into vercel.json ("*/5 * * * *" -- this one wants minutes, not
-// once a day: a pending row should never realistically survive more
-// than a few seconds, so five minutes is already a generous margin,
-// not a tight one). CRON_SECRET is the same one purge-app-events
-// already requires, reused here rather than adding a second secret for
-// the same purpose -- confirm it's set on Vercel before this can fire
-// for real.
+// Wired into vercel.json at "0 4 * * *" -- once a day, NOT the "*/5 * * * *"
+// the staleness threshold below would ideally want. The Hobby plan
+// caps Vercel Cron Jobs at once per day (confirmed: this project is on
+// Hobby) -- a five-minute schedule on that plan is configuration that
+// does not describe what actually runs, which is worse than an honest
+// daily one. STALE_AFTER_MINUTES stays 5 regardless -- that number
+// defines what counts as stale once the cron DOES run, not how often
+// it runs; it's still correct to flip anything older than a genuine
+// Google round-trip the moment the daily sweep gets to it.
+//
+// The real cost, stated plainly rather than left implied: a booking
+// that fails between the row insert and the Google call can now sit
+// ambiguously `pending` for up to 24 hours instead of a few minutes,
+// before this route ever reclassifies it to `sync_failed` and puts it
+// in front of the clinician's own attention queue. Not a lost booking
+// -- the parent already saw a plain, synchronous error at the moment
+// it failed (see /api/scheduling/book's own all-or-nothing write) -- a
+// DELAYED signal to the clinician, not a silent one. Upgrading to the
+// Pro plan is what unlocks the tighter, minutes-scale cadence this
+// route was originally built for -- a known, named consequence of
+// staying on Hobby, not a rediscovery the next time this file is read.
+// CRON_SECRET is the same one purge-app-events and sweep-discharged-
+// bookings already require -- confirm it's set on Vercel before this
+// can fire for real.
 const STALE_AFTER_MINUTES = 5;
 
 export async function GET(request: Request) {
