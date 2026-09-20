@@ -50,11 +50,18 @@ import { CheckIcon } from "@/components/ui/icons";
 //     calendar, their session, only they can tell"); pulling it onto a
 //     director's dashboard would contradict that decision, not extend
 //     it.
-//   - ROOM LEFT FOR THE STAGNATION QUEUE (PRD 8 Stage 3): not built,
-//     not designed around. This page's own layout -- one outstanding-
-//     work section, then a separate reference section -- has nowhere
-//     it assumes the stagnation queue's own shape, so adding it later
-//     is a new section, not a rework of this one.
+//   - THE STAGNATION QUEUE (PRD 8 Stage 3, "Worth A Look" below) is its
+//     OWN section, deliberately never folded into "Outstanding Work" or
+//     its shared nothingOutstanding/"All clear." empty state -- that
+//     empty state is TRUE for the other buckets (their absence is a
+//     real fact: nothing is pending). It would NOT be true here: this
+//     queue's own silence usually means "not enough incident history
+//     yet," not "checked and fine," and conflating the two is exactly
+//     the defect this feature exists to avoid making about a CHILD, now
+//     repeated about the dashboard's own confidence in itself. See
+//     get_institution_stagnation_queue()'s own migration (0260) for the
+//     full reasoning, including why withheld incidents are invisible to
+//     it by design and why that is a real, named limitation, not a bug.
 //
 // THE FBA IS NOT TO BE TOUCHED (CLAUDE.md, standing). The draft-FBA
 // bucket reads fba_reports directly (Stage 7's own get_institution_
@@ -135,6 +142,26 @@ interface CaseloadRow {
   caseload_size: number;
 }
 
+type StagnationQueueStatus = "no_signed_plan" | "insufficient_evidence" | "rising" | "not_rising";
+
+interface StagnationQueueRow {
+  passport_id: string;
+  child_name: string;
+  bsp_id: string | null;
+  bsp_signed_at: string | null;
+  queue_status: StagnationQueueStatus;
+  incidents_before_count: number;
+  incidents_after_count: number;
+  incidents_before_rate: number | null;
+  incidents_after_rate: number | null;
+  incidents_rising: boolean;
+  restraints_before_count: number;
+  restraints_after_count: number;
+  restraints_before_rate: number | null;
+  restraints_after_rate: number | null;
+  restraints_rising: boolean;
+}
+
 export function ClinicDirectorDashboard({
   institutionId,
   institutionName,
@@ -155,6 +182,7 @@ export function ClinicDirectorDashboard({
   const [pendingTagChanges, setPendingTagChanges] = useState<PendingTagChangeRow[]>([]);
   const [pendingGrants, setPendingGrants] = useState<PendingGrantRow[]>([]);
   const [caseloadSizes, setCaseloadSizes] = useState<CaseloadRow[]>([]);
+  const [stagnationQueue, setStagnationQueue] = useState<StagnationQueueRow[]>([]);
 
   const [reviewJoinTarget, setReviewJoinTarget] = useState<PendingStaffJoinRow | null>(null);
   const [approvingTagChangeId, setApprovingTagChangeId] = useState<string | null>(null);
@@ -175,6 +203,7 @@ export function ClinicDirectorDashboard({
       tagChangesResult,
       grantsResult,
       caseloadResult,
+      stagnationResult,
     ] = await Promise.all([
       supabase.rpc("get_institution_episodes_without_active_practitioner", { p_institution_id: institutionId }),
       supabase.rpc("get_institution_pending_staff_joins", { p_institution_id: institutionId }),
@@ -184,6 +213,7 @@ export function ClinicDirectorDashboard({
       supabase.rpc("get_pending_tag_change_requests", { p_institution_id: institutionId }),
       supabase.rpc("get_institution_pending_cross_org_grants", { p_institution_id: institutionId }),
       supabase.rpc("get_institution_caseload_sizes", { p_institution_id: institutionId }),
+      supabase.rpc("get_institution_stagnation_queue", { p_institution_id: institutionId }),
     ]);
 
     if (episodesResult.error) {
@@ -200,6 +230,7 @@ export function ClinicDirectorDashboard({
     if (!tagChangesResult.error) setPendingTagChanges((tagChangesResult.data ?? []) as PendingTagChangeRow[]);
     if (!grantsResult.error) setPendingGrants((grantsResult.data ?? []) as PendingGrantRow[]);
     if (!caseloadResult.error) setCaseloadSizes((caseloadResult.data ?? []) as CaseloadRow[]);
+    if (!stagnationResult.error) setStagnationQueue((stagnationResult.data ?? []) as StagnationQueueRow[]);
 
     setIsLoading(false);
   }, [institutionId]);
@@ -232,6 +263,37 @@ export function ClinicDirectorDashboard({
     pendingGrants.length;
 
   const nothingOutstanding = !isLoading && !error && outstandingCount === 0;
+
+  // The stagnation queue's own empty state, built deliberately separate
+  // from nothingOutstanding above -- Daniel's own instruction: "not
+  // enough evidence yet" and "all clear" are different claims, and a
+  // director reading the wrong one would be misled by it. rising is the
+  // only status that renders a row; the other three are accounted for
+  // in the summary text below so a 'no_signed_plan' or
+  // 'insufficient_evidence' client is stated plainly, never silently
+  // absent (Decision 3).
+  const risingClients = stagnationQueue.filter((row) => row.queue_status === "rising");
+  const stableWithEvidenceCount = stagnationQueue.filter((row) => row.queue_status === "not_rising").length;
+  const insufficientEvidenceCount = stagnationQueue.filter((row) => row.queue_status === "insufficient_evidence").length;
+  const noSignedPlanCount = stagnationQueue.filter((row) => row.queue_status === "no_signed_plan").length;
+
+  const stagnationSummary =
+    stableWithEvidenceCount > 0
+      ? `No current client is showing a rising trend, based on ${stableWithEvidenceCount} compared with enough incident history to say so.`
+      : "Not enough incident history yet to say whether a current plan is working for any client.";
+  const stagnationSummaryDetail =
+    insufficientEvidenceCount > 0 || noSignedPlanCount > 0
+      ? [
+          insufficientEvidenceCount > 0
+            ? `${insufficientEvidenceCount} ${insufficientEvidenceCount === 1 ? "doesn't" : "don't"} have enough incident history yet to compare either way`
+            : null,
+          noSignedPlanCount > 0
+            ? `${noSignedPlanCount} ${noSignedPlanCount === 1 ? "doesn't" : "don't"} have a signed plan yet`
+            : null,
+        ]
+          .filter(Boolean)
+          .join("; ") + "."
+      : null;
 
   return (
     <div className="flex min-h-full flex-1 flex-col bg-brand-off-white/40 pb-24">
@@ -356,6 +418,56 @@ export function ClinicDirectorDashboard({
                     </p>
                   )}
                 </div>
+              </section>
+            )}
+
+            {/* PRD 8 Stage 3 -- the stagnation queue. Its own section,
+                its own empty state, deliberately not merged into
+                nothingOutstanding above (see this file's own header
+                comment for why). States a fact and stops -- never a
+                cause, never a verdict, never sorted by severity (order
+                is alphabetical, same as Caseload below). Golden Brown,
+                not red -- this is a prompt to look, not a safety alert.
+                "Review" opens the CHILD's own record, same as every
+                other bucket -- never the incidents themselves. */}
+            {!isLoading && !error && (
+              <section className="mb-6">
+                <h2 className="mb-2 font-accent text-eyebrow font-bold uppercase tracking-wide text-brand-prussian-blue">
+                  Worth A Look
+                </h2>
+                {risingClients.length > 0 ? (
+                  <div className="flex flex-col gap-2">
+                    {risingClients.map((row) => {
+                      const useRestraintCopy = row.restraints_rising;
+                      const exception = useRestraintCopy
+                        ? "Physical intervention has increased since their plan began — worth checking in on."
+                        : "Incidents have increased since their plan began — worth checking in on.";
+                      const beforeRate = useRestraintCopy ? row.restraints_before_rate : row.incidents_before_rate;
+                      const afterRate = useRestraintCopy ? row.restraints_after_rate : row.incidents_after_rate;
+                      const context =
+                        beforeRate !== null && afterRate !== null
+                          ? `${beforeRate}/wk before their plan → ${afterRate}/wk since`
+                          : undefined;
+                      return (
+                        <WorkQueueRow
+                          key={row.passport_id}
+                          entity={row.child_name}
+                          exception={exception}
+                          context={context}
+                          actionLabel="Review"
+                          href={`/principal/passports/${row.passport_id}`}
+                        />
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="rounded-2xl bg-white p-5 shadow-sm">
+                    <p className="font-sans text-body text-brand-neutral-black/70">{stagnationSummary}</p>
+                    {stagnationSummaryDetail && (
+                      <p className="mt-1 font-sans text-eyebrow text-brand-neutral-black/50">{stagnationSummaryDetail}</p>
+                    )}
+                  </div>
+                )}
               </section>
             )}
 
