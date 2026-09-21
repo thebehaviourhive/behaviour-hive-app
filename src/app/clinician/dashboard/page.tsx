@@ -407,7 +407,7 @@ export default function ClinicianDashboardPage() {
             <ClinicianActivityCard />
           </div>
 
-          <ClinicianQuickActions messagesAwaitingCount={messagesAwaitingCount} />
+          <ClinicianQuickActions messagesAwaitingCount={messagesAwaitingCount} userId={user?.id} />
 
           <MyTagChangeRequestsSection recordHref={(passportId) => `/clinician/passport/${passportId}`} />
         </div>

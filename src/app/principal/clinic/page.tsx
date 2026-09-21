@@ -15,6 +15,7 @@ import { SetBookingBufferSheet } from "@/components/principal/SetBookingBufferSh
 import { SetBookingWindowSheet } from "@/components/principal/SetBookingWindowSheet";
 import { SetCancellationNoticeSheet } from "@/components/principal/SetCancellationNoticeSheet";
 import { SetCancellationPolicySheet } from "@/components/principal/SetCancellationPolicySheet";
+import { ToggleConfirmSheet } from "@/components/principal/ToggleConfirmSheet";
 import { formatTimeOfDay } from "@/lib/temporaryAccessTime";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 import { Button } from "@/components/ui/Button";
@@ -44,6 +45,68 @@ interface StaffRow {
   is_active: boolean;
 }
 
+// PRD 10 Stage 4, section 5.6 -- the five toggles, each defined once:
+// which institutions column it maps to, which RPC sets it, which role
+// it actually affects (so the confirm sheet can name the right people),
+// and the one-line description of what being ON permits. Kept as data,
+// not five hand-copied blocks of near-identical JSX.
+interface ToggleDefinition {
+  key:
+    | "lead_can_reassign_within_scope"
+    | "lead_can_discharge_within_scope"
+    | "lead_can_approve_non_scoping_tag_changes"
+    | "practitioner_can_onboard"
+    | "practitioner_can_discharge_own_clients";
+  rpcName: string;
+  label: string;
+  permitsText: string;
+  affectedRole: "clinical_lead" | "clinician";
+  affectedRoleLabel: string;
+}
+
+const TOGGLE_DEFINITIONS: ToggleDefinition[] = [
+  {
+    key: "lead_can_reassign_within_scope",
+    rpcName: "set_lead_can_reassign_within_scope",
+    label: "Lead can reassign within scope",
+    permitsText: "reassign a client, within their own scope, to a different practitioner",
+    affectedRole: "clinical_lead",
+    affectedRoleLabel: "clinical lead",
+  },
+  {
+    key: "lead_can_discharge_within_scope",
+    rpcName: "set_lead_can_discharge_within_scope",
+    label: "Lead can discharge within scope",
+    permitsText: "discharge a client within their own scope",
+    affectedRole: "clinical_lead",
+    affectedRoleLabel: "clinical lead",
+  },
+  {
+    key: "lead_can_approve_non_scoping_tag_changes",
+    rpcName: "set_lead_can_approve_non_scoping_tag_changes",
+    label: "Lead can approve non-scoping tag changes",
+    permitsText: "approve a tag change request that doesn't touch a scoping dimension, within their own scope",
+    affectedRole: "clinical_lead",
+    affectedRoleLabel: "clinical lead",
+  },
+  {
+    key: "practitioner_can_onboard",
+    rpcName: "set_practitioner_can_onboard",
+    label: "Practitioner can add clients",
+    permitsText: "add a new client to the clinic",
+    affectedRole: "clinician",
+    affectedRoleLabel: "practitioner",
+  },
+  {
+    key: "practitioner_can_discharge_own_clients",
+    rpcName: "set_practitioner_can_discharge_own_clients",
+    label: "Practitioner can discharge their own clients",
+    permitsText: "discharge a client from their own caseload",
+    affectedRole: "clinician",
+    affectedRoleLabel: "practitioner",
+  },
+];
+
 export default function PrincipalClinicPage() {
   const router = useRouter();
   const { user, isReady } = useRequireRole("principal");
@@ -59,6 +122,14 @@ export default function PrincipalClinicPage() {
   const [staff, setStaff] = useState<StaffRow[]>([]);
   const [tagDimensionCount, setTagDimensionCount] = useState<number>(0);
   const [tagValueCount, setTagValueCount] = useState<number>(0);
+  const [toggles, setToggles] = useState<Record<ToggleDefinition["key"], boolean>>({
+    lead_can_reassign_within_scope: true,
+    lead_can_discharge_within_scope: true,
+    lead_can_approve_non_scoping_tag_changes: true,
+    practitioner_can_onboard: false,
+    practitioner_can_discharge_own_clients: false,
+  });
+  const [toggleTarget, setToggleTarget] = useState<ToggleDefinition | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isHandOverOpen, setIsHandOverOpen] = useState(false);
@@ -153,6 +224,13 @@ export default function PrincipalClinicPage() {
     setTagValueCount(activeTags.length);
     setTagDimensionCount(new Set(activeTags.map((t) => t.dimension)).size);
 
+    const { data: toggleRow, error: toggleError } = await supabase
+      .rpc("get_institution_toggles", { p_institution_id: staffRow.institution_id })
+      .single();
+    if (!toggleError && toggleRow) {
+      setToggles(toggleRow as Record<ToggleDefinition["key"], boolean>);
+    }
+
     setIsLoading(false);
   }, [user]);
 
@@ -160,6 +238,33 @@ export default function PrincipalClinicPage() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
   }, [load]);
+
+  // PRD 10 Stage 4, section 5.6 -- "changing one should state its
+  // effect... turning off 'lead can discharge within scope' means a
+  // named person loses an ability." Built from the SAME staff roster
+  // this page already fetches (get_institution_staff_roster) rather
+  // than a sixth RPC -- names the real people this toggle currently
+  // reaches, or says plainly that nobody holds the role yet.
+  function describeToggleEffect(toggle: ToggleDefinition, nextValue: boolean): string {
+    const affected = staff.filter((s) => s.role === toggle.affectedRole && s.is_active);
+    const verb = nextValue ? "will be able to" : "will no longer be able to";
+    if (affected.length === 0) {
+      return `No one is currently a ${toggle.affectedRoleLabel} at this clinic, so this won't affect anyone right now. Once someone is, they ${verb} ${toggle.permitsText}.`;
+    }
+    const names = affected.map((s) => s.full_name).join(", ");
+    return `${names} ${verb} ${toggle.permitsText}.`;
+  }
+
+  async function handleToggleConfirm(toggle: ToggleDefinition, nextValue: boolean) {
+    if (!institutionId) return;
+    const supabase = createClient();
+    const { error: rpcError } = await supabase.rpc(toggle.rpcName, {
+      p_institution_id: institutionId,
+      p_value: nextValue,
+    });
+    if (rpcError) throw new Error(rpcError.message);
+    setToggles((prev) => ({ ...prev, [toggle.key]: nextValue }));
+  }
 
   function handleCopyCode() {
     if (!institutionCode) return;
@@ -348,6 +453,37 @@ export default function PrincipalClinicPage() {
 
               <section className="mt-16">
                 <h2 className="mb-2 font-accent text-eyebrow font-bold uppercase tracking-wide text-brand-prussian-blue">
+                  Permissions
+                </h2>
+                <div className="flex flex-col gap-2">
+                  {TOGGLE_DEFINITIONS.map((toggle) => {
+                    const isOn = toggles[toggle.key];
+                    return (
+                      <div
+                        key={toggle.key}
+                        className="flex items-center justify-between rounded-2xl border border-black/5 bg-white p-4 shadow-sm"
+                      >
+                        <div className="pr-3">
+                          <p className="font-sans text-body font-semibold text-brand-neutral-black">{toggle.label}</p>
+                          <p className="mt-0.5 font-sans text-eyebrow text-brand-neutral-black/50">
+                            {isOn ? "On" : "Off"} -- lets a {toggle.affectedRoleLabel} {toggle.permitsText}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setToggleTarget(toggle)}
+                          className="flex-shrink-0 font-sans text-body font-semibold text-brand-prussian-blue"
+                        >
+                          Change
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </section>
+
+              <section className="mt-16">
+                <h2 className="mb-2 font-accent text-eyebrow font-bold uppercase tracking-wide text-brand-prussian-blue">
                   Account Administration
                 </h2>
                 <button
@@ -486,6 +622,16 @@ export default function PrincipalClinicPage() {
             setCancellationPolicyText(newText);
             setIsCancellationPolicyOpen(false);
           }}
+        />
+      )}
+
+      {toggleTarget && (
+        <ToggleConfirmSheet
+          isOpen={Boolean(toggleTarget)}
+          onClose={() => setToggleTarget(null)}
+          title={toggleTarget.label}
+          effectText={describeToggleEffect(toggleTarget, !toggles[toggleTarget.key])}
+          onConfirm={() => handleToggleConfirm(toggleTarget, !toggles[toggleTarget.key])}
         />
       )}
 
