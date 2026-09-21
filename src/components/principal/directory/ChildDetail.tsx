@@ -18,6 +18,7 @@ import { ClinicalTeamSection } from "@/components/passport/clinical-team/Clinica
 import { ClinicalPlansSection } from "@/components/passport/clinical-team/ClinicalPlansSection";
 import { DirectorSessionNotesTab } from "@/components/principal/directory/DirectorSessionNotesTab";
 import { EpisodeTagsSection } from "@/components/clinic/EpisodeTagsSection";
+import { GrantManagementSection } from "@/components/clinic/GrantManagementSection";
 import { PassportCompletionSection } from "@/components/passport/PassportCompletionSection";
 import { PassportMessagesTab } from "@/components/passport/PassportMessagesTab";
 import { ProgressSurface } from "@/components/progress/ProgressSurface";
@@ -1461,6 +1462,11 @@ export function ChildDetail({
                   </div>
                 </section>
               )}
+
+              {/* PRD 10 Stage 6, item 6.1/6.3 -- propose/revoke, "from a
+                  client's record." Self-contained, renders nothing for
+                  anyone but a director. */}
+              {institutionType === "clinic" && <GrantManagementSection passportId={passportId} />}
 
               {/* Stage 4: Previous Clinicians -- revoked or stepped-back
                   engagements, name/role/date ended/reason retained.

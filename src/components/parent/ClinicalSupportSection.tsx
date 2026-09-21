@@ -6,6 +6,8 @@ import { createClient } from "@/lib/supabase/client";
 import { formatClinicianReference } from "@/lib/clinicianDisplayName";
 import { QuestionnairePromptCard } from "@/components/questionnaire/QuestionnairePromptCard";
 import { AssessmentRequestPromptCard } from "@/components/questionnaire/AssessmentRequestPromptCard";
+import { GrantConfirmationPromptCard } from "@/components/consent/GrantConfirmationPromptCard";
+import { ActiveGrantsSection } from "@/components/consent/ActiveGrantsSection";
 import { ClinicalDocumentCard } from "./ClinicalDocumentCard";
 import { WhatIsAnFbaSheet } from "./WhatIsAnFbaSheet";
 
@@ -158,6 +160,7 @@ export function ClinicalSupportSection({
             horizontal inset. */}
         <QuestionnairePromptCard track="parent" />
         <AssessmentRequestPromptCard />
+        <GrantConfirmationPromptCard />
 
         {isLoading || !fbaState ? (
           <div className="h-32 animate-pulse rounded-2xl bg-white" />
@@ -165,6 +168,12 @@ export function ClinicalSupportSection({
           <FbaCard state={fbaState} childName={childName} onOpenInfo={() => setIsInfoSheetOpen(true)} />
         )}
       </div>
+
+      {/* PRD 10 Stage 6, item 6.3 -- "the parent revokes from wherever
+          they confirmed the grant." Same section, real and wired --
+          only the CONFIRMATION screen above is held back for design
+          review, not revocation. */}
+      <ActiveGrantsSection />
 
       <WhatIsAnFbaSheet isOpen={isInfoSheetOpen} onClose={() => setIsInfoSheetOpen(false)} />
     </section>

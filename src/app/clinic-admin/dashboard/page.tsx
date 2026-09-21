@@ -40,6 +40,7 @@ interface GrantRow {
   scopeItems: string[];
   status: string;
   declineReason: string | null;
+  revokeReason: string | null;
 }
 
 export default function ClinicAdminDashboardPage() {
@@ -104,7 +105,7 @@ export default function ClinicAdminDashboardPage() {
       supabase.rpc("get_institution_episode_roster", { p_institution_id: staffRow.institution_id, p_include_ended: true }),
       supabase
         .from("cross_organisation_grants")
-        .select("id, passport_id, receiving_institution_id, scope_items, status, decline_reason")
+        .select("id, passport_id, receiving_institution_id, scope_items, status, decline_reason, revoke_reason")
         .eq("granting_institution_id", staffRow.institution_id)
         .order("proposed_at", { ascending: false }),
     ]);
@@ -122,6 +123,7 @@ export default function ClinicAdminDashboardPage() {
         scope_items: string[];
         status: string;
         decline_reason: string | null;
+        revoke_reason: string | null;
       }>;
       setGrants(
         grantRows.map((g) => ({
@@ -131,6 +133,7 @@ export default function ClinicAdminDashboardPage() {
           scopeItems: g.scope_items,
           status: g.status,
           declineReason: g.decline_reason,
+          revokeReason: g.revoke_reason,
         }))
       );
 
@@ -216,7 +219,7 @@ export default function ClinicAdminDashboardPage() {
                           ? "Active"
                           : g.status === "declined"
                             ? `Declined${g.declineReason ? ` — ${g.declineReason}` : ""}`
-                            : `Revoked${g.declineReason ? ` — ${g.declineReason}` : ""}`}
+                            : `Revoked${g.revokeReason ? ` — ${g.revokeReason}` : ""}`}
                     </p>
                   </div>
                 ))}
