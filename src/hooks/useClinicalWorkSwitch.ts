@@ -72,26 +72,61 @@ export function useClinicalWorkSwitch(institutionType: InstitutionType | null) {
 
 // The reverse direction: a director or lead already admitted onto a
 // clinician screen (via the widened gate) sees a link back to their
-// own dashboard. No RPC needed -- reaching a clinician page at all
-// already proves institution type = clinic for a director (the gate
-// checked it), and a clinical_lead's role can only ever exist at a
-// clinic to begin with. getPostAuthRedirect() already has a real case
-// for both roles (principal -> /principal/dashboard, clinical_lead ->
-// /clinical-lead/dashboard) -- reused directly, not duplicated.
+// own dashboard.
+//
+// FOUND LIVE PROVING THE SCHOOL-PRINCIPAL-REFUSED CASE, 21 Sept 2026:
+// reaching a clinician page does NOT always prove institution type =
+// clinic for a 'principal' -- /clinician/strategy-bank's own gate is
+// useRequireRole(["clinician", "principal"]), which admits ANY
+// principal directly (the role is literally in the array), never
+// routing through the widened is_verified_clinic_director_or_lead()
+// check at all. A school principal legitimately reaches that page
+// (correctly refused further in by its own institution-type check,
+// see strategy-bank/page.tsx) and, without this check, would have seen
+// a "Director" switch-back link in the clinician nav despite never
+// having done anything clinic-shaped. A clinical_lead's role, unlike
+// 'principal', can only ever exist at a clinic institution (the
+// self-link INSERT policy's own type-aware gating) -- so only the
+// 'principal' branch needs the extra check, matching
+// useClinicalWorkSwitch's own identical asymmetry above. getPostAuthRedirect()
+// already has a real case for both roles (principal -> /principal/dashboard,
+// clinical_lead -> /clinical-lead/dashboard) -- reused directly, not
+// duplicated.
 export function useDirectorSwitchBack() {
   const [role, setRole] = useState<string | null>(null);
+  const [isPrincipalAtClinic, setIsPrincipalAtClinic] = useState(false);
 
   useEffect(() => {
     let isMounted = true;
-    createClient()
-      .auth.getUser()
-      .then(({ data }) => {
-        if (isMounted) setRole(data.user?.app_metadata?.role ?? null);
-      });
+    const supabase = createClient();
+
+    supabase.auth.getUser().then(async ({ data }) => {
+      if (!isMounted) return;
+      const userRole = data.user?.app_metadata?.role ?? null;
+      setRole(userRole);
+
+      if (userRole === "principal") {
+        const { data: staffRows } = await supabase
+          .from("institution_staff")
+          .select("institutions(type)")
+          .eq("user_id", data.user!.id)
+          .is("deactivated_at", null)
+          .not("approved_at", "is", null);
+        if (!isMounted) return;
+        setIsPrincipalAtClinic(
+          (staffRows ?? []).some((row) => {
+            const institution = row.institutions as unknown as { type: string } | { type: string }[] | null;
+            const type = Array.isArray(institution) ? institution[0]?.type : institution?.type;
+            return type === "clinic";
+          })
+        );
+      }
+    });
+
     return () => {
       isMounted = false;
     };
   }, []);
 
-  return { shouldShow: role === "principal" || role === "clinical_lead", role };
+  return { shouldShow: role === "clinical_lead" || (role === "principal" && isPrincipalAtClinic), role };
 }
