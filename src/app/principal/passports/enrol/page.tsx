@@ -229,6 +229,21 @@ export default function EnrolChildPage() {
     }
 
     setIsSubmitting(false);
+
+    // Found proving this flow live: /principal/passports/[passportId]
+    // is principal-only, correctly -- decision #3's own boundary ("an
+    // admin sees no clinical content") means an admin must never reach
+    // it, and that page's own gate already refuses them. Left as
+    // router.push below, an admin would bounce off that refusal and
+    // land on their own dashboard anyway, via an extra redirect they'd
+    // never see the reason for. The admin's own client list is PRD 10's
+    // next stage (5.3), not built yet -- until it exists, sending them
+    // there directly is the honest version of the same outcome, not a
+    // new capability.
+    if (callerRole === "clinic_admin") {
+      router.push("/clinic-admin/dashboard");
+      return;
+    }
     router.push(`/principal/passports/${passportId}`);
   }
 
