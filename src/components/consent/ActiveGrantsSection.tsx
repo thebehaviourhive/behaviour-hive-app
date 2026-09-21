@@ -14,7 +14,20 @@ import { getChildDisplayName } from "@/lib/childDisplayName";
 // Renders nothing at all when the parent has nothing currently shared
 // -- same "genuinely absent, not an empty state" posture every other
 // self-contained prompt/section in this app already uses.
-
+//
+// SCOPED TO ONE CHILD, found and fixed 21 Sept 2026 while making
+// ClinicalSupportSection's own visibility rules precise per child. This
+// component used to query every one of the calling parent's active
+// grants across ALL their children, unfiltered -- fine for a single-
+// child parent (the only kind this app supported until multi-child
+// entry), but wrong the moment a second child exists: mounted under
+// child B's own ClinicalSupportSection, it would have shown child A's
+// grant too. `cross_organisation_grants` can only ever exist once a
+// child has a real clinic connection (its own direction trigger
+// requires the granting institution to be type='clinic') -- which is
+// exactly why this component needed no separate "does this child have
+// a clinic connection" check to satisfy that rule; it only needed to
+// stop looking at every child's grants at once.
 interface ActiveGrantRow {
   id: string;
   childName: string;
@@ -25,7 +38,7 @@ interface ActiveGrantRow {
 
 const SCOPE_LABELS: Record<string, string> = { fba_report: "FBA", bsp: "BSP" };
 
-export function ActiveGrantsSection() {
+export function ActiveGrantsSection({ passportId }: { passportId: string | null }) {
   const [active, setActive] = useState<ActiveGrantRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [revokeTarget, setRevokeTarget] = useState<ActiveGrantRow | null>(null);
@@ -33,13 +46,19 @@ export function ActiveGrantsSection() {
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
+    if (!passportId) {
+      setActive([]);
+      setIsLoading(false);
+      return;
+    }
     setIsLoading(true);
     const supabase = createClient();
 
     const { data: grantRows, error: grantsError } = await supabase
       .from("cross_organisation_grants")
       .select("id, passport_id, granting_institution_id, receiving_institution_id, scope_items")
-      .eq("status", "active");
+      .eq("status", "active")
+      .eq("passport_id", passportId);
 
     if (grantsError || !grantRows || grantRows.length === 0) {
       setActive([]);
@@ -68,7 +87,7 @@ export function ActiveGrantsSection() {
       }))
     );
     setIsLoading(false);
-  }, []);
+  }, [passportId]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect

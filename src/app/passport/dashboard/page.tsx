@@ -128,7 +128,18 @@ export default function PassportDashboardPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { user, isReady: isRoleReady } = useRequireRole("parent");
-  const { passportId, isLoading: isLoadingPassportId } = useMyPassport(user?.id);
+  // A parent can now be a guardian of more than one child (multi-child
+  // entry, 21 Sept 2026) -- useMyPassport()'s own default (the first
+  // child, alphabetically) is only right when nothing more specific was
+  // asked for. The new "View passport" CTA on the connected-passports
+  // list (ConnectedPassportsSection, parent-dashboard) links here with
+  // an explicit ?passportId=, which always wins when present. A
+  // tampered/foreign id degrades safely -- passports' own SELECT policy
+  // is owns_passport()-based (0117), so a non-owned id just resolves to
+  // this page's existing "not found" state below, never another
+  // parent's data.
+  const { passportId: defaultPassportId, isLoading: isLoadingPassportId } = useMyPassport(user?.id);
+  const passportId = searchParams.get("passportId") || defaultPassportId;
   const [summary, setSummary] = useState<PassportSummaryData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   // Background pass, "the ~17 window.location.reload() sites" -- a

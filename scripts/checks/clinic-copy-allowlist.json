@@ -28,15 +28,15 @@
     "141:\"The school has completed this record.\"": "Same as the [incidentId] page's own identical line -- only renders per real incident row, structurally school-authored."
   },
   "src/app/parent-dashboard/page.tsx": {
-    "229:\"Failed to load teacher name:\"": "console.error only, never user-facing.",
-    "236:\"your child's teacher\"": "Fallback only inside `if (todaysUpdate)`, gated on a real teacher_updates row existing -- can't fire for a clinic-only child."
+    "230:\"Failed to load teacher name:\"": "console.error only, never user-facing.",
+    "237:\"your child's teacher\"": "Fallback only inside `if (todaysUpdate)`, gated on a real teacher_updates row existing -- can't fire for a clinic-only child."
   },
   "src/app/passport/claim/page.tsx": {
     "106:\"You'll see everything the school and clinical team have already added, and you can pick up wherever they left off.\"": "The school branch of an already-correct isClinicOnly ternary (the clinic branch reads \"your clinic's own team\")."
   },
   "src/app/passport/dashboard/page.tsx": {
-    "1011:\"What sensory tools and de-escalation strategies work best? Build a quick-reference toolkit for the classroom.\"": "The school branch of an already-correct allConnectedAreClinic ternary.",
-    "1109:\"Incident Timeline\"": "PassportIncidentsSection's own heading, only ever rendered inside `{!allConnectedAreClinic && (...)}` a few lines above -- the whole section is gated, not just relabelled."
+    "1022:\"What sensory tools and de-escalation strategies work best? Build a quick-reference toolkit for the classroom.\"": "The school branch of an already-correct allConnectedAreClinic ternary.",
+    "1120:\"Incident Timeline\"": "PassportIncidentsSection's own heading, only ever rendered inside `{!allConnectedAreClinic && (...)}` a few lines above -- the whole section is gated, not just relabelled."
   },
   "src/app/passport/section-e/page.tsx": {
     "116:\"This is what a teacher or SNA covering your child's class needs to know quickly — allergies, medical conditions, medication, and what to do in an emergency.\"": "Finding 1 fix -- the hasSchoolLink=true branch of an already-correct ternary.",

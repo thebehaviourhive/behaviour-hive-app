@@ -11,6 +11,7 @@ import { useMessagesAwaitingActionCount } from "@/hooks/useMessagesAwaitingActio
 import { RecentUpdatesCard } from "@/components/parent/RecentUpdatesCard";
 import { IncidentNoticeCard } from "@/components/parent/IncidentNoticeCard";
 import { PassportCompletionPromptCard } from "@/components/passport/PassportCompletionPromptCard";
+import { ConnectedPassportsSection } from "@/components/parent/ConnectedPassportsSection";
 import { ClinicalSupportSection } from "@/components/parent/ClinicalSupportSection";
 import { QuickActionButtons } from "@/components/parent/QuickActionButtons";
 import { YourTeamCard } from "@/components/parent/YourTeamCard";
@@ -292,6 +293,12 @@ export default function ParentDashboardPage() {
       </header>
 
       <main className="flex flex-col gap-3 px-4 pt-3">
+        {/* Multi-child entry, 21 Sept 2026 -- the passport-code box lives
+            at the TOP of the dashboard now, always available, not a
+            one-time "build your passport" step. See
+            ConnectedPassportsSection's own header for why. */}
+        <ConnectedPassportsSection />
+
         {user && <CalmLogReminderCard userId={user.id} />}
 
         {hasSchoolLink && (
@@ -341,7 +348,7 @@ export default function ParentDashboardPage() {
               </div>
             </section>
           )
-        ) : !isSectionAComplete ? (
+        ) : passportId && !isSectionAComplete ? (
           // PRD 3, Stage 3 -- a claimed guardian now gets this card too,
           // once Section A is genuinely reachable and writable for them
           // (Stage 1). Closes CLAUDE.md's own "claimed passport can be
@@ -354,9 +361,19 @@ export default function ParentDashboardPage() {
           // Sept 2026: this IS the only guardian shape now, since self-
           // creation is retired -- the isSelfCreatedPassport branch this
           // condition used to also check is gone, not just unreached.
+          //
+          // Gated on passportId (21 Sept 2026, multi-child entry) --
+          // this card is "finish what your child's organisation
+          // started", never "build/create", and only makes sense once a
+          // passport actually exists to finish. With no passport
+          // connected yet, ConnectedPassportsSection above is the only
+          // entry point; this section renders nothing rather than a
+          // second, now-meaningless "Build your child's passport" door.
+          // The not_started vs in_progress copy split is gone too --
+          // both meant "creation", which a parent no longer does.
           <section>
             <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-black/40">
-              Get started
+              Finish {childName}&apos;s passport
             </h2>
             <Link
               href={resumeHref}
@@ -370,9 +387,7 @@ export default function ParentDashboardPage() {
               </span>
               <div className="flex-1">
                 <p className="text-sm font-semibold text-brand-neutral-black">
-                  {passportStatus === "not_started"
-                    ? "Build your child's passport"
-                    : "Resume passport creation"}
+                  Add your child&apos;s details
                 </p>
                 <p className="text-xs text-black/50">
                   Takes about 10 minutes, save and return anytime

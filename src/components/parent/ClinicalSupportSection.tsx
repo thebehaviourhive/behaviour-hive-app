@@ -42,6 +42,38 @@ type FbaState =
 // card (get_passport_clinicians is reused as-is for the clinician
 // connection signal + name -- not duplicated -- and
 // get_child_clinical_document_status, Step 0, supplies the rest).
+//
+// VISIBILITY, recorded here after a real recon (21 Sept 2026) rather
+// than assumed -- this section is NOT all clinic content, and does not
+// need one explicit "does this child have a clinic connection" gate to
+// behave correctly:
+//   - QuestionnairePromptCard / AssessmentRequestPromptCard /
+//     GrantConfirmationPromptCard -- things a parent must ACT on. All
+//     three already query across every one of the parent's own
+//     children (not scoped to this passport at all) and already render
+//     nothing when there's nothing pending -- exactly "shown wherever
+//     it applies", no change needed. A school can have its own
+//     engaged clinician (institution-employed or parent-engaged), so a
+//     school-only child can have a real pending questionnaire; gating
+//     these on a clinic connection would have hidden it.
+//   - The FBA card (below) is driven by get_passport_clinicians()/
+//     get_child_clinical_document_status(), which key off a
+//     clinician's own engagement (clinician_access), not the type of
+//     institution that engaged them. A school-only child with a
+//     school-engaged clinician has real clinical work here too --
+//     deliberately ungated by institution type.
+//   - ActiveGrantsSection is the one genuinely clinic-specific piece --
+//     cross_organisation_grants can only exist when the granting
+//     institution is type='clinic' (its own direction trigger), so it
+//     is structurally impossible for a school-only child to ever have
+//     a row there. It already rendered nothing when empty; the one
+//     real fix needed was scoping its own query to THIS passport (see
+//     its own header for the bug that predated this section's
+//     multi-child awareness).
+// A child at both a school and a clinic gets the full section for the
+// same reason a school-only child gets none of the clinic-only piece:
+// every card here answers its own question from real data, not from an
+// institution-type flag threaded down from above.
 export function ClinicalSupportSection({
   passportId,
   childName,
@@ -173,7 +205,7 @@ export function ClinicalSupportSection({
           they confirmed the grant." Same section, real and wired --
           only the CONFIRMATION screen above is held back for design
           review, not revocation. */}
-      <ActiveGrantsSection />
+      <ActiveGrantsSection passportId={passportId} />
 
       <WhatIsAnFbaSheet isOpen={isInfoSheetOpen} onClose={() => setIsInfoSheetOpen(false)} />
     </section>
