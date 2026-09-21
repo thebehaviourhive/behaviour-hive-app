@@ -1,7 +1,9 @@
 "use client";
 
+import Link from "next/link";
 import { BrandMark } from "@/components/ui/BrandMark";
 import { useRequireRole } from "@/hooks/useRequireRole";
+import { useClinicalWorkSwitch } from "@/hooks/useClinicalWorkSwitch";
 
 // A real, honest landing page, not a redirect loop. Built 21 Sept 2026
 // alongside the clinic role picker fix -- before this, getPostAuthRedirect()
@@ -15,6 +17,14 @@ import { useRequireRole } from "@/hooks/useRequireRole";
 // that reads as "you haven't joined."
 export default function ClinicalLeadDashboardPage() {
   const { isReady } = useRequireRole("clinical_lead");
+  // Director/lead clinical-work switch, 21 Sept 2026 -- this page is
+  // the ONLY nav surface a clinical_lead has today (no sidebar, no
+  // bottom nav -- see this page's own header comment), so it's the one
+  // place the switch link can live for a lead. institutionType is
+  // passed null: useClinicalWorkSwitch's own school-principal check
+  // never applies to a clinical_lead (that role can only ever exist at
+  // a clinic), so nothing here depends on it.
+  const clinicalWork = useClinicalWorkSwitch(null);
 
   if (!isReady) {
     return null;
@@ -34,6 +44,14 @@ export default function ClinicalLeadDashboardPage() {
             Your account is set up as a Clinical Lead. This dashboard isn&apos;t built yet -- we&apos;ll
             be in touch when it is.
           </p>
+          {clinicalWork.shouldShow && (
+            <Link
+              href={clinicalWork.href}
+              className="mt-4 block w-full rounded-2xl bg-brand-prussian-blue py-3 text-sm font-semibold text-white"
+            >
+              Go to clinical work
+            </Link>
+          )}
         </div>
       </div>
     </main>

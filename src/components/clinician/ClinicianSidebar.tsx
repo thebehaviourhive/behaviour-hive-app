@@ -3,10 +3,13 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { ArrowLeftRight } from "lucide-react";
 import { BrandMark } from "@/components/ui/BrandMark";
 import { useMessagesAwaitingActionCount } from "@/hooks/useMessagesAwaitingActionCount";
 import { useHasUnreadMessages } from "@/hooks/useHasUnreadMessages";
+import { useDirectorSwitchBack } from "@/hooks/useClinicalWorkSwitch";
 import { createClient } from "@/lib/supabase/client";
+import { getPostAuthRedirect } from "@/lib/roleRedirect";
 import { CountBadge } from "@/components/ui/CountBadge";
 import { CLINICIAN_NAV_TABS } from "./clinicianNavTabs";
 
@@ -43,6 +46,12 @@ export function ClinicianSidebar() {
 
   const messagesAwaitingCount = useMessagesAwaitingActionCount(userId);
   const hasUnreadMessages = useHasUnreadMessages(userId);
+
+  // Director/lead clinical-work switch, 21 Sept 2026 -- the reverse
+  // direction. Shown only when the caller's own role is principal/
+  // clinical_lead (never a plain practitioner). See
+  // useClinicalWorkSwitch.ts's own header for the full reasoning.
+  const directorSwitch = useDirectorSwitchBack();
 
   return (
     <aside className="hidden lg:fixed lg:inset-y-0 lg:left-0 lg:z-10 lg:flex lg:w-64 lg:flex-col lg:border-r lg:border-black/5 lg:bg-brand-off-white lg:px-4 lg:py-6">
@@ -89,6 +98,16 @@ export function ClinicianSidebar() {
             </Link>
           );
         })}
+
+        {directorSwitch.shouldShow && (
+          <Link
+            href={getPostAuthRedirect(directorSwitch.role)}
+            className="mt-2 flex items-center gap-3 rounded-2xl border border-dashed border-black/10 px-3 py-2.5 font-sans text-body font-medium text-brand-neutral-black/70"
+          >
+            <ArrowLeftRight aria-hidden size={20} strokeWidth={2} />
+            {directorSwitch.role === "clinical_lead" ? "Lead dashboard" : "Director dashboard"}
+          </Link>
+        )}
       </nav>
     </aside>
   );

@@ -20,6 +20,20 @@ interface UseRequireRoleOptions {
   // adding a second call site here, that's the one thing to get right:
   // this must never reach a page an unconsented user shouldn't see.
   allowBeforeConsent?: boolean;
+  // Director/lead clinical work, 21 Sept 2026. Named the same way --
+  // for what it grants. A clinic director or lead has no verified
+  // clinicians row until AFTER they've visited /clinician/specialty
+  // (select_director_specialty(), 0266) -- if this page required the
+  // fully-verified admission (see below) like every other clinician
+  // page, a bootstrap director could never reach the one screen that
+  // creates the row in the first place. Only /clinician/specialty
+  // passes this; every other clinician page keeps the full, verified-
+  // row-required check. The condition here checks institution type
+  // ONLY (no verified row exists yet by definition) -- a raw client
+  // query, safe because it only ever reads the CALLER'S OWN
+  // institution_staff row (self-scoped RLS, 0009) and institutions'
+  // own `using (true)` read policy, never another institution's data.
+  allowUnverifiedClinicLeadership?: boolean;
 }
 
 export function useRequireRole(role: string | string[], options?: UseRequireRoleOptions) {
@@ -27,6 +41,7 @@ export function useRequireRole(role: string | string[], options?: UseRequireRole
   const [user, setUser] = useState<User | null>(null);
   const [isReady, setIsReady] = useState(false);
   const allowBeforeConsent = options?.allowBeforeConsent ?? false;
+  const allowUnverifiedClinicLeadership = options?.allowUnverifiedClinicLeadership ?? false;
 
   // A caller passing an inline array literal (e.g. useRequireRole(["class_teacher", "sna"]))
   // gets a new array reference every render -- using that directly as a dependency
@@ -53,7 +68,50 @@ export function useRequireRole(role: string | string[], options?: UseRequireRole
       }
 
       const userRole = user.app_metadata?.role;
-      if (!userRole || !roleKey.split(",").includes(userRole)) {
+      const requestedRoles = roleKey.split(",");
+      let admitted = Boolean(userRole && requestedRoles.includes(userRole));
+
+      // THE FBA REMAINS UNTOUCHED. STANDING. A director or lead reaches
+      // clinical work by this gate answering differently for them --
+      // never by any clinician-track file (FBA included) changing what
+      // it asks for. Both branches below fire ONLY when the ordinary
+      // membership check above has already failed AND the page asked
+      // for "clinician" specifically -- zero added query for every
+      // other role check in this app, and zero added query for an
+      // ordinary clinician (already admitted above).
+      if (!admitted && userRole && ["principal", "clinical_lead"].includes(userRole) && requestedRoles.includes("clinician")) {
+        if (allowUnverifiedClinicLeadership) {
+          // The bootstrap case (/clinician/specialty only) -- no
+          // verified clinicians row can exist yet by definition, so this
+          // checks institution type alone: is this caller CURRENTLY an
+          // active principal/clinical_lead at a clinic. A raw client
+          // read of the caller's own institution_staff row (self-scoped
+          // RLS) joined to institutions (open read) -- never another
+          // institution's data, never another user's row.
+          const { data: staffRows } = await supabase
+            .from("institution_staff")
+            .select("role, institutions(type)")
+            .eq("user_id", user.id)
+            .is("deactivated_at", null)
+            .not("approved_at", "is", null);
+          admitted = (staffRows ?? []).some((row) => {
+            const institution = row.institutions as unknown as { type: string } | { type: string }[] | null;
+            const type = Array.isArray(institution) ? institution[0]?.type : institution?.type;
+            return ["principal", "clinical_lead"].includes(row.role) && type === "clinic";
+          });
+        } else {
+          // Every other clinician page: the full, two-independent-
+          // layers check (0266) -- institution type = clinic AND a
+          // genuinely verified clinicians row, checked together,
+          // server-side, in one call. See is_verified_clinic_director_
+          // or_lead()'s own header for why both layers are required
+          // rather than trusting the clinicians row alone.
+          const { data: isVerifiedLeadership } = await supabase.rpc("is_verified_clinic_director_or_lead");
+          admitted = Boolean(isVerifiedLeadership);
+        }
+      }
+
+      if (!admitted) {
         router.replace(getPostAuthRedirect(userRole));
         return;
       }
@@ -87,7 +145,7 @@ export function useRequireRole(role: string | string[], options?: UseRequireRole
     return () => {
       isMounted = false;
     };
-  }, [router, roleKey, allowBeforeConsent]);
+  }, [router, roleKey, allowBeforeConsent, allowUnverifiedClinicLeadership]);
 
   return { user, isReady };
 }

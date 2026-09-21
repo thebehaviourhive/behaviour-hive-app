@@ -2,10 +2,12 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { ClipboardList } from "lucide-react";
 import { BrandMark } from "@/components/ui/BrandMark";
 import { usePrincipalSupportAlert, usePrincipalInstitutionType } from "@/components/principal/PrincipalSupportAlertProvider";
 import { useMessagesAwaitingActionCount } from "@/hooks/useMessagesAwaitingActionCount";
 import { useHasUnreadMessages } from "@/hooks/useHasUnreadMessages";
+import { useClinicalWorkSwitch } from "@/hooks/useClinicalWorkSwitch";
 import { CountBadge } from "@/components/ui/CountBadge";
 import { getPrincipalNavTabs } from "./principalNavTabs";
 
@@ -52,6 +54,12 @@ export function PrincipalSidebar() {
   // default-while-loading convention used everywhere else in this app.
   const { institutionType } = usePrincipalInstitutionType();
   const navTabs = getPrincipalNavTabs(institutionType);
+
+  // Director/lead clinical-work switch, 21 Sept 2026 -- shown only for
+  // a clinic director (never a school principal, since "principal" is
+  // the same role value for both). See useClinicalWorkSwitch.ts's own
+  // header for the full reasoning.
+  const clinicalWork = useClinicalWorkSwitch(institutionType);
 
   return (
     <aside className="hidden lg:fixed lg:inset-y-0 lg:left-0 lg:z-10 lg:flex lg:w-64 lg:flex-col lg:border-r lg:border-black/5 lg:bg-brand-off-white lg:px-4 lg:py-6">
@@ -100,6 +108,16 @@ export function PrincipalSidebar() {
             </Link>
           );
         })}
+
+        {clinicalWork.shouldShow && (
+          <Link
+            href={clinicalWork.href}
+            className="mt-2 flex items-center gap-3 rounded-2xl border border-dashed border-black/10 px-3 py-2.5 font-sans text-body font-medium text-brand-neutral-black/70"
+          >
+            <ClipboardList aria-hidden size={20} strokeWidth={2} />
+            Clinical work
+          </Link>
+        )}
       </nav>
     </aside>
   );

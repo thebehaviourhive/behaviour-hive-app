@@ -24,7 +24,14 @@ export default function ClinicianSpecialtyPage() {
   // useRequireRole's own hasConsented() check is simply skipped, which
   // has no effect once consent is already recorded. See the option's
   // own doc comment for the full reasoning.
-  const { isReady, user } = useRequireRole("clinician", { allowBeforeConsent: true });
+  // Director/lead clinical work, 21 Sept 2026 -- allowUnverifiedClinicLeadership
+  // is the one thing this page adds; every OTHER clinician page is
+  // untouched (FBA files included -- see useRequireRole.ts's own header
+  // for the full reasoning). This is the bootstrap screen: a director
+  // or lead has no verified clinicians row until AFTER saving here, so
+  // this must admit them BEFORE that row exists, not after.
+  const { isReady, user } = useRequireRole("clinician", { allowBeforeConsent: true, allowUnverifiedClinicLeadership: true });
+  const isDirectorOrLead = user?.app_metadata?.role === "principal" || user?.app_metadata?.role === "clinical_lead";
 
   const [isLoadingProfile, setIsLoadingProfile] = useState(true);
   const [isReturnVisit, setIsReturnVisit] = useState(false);
@@ -89,12 +96,18 @@ export default function ClinicianSpecialtyPage() {
 
     const supabase = createClient();
 
-    // select_clinician_specialty() upserts the clinicians row first --
-    // the domain_tags write below needs that row to already exist, so
-    // this has to run first, not in parallel with it.
-    const { error: specialtyError } = await supabase.rpc("select_clinician_specialty", {
-      p_specialty: specialty,
-    });
+    // select_clinician_specialty() (ordinary path) or select_director_
+    // specialty() (0266, a director or lead's own bootstrap) upserts
+    // the clinicians row first -- the domain_tags write below needs
+    // that row to already exist, so this has to run first, not in
+    // parallel with it. Two functions, never one branching on a
+    // client-supplied flag -- select_director_specialty() re-derives
+    // "is this genuinely a director/lead at a clinic" itself, server-
+    // side, rather than trusting isDirectorOrLead (a plain JWT-role
+    // read) as authorization.
+    const { error: specialtyError } = isDirectorOrLead
+      ? await supabase.rpc("select_director_specialty", { p_specialty: specialty })
+      : await supabase.rpc("select_clinician_specialty", { p_specialty: specialty });
 
     if (specialtyError) {
       setIsSaving(false);

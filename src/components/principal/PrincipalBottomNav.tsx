@@ -1,9 +1,11 @@
 "use client";
 
-import { AppBottomNav } from "@/components/ui/AppBottomNav";
+import { ClipboardList } from "lucide-react";
+import { AppBottomNav, type NavTab } from "@/components/ui/AppBottomNav";
 import { usePrincipalSupportAlert, usePrincipalInstitutionType } from "@/components/principal/PrincipalSupportAlertProvider";
 import { useMessagesAwaitingActionCount } from "@/hooks/useMessagesAwaitingActionCount";
 import { useHasUnreadMessages } from "@/hooks/useHasUnreadMessages";
+import { useClinicalWorkSwitch } from "@/hooks/useClinicalWorkSwitch";
 import { getPrincipalNavTabs } from "./principalNavTabs";
 
 // PRD 2, Stage 1. Matches TeacherBottomNav/ClinicianBottomNav/
@@ -48,9 +50,27 @@ export function PrincipalBottomNav() {
   // own identical comment; same shared context, same default-while-
   // loading convention.
   const { institutionType } = usePrincipalInstitutionType();
-  const tabs = getPrincipalNavTabs(institutionType).map((tab) =>
+  // Director/lead clinical-work switch, 21 Sept 2026 -- shown only for
+  // a clinic director (never a school principal). See
+  // useClinicalWorkSwitch.ts's own header for the full reasoning; a
+  // clinical_lead never reaches this component at all (they have no
+  // nav shell today, see their own dashboard page).
+  const clinicalWork = useClinicalWorkSwitch(institutionType);
+  const baseTabs = getPrincipalNavTabs(institutionType).map((tab) =>
     tab.key === "messages" ? { ...tab, badgeCount: messagesAwaitingCount, showUnreadDot: hasUnreadMessages } : tab
   );
+  const tabs: NavTab[] = clinicalWork.shouldShow
+    ? [
+        ...baseTabs,
+        {
+          key: "clinical-work",
+          label: "Clinical",
+          icon: ClipboardList,
+          href: clinicalWork.href,
+          isActive: (pathname) => pathname.startsWith("/clinician"),
+        },
+      ]
+    : baseTabs;
 
   // Widened past AppBottomNav's own max-w-sm default -- measured live at
   // 1280px (Stage 1's own review): the shared default left the four tabs

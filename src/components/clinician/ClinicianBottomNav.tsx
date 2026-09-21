@@ -1,10 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { AppBottomNav } from "@/components/ui/AppBottomNav";
+import { ArrowLeftRight } from "lucide-react";
+import { AppBottomNav, type NavTab } from "@/components/ui/AppBottomNav";
 import { useMessagesAwaitingActionCount } from "@/hooks/useMessagesAwaitingActionCount";
 import { useHasUnreadMessages } from "@/hooks/useHasUnreadMessages";
+import { useDirectorSwitchBack } from "@/hooks/useClinicalWorkSwitch";
 import { createClient } from "@/lib/supabase/client";
+import { getPostAuthRedirect } from "@/lib/roleRedirect";
 import { CLINICIAN_NAV_TABS } from "./clinicianNavTabs";
 
 // Clinician track's tab list. "Passports" owns the caseload list plus any
@@ -42,9 +45,28 @@ export function ClinicianBottomNav() {
   }, []);
   const messagesAwaitingCount = useMessagesAwaitingActionCount(userId);
   const hasUnreadMessages = useHasUnreadMessages(userId);
-  const tabs = CLINICIAN_NAV_TABS.map((tab) =>
+
+  // Director/lead clinical-work switch, 21 Sept 2026 -- the reverse
+  // direction. Shown only when the caller's own role is principal/
+  // clinical_lead (never a plain practitioner). See
+  // useClinicalWorkSwitch.ts's own header for the full reasoning.
+  const directorSwitch = useDirectorSwitchBack();
+
+  const baseTabs = CLINICIAN_NAV_TABS.map((tab) =>
     tab.key === "messages" ? { ...tab, badgeCount: messagesAwaitingCount, showUnreadDot: hasUnreadMessages } : tab
   );
+  const tabs: NavTab[] = directorSwitch.shouldShow
+    ? [
+        ...baseTabs,
+        {
+          key: "director-switch",
+          label: directorSwitch.role === "clinical_lead" ? "Lead" : "Director",
+          icon: ArrowLeftRight,
+          href: getPostAuthRedirect(directorSwitch.role),
+          isActive: () => false,
+        },
+      ]
+    : baseTabs;
 
   return (
     <div className="lg:hidden">

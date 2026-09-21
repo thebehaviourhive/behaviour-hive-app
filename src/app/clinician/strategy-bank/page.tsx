@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useRequireRole } from "@/hooks/useRequireRole";
+import { useInstitutionType } from "@/hooks/useInstitutionType";
 import { useStrategyBank } from "@/hooks/useStrategyBank";
 import { useBankAssets } from "@/hooks/useBankAssets";
 import { ClinicianBottomNav } from "@/components/clinician/ClinicianBottomNav";
@@ -28,10 +29,31 @@ const PLACEMENTS: StrategyPlacement[] = ["home", "school", "shared"];
 // page already correctly allows a director's own update -- the client
 // gate was the only thing actually blocking them. Fixed before this
 // stage was called closed, not left as a known gap.
+//
+// A SCHOOL PRINCIPAL ADMITTED HERE TOO, WITH NO CLINIC CHECK ANYWHERE
+// -- found 21 Sept 2026, same pass as the director/lead clinical-work
+// gate. ["clinician", "principal"] admits any school principal, and
+// resolveContext() below resolved their own school's institution_id
+// with no institution-type filter at all -- so did the two RLS
+// helpers backing strategy_bank/bank_assets themselves
+// (_is_director_of_institution / _is_verified_clinician_at_institution,
+// 0238), hardened in the same migration as this fix (0267) to also
+// require institution type = clinic, belt and braces, matching the
+// director/lead gate's own two-independent-layers shape. Before this
+// fix: a school principal landed on this page framed as "Your clinic's
+// bank" for their own school, saw the empty state (or, if any
+// school-engaged clinician had ever used this page too, real bank
+// entries) and could curate/retire them via _is_director_of_
+// institution()'s own institution-type-blind check -- and any
+// school-engaged clinician (a real, existing pattern, not
+// hypothetical) could freely add strategy_bank rows scoped to a
+// school's own institution_id. Closed here (client) and in 0267
+// (server).
 export default function StrategyBankPage() {
   const { isReady, user } = useRequireRole(["clinician", "principal"]);
   const [institutionId, setInstitutionId] = useState<string | null | undefined>(undefined);
   const [isDirector, setIsDirector] = useState(false);
+  const { institutionType, isLoading: isInstitutionTypeLoading } = useInstitutionType(institutionId ?? null);
 
   const { strategies, loadError, reload, addStrategy, isSaving, saveError, curateStrategy } = useStrategyBank(institutionId ?? null);
   const { upload: uploadAsset, isUploading } = useBankAssets(institutionId ?? null);
@@ -56,8 +78,16 @@ export default function StrategyBankPage() {
       .eq("user_id", user.id)
       .is("deactivated_at", null);
 
-    const clinicRow = (staff ?? []).find((s) => s.role === "clinician" || s.role === "principal");
+    const clinicRow = (staff ?? []).find(
+      (s) => s.role === "clinician" || s.role === "principal" || s.role === "clinical_lead"
+    );
     setInstitutionId(clinicRow?.institution_id ?? null);
+    // Curate/retire is director-only at the RLS layer
+    // (_is_director_of_institution() checks role = 'principal' only,
+    // 0238) -- a clinical_lead can view the bank (no role filter on the
+    // SELECT policy) but never curate it, so isDirector deliberately
+    // stays principal-only here to match what the backend will actually
+    // accept.
     setIsDirector((staff ?? []).some((s) => s.role === "principal"));
   }, [user]);
 
@@ -110,15 +140,17 @@ export default function StrategyBankPage() {
     }
   }
 
-  if (!isReady || institutionId === undefined) {
+  if (!isReady || institutionId === undefined || (institutionId && isInstitutionTypeLoading)) {
     return null;
   }
 
-  if (!institutionId) {
+  if (!institutionId || institutionType !== "clinic") {
     return (
       <div className="flex min-h-full flex-1 flex-col items-center justify-center gap-2 bg-brand-off-white/40 p-6 text-center">
         <p className="text-sm text-brand-neutral-black/60">
-          The strategy bank belongs to a clinic. Independent practitioners have no clinic-wide library to build.
+          {institutionId
+            ? "The strategy bank belongs to a clinic. Your own organisation doesn't have one."
+            : "The strategy bank belongs to a clinic. Independent practitioners have no clinic-wide library to build."}
         </p>
         <ClinicianBottomNav />
       </div>
