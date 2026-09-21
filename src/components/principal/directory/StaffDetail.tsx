@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { DeactivateStaffSheet } from "@/components/principal/DeactivateStaffSheet";
@@ -135,6 +136,19 @@ export function StaffDetail({
       {/* Hand Over lives on /principal/school -- isSelf's own principal
           branch needs no action here, matching staff/page.tsx's own
           established reasoning. */}
+
+      {/* PRD 10 Stage 4 -- a lead's own scope is authority (AND across
+          dimensions, OR within one), never a bare tag list; its own
+          editor is a dedicated screen, not a sheet, per Daniel's own
+          instruction that it "needs real design care." */}
+      {staffRow.is_active && staffRow.role === "clinical_lead" && (
+        <Link
+          href={`/principal/clinic/lead/${staffRow.id}/scope`}
+          className="mt-4 block w-full lg:w-auto rounded-xl border border-brand-prussian-blue px-6 py-2.5 text-center font-sans text-body font-semibold text-brand-prussian-blue"
+        >
+          Manage Scope
+        </Link>
+      )}
 
       {staffRow.is_active && !isSelf && (
         <button
