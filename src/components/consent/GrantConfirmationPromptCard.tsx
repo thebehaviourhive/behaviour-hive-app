@@ -16,11 +16,9 @@ import { GrantConfirmationScreen } from "./GrantConfirmationScreen";
 // no dedicated RPC needed for the read, matching how the clinic-admin
 // dashboard already reads the same table directly.
 //
-// STOPPED BEFORE WIRING THE SUBMIT, per instruction -- onConfirm/
-// onDecline below do not call confirm_cross_organisation_grant() /
-// decline_cross_organisation_grant() yet. Everything else is real:
-// real pending grants, real clinic/school names, real child name,
-// real scope items.
+// Wired, per Daniel's approval of GrantConfirmationScreen's design
+// (section 7) -- onConfirm/onDecline call confirm_cross_organisation_
+// grant()/decline_cross_organisation_grant() directly.
 
 interface PendingGrantRow {
   id: string;
@@ -113,12 +111,19 @@ export function GrantConfirmationPromptCard({ className = "" }: { className?: st
             childName={activeGrant.childName}
             scopeItems={activeGrant.scopeItems}
             onConfirm={async () => {
-              // Not yet wired -- section 7 requires the design is seen
-              // before this calls confirm_cross_organisation_grant().
-              return { error: "This screen is pending design review and cannot be confirmed yet." };
+              const supabase = createClient();
+              const { error } = await supabase.rpc("confirm_cross_organisation_grant", {
+                p_grant_id: activeGrant.id,
+              });
+              return { error: error?.message ?? null };
             }}
-            onDecline={async () => {
-              return { error: "This screen is pending design review and cannot be declined yet." };
+            onDecline={async (reason: string) => {
+              const supabase = createClient();
+              const { error } = await supabase.rpc("decline_cross_organisation_grant", {
+                p_grant_id: activeGrant.id,
+                p_reason: reason.trim() === "" ? null : reason.trim(),
+              });
+              return { error: error?.message ?? null };
             }}
             onConfirmed={() => {
               setActiveGrant(null);
