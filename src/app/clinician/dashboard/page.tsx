@@ -9,6 +9,7 @@ import { useMessagesAwaitingActionCount } from "@/hooks/useMessagesAwaitingActio
 import { ClinicianBottomNav } from "@/components/clinician/ClinicianBottomNav";
 import { ClinicianActivityCard } from "@/components/clinician/ClinicianActivityCard";
 import { ClinicianQuickActions } from "@/components/clinician/ClinicianQuickActions";
+import { MyTagChangeRequestsSection } from "@/components/clinic/MyTagChangeRequestsSection";
 import { CalmEscalationNoticeList } from "@/components/clinician/CalmEscalationNoticeList";
 import { ClinicalFileIcon, LockIcon } from "@/components/ui/icons";
 import { InlineErrorState } from "@/components/ui/InlineErrorState";
@@ -407,6 +408,8 @@ export default function ClinicianDashboardPage() {
           </div>
 
           <ClinicianQuickActions messagesAwaitingCount={messagesAwaitingCount} />
+
+          <MyTagChangeRequestsSection recordHref={(passportId) => `/clinician/passport/${passportId}`} />
         </div>
 
         {reviewState === "not_submitted" && (

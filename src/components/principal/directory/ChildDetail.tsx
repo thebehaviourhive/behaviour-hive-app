@@ -17,6 +17,7 @@ import { usePassportClinicalContent } from "@/hooks/usePassportClinicalContent";
 import { ClinicalTeamSection } from "@/components/passport/clinical-team/ClinicalTeamSection";
 import { ClinicalPlansSection } from "@/components/passport/clinical-team/ClinicalPlansSection";
 import { DirectorSessionNotesTab } from "@/components/principal/directory/DirectorSessionNotesTab";
+import { EpisodeTagsSection } from "@/components/clinic/EpisodeTagsSection";
 import { PassportCompletionSection } from "@/components/passport/PassportCompletionSection";
 import { PassportMessagesTab } from "@/components/passport/PassportMessagesTab";
 import { ProgressSurface } from "@/components/progress/ProgressSurface";
@@ -1054,7 +1055,11 @@ export function ChildDetail({
                     );
                   })()}
                 </section>
-              ) : (
+              ) : null}
+
+              {institutionType === "clinic" && <EpisodeTagsSection passportId={passportId} />}
+
+              {institutionType !== "clinic" && (
                 <section className="mb-6">
                   <h2 className="mb-2 font-heading text-sm font-bold uppercase tracking-wide text-brand-neutral-black/60">
                     Enrolment

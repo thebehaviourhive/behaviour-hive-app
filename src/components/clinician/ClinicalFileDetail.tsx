@@ -18,6 +18,7 @@ import { ClinicalFileBspTab } from "@/components/clinician/bsp/ClinicalFileBspTa
 import { ClinicalFilePlansTab } from "@/components/clinician/plans/ClinicalFilePlansTab";
 import { ClinicalFileMessagesTab } from "@/components/clinician/ClinicalFileMessagesTab";
 import { ClinicalFileIncidentsTab } from "@/components/clinician/ClinicalFileIncidentsTab";
+import { EpisodeTagsSection } from "@/components/clinic/EpisodeTagsSection";
 import { ClinicalFileSessionNotesTab } from "@/components/clinician/ClinicalFileSessionNotesTab";
 import { ClinicalFileAssessmentsTab } from "@/components/clinician/assessments/ClinicalFileAssessmentsTab";
 import { EffectivenessSurface } from "@/components/clinician/passport/EffectivenessSurface";
@@ -431,6 +432,8 @@ export function ClinicalFileDetail({
               ) : (
                 <EmptyCard text="No communication methods provided." />
               )}
+
+              <EpisodeTagsSection passportId={passportId} />
             </>
           )}
 
