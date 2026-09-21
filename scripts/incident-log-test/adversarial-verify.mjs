@@ -4076,6 +4076,16 @@ async function main() {
 
   console.log(`\n== CHECK X: Principal handover -- hand_over_principal() (migration 0102) ==`);
   if (shouldRun("X")) {
+    // Randomized, not the fixed "handoverx.*" literals this block used
+    // to carry -- a crash mid-block (CHECK X's own accounts are hard
+    // to avoid re-touching given how many negative-guard tests reuse
+    // them) used to permanently block every later run's user creation
+    // with "already registered" until someone cleaned up by hand. Every
+    // other block in this suite already randomizes its institution code
+    // the same way (the global CODE, or a local rand()/suffix); this
+    // gives CHECK X's own emails the identical treatment so it can
+    // never be the one fixture that wedges the gate.
+    const xEmailSuffix = Math.floor(Math.random() * 1000000);
     const { data: instXLeaving, error: instXLeavingErr } = await admin
       .from("institutions")
       .insert({ name: "Handover Verify -- Leaving", institution_code: CODE + "XL", status: "verified" })
@@ -4100,12 +4110,12 @@ async function main() {
     if (instXOtherErr) throw instXOtherErr;
     const institutionXOtherId = instXOther.id;
 
-    const principalA1Id = await createUser("handoverx.principal1@thebehaviourhive.com", "Handover Principal One", "principal");
-    const successorAId = await createUser("handoverx.successora@thebehaviourhive.com", "Handover Successor A", "class_teacher");
-    const extraTeacherLeavingId = await createUser("handoverx.extra@thebehaviourhive.com", "Handover Extra Teacher", "class_teacher");
-    const deactivatedCandidateId = await createUser("handoverx.deactivated@thebehaviourhive.com", "Handover Deactivated Candidate", "class_teacher");
-    const principalA2Id = await createUser("handoverx.principal2@thebehaviourhive.com", "Handover Principal Two", "principal");
-    const successorBId = await createUser("handoverx.successorb@thebehaviourhive.com", "Handover Successor B", "class_teacher");
+    const principalA1Id = await createUser(`handoverx.principal1.${xEmailSuffix}@thebehaviourhive.com`, "Handover Principal One", "principal");
+    const successorAId = await createUser(`handoverx.successora.${xEmailSuffix}@thebehaviourhive.com`, "Handover Successor A", "class_teacher");
+    const extraTeacherLeavingId = await createUser(`handoverx.extra.${xEmailSuffix}@thebehaviourhive.com`, "Handover Extra Teacher", "class_teacher");
+    const deactivatedCandidateId = await createUser(`handoverx.deactivated.${xEmailSuffix}@thebehaviourhive.com`, "Handover Deactivated Candidate", "class_teacher");
+    const principalA2Id = await createUser(`handoverx.principal2.${xEmailSuffix}@thebehaviourhive.com`, "Handover Principal Two", "principal");
+    const successorBId = await createUser(`handoverx.successorb.${xEmailSuffix}@thebehaviourhive.com`, "Handover Successor B", "class_teacher");
     // principalOtherId doubles as X7's "someone not staff at
     // institutionXLeaving" target below -- no dedicated otherStaff
     // account needed, since the check only needs "some real, active
@@ -4113,13 +4123,13 @@ async function main() {
     // principalOtherId (auto-approved as the first-ever principal at
     // institutionXOtherId) already is that with no separate approval
     // RPC call required either.
-    const principalOtherId = await createUser("handoverx.principalother@thebehaviourhive.com", "Handover Principal Other", "principal");
+    const principalOtherId = await createUser(`handoverx.principalother.${xEmailSuffix}@thebehaviourhive.com`, "Handover Principal Other", "principal");
     // passports.user_id is unique -- one passport per parent -- so each
     // child needs its own parent, not two children sharing one.
-    const parentXL1Id = await createUser("handoverx.parentl1@thebehaviourhive.com", "Handover Parent L1", "parent");
-    const parentXL2Id = await createUser("handoverx.parentl2@thebehaviourhive.com", "Handover Parent L2", "parent");
-    const parentXS1Id = await createUser("handoverx.parents1@thebehaviourhive.com", "Handover Parent S1", "parent");
-    const parentXS2Id = await createUser("handoverx.parents2@thebehaviourhive.com", "Handover Parent S2", "parent");
+    const parentXL1Id = await createUser(`handoverx.parentl1.${xEmailSuffix}@thebehaviourhive.com`, "Handover Parent L1", "parent");
+    const parentXL2Id = await createUser(`handoverx.parentl2.${xEmailSuffix}@thebehaviourhive.com`, "Handover Parent L2", "parent");
+    const parentXS1Id = await createUser(`handoverx.parents1.${xEmailSuffix}@thebehaviourhive.com`, "Handover Parent S1", "parent");
+    const parentXS2Id = await createUser(`handoverx.parents2.${xEmailSuffix}@thebehaviourhive.com`, "Handover Parent S2", "parent");
 
     const { data: staffXRows, error: staffXErr } = await admin
       .from("institution_staff")
@@ -4140,8 +4150,8 @@ async function main() {
     const deactivatedCandidateStaffId = byUserX(deactivatedCandidateId).id;
     const successorBStaffId = byUserX(successorBId).id;
 
-    const principalA1 = await signedInClient("handoverx.principal1@thebehaviourhive.com");
-    const principalA2 = await signedInClient("handoverx.principal2@thebehaviourhive.com");
+    const principalA1 = await signedInClient(`handoverx.principal1.${xEmailSuffix}@thebehaviourhive.com`);
+    const principalA2 = await signedInClient(`handoverx.principal2.${xEmailSuffix}@thebehaviourhive.com`);
 
     // Approve every non-principal row through the real RPC.
     for (const id of [successorAStaffId, extraTeacherLeavingStaffId, deactivatedCandidateStaffId]) {
@@ -4198,7 +4208,7 @@ async function main() {
     // Signed in once here and reused below (as `extraTeacherLeaving`)
     // rather than a second signedInClient() call for the same account --
     // nothing about signing off an incident invalidates the session.
-    const extraTeacherLeaving = await signedInClient("handoverx.extra@thebehaviourhive.com");
+    const extraTeacherLeaving = await signedInClient(`handoverx.extra.${xEmailSuffix}@thebehaviourhive.com`);
     const { data: xIncidentId } = await extraTeacherLeaving.rpc("create_incident_stamp", {
       p_institution_id: institutionXLeavingId, p_occurred_at: new Date().toISOString(), p_location_id: globalLocX.id,
       p_child_passport_ids: [cXL1.id], p_staff: [],
@@ -4334,7 +4344,7 @@ async function main() {
     console.log(`-- item 13: the new principal can countersign, the old one cannot -- same incident, order matters --`);
     const { error: x13OldPrincipalErr } = await principalA1.rpc("countersign_incident", { p_incident_id: xIncidentId });
     record("X13a: the now-deactivated OLD principal is refused countersigning", Boolean(x13OldPrincipalErr) && /permission/i.test(x13OldPrincipalErr?.message ?? ""), x13OldPrincipalErr?.message);
-    const successorA = await signedInClient("handoverx.successora@thebehaviourhive.com");
+    const successorA = await signedInClient(`handoverx.successora.${xEmailSuffix}@thebehaviourhive.com`);
     const { error: x13NewPrincipalErr } = await successorA.rpc("countersign_incident", { p_incident_id: xIncidentId });
     const { data: x13After } = await admin.from("incidents").select("countersigned_by, countersigned_role_at_time, countersigned_via, status").eq("id", xIncidentId).single();
     record(
