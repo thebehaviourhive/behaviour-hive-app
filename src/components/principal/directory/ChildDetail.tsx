@@ -7,6 +7,8 @@ import { createClient } from "@/lib/supabase/client";
 import { ReasonConfirmSheet } from "@/components/shared/ReasonConfirmSheet";
 import { GrantPassportAccessSheet } from "@/components/principal/GrantPassportAccessSheet";
 import { EndEnrolmentSheet } from "@/components/principal/EndEnrolmentSheet";
+import { DischargeEpisodeSheet } from "@/components/principal/DischargeEpisodeSheet";
+import { ReopenEpisodeSheet } from "@/components/principal/ReopenEpisodeSheet";
 import { GrantClinicianAccessSheet } from "@/components/principal/GrantClinicianAccessSheet";
 import { CLINICIAN_SPECIALTY_LABEL, type ClinicianSpecialty } from "@/lib/clinicianSpecialties";
 import { IncidentCard, type InstitutionIncidentRow } from "@/components/principal/IncidentCard";
@@ -118,6 +120,45 @@ interface EnrolmentRow {
   id: string;
   endedAt: string | null;
   endReason: string | null;
+}
+
+// Tier 1 item 2 (one level deeper), 21 Sept 2026. A clinic client has no
+// enrolments row -- ever -- so the Enrolment tab's own status block
+// needs the clinic-side equivalent: the passport's own episodes_of_care
+// history at THIS institution, active and discharged, same "history is
+// visible, not hidden" instruction this file's own header already
+// states for Access. Read directly (episodes_of_care's own SELECT
+// policy is any current-standing staff member, 0209) -- no new RPC.
+interface EpisodeOfCareRow {
+  id: string;
+  startedAt: string;
+  endedAt: string | null;
+  endReason: string | null;
+}
+
+// The Incidents tab's own clinic decision, per Daniel's explicit
+// instruction not to decide silently -- recorded here, not just in a
+// commit message, so the next reader sees the reasoning in place.
+// get_institution_incidents_for_director() (0260, PRD 8 Stage 3) is
+// deliberately minimal -- passport_id/incident_id/occurred_at/
+// is_restraint only, no narrative/category/location, per that
+// migration's own Decision 1 scoping -- and it's the ONLY cross-
+// organisation incident read that exists in this schema; nothing here
+// invents a second, richer one. A clinic client who ALSO attends a
+// school has real school incidents a clinical director is authorized
+// to know about (that RPC's whole reason to exist) -- so the tab is the
+// right home for that fact, rendered as a plain, read-only, clearly-
+// attributed dated list (no narrative, because none is available
+// through this RPC, not because it's being withheld from the UI), never
+// reusing IncidentCard (built for the school's own FULL incident
+// content, a different shape entirely). A clinic-only child with no
+// school link at all has no such data structurally, ever -- the tab is
+// hidden for them, not shown empty, matching the Session Notes tab's
+// own established precedent for a permanently-irrelevant tab.
+interface DirectorIncidentRow {
+  incidentId: string;
+  occurredAt: string;
+  isRestraint: boolean;
 }
 
 // Stage 7, Step 2. Same shape as passport/dashboard's own
@@ -304,6 +345,18 @@ export function ChildDetail({
   const [enrolment, setEnrolment] = useState<EnrolmentRow | null>(null);
   const [isEndEnrolmentOpen, setIsEndEnrolmentOpen] = useState(false);
 
+  // Tier 1 item 2 -- clinic-side Enrolment tab.
+  const [episodesOfCare, setEpisodesOfCare] = useState<EpisodeOfCareRow[]>([]);
+  const [isDischargeOpen, setIsDischargeOpen] = useState(false);
+  const [isReopenOpen, setIsReopenOpen] = useState(false);
+  const [showEpisodeHistory, setShowEpisodeHistory] = useState(false);
+
+  // Tier 1 item 2 -- the Incidents tab's own clinic decision (see the
+  // DirectorIncidentRow header comment above for the reasoning).
+  const [hasSchoolLink, setHasSchoolLink] = useState(false);
+  const [schoolIncidents, setSchoolIncidents] = useState<DirectorIncidentRow[]>([]);
+  const [schoolIncidentsError, setSchoolIncidentsError] = useState<string | null>(null);
+
   // Stage 3 -- coexisting, not exclusive. See the header comment above.
   const [guardians, setGuardians] = useState<GuardianRow[]>([]);
   const [claimCode, setClaimCode] = useState<ClaimCodeStatus | null>(null);
@@ -371,7 +424,7 @@ export function ChildDetail({
 
     const { data: staffRow, error: staffError } = await supabase
       .from("institution_staff")
-      .select("institution_id")
+      .select("institution_id, institutions(type)")
       .eq("user_id", user.id)
       .eq("role", "principal")
       .is("deactivated_at", null)
@@ -384,6 +437,15 @@ export function ChildDetail({
       return;
     }
     setInstitutionId(staffRow.institution_id);
+
+    // Resolved locally, synchronously with this same load() -- not from
+    // the separate useInstitutionType(institutionId) hook below, whose
+    // own async resolution would otherwise race the Promise.all this
+    // function is about to build (which queries to include depends on
+    // knowing the type NOW, not on a later render).
+    const staffInstitutionRecord = staffRow.institutions as unknown as { type: string } | { type: string }[] | null;
+    const isClinicLocal =
+      (Array.isArray(staffInstitutionRecord) ? staffInstitutionRecord[0]?.type : staffInstitutionRecord?.type) === "clinic";
 
     // Same roster RPC the list page uses -- if this child genuinely
     // isn't on it (a stale link, or a passportId that was never really
@@ -420,6 +482,9 @@ export function ChildDetail({
       institutionIncidentsResult,
       medicalCareResult,
       todayContextResult,
+      episodesOfCareResult,
+      institutionLinksResult,
+      directorIncidentsResult,
     ] = await Promise.all([
       supabase.rpc("get_passport_access_for_child", { p_passport_id: passportId, p_institution_id: staffRow.institution_id }),
       supabase.rpc("get_institution_staff_roster", { p_institution_id: staffRow.institution_id, p_include_inactive: false, p_include_pending: false }),
@@ -453,6 +518,36 @@ export function ChildDetail({
         .order("checked_in_at", { ascending: false })
         .limit(1)
         .maybeSingle(),
+      // Tier 1 item 2 -- clinic-side Enrolment tab's own episode
+      // history at THIS institution. Always run, harmless for a school
+      // (zero rows, same posture as the enrolments read above being
+      // harmless for a clinic).
+      supabase
+        .from("episodes_of_care")
+        .select("id, started_at, ended_at, end_reason")
+        .eq("passport_id", passportId)
+        .eq("institution_id", staffRow.institution_id)
+        .order("started_at", { ascending: false }),
+      // Tier 1 item 2 -- does this passport link to a school ANYWHERE
+      // (not just this institution)? Decides the Incidents tab's own
+      // visibility for a clinic caller. A real RPC, not a raw select on
+      // passport_institution_links -- that table's own "Teachers can
+      // view links for their institution" policy (0014) is scoped to
+      // the CALLER'S OWN institution_id, so a clinic director querying
+      // it directly would only ever see the clinic's own row, never the
+      // school's (a different institution_id entirely) -- caught before
+      // shipping, see get_passport_has_school_link()'s own header
+      // (0265). Skipped for a school caller -- irrelevant there, the
+      // tab is unconditional.
+      isClinicLocal
+        ? supabase.rpc("get_passport_has_school_link", { p_passport_id: passportId, p_institution_id: staffRow.institution_id })
+        : Promise.resolve({ data: false, error: null }),
+      // Tier 1 item 2 -- the Incidents tab's clinic decision (see
+      // DirectorIncidentRow's own header comment). Bulk/institution-
+      // scoped by design (0260) -- filtered to this one passport below.
+      isClinicLocal
+        ? supabase.rpc("get_institution_incidents_for_director", { p_institution_id: staffRow.institution_id })
+        : Promise.resolve({ data: [], error: null }),
     ]);
 
     if (institutionIncidentsResult.error) {
@@ -462,6 +557,38 @@ export function ChildDetail({
     } else {
       setInstitutionIncidentsError(null);
       setInstitutionIncidents((institutionIncidentsResult.data ?? []) as InstitutionIncidentRow[]);
+    }
+
+    // Tier 1 item 2 -- episodes of care (clinic-side Enrolment tab).
+    if (!episodesOfCareResult.error) {
+      setEpisodesOfCare(
+        ((episodesOfCareResult.data ?? []) as { id: string; started_at: string; ended_at: string | null; end_reason: string | null }[]).map(
+          (row) => ({ id: row.id, startedAt: row.started_at, endedAt: row.ended_at, endReason: row.end_reason })
+        )
+      );
+    }
+
+    // Tier 1 item 2 -- does this child have a school link anywhere.
+    setHasSchoolLink(Boolean(institutionLinksResult.data));
+
+    // Tier 1 item 2 -- the clinic's own director-facing school-incidents
+    // read, bulk/institution-scoped (0260) -- filtered client-side to
+    // this one passport, matching how get_institution_child_status_
+    // badges() and similar bulk RPCs are already consumed per-row
+    // elsewhere in this app.
+    if (directorIncidentsResult.error) {
+      console.error("Failed to load this child's school incidents:", directorIncidentsResult.error);
+      setSchoolIncidentsError("Couldn't load this child's school incidents.");
+      setSchoolIncidents([]);
+    } else {
+      setSchoolIncidentsError(null);
+      setSchoolIncidents(
+        (
+          (directorIncidentsResult.data ?? []) as { passport_id: string; incident_id: string; occurred_at: string; is_restraint: boolean }[]
+        )
+          .filter((row) => row.passport_id === passportId)
+          .map((row) => ({ incidentId: row.incident_id, occurredAt: row.occurred_at, isRestraint: row.is_restraint }))
+      );
     }
 
     if (cliniciansResult.error) {
@@ -785,7 +912,13 @@ export function ChildDetail({
       <div className="lg:flex lg:items-start lg:gap-4">
       {!isLoading && !error && !notOnRoster && (
         <div className="relative flex gap-1 overflow-x-auto border-b border-black/5 px-4 lg:w-52 lg:flex-shrink-0 lg:flex-col lg:gap-0.5 lg:overflow-visible lg:border-b-0 lg:border-r lg:border-black/5 lg:px-2 lg:py-2">
-          {TABS.filter((tab) => tab.key !== "sessionNotes" || institutionType === "clinic").map((tab) => (
+          {TABS.filter((tab) => tab.key !== "sessionNotes" || institutionType === "clinic")
+            // Tier 1 item 2 -- a clinic-only child (no school link at
+            // all) has no school-incidents data structurally, ever;
+            // hidden rather than shown empty, matching sessionNotes'
+            // own precedent just above.
+            .filter((tab) => tab.key !== "incidents" || institutionType !== "clinic" || hasSchoolLink)
+            .map((tab) => (
             <button
               key={tab.key}
               type="button"
@@ -803,7 +936,7 @@ export function ChildDetail({
                   : "border-transparent text-black/40 lg:text-brand-neutral-black/70"
               }`}
             >
-              {tab.label}
+              {tab.key === "incidents" && institutionType === "clinic" ? "School Incidents" : tab.label}
             </button>
           ))}
           {/* lg+ becomes a non-scrolling vertical list -- no fade needed there. */}
@@ -837,36 +970,122 @@ export function ChildDetail({
         <>
           {activeTab === "enrolment" && (
             <>
-              <section className="mb-6">
-                <h2 className="mb-2 font-heading text-sm font-bold uppercase tracking-wide text-brand-neutral-black/60">
-                  Enrolment
-                </h2>
-                {enrolment?.endedAt ? (
-                  <div className="rounded-2xl border border-black/5 bg-white/60 p-4">
-                    <span className="inline-flex items-center gap-1.5 rounded-full bg-black/5 px-2.5 py-1 text-xs font-semibold text-brand-neutral-black/60">
-                      Enrolment ended
-                    </span>
-                    <p className="mt-2 text-xs text-brand-neutral-black/50">
-                      {END_REASON_LABEL[enrolment.endReason ?? ""] ?? enrolment.endReason} · {formatDate(enrolment.endedAt)}
-                    </p>
-                  </div>
-                ) : (
-                  <div className="flex items-center justify-between rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
-                    <span className="inline-flex items-center gap-1.5 rounded-full bg-brand-pastel-blue/20 px-2.5 py-1 text-xs font-semibold text-brand-prussian-blue">
-                      Enrolled
-                    </span>
-                    {enrolment && (
-                      <button
-                        type="button"
-                        onClick={() => setIsEndEnrolmentOpen(true)}
-                        className="text-xs font-semibold text-brand-golden-brown"
-                      >
-                        End Enrolment
-                      </button>
-                    )}
-                  </div>
-                )}
-              </section>
+              {institutionType === "clinic" ? (
+                // Tier 1 item 2 -- a clinic client has no enrolments row,
+                // ever; episodes_of_care is the real record, with the
+                // active/discharged history proved live in the Tier 1
+                // proof pass. Shown here, not the school's own "Enrolled"
+                // placeholder badge.
+                <section className="mb-6">
+                  <h2 className="mb-2 font-heading text-sm font-bold uppercase tracking-wide text-brand-neutral-black/60">
+                    Episode of Care
+                  </h2>
+                  {(() => {
+                    const currentEpisode = episodesOfCare.find((e) => !e.endedAt) ?? null;
+                    const pastEpisodes = episodesOfCare.filter((e) => e.endedAt);
+                    return (
+                      <>
+                        {currentEpisode ? (
+                          <div className="flex items-center justify-between rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
+                            <div>
+                              <span className="inline-flex items-center gap-1.5 rounded-full bg-brand-pastel-blue/20 px-2.5 py-1 text-xs font-semibold text-brand-prussian-blue">
+                                Active
+                              </span>
+                              <p className="mt-1.5 text-xs text-brand-neutral-black/50">
+                                Started {formatDate(currentEpisode.startedAt)}
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setIsDischargeOpen(true)}
+                              className="text-xs font-semibold text-brand-golden-brown"
+                            >
+                              Discharge
+                            </button>
+                          </div>
+                        ) : pastEpisodes.length > 0 ? (
+                          <div className="flex items-center justify-between rounded-2xl border border-black/5 bg-white/60 p-4">
+                            <div>
+                              <span className="inline-flex items-center gap-1.5 rounded-full bg-black/5 px-2.5 py-1 text-xs font-semibold text-brand-neutral-black/60">
+                                Discharged
+                              </span>
+                              <p className="mt-1.5 text-xs text-brand-neutral-black/50">
+                                {pastEpisodes[0].endReason} · {formatDate(pastEpisodes[0].endedAt!)}
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setIsReopenOpen(true)}
+                              className="text-xs font-semibold text-brand-prussian-blue"
+                            >
+                              Reopen
+                            </button>
+                          </div>
+                        ) : (
+                          <p className="rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-center text-sm text-brand-neutral-black/60">
+                            No episode of care on record.
+                          </p>
+                        )}
+
+                        {pastEpisodes.length > 0 && (
+                          <div className="mt-2">
+                            <button
+                              type="button"
+                              onClick={() => setShowEpisodeHistory((v) => !v)}
+                              className="text-xs font-semibold text-brand-prussian-blue"
+                            >
+                              {showEpisodeHistory ? "Hide" : "Show"} episode history ({pastEpisodes.length})
+                            </button>
+                            {showEpisodeHistory && (
+                              <div className="mt-2 flex flex-col gap-2">
+                                {pastEpisodes.map((ep) => (
+                                  <div key={ep.id} className="rounded-xl border border-black/5 bg-white/60 p-3">
+                                    <p className="text-xs text-brand-neutral-black/60">
+                                      {formatDate(ep.startedAt)} – {formatDate(ep.endedAt!)}
+                                    </p>
+                                    <p className="mt-0.5 text-xs text-brand-neutral-black/50">{ep.endReason}</p>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
+                </section>
+              ) : (
+                <section className="mb-6">
+                  <h2 className="mb-2 font-heading text-sm font-bold uppercase tracking-wide text-brand-neutral-black/60">
+                    Enrolment
+                  </h2>
+                  {enrolment?.endedAt ? (
+                    <div className="rounded-2xl border border-black/5 bg-white/60 p-4">
+                      <span className="inline-flex items-center gap-1.5 rounded-full bg-black/5 px-2.5 py-1 text-xs font-semibold text-brand-neutral-black/60">
+                        Enrolment ended
+                      </span>
+                      <p className="mt-2 text-xs text-brand-neutral-black/50">
+                        {END_REASON_LABEL[enrolment.endReason ?? ""] ?? enrolment.endReason} · {formatDate(enrolment.endedAt)}
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="flex items-center justify-between rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
+                      <span className="inline-flex items-center gap-1.5 rounded-full bg-brand-pastel-blue/20 px-2.5 py-1 text-xs font-semibold text-brand-prussian-blue">
+                        Enrolled
+                      </span>
+                      {enrolment && (
+                        <button
+                          type="button"
+                          onClick={() => setIsEndEnrolmentOpen(true)}
+                          className="text-xs font-semibold text-brand-golden-brown"
+                        >
+                          End Enrolment
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </section>
+              )}
 
               <section>
                 <h2 className="mb-2 font-heading text-sm font-bold uppercase tracking-wide text-brand-neutral-black/60">
@@ -1339,24 +1558,66 @@ export function ChildDetail({
             </>
           )}
 
-          {activeTab === "incidents" && (
+          {/* Tier 1 item 2 -- the clinic branch renders a distinct,
+              deliberately minimal read-only list, never IncidentCard
+              (built for the school's own FULL incident content, a
+              different RPC entirely). get_institution_incidents_for_
+              director() (0260) returns date + restraint flag only --
+              no narrative, no category, no location -- so that's all
+              this shows, labelled plainly as what it is: a fact this
+              clinic has been given access to, not the record itself. */}
+          {activeTab === "incidents" && institutionType === "clinic" ? (
             <>
-              {institutionIncidentsError ? (
+              <p className="mb-3 text-xs text-brand-neutral-black/50">
+                Incidents recorded by {childName}&apos;s school that your clinic has been given access to. This is
+                not the full school record -- only the date and whether a physical intervention was used.
+              </p>
+              {schoolIncidentsError ? (
                 <p className="rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-center text-sm text-brand-neutral-black/60">
-                  {institutionIncidentsError}
+                  {schoolIncidentsError}
                 </p>
-              ) : institutionIncidents.length === 0 ? (
+              ) : schoolIncidents.length === 0 ? (
                 <p className="rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-center text-sm text-brand-neutral-black/60">
-                  No incidents recorded for this child yet.
+                  No school incidents shared with this clinic yet.
                 </p>
               ) : (
                 <div className="flex flex-col gap-2">
-                  {institutionIncidents.map((incident) => (
-                    <IncidentCard key={incident.incident_id} incident={incident} showRealNames />
+                  {schoolIncidents.map((incident) => (
+                    <div
+                      key={incident.incidentId}
+                      className="flex items-center justify-between rounded-2xl border border-black/5 bg-white p-4 shadow-sm"
+                    >
+                      <p className="text-sm text-brand-neutral-black">{formatDate(incident.occurredAt)}</p>
+                      {incident.isRestraint && (
+                        <span className="rounded-full bg-brand-golden-brown/15 px-2.5 py-1 text-xs font-semibold text-brand-golden-brown">
+                          Physical intervention used
+                        </span>
+                      )}
+                    </div>
                   ))}
                 </div>
               )}
             </>
+          ) : (
+            activeTab === "incidents" && (
+              <>
+                {institutionIncidentsError ? (
+                  <p className="rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-center text-sm text-brand-neutral-black/60">
+                    {institutionIncidentsError}
+                  </p>
+                ) : institutionIncidents.length === 0 ? (
+                  <p className="rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-center text-sm text-brand-neutral-black/60">
+                    No incidents recorded for this child yet.
+                  </p>
+                ) : (
+                  <div className="flex flex-col gap-2">
+                    {institutionIncidents.map((incident) => (
+                      <IncidentCard key={incident.incident_id} incident={incident} showRealNames />
+                    ))}
+                  </div>
+                )}
+              </>
+            )
           )}
 
           {activeTab === "abcLogs" && <ABCTimeline passportId={passportId} viewerRole="principal" />}
@@ -1433,6 +1694,42 @@ export function ChildDetail({
           }}
         />
       )}
+
+      {/* Tier 1 item 2 -- clinic-side discharge/reopen, same shared
+          sheets Directory's Children list uses. */}
+      {(() => {
+        const currentEpisode = episodesOfCare.find((e) => !e.endedAt) ?? null;
+        return (
+          <>
+            {currentEpisode && childName && institutionId && (
+              <DischargeEpisodeSheet
+                isOpen={isDischargeOpen}
+                episodeId={currentEpisode.id}
+                institutionId={institutionId}
+                childName={childName}
+                onClose={() => setIsDischargeOpen(false)}
+                onDischarged={() => {
+                  setIsDischargeOpen(false);
+                  load();
+                }}
+              />
+            )}
+            {!currentEpisode && childName && institutionId && (
+              <ReopenEpisodeSheet
+                isOpen={isReopenOpen}
+                institutionId={institutionId}
+                passportId={passportId}
+                childName={childName}
+                onClose={() => setIsReopenOpen(false)}
+                onReopened={() => {
+                  setIsReopenOpen(false);
+                  load();
+                }}
+              />
+            )}
+          </>
+        );
+      })()}
 
       {revokeTarget && (
         <ReasonConfirmSheet

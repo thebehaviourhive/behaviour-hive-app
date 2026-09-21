@@ -6,8 +6,8 @@ import { BookUser, User } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { ClinicalFileIcon } from "@/components/ui/icons";
 import type { InstitutionType } from "@/lib/institutionType";
-import { BottomSheet } from "@/components/ui/BottomSheet";
-import { Button } from "@/components/ui/Button";
+import { DischargeEpisodeSheet } from "@/components/principal/DischargeEpisodeSheet";
+import { ReopenEpisodeSheet } from "@/components/principal/ReopenEpisodeSheet";
 
 type ChildrenSegment = "active" | "past";
 
@@ -180,11 +180,6 @@ interface RosterRow {
   endReason: string | null;
 }
 
-interface DischargeReasonOption {
-  id: string;
-  value: string;
-}
-
 export function ChildrenList({
   institutionId,
   institutionType,
@@ -214,12 +209,8 @@ export function ChildrenList({
   const [query, setQuery] = useState("");
   const [segment, setSegment] = useState<ChildrenSegment>("active");
 
-  const [dischargeReasons, setDischargeReasons] = useState<DischargeReasonOption[]>([]);
   const [dischargeTarget, setDischargeTarget] = useState<RosterRow | null>(null);
   const [reopenTarget, setReopenTarget] = useState<RosterRow | null>(null);
-  const [isSubmittingAction, setIsSubmittingAction] = useState(false);
-  const [actionError, setActionError] = useState<string | null>(null);
-  const [selectedReasonId, setSelectedReasonId] = useState<string>("");
 
   const load = useCallback(
     async (instId: string) => {
@@ -309,24 +300,6 @@ export function ChildrenList({
     run();
   }, [institutionId, load]);
 
-  useEffect(() => {
-    if (!isClinic || !institutionId) return;
-    let isMounted = true;
-    const supabase = createClient();
-    supabase
-      .from("discharge_reasons")
-      .select("id, value")
-      .eq("is_active", true)
-      .or(`institution_id.is.null,institution_id.eq.${institutionId}`)
-      .order("sort_order")
-      .then(({ data }) => {
-        if (isMounted) setDischargeReasons((data ?? []) as DischargeReasonOption[]);
-      });
-    return () => {
-      isMounted = false;
-    };
-  }, [isClinic, institutionId]);
-
   const active = children.filter((c) => !c.endedAt);
   const past = children.filter((c) => c.endedAt);
   const filteredActive = query.trim()
@@ -340,45 +313,6 @@ export function ChildrenList({
     const d = new Date(value);
     if (Number.isNaN(d.getTime())) return value;
     return d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
-  }
-
-  async function handleDischarge() {
-    if (!dischargeTarget?.episodeId || !selectedReasonId) return;
-    const reason = dischargeReasons.find((r) => r.id === selectedReasonId);
-    if (!reason) return;
-    setIsSubmittingAction(true);
-    setActionError(null);
-    const supabase = createClient();
-    const { error: rpcError } = await supabase.rpc("end_clinic_episode", {
-      p_episode_id: dischargeTarget.episodeId,
-      p_reason: reason.value,
-    });
-    setIsSubmittingAction(false);
-    if (rpcError) {
-      setActionError(rpcError.message);
-      return;
-    }
-    setDischargeTarget(null);
-    setSelectedReasonId("");
-    if (institutionId) load(institutionId);
-  }
-
-  async function handleReopen() {
-    if (!reopenTarget || !institutionId) return;
-    setIsSubmittingAction(true);
-    setActionError(null);
-    const supabase = createClient();
-    const { error: rpcError } = await supabase.rpc("reopen_clinic_episode", {
-      p_institution_id: institutionId,
-      p_passport_id: reopenTarget.passportId,
-    });
-    setIsSubmittingAction(false);
-    if (rpcError) {
-      setActionError(rpcError.message);
-      return;
-    }
-    setReopenTarget(null);
-    load(institutionId);
   }
 
   function rowLink(c: RosterRow, muted: boolean) {
@@ -480,10 +414,7 @@ export function ChildrenList({
                     {isClinic && (
                       <button
                         type="button"
-                        onClick={() => {
-                          setDischargeTarget(c);
-                          setActionError(null);
-                        }}
+                        onClick={() => setDischargeTarget(c)}
                         className="mt-1 px-1 font-sans text-eyebrow font-semibold text-brand-golden-brown"
                       >
                         Discharge
@@ -513,10 +444,7 @@ export function ChildrenList({
                   {isClinic && (
                     <button
                       type="button"
-                      onClick={() => {
-                        setReopenTarget(c);
-                        setActionError(null);
-                      }}
+                      onClick={() => setReopenTarget(c)}
                       className="mt-1 px-1 font-sans text-eyebrow font-semibold text-brand-prussian-blue"
                     >
                       Reopen
@@ -529,89 +457,33 @@ export function ChildrenList({
         </>
       )}
 
-      <BottomSheet
-        isOpen={Boolean(dischargeTarget)}
-        onClose={() => {
-          if (!isSubmittingAction) {
+      {dischargeTarget && institutionId && (
+        <DischargeEpisodeSheet
+          isOpen={Boolean(dischargeTarget)}
+          episodeId={dischargeTarget.episodeId!}
+          institutionId={institutionId}
+          childName={dischargeTarget.childName}
+          onClose={() => setDischargeTarget(null)}
+          onDischarged={() => {
             setDischargeTarget(null);
-            setSelectedReasonId("");
-            setActionError(null);
-          }
-        }}
-      >
-        {dischargeTarget && (
-          <div>
-            <h2 className="font-heading text-h2 font-bold text-brand-prussian-blue">
-              Discharge {dischargeTarget.childName}?
-            </h2>
-            <p className="mt-2 font-sans text-body text-brand-neutral-black/70">
-              This ends the episode of care and closes every practitioner&apos;s own caseload access to this client at
-              your clinic. A reason is required.
-            </p>
-            <div className="mt-4">
-              <label className="mb-1.5 block font-accent text-eyebrow font-bold uppercase tracking-wide text-brand-neutral-black/50" htmlFor="discharge-reason">
-                Reason
-              </label>
-              <select
-                id="discharge-reason"
-                value={selectedReasonId}
-                onChange={(e) => setSelectedReasonId(e.target.value)}
-                className="w-full rounded-xl border border-black/10 bg-white px-4 py-3 font-sans text-body text-brand-neutral-black"
-              >
-                <option value="">Select a reason…</option>
-                {dischargeReasons.map((r) => (
-                  <option key={r.id} value={r.id}>
-                    {r.value}
-                  </option>
-                ))}
-              </select>
-            </div>
-            {actionError && (
-              <p role="alert" className="mt-3 font-sans text-body font-medium text-brand-golden-brown">
-                {actionError}
-              </p>
-            )}
-            <Button
-              type="button"
-              onClick={handleDischarge}
-              disabled={!selectedReasonId || isSubmittingAction}
-              className="mt-4 lg:w-auto"
-            >
-              {isSubmittingAction ? "Discharging…" : "Discharge"}
-            </Button>
-          </div>
-        )}
-      </BottomSheet>
+            load(institutionId);
+          }}
+        />
+      )}
 
-      <BottomSheet
-        isOpen={Boolean(reopenTarget)}
-        onClose={() => {
-          if (!isSubmittingAction) {
+      {reopenTarget && institutionId && (
+        <ReopenEpisodeSheet
+          isOpen={Boolean(reopenTarget)}
+          institutionId={institutionId}
+          passportId={reopenTarget.passportId}
+          childName={reopenTarget.childName}
+          onClose={() => setReopenTarget(null)}
+          onReopened={() => {
             setReopenTarget(null);
-            setActionError(null);
-          }
-        }}
-      >
-        {reopenTarget && (
-          <div>
-            <h2 className="font-heading text-h2 font-bold text-brand-prussian-blue">
-              Reopen {reopenTarget.childName}?
-            </h2>
-            <p className="mt-2 font-sans text-body text-brand-neutral-black/70">
-              Starts a new episode of care for this client at your clinic. Their previous episode stays on record
-              exactly as it ended.
-            </p>
-            {actionError && (
-              <p role="alert" className="mt-3 font-sans text-body font-medium text-brand-golden-brown">
-                {actionError}
-              </p>
-            )}
-            <Button type="button" onClick={handleReopen} disabled={isSubmittingAction} className="mt-4 lg:w-auto">
-              {isSubmittingAction ? "Reopening…" : "Reopen"}
-            </Button>
-          </div>
-        )}
-      </BottomSheet>
+            load(institutionId);
+          }}
+        />
+      )}
     </>
   );
 }

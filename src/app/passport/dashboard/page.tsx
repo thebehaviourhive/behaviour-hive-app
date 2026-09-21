@@ -914,7 +914,11 @@ export default function PassportDashboardPage() {
             >
               {sectionBEmpty ? (
                 <EmptyStateBox
-                  prompt={`Help teachers recognise when ${summary.childName} is feeling regulated, and spot the early signs when they are finding things hard.`}
+                  prompt={
+                    allConnectedAreClinic
+                      ? `Help ${summary.childName}'s clinical team recognise when they are feeling regulated, and spot the early signs when they are finding things hard.`
+                      : `Help teachers recognise when ${summary.childName} is feeling regulated, and spot the early signs when they are finding things hard.`
+                  }
                   ctaLabel="Add Signals and Triggers"
                   ctaHref="/passport/section-b/1"
                 />
@@ -1001,7 +1005,11 @@ export default function PassportDashboardPage() {
             >
               {sectionDEmpty ? (
                 <EmptyStateBox
-                  prompt="What sensory tools and de-escalation strategies work best? Build a quick-reference toolkit for the classroom."
+                  prompt={
+                    allConnectedAreClinic
+                      ? "What sensory tools and de-escalation strategies work best? Build a quick-reference toolkit for their clinical team."
+                      : "What sensory tools and de-escalation strategies work best? Build a quick-reference toolkit for the classroom."
+                  }
                   ctaLabel="Add Support Strategies"
                   ctaHref="/passport/section-d/1"
                 />
@@ -1112,9 +1120,17 @@ export default function PassportDashboardPage() {
           </section>
         </ErrorBoundary>
 
-        <ErrorBoundary fallback={fallbackCard}>
-          <PassportIncidentsSection passportId={summary.passportId} />
-        </ErrorBoundary>
+        {/* Tier 1 item 3 -- incidents are a school-only concept; a
+            clinic-only child (no school link at all) has none,
+            structurally, ever. Shown for a child who also attends a
+            school (allConnectedAreClinic is false whenever any
+            connected institution is a school, or none are connected
+            yet), hidden for a clinic-only child. */}
+        {!allConnectedAreClinic && (
+          <ErrorBoundary fallback={fallbackCard}>
+            <PassportIncidentsSection passportId={summary.passportId} />
+          </ErrorBoundary>
+        )}
       </main>
 
       <ShareBottomSheet

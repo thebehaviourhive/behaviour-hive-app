@@ -6,6 +6,7 @@ import { useRequireRole } from "@/hooks/useRequireRole";
 import { createClient } from "@/lib/supabase/client";
 import { getPostAuthRedirect } from "@/lib/roleRedirect";
 import { useInstitutionType } from "@/hooks/useInstitutionType";
+import { getRoleLabel } from "@/lib/vocabulary";
 import { PrincipalBottomNav } from "@/components/principal/PrincipalBottomNav";
 import { HandOverPrincipalSheet } from "@/components/principal/HandOverPrincipalSheet";
 import { SetClinicHoursSheet } from "@/components/principal/SetClinicHoursSheet";
@@ -319,7 +320,9 @@ export default function PrincipalClinicPage() {
                   onClick={() => setIsHandOverOpen(true)}
                   className="block w-full lg:w-auto rounded-2xl border border-brand-prussian-blue bg-white p-4 text-left shadow-sm"
                 >
-                  <p className="font-sans text-body font-semibold text-brand-prussian-blue">Transfer Principal Role</p>
+                  <p className="font-sans text-body font-semibold text-brand-prussian-blue">
+                    Transfer {getRoleLabel("principal", "clinic")} Role
+                  </p>
                   <p className="mt-0.5 font-sans text-eyebrow text-brand-neutral-black/50">
                     Promotes another active staff member. This cannot be undone from your own account.
                   </p>
