@@ -116,6 +116,49 @@ export default function ConsentPage() {
       const resolvedType = Array.isArray(institutionRecord) ? institutionRecord[0]?.type : institutionRecord?.type;
       if (resolvedType) setInstitutionType(resolvedType);
 
+      // Tier 1 item 4, 21 Sept 2026 -- a parent has no institution_staff
+      // row at all, so the resolution above never runs for them, and
+      // ParentConsentScreen's own copy was hard-written for a school
+      // ("your child's school creates and keeps their record") --
+      // false, not just mislabelled, for a parent whose only linked
+      // organisation is a clinic. Resolved separately here via the
+      // parent's own passport_guardians rows (self-scoped, always
+      // visible) -> passport_institution_links -> institutions.type.
+      // A brand-new parent who hasn't claimed anything yet (consent
+      // has no joining precondition for this role, so this can be
+      // genuinely empty) falls through to the 'school' default above
+      // -- the copy that's actually right for the overwhelming
+      // majority of real accounts today, and never worse than what
+      // shipped before this fix. A parent linked to BOTH a school and
+      // a clinic also keeps the school copy -- the specific harm
+      // reported was a CLINIC-ONLY parent reading false claims about a
+      // school, not a mixed-organisation parent seeing the school half
+      // of their own true situation.
+      if (userRole === "parent") {
+        const { data: guardianRows } = await supabase
+          .from("passport_guardians")
+          .select("passport_id")
+          .eq("user_id", user.id);
+        const passportIds = (guardianRows ?? []).map((r) => r.passport_id);
+        if (passportIds.length > 0) {
+          const { data: linkRows } = await supabase
+            .from("passport_institution_links")
+            .select("institution_id")
+            .in("passport_id", passportIds);
+          const institutionIds = Array.from(new Set((linkRows ?? []).map((r) => r.institution_id)));
+          if (institutionIds.length > 0) {
+            const { data: institutionRows } = await supabase
+              .from("institutions")
+              .select("type")
+              .in("id", institutionIds);
+            const types = new Set((institutionRows ?? []).map((r) => r.type as InstitutionType));
+            if (types.has("clinic") && !types.has("school") && isMounted) {
+              setInstitutionType("clinic");
+            }
+          }
+        }
+      }
+
       // Someone who already has a CURRENT-version consents row (real
       // prior completion at the version now live, not a stale one)
       // shouldn't sit through the form again just because they landed
@@ -179,7 +222,7 @@ export default function ConsentPage() {
   let screen: React.ReactNode;
   switch (role) {
     case "parent":
-      screen = <ParentConsentScreen {...screenProps} />;
+      screen = <ParentConsentScreen {...screenProps} institutionType={institutionType} />;
       break;
     case "class_teacher":
       screen = <TeacherAgreementScreen {...screenProps} />;

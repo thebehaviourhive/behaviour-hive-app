@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { TextField } from "@/components/ui/TextField";
 import { Checkbox } from "@/components/ui/Checkbox";
 import { createClient } from "@/lib/supabase/client";
@@ -13,6 +13,34 @@ export default function ClinicianVerifyPage() {
   const router = useRouter();
   const { user, isReady } = useRequireRole("clinician");
   const { regions } = useRegions();
+
+  // Tier 1 item 6. This form's own RPC (submit_clinician_verification)
+  // resets verification_status back to 'pending' on every call -- the
+  // independent-credential review path, per 0029. A clinic-approved
+  // practitioner's director approval already IS their verification
+  // (verification_route = 'organisation', PRD 5 Stage 6) -- reaching
+  // this screen and submitting would silently un-verify an already-
+  // working account, locking them out until Behaviour Hive manually
+  // reviews credentials they were never supposed to need. Guarded away
+  // rather than left reachable.
+  useEffect(() => {
+    if (!isReady || !user) return;
+    let isMounted = true;
+    const supabase = createClient();
+    supabase
+      .from("clinicians")
+      .select("verification_route")
+      .eq("user_id", user.id)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (isMounted && data?.verification_route === "organisation") {
+          router.replace("/clinician/dashboard");
+        }
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, [isReady, user, router]);
 
   const [fullName, setFullName] = useState("");
   const [psiNumber, setPsiNumber] = useState("");

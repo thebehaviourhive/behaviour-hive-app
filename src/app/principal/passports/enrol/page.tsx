@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useRequireRole } from "@/hooks/useRequireRole";
+import { useInstitutionType } from "@/hooks/useInstitutionType";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/Button";
 
@@ -12,41 +13,71 @@ import { Button } from "@/components/ui/Button";
 // weighted the same way Handover's own full-screen sheet is (a
 // deliberate context switch, not a quick action). Replaces
 // EnrolChildSheet.tsx entirely (its own only caller); the write itself
-// is unchanged -- create_school_passport() (0113/0121), the same RPC,
-// same single required field.
+// is unchanged for a school -- create_school_passport() (0113/0121),
+// the same RPC, same single required field.
+//
+// Tier 1 item 1, 21 Sept 2026, the "active harm" fix: this screen was
+// the ONLY reachable "add a client" entry point at a clinic institution
+// too, and it unconditionally called create_school_passport() --
+// producing an `enrolments` row for a clinic client, a table that is
+// structurally invisible to tags, scope, discharge, and the
+// stagnation queue forever (episodes_of_care is the parallel,
+// clinic-only table those all key off; see CLAUDE.md's own "reuse the
+// enrolment shape means the shape, never the table" entry). Checked
+// directly against production before fixing anything: zero wrong
+// enrolments/episodes_of_care rows exist for the one real clinic --
+// nothing to clean up, this was caught before any real client was
+// added through it. Now branches on institutionType and calls
+// onboard_clinic_client() (0210, already built, already tested, zero
+// callers until this) for a clinic -- same uuid return shape, same
+// redirect.
 
 export default function EnrolChildPage() {
   const router = useRouter();
   const { user, isReady } = useRequireRole("principal");
+  const [institutionId, setInstitutionId] = useState<string | null>(null);
+  const { institutionType } = useInstitutionType(institutionId);
   const [childName, setChildName] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function handleEnrol() {
-    if (!user || !childName.trim()) return;
-    setIsSubmitting(true);
-    setError(null);
-
+  useEffect(() => {
+    if (!isReady || !user) return;
+    let isMounted = true;
     const supabase = createClient();
-    const { data: staffRow, error: staffError } = await supabase
+    supabase
       .from("institution_staff")
       .select("institution_id")
       .eq("user_id", user.id)
       .eq("role", "principal")
       .is("deactivated_at", null)
       .not("approved_at", "is", null)
-      .maybeSingle();
+      .maybeSingle()
+      .then(({ data }) => {
+        if (isMounted) setInstitutionId(data?.institution_id ?? null);
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, [isReady, user]);
 
-    if (staffError || !staffRow) {
-      setIsSubmitting(false);
-      setError("Could not find your institution.");
-      return;
-    }
+  const isClinic = institutionType === "clinic";
 
-    const { data: passportId, error: enrolError } = await supabase.rpc("create_school_passport", {
-      p_institution_id: staffRow.institution_id,
-      p_child_name: childName.trim(),
-    });
+  async function handleEnrol() {
+    if (!user || !childName.trim() || !institutionId) return;
+    setIsSubmitting(true);
+    setError(null);
+
+    const supabase = createClient();
+    const { data: passportId, error: enrolError } = isClinic
+      ? await supabase.rpc("onboard_clinic_client", {
+          p_institution_id: institutionId,
+          p_client_name: childName.trim(),
+        })
+      : await supabase.rpc("create_school_passport", {
+          p_institution_id: institutionId,
+          p_child_name: childName.trim(),
+        });
 
     setIsSubmitting(false);
 
@@ -72,17 +103,20 @@ export default function EnrolChildPage() {
         >
           ‹
         </Link>
-        <h1 className="font-heading text-xl font-bold text-brand-prussian-blue">Enrol a Child</h1>
+        <h1 className="font-heading text-xl font-bold text-brand-prussian-blue">
+          {isClinic ? "Add a Client" : "Enrol a Child"}
+        </h1>
       </header>
 
       <main className="flex-1 px-4">
         <p className="text-sm text-brand-neutral-black/70">
-          Creates a new passport for this child, started by your school. Their parent or guardian claims it later
-          using a code you generate from their own passport page — this doesn&apos;t require them to do anything yet.
+          {isClinic
+            ? "Creates a new record for this client, started by your clinic. Their parent or guardian claims it later using a code you generate from their own record page — this doesn't require them to do anything yet."
+            : "Creates a new passport for this child, started by your school. Their parent or guardian claims it later using a code you generate from their own passport page — this doesn't require them to do anything yet."}
         </p>
 
         <label className="mt-6 block text-sm font-semibold text-brand-neutral-black" htmlFor="enrol-child-name">
-          Child&apos;s name
+          {isClinic ? "Client's name" : "Child's name"}
         </label>
         <input
           id="enrol-child-name"
@@ -102,10 +136,10 @@ export default function EnrolChildPage() {
         <Button
           type="button"
           onClick={handleEnrol}
-          disabled={!childName.trim() || isSubmitting}
+          disabled={!childName.trim() || isSubmitting || !institutionId}
           className="mt-6 lg:w-auto"
         >
-          {isSubmitting ? "Enrolling…" : "Enrol Child"}
+          {isSubmitting ? (isClinic ? "Adding…" : "Enrolling…") : isClinic ? "Add Client" : "Enrol Child"}
         </Button>
         <Link
           href="/principal/directory?segment=children"

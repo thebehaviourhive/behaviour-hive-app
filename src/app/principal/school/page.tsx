@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { useRequireRole } from "@/hooks/useRequireRole";
+import { useInstitutionType } from "@/hooks/useInstitutionType";
 import { createClient } from "@/lib/supabase/client";
 import { getPostAuthRedirect } from "@/lib/roleRedirect";
 import { PrincipalBottomNav } from "@/components/principal/PrincipalBottomNav";
@@ -79,6 +80,20 @@ export default function PrincipalSchoolPage() {
   const [isStartTimeOpen, setIsStartTimeOpen] = useState(false);
   const [isCutoffOpen, setIsCutoffOpen] = useState(false);
   const [institutionId, setInstitutionId] = useState<string | null>(null);
+
+  // Tier 1 item 4, 21 Sept 2026 -- the reciprocal of /principal/clinic's
+  // own existing school-redirect guard (that page's own header comment
+  // explains why). A clinic director reaching this route directly (no
+  // nav link ever points here for a clinic) is sent to their own real
+  // settings page rather than shown School Code/temporary-access
+  // controls that mean nothing for their institution.
+  const { institutionType, isLoading: isInstitutionTypeLoading } = useInstitutionType(institutionId);
+  useEffect(() => {
+    if (!isInstitutionTypeLoading && institutionId && institutionType === "clinic") {
+      router.replace("/principal/clinic");
+    }
+  }, [isInstitutionTypeLoading, institutionId, institutionType, router]);
+
   // Bug sweep item 3 -- the principal track had no sign-out anywhere,
   // on either PrincipalBottomNav or PrincipalSidebar, and no route
   // reaches it (the shared /more page the other four tracks use has no
@@ -337,6 +352,7 @@ export default function PrincipalSchoolPage() {
           isOpen={isHandOverOpen}
           onClose={() => setIsHandOverOpen(false)}
           institutionId={institutionId}
+          institutionType="school"
           eligibleSuccessors={staff
             .filter((m) => m.is_active && m.role !== "principal")
             .map((m) => ({ userId: m.user_id, fullName: m.full_name }))}

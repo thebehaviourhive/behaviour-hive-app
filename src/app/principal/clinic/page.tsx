@@ -369,6 +369,7 @@ export default function PrincipalClinicPage() {
           isOpen={isHandOverOpen}
           onClose={() => setIsHandOverOpen(false)}
           institutionId={institutionId}
+          institutionType="clinic"
           eligibleSuccessors={staff
             .filter((m) => m.is_active && m.role !== "principal")
             .map((m) => ({ userId: m.user_id, fullName: m.full_name }))}

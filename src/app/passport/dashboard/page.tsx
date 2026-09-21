@@ -37,6 +37,7 @@ import { SharedSessionNotesSection } from "@/components/parent/SharedSessionNote
 interface ApprovedInstitution {
   institutionId: string;
   institutionName: string;
+  institutionType: "school" | "clinic";
   approvedAt: string | null;
 }
 
@@ -287,22 +288,23 @@ export default function PassportDashboardPage() {
     const supabase = createClient();
     const { data: linkRows, error } = await supabase
       .from("passport_institution_links")
-      .select("institution_id, parent_approved_at, institutions(name)")
+      .select("institution_id, parent_approved_at, institutions(name, type)")
       .eq("passport_id", passportId)
       .order("parent_approved_at", { ascending: false });
 
     if (error) {
       console.error("Failed to load approved institutions:", error);
-      setInstitutionsError("Couldn't load connected schools.");
+      setInstitutionsError("Couldn't load connected organisations.");
       return;
     }
 
     setApprovedInstitutions(
       (linkRows ?? []).map((row) => {
-        const institution = row.institutions as unknown as { name: string } | null;
+        const institution = row.institutions as unknown as { name: string; type: "school" | "clinic" } | null;
         return {
           institutionId: row.institution_id,
-          institutionName: institution?.name ?? "Unknown school",
+          institutionName: institution?.name ?? "Unknown organisation",
+          institutionType: institution?.type ?? "school",
           approvedAt: row.parent_approved_at,
         };
       })
@@ -576,6 +578,12 @@ export default function PassportDashboardPage() {
 
   const diagnosisPills = getDiagnosisPills(summary.diagnoses, summary.diagnosisOther);
   const subInfoLine = buildSubInfoLine(summary.age, summary.school);
+  // Tier 1 item 4, 21 Sept 2026 -- "Connected Schools"/"Managed by
+  // school" were literally false for a clinic-only child. Derived from
+  // the loaded links themselves rather than a second institutionType
+  // fetch -- a passport can link to more than one organisation, so
+  // this is "is EVERY link a clinic," not a single yes/no.
+  const allConnectedAreClinic = approvedInstitutions.length > 0 && approvedInstitutions.every((i) => i.institutionType === "clinic");
 
   // "Never shared" per the brief's own three-part definition: no code
   // ever generated (passportCode is only ever set the moment the share
@@ -696,7 +704,7 @@ export default function PassportDashboardPage() {
           onClick={() => setIsAbcLoggerOpen(true)}
           className="w-full rounded-2xl border-2 border-brand-prussian-blue py-3.5 text-base font-semibold text-brand-prussian-blue"
         >
-          + Log Incident
+          {allConnectedAreClinic ? "+ Log Entry" : "+ Log Incident"}
         </button>
       </div>
 
@@ -747,7 +755,7 @@ export default function PassportDashboardPage() {
                   so plainly rather than implying the parent granted or
                   could grant this link. */}
               <h3 className="mb-2 text-sm font-semibold text-brand-neutral-black/70">
-                Connected Schools
+                {allConnectedAreClinic ? "Connected Organisations" : "Connected Schools"}
               </h3>
               {institutionsError ? (
                 <InlineErrorState
@@ -756,8 +764,9 @@ export default function PassportDashboardPage() {
                 />
               ) : approvedInstitutions.length === 0 ? (
                 <p className="text-center text-sm text-brand-neutral-black/60">
-                  No schools connected yet. Your child&apos;s school connects
-                  itself once they add your child&apos;s passport.
+                  No organisations connected yet. Your child&apos;s school or
+                  clinic connects itself once they add your child&apos;s
+                  record.
                 </p>
               ) : (
                 <div>
@@ -813,7 +822,7 @@ export default function PassportDashboardPage() {
                         <p className="mt-0.5 text-xs text-brand-neutral-black/40">
                           {clinician.engagedBy === "parent"
                             ? "Connected by you"
-                            : `Connected by ${clinician.engagedByInstitutionName ?? "the school"}`}
+                            : `Connected by ${clinician.engagedByInstitutionName ?? "their organisation"}`}
                         </p>
                       </div>
                       {clinician.engagedBy === "parent" ? (
@@ -826,7 +835,7 @@ export default function PassportDashboardPage() {
                         </button>
                       ) : (
                         <span className="text-xs text-brand-neutral-black/40">
-                          Managed by school
+                          Managed by their organisation
                         </span>
                       )}
                     </div>

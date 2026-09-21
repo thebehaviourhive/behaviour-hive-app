@@ -31,6 +31,14 @@ export default function PassportClaimPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [claimedChildName, setClaimedChildName] = useState<string | null>(null);
+  // Tier 1 item 4, 21 Sept 2026 -- unknown until AFTER a successful
+  // claim (a code could belong to either a school or a clinic; nothing
+  // before the claim resolves it), so the pre-lookup copy stays
+  // deliberately neutral, matching /role-select's own established
+  // "organisation" wording for the identical not-yet-known case. The
+  // success screen resolves the real institution(s) this passport is
+  // now linked to, exactly once, to say something true instead.
+  const [isClinicOnly, setIsClinicOnly] = useState(false);
 
   async function handleClaim() {
     if (!code.trim()) return;
@@ -43,9 +51,8 @@ export default function PassportClaimPage() {
       p_code: code.trim(),
     });
 
-    setIsSubmitting(false);
-
     if (claimError) {
+      setIsSubmitting(false);
       setError(claimError.message);
       return;
     }
@@ -53,12 +60,25 @@ export default function PassportClaimPage() {
     const claimed = data?.[0] ?? null;
 
     if (!claimed) {
+      setIsSubmitting(false);
       setError(
-        "We couldn't find a passport with that code. Please check with the school and try again."
+        "We couldn't find a passport with that code. Please check with them and try again."
       );
       return;
     }
 
+    const { data: linkRows } = await supabase
+      .from("passport_institution_links")
+      .select("institution_id")
+      .eq("passport_id", claimed.passport_id);
+    const institutionIds = Array.from(new Set((linkRows ?? []).map((r) => r.institution_id)));
+    if (institutionIds.length > 0) {
+      const { data: institutionRows } = await supabase.from("institutions").select("type").in("id", institutionIds);
+      const types = new Set((institutionRows ?? []).map((r) => r.type as string));
+      setIsClinicOnly(types.has("clinic") && !types.has("school"));
+    }
+
+    setIsSubmitting(false);
     setClaimedChildName(claimed.child_name);
   }
 
@@ -81,8 +101,9 @@ export default function PassportClaimPage() {
               You now have access to {claimedChildName}&apos;s passport
             </h1>
             <p className="mt-2 text-sm leading-relaxed text-black/60">
-              You&apos;ll see everything the school and clinical team have
-              already added, and you can pick up wherever they left off.
+              {isClinicOnly
+                ? "You'll see everything your clinic's own team has already added, and you can pick up wherever they left off."
+                : "You'll see everything the school and clinical team have already added, and you can pick up wherever they left off."}
             </p>
             <Button
               type="button"
@@ -109,8 +130,8 @@ export default function PassportClaimPage() {
 
         <div className="rounded-3xl border border-black/5 bg-white p-6 shadow-sm">
           <p className="text-sm leading-relaxed text-black/70">
-            Your child&apos;s school gave you a code to link your account to
-            the passport they&apos;ve already started.
+            Your child&apos;s organisation gave you a code to link your
+            account to the record they&apos;ve already started.
           </p>
 
           <label className="mt-5 block text-left text-sm font-semibold text-brand-neutral-black">
@@ -143,10 +164,12 @@ export default function PassportClaimPage() {
           {/* Stage 2, 15 Sept 2026: self-creation retired -- there is no
               longer an alternative path this could route to, so this is
               now explanatory copy, not a link. Every family gets their
-              code from their child's school. */}
+              code from their child's organisation. Deliberately neutral
+              -- a code can come from either a school or a clinic, and
+              nothing here yet knows which. */}
           <p className="mt-4 text-sm text-black/50">
-            Don&apos;t have a code? Ask your child&apos;s school -- they can
-            generate one for you.
+            Don&apos;t have a code? Ask your child&apos;s organisation --
+            they can generate one for you.
           </p>
         </div>
       </div>

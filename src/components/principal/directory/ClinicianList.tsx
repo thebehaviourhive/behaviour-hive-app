@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { CLINICIAN_SPECIALTY_LABEL, type ClinicianSpecialty } from "@/lib/clinicianSpecialties";
+import { useInstitutionType } from "@/hooks/useInstitutionType";
 
 // Directory's fifth segment -- left pane. Every clinician this school has
 // engaged, with a live count of children they currently cover. Selecting
@@ -39,6 +40,7 @@ export function ClinicianList({
   const [clinicians, setClinicians] = useState<ClinicianRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const { institutionType } = useInstitutionType(institutionId);
 
   const load = useCallback(async (instId: string) => {
     setIsLoading(true);
@@ -95,7 +97,7 @@ export function ClinicianList({
         onClick={onEngageNew}
         className="mb-4 w-full rounded-2xl border-2 border-dashed border-brand-prussian-blue/30 py-3 text-center font-sans text-body font-semibold text-brand-prussian-blue"
       >
-        + Engage a New Clinician
+        {institutionType === "clinic" ? "+ Assign a Practitioner" : "+ Engage a New Clinician"}
       </button>
 
       {isLoading ? (
@@ -107,7 +109,9 @@ export function ClinicianList({
         <p className="font-sans text-body text-brand-neutral-black/60">{error}</p>
       ) : clinicians.length === 0 ? (
         <p className="rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-center font-sans text-body text-brand-neutral-black/60">
-          This school hasn&apos;t engaged any clinicians yet.
+          {institutionType === "clinic"
+            ? "No practitioners have been assigned a caseload yet."
+            : "This school hasn't engaged any clinicians yet."}
         </p>
       ) : (
         <div className="flex flex-col gap-2">

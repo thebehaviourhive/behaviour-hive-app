@@ -100,6 +100,49 @@ export default function MorningCheckinPage() {
   } = useMyPassport(user?.id);
   const childName = resolvedChildName || "your child";
 
+  // Tier 1 item 4, 21 Sept 2026. This screen writes to morning_checkins,
+  // read ONLY by get_todays_checkins_for_passports() -> has_child_access()
+  // -- has_class_teacher_access() OR has_sna_access(), entirely
+  // school-side (CLAUDE.md). A clinic-only child has neither, ever --
+  // a submission here doesn't just carry the wrong word ("teacher"), it
+  // is genuinely unreadable by anyone at the clinic. Guarded away rather
+  // than left reachable: resolved once the passport is known, redirects
+  // straight back rather than accepting a submission that goes nowhere.
+  const [isCheckingSchoolLink, setIsCheckingSchoolLink] = useState(true);
+  useEffect(() => {
+    if (!isLoadingPassport && !passportId) {
+      // No passport resolved at all -- nothing to check a school link
+      // against; fall through to the existing render, unchanged from
+      // before this guard existed.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setIsCheckingSchoolLink(false);
+      return;
+    }
+    if (!passportId) return;
+    let isMounted = true;
+    const supabase = createClient();
+    supabase
+      .from("passport_institution_links")
+      .select("institutions(type)")
+      .eq("passport_id", passportId)
+      .then(({ data }) => {
+        if (!isMounted) return;
+        const hasSchoolLink = (data ?? []).some((row) => {
+          const institution = row.institutions as unknown as { type: string } | { type: string }[] | null;
+          const type = Array.isArray(institution) ? institution[0]?.type : institution?.type;
+          return type === "school";
+        });
+        if (!hasSchoolLink) {
+          router.replace("/parent-dashboard");
+          return;
+        }
+        setIsCheckingSchoolLink(false);
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, [passportId, isLoadingPassport, router]);
+
   const [step, setStep] = useState(1);
   const [sleepQuality, setSleepQuality] = useState<SleepQuality | null>(null);
   const [regulationState, setRegulationState] = useState<RegulationState | null>(null);
@@ -184,7 +227,7 @@ export default function MorningCheckinPage() {
     }, 1000);
   }
 
-  if (!isReady || isLoadingPassport) {
+  if (!isReady || isLoadingPassport || isCheckingSchoolLink) {
     return null;
   }
 

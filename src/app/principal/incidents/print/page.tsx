@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { useRequireRole } from "@/hooks/useRequireRole";
+import { useGuardSchoolOnlyRoute } from "@/hooks/useGuardSchoolOnlyRoute";
 import { InlineErrorState } from "@/components/ui/InlineErrorState";
 import { BrandMark } from "@/components/ui/BrandMark";
 import { STATUS_LABEL, formatIncidentDate, type InstitutionIncidentRow } from "@/components/principal/IncidentCard";
@@ -72,6 +73,7 @@ function filtersAppliedText(restraint: boolean, planning: string, ncse: boolean)
 export default function PrincipalIncidentsPrintPage() {
   const router = useRouter();
   const { user, isReady } = useRequireRole("principal");
+  const { isChecking: isCheckingClinicGuard, isBlocked } = useGuardSchoolOnlyRoute(user?.id, "/principal/dashboard");
   const searchParams = useSearchParams();
 
   const start = searchParams.get("start") ?? "";
@@ -138,7 +140,7 @@ export default function PrincipalIncidentsPrintPage() {
     };
   }, [user, start, end, planningSubFilter, isNcsePending, isRestraintUsed, reloadKey]);
 
-  if (!isReady) {
+  if (!isReady || isCheckingClinicGuard || isBlocked) {
     return null;
   }
 

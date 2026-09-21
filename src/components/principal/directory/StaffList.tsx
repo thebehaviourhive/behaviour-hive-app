@@ -163,7 +163,7 @@ export function StaffList({
         <p className="font-sans text-body text-brand-neutral-black/60">{error}</p>
       ) : staff.length === 0 ? (
         <p className="rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-center font-sans text-body text-brand-neutral-black/60">
-          No staff registered at this school yet.
+          {institutionType === "clinic" ? "No staff registered at this clinic yet." : "No staff registered at this school yet."}
         </p>
       ) : visible.length === 0 ? (
         <p className="rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-center font-sans text-body text-brand-neutral-black/60">

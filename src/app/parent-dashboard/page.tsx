@@ -104,6 +104,14 @@ export default function ParentDashboardPage() {
   const [hasTeacherUpdateToday, setHasTeacherUpdateToday] = useState(false);
   const [teacherUpdate, setTeacherUpdate] = useState<TeacherUpdateData | null>(null);
   const [isPassportCardDismissed, setIsPassportCardDismissed] = useState(false);
+  // Tier 1 item 4, 21 Sept 2026 -- CheckInCard's own entry point invites
+  // a parent into /morning-checkin, which now redirects straight back
+  // out for a clinic-only child (see that page's own guard comment --
+  // morning_checkins is only ever read via has_child_access(), entirely
+  // school-side). Defaults true (show it) so a school parent, the
+  // overwhelming majority of real accounts today, never sees a flicker
+  // while this resolves.
+  const [hasSchoolLink, setHasSchoolLink] = useState(true);
 
   useEffect(() => {
     if (!user) return;
@@ -154,7 +162,7 @@ export default function ParentDashboardPage() {
       // ordering IS the three-state UI CheckInCard renders below: the
       // caller's own row wins if one exists, otherwise the most recent
       // row from any guardian, otherwise nothing.
-      const [{ data: passportRow }, { data: checkinRows }] = await Promise.all([
+      const [{ data: passportRow }, { data: checkinRows }, { data: linkRows }] = await Promise.all([
         supabase
           .from("passports")
           .select("passport_status, section_a_complete")
@@ -167,10 +175,19 @@ export default function ParentDashboardPage() {
           p_passport_id: passportId,
           p_start_of_today: startOfToday.toISOString(),
         }),
+        supabase.from("passport_institution_links").select("institutions(type)").eq("passport_id", passportId),
       ]);
       const checkinRow = checkinRows?.[0] ?? null;
 
       if (!isMounted) return;
+
+      setHasSchoolLink(
+        (linkRows ?? []).some((row) => {
+          const institution = row.institutions as unknown as { type: string } | { type: string }[] | null;
+          const type = Array.isArray(institution) ? institution[0]?.type : institution?.type;
+          return type === "school";
+        })
+      );
 
       const status =
         (passportRow?.passport_status as PassportStatus | undefined) ?? "not_started";
@@ -277,13 +294,15 @@ export default function ParentDashboardPage() {
       <main className="flex flex-col gap-3 px-4 pt-3">
         {user && <CalmLogReminderCard userId={user.id} />}
 
-        <CheckInCard
-          childName={childName}
-          isBefore1pm={isBefore1pm}
-          todaysCheckin={todaysCheckin}
-          hasTeacherUpdateToday={hasTeacherUpdateToday}
-          teacherUpdate={teacherUpdate}
-        />
+        {hasSchoolLink && (
+          <CheckInCard
+            childName={childName}
+            isBefore1pm={isBefore1pm}
+            todaysCheckin={todaysCheckin}
+            hasTeacherUpdateToday={hasTeacherUpdateToday}
+            teacherUpdate={teacherUpdate}
+          />
+        )}
 
         <IncidentNoticeCard passportId={passportId} />
 

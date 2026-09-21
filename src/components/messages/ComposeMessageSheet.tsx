@@ -147,7 +147,7 @@ export function ComposeMessageSheet({
       {candidates.length === 0 ? (
         <p className="mt-1.5 text-sm text-brand-neutral-black/60">
           {isStaffMode
-            ? "No other active staff at your school yet."
+            ? `No other active staff at your ${institutionType === "clinic" ? "clinic" : "school"} yet.`
             : `No one else is linked to ${childName}'s passport yet.`}
         </p>
       ) : (
@@ -263,8 +263,10 @@ export function ComposeMessageSheet({
         Messages are checked when people have time. For anything urgent today,{" "}
         {institutionPhone ? (
           <a href={`tel:${institutionPhone}`} className="font-semibold text-brand-prussian-blue underline underline-offset-2">
-            phone the school
+            phone {institutionType === "clinic" ? "the clinic" : "the school"}
           </a>
+        ) : institutionType === "clinic" ? (
+          "phone the clinic"
         ) : (
           "phone the school"
         )}

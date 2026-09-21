@@ -74,12 +74,71 @@ export function ClinicianCoverageDetail(props: ClinicianCoverageDetailProps) {
   // fills this in, then the rest of the component behaves identically
   // to "existing" mode, just remembering the code instead of nothing.
   const [resolved, setResolved] = useState<
-    { clinicianId: string; fullName: string; specialty: string; code: string | null; workspaceEmail: string | null } | null
-  >(props.mode === "existing" ? { ...props.clinician, code: null } : null);
+    {
+      clinicianId: string;
+      fullName: string;
+      specialty: string;
+      code: string | null;
+      // Tier 1 item 2 -- set only when this resolution came from the
+      // clinic's own roster picker (never the by-code path, never an
+      // already-engaged selection), so runGrant() below knows to call
+      // bulk_grant_clinician_access() with p_roster_user_id instead of
+      // p_clinician_code/p_clinician_id -- the RPC itself requires
+      // exactly one of the three, and this is the third.
+      rosterUserId: string | null;
+      workspaceEmail: string | null;
+    } | null
+  >(props.mode === "existing" ? { ...props.clinician, code: null, rosterUserId: null } : null);
 
   const [codeInput, setCodeInput] = useState("");
   const [isLookingUp, setIsLookingUp] = useState(false);
   const [lookupError, setLookupError] = useState<string | null>(null);
+
+  // Tier 1 item 2, 21 Sept 2026. A clinic director assigning caseload
+  // among their OWN roster of already-approved practitioners has no
+  // code to enter at all -- the by-code screen below is a school-only
+  // mechanism for engaging an EXTERNAL clinician. get_institution_
+  // roster_clinicians_for_caseload() (0264) resolves the same
+  // "resolved" state this component already understands, skipping the
+  // code step entirely.
+  const [rosterClinicians, setRosterClinicians] = useState<
+    { userId: string; fullName: string; specialty: string; coveredChildCount: number }[]
+  >([]);
+  const [isLoadingRoster, setIsLoadingRoster] = useState(false);
+  const [rosterError, setRosterError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (props.mode !== "new" || institutionType !== "clinic" || resolved) return;
+    let isMounted = true;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setIsLoadingRoster(true);
+    setRosterError(null);
+    const supabase = createClient();
+    supabase
+      .rpc("get_institution_roster_clinicians_for_caseload", { p_institution_id: institutionId })
+      .then(({ data, error }) => {
+        if (!isMounted) return;
+        if (error) {
+          setRosterError("Could not load your clinic's own practitioners.");
+          setIsLoadingRoster(false);
+          return;
+        }
+        setRosterClinicians(
+          (
+            (data ?? []) as { user_id: string; full_name: string; specialty: string; covered_child_count: number }[]
+          ).map((r) => ({
+            userId: r.user_id,
+            fullName: r.full_name ?? "This practitioner",
+            specialty: r.specialty,
+            coveredChildCount: r.covered_child_count,
+          }))
+        );
+        setIsLoadingRoster(false);
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, [props.mode, institutionType, institutionId, resolved]);
 
   const [rows, setRows] = useState<CoverageRow[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -96,7 +155,7 @@ export function ClinicianCoverageDetail(props: ClinicianCoverageDetailProps) {
   useEffect(() => {
     function resetForNewSelection() {
       if (props.mode === "existing") {
-        setResolved({ ...props.clinician, code: null });
+        setResolved({ ...props.clinician, code: null, rosterUserId: null });
         setOutcomeSummary(null);
         setApplyError(null);
       }
@@ -166,6 +225,7 @@ export function ClinicianCoverageDetail(props: ClinicianCoverageDetailProps) {
       fullName: clinician.full_name ?? "This clinician",
       specialty: clinician.specialty,
       code: codeInput.trim(),
+      rosterUserId: null,
       // lookup_clinician_by_code() doesn't return workspace_email --
       // a freshly-engaged clinician's mapping (if any already exists)
       // is picked up on their next visit here via ClinicianList's own
@@ -194,11 +254,24 @@ export function ClinicianCoverageDetail(props: ClinicianCoverageDetailProps) {
   async function runGrant(): Promise<string[]> {
     if (!resolved) return [];
     const supabase = createClient();
-    const params: { p_institution_id: string; p_passport_ids: string[]; p_clinician_code?: string; p_clinician_id?: string } = {
+    const params: {
+      p_institution_id: string;
+      p_passport_ids: string[];
+      p_clinician_code?: string;
+      p_clinician_id?: string;
+      p_roster_user_id?: string;
+    } = {
       p_institution_id: institutionId,
       p_passport_ids: toGrant.map((r) => r.passportId),
     };
-    if (resolved.code) {
+    if (resolved.rosterUserId) {
+      // Tier 1 item 2 -- a roster pick was never code-verified and has
+      // no prior engagement at this institution to look up by
+      // p_clinician_id (its whole own check would fail on a brand-new
+      // assignment) -- bulk_grant_clinician_access()'s third path
+      // resolves it directly via institution_staff instead.
+      params.p_roster_user_id = resolved.rosterUserId;
+    } else if (resolved.code) {
       params.p_clinician_code = resolved.code;
     } else {
       params.p_clinician_id = resolved.clinicianId;
@@ -279,8 +352,59 @@ export function ClinicianCoverageDetail(props: ClinicianCoverageDetailProps) {
     onCoverageChanged();
   }
 
+  if (!resolved && institutionType === "clinic") {
+    // Tier 1 item 2 -- clinic "new" mode is a roster pick, never a code.
+    return (
+      <div className="rounded-2xl bg-white p-6 shadow-sm">
+        <h2 className="font-heading text-h2 font-bold text-brand-prussian-blue">Assign a Practitioner</h2>
+        <p className="mt-2 font-sans text-body text-brand-neutral-black/70">
+          Pick a practitioner from your clinic&apos;s own roster. You&apos;ll choose which clients they cover next.
+        </p>
+
+        {isLoadingRoster ? (
+          <div className="mt-4 flex flex-col gap-2">
+            <div className="h-14 animate-pulse rounded-xl bg-brand-off-white" />
+            <div className="h-14 animate-pulse rounded-xl bg-brand-off-white" />
+          </div>
+        ) : rosterError ? (
+          <p className="mt-4 font-sans text-body text-brand-neutral-black/60">{rosterError}</p>
+        ) : rosterClinicians.length === 0 ? (
+          <p className="mt-4 rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-center font-sans text-body text-brand-neutral-black/60">
+            No approved practitioners on your clinic&apos;s own roster yet.
+          </p>
+        ) : (
+          <div className="mt-4 flex flex-col gap-2">
+            {rosterClinicians.map((c) => (
+              <button
+                key={c.userId}
+                type="button"
+                onClick={() =>
+                  setResolved({
+                    clinicianId: c.userId,
+                    fullName: c.fullName,
+                    specialty: c.specialty,
+                    code: null,
+                    rosterUserId: c.userId,
+                    workspaceEmail: null,
+                  })
+                }
+                className="w-full rounded-2xl border border-black/5 bg-white p-4 text-left shadow-sm"
+              >
+                <p className="font-sans text-body font-semibold text-brand-neutral-black">{c.fullName}</p>
+                <p className="mt-0.5 font-sans text-eyebrow text-brand-neutral-black/50">
+                  {CLINICIAN_SPECIALTY_LABEL[c.specialty as ClinicianSpecialty] ?? c.specialty} · {c.coveredChildCount}{" "}
+                  client{c.coveredChildCount === 1 ? "" : "s"} covered
+                </p>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
   if (!resolved) {
-    // "new" mode, code not yet resolved.
+    // "new" mode, code not yet resolved -- school only.
     return (
       <div className="rounded-2xl bg-white p-6 shadow-sm">
         <h2 className="font-heading text-h2 font-bold text-brand-prussian-blue">Engage a New Clinician</h2>
@@ -354,7 +478,7 @@ export function ClinicianCoverageDetail(props: ClinicianCoverageDetailProps) {
         <p className="mt-6 font-sans text-body text-brand-neutral-black/60">{loadError}</p>
       ) : rows.length === 0 ? (
         <p className="mt-6 rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-center font-sans text-body text-brand-neutral-black/60">
-          No currently-enrolled children at this school.
+          {institutionType === "clinic" ? "No clients linked to your clinic yet." : "No currently-enrolled children at this school."}
         </p>
       ) : (
         <>

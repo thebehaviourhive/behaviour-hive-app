@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { useParams } from "next/navigation";
 import { useRequireRole } from "@/hooks/useRequireRole";
+import { useGuardSchoolOnlyRoute } from "@/hooks/useGuardSchoolOnlyRoute";
 import { ClassDetail } from "@/components/principal/directory/ClassDetail";
 
 // PRD 4, Stage 4 -- thin route wrapper. All the actual content moved,
@@ -15,10 +16,11 @@ import { ClassDetail } from "@/components/principal/directory/ClassDetail";
 export default function PrincipalClassDetailPage() {
   const params = useParams();
   const classId = params.classId as string;
-  const { isReady } = useRequireRole("principal");
+  const { user, isReady } = useRequireRole("principal");
+  const { isChecking: isCheckingClinicGuard, isBlocked } = useGuardSchoolOnlyRoute(user?.id, "/principal/dashboard");
   const [className, setClassName] = useState<string | null>(null);
 
-  if (!isReady) {
+  if (!isReady || isCheckingClinicGuard || isBlocked) {
     return null;
   }
 

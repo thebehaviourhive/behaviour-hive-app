@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useRequireRole } from "@/hooks/useRequireRole";
+import { useGuardSchoolOnlyRoute } from "@/hooks/useGuardSchoolOnlyRoute";
 import { InlineErrorState } from "@/components/ui/InlineErrorState";
 import { PrincipalBottomNav } from "@/components/principal/PrincipalBottomNav";
 import { IncidentCard, formatIncidentDate, type InstitutionIncidentRow } from "@/components/principal/IncidentCard";
@@ -75,6 +76,10 @@ function PillToggle({
 
 export default function PrincipalIncidentsListPage() {
   const { user, isReady } = useRequireRole("principal");
+  // Tier 1 item 5 -- Incidents is school-only, no clinic equivalent at
+  // all. Unreachable, not merely hidden: redirects a clinic director
+  // straight to their own dashboard.
+  const { isChecking: isCheckingClinicGuard, isBlocked } = useGuardSchoolOnlyRoute(user?.id, "/principal/dashboard");
   const [institutionId, setInstitutionId] = useState<string | null>(null);
   const [isDateRangeOpen, setIsDateRangeOpen] = useState(false);
   const [start, setStart] = useState("");
@@ -179,7 +184,7 @@ export default function PrincipalIncidentsListPage() {
     return sortDirection === "asc" ? sorted : sorted.reverse();
   }, [visibleRows, sortKey, sortDirection]);
 
-  if (!isReady) {
+  if (!isReady || isCheckingClinicGuard || isBlocked) {
     return null;
   }
 

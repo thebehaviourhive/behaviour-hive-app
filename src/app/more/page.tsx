@@ -241,20 +241,30 @@ export default function MorePage() {
               </p>
             )}
 
-            <div className="my-4 h-px bg-black/10" />
+            {/* Tier 1 item 6. "Operating Area" describes where an
+                INDEPENDENT clinician offers services -- meaningless
+                for a director-approved clinic practitioner, who works
+                from their clinic's own fixed institution, not
+                wherever they personally operate. Gated the same way
+                the clinician_code block above already is. */}
+            {verificationRoute !== "organisation" && (
+              <>
+                <div className="my-4 h-px bg-black/10" />
 
-            <p className="mb-1 font-accent text-xs font-bold uppercase tracking-wide text-brand-neutral-black/50">
-              Operating Area
-            </p>
-            <p className="mb-2 text-xs text-brand-neutral-black/50">
-              Ireland · Select all counties you operate in.
-            </p>
-            <RegionMultiSelect regions={regions} selected={operatingCounties} onToggle={handleToggleCounty} />
-            {isSavingCounties && <p className="mt-2 text-xs text-brand-neutral-black/40">Saving…</p>}
-            {countiesError && (
-              <p role="alert" className="mt-2 text-sm font-medium text-red-600">
-                {countiesError}
-              </p>
+                <p className="mb-1 font-accent text-xs font-bold uppercase tracking-wide text-brand-neutral-black/50">
+                  Operating Area
+                </p>
+                <p className="mb-2 text-xs text-brand-neutral-black/50">
+                  Ireland · Select all counties you operate in.
+                </p>
+                <RegionMultiSelect regions={regions} selected={operatingCounties} onToggle={handleToggleCounty} />
+                {isSavingCounties && <p className="mt-2 text-xs text-brand-neutral-black/40">Saving…</p>}
+                {countiesError && (
+                  <p role="alert" className="mt-2 text-sm font-medium text-red-600">
+                    {countiesError}
+                  </p>
+                )}
+              </>
             )}
 
             <div className="my-4 h-px bg-black/10" />

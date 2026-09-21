@@ -31,6 +31,11 @@ export default function MessagesPage() {
   const [institutionPhone, setInstitutionPhone] = useState<string | null>(null);
   const [isComposeOpen, setIsComposeOpen] = useState(false);
   const passportLoadError = passportLoadFailed ? "Couldn't load Messages." : null;
+  // Tier 1 item 4, 21 Sept 2026 -- "the school can acknowledge" was
+  // false for a clinic-only child. Defaults true (the overwhelming
+  // majority of real accounts today) so a school parent sees no
+  // flicker while this resolves.
+  const [hasSchoolLink, setHasSchoolLink] = useState(true);
 
   useEffect(() => {
     if (!passportId) return;
@@ -39,6 +44,20 @@ export default function MessagesPage() {
     fetchApprovedInstitutionPhone(supabase, passportId).then((phone) => {
       if (isMounted) setInstitutionPhone(phone);
     });
+    supabase
+      .from("passport_institution_links")
+      .select("institutions(type)")
+      .eq("passport_id", passportId)
+      .then(({ data }) => {
+        if (!isMounted) return;
+        setHasSchoolLink(
+          (data ?? []).some((row) => {
+            const institution = row.institutions as unknown as { type: string } | { type: string }[] | null;
+            const type = Array.isArray(institution) ? institution[0]?.type : institution?.type;
+            return type === "school";
+          })
+        );
+      });
     return () => {
       isMounted = false;
     };
@@ -104,7 +123,7 @@ export default function MessagesPage() {
             viewerRole="parent"
             emptyOpenMessage={
               <>
-                Send quick updates the school can acknowledge when they have a
+                Send quick updates {hasSchoolLink ? "the school" : "your clinic"} can acknowledge when they have a
                 moment — no replies expected.
               </>
             }

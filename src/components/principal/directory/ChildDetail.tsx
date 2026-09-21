@@ -829,7 +829,9 @@ export function ChildDetail({
         <p className="text-sm text-brand-neutral-black/60">{error}</p>
       ) : notOnRoster ? (
         <p className="rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-center text-sm text-brand-neutral-black/60">
-          This child isn&apos;t on your school&apos;s roster.
+          {institutionType === "clinic"
+            ? "This client isn't on your clinic's roster."
+            : "This child isn't on your school's roster."}
         </p>
       ) : (
         <>
@@ -1137,7 +1139,7 @@ export function ChildDetail({
                           ? "Managed by parent"
                           : canRevoke
                             ? null
-                            : `Managed by ${c.engagedByInstitutionName ?? "another school"}`;
+                            : `Managed by ${c.engagedByInstitutionName ?? "another organisation"}`;
                       return (
                         <div key={c.clinicianAccessId} className="rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
                           {eyebrow && (

@@ -5,6 +5,9 @@ import { useCallback, useEffect, useState } from "react";
 import { BookUser, User } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { ClinicalFileIcon } from "@/components/ui/icons";
+import type { InstitutionType } from "@/lib/institutionType";
+import { BottomSheet } from "@/components/ui/BottomSheet";
+import { Button } from "@/components/ui/Button";
 
 type ChildrenSegment = "active" | "past";
 
@@ -142,11 +145,6 @@ function StatusBadgeLegend() {
   );
 }
 
-const CHILDREN_SEGMENTS: { key: ChildrenSegment; label: string }[] = [
-  { key: "active", label: "Active" },
-  { key: "past", label: "Past Pupils" },
-];
-
 // PRD 4, Stage 4 -- extracted from principal/passports/page.tsx.
 // "Passports" renamed to "Children" here, per Daniel's confirmation --
 // a rename, in scope, no surface change. Same Link+preventDefault
@@ -164,64 +162,144 @@ const CHILDREN_SEGMENTS: { key: ChildrenSegment; label: string }[] = [
 // (ChildDetail.tsx has no enrolment-status filter on its own roster
 // check, only on its two write actions) -- this is a pure UI
 // restructuring, no data-layer change.
+//
+// Tier 1 items 1 and 3, 21 Sept 2026 -- a clinic client's own "active
+// vs discharged" split can never come from get_institution_child_
+// roster()'s enrolment_ended_at (sourced from `enrolments`, a table a
+// clinic client never has a row in) -- so at a clinic this now loads
+// from get_institution_episode_roster(instId, true) instead, the same
+// clinic-only table tags/scope/discharge/the stagnation queue all key
+// off. Discharge (end_clinic_episode) and Reopen (reopen_clinic_
+// episode) are both real actions here now too -- both existed with
+// zero client callers before this.
+interface RosterRow {
+  passportId: string;
+  childName: string;
+  endedAt: string | null;
+  episodeId: string | null;
+  endReason: string | null;
+}
+
+interface DischargeReasonOption {
+  id: string;
+  value: string;
+}
+
 export function ChildrenList({
   institutionId,
+  institutionType,
   selectedPassportId,
   onSelect,
 }: {
   institutionId: string | null;
+  institutionType: InstitutionType;
   selectedPassportId: string | null;
   onSelect: (passportId: string) => void;
 }) {
-  const [children, setChildren] = useState<{ passport_id: string; child_name: string; enrolment_ended_at: string | null }[]>([]);
+  const isClinic = institutionType === "clinic";
+  const CHILDREN_SEGMENTS: { key: ChildrenSegment; label: string }[] = isClinic
+    ? [
+        { key: "active", label: "Active" },
+        { key: "past", label: "Discharged" },
+      ]
+    : [
+        { key: "active", label: "Active" },
+        { key: "past", label: "Past Pupils" },
+      ];
+
+  const [children, setChildren] = useState<RosterRow[]>([]);
   const [badgesByPassportId, setBadgesByPassportId] = useState<Map<string, ChildStatusBadges>>(new Map());
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [segment, setSegment] = useState<ChildrenSegment>("active");
 
-  const load = useCallback(async (instId: string) => {
-    setIsLoading(true);
-    setError(null);
-    const supabase = createClient();
-    const [rosterResult, badgesResult] = await Promise.all([
-      supabase.rpc("get_institution_child_roster", { p_institution_id: instId }),
-      supabase.rpc("get_institution_child_status_badges", { p_institution_id: instId }),
-    ]);
-    if (rosterResult.error) {
-      setError("Could not load the school roster.");
-      setIsLoading(false);
-      return;
-    }
-    setChildren(
-      ((rosterResult.data ?? []) as { passport_id: string; child_name: string; enrolment_ended_at: string | null }[])
-        .slice()
-        .sort((a, b) => a.child_name.localeCompare(b.child_name))
-    );
-    // Secondary read -- a failure here doesn't block the roster itself
-    // from rendering, badges just fall back to "incomplete" (every
-    // StatusBadge already renders its own not-yet state for an unknown
-    // passport id, since badgesByPassportId.get() returns undefined).
-    if (badgesResult.error) {
-      console.error("Failed to load child status badges:", badgesResult.error);
-    } else {
-      const map = new Map<string, ChildStatusBadges>();
-      for (const row of (badgesResult.data ?? []) as {
-        passport_id: string;
-        section_a_complete: boolean;
-        has_active_clinician: boolean;
-        has_claimed_guardian: boolean;
-      }[]) {
-        map.set(row.passport_id, {
-          sectionAComplete: row.section_a_complete,
-          hasActiveClinician: row.has_active_clinician,
-          hasClaimedGuardian: row.has_claimed_guardian,
+  const [dischargeReasons, setDischargeReasons] = useState<DischargeReasonOption[]>([]);
+  const [dischargeTarget, setDischargeTarget] = useState<RosterRow | null>(null);
+  const [reopenTarget, setReopenTarget] = useState<RosterRow | null>(null);
+  const [isSubmittingAction, setIsSubmittingAction] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [selectedReasonId, setSelectedReasonId] = useState<string>("");
+
+  const load = useCallback(
+    async (instId: string) => {
+      setIsLoading(true);
+      setError(null);
+      const supabase = createClient();
+
+      if (isClinic) {
+        const { data, error: rpcError } = await supabase.rpc("get_institution_episode_roster", {
+          p_institution_id: instId,
+          p_include_ended: true,
         });
+        if (rpcError) {
+          setError("Could not load your clinic's own client list.");
+          setIsLoading(false);
+          return;
+        }
+        setChildren(
+          (
+            (data ?? []) as { episode_id: string; passport_id: string; child_name: string; ended_at: string | null; end_reason: string | null }[]
+          )
+            .map((r) => ({
+              passportId: r.passport_id,
+              childName: r.child_name,
+              endedAt: r.ended_at,
+              episodeId: r.episode_id,
+              endReason: r.end_reason,
+            }))
+            .sort((a, b) => a.childName.localeCompare(b.childName))
+        );
+        setIsLoading(false);
+        return;
       }
-      setBadgesByPassportId(map);
-    }
-    setIsLoading(false);
-  }, []);
+
+      const [rosterResult, badgesResult] = await Promise.all([
+        supabase.rpc("get_institution_child_roster", { p_institution_id: instId }),
+        supabase.rpc("get_institution_child_status_badges", { p_institution_id: instId }),
+      ]);
+      if (rosterResult.error) {
+        setError("Could not load the school roster.");
+        setIsLoading(false);
+        return;
+      }
+      setChildren(
+        ((rosterResult.data ?? []) as { passport_id: string; child_name: string; enrolment_ended_at: string | null }[])
+          .map((r) => ({
+            passportId: r.passport_id,
+            childName: r.child_name,
+            endedAt: r.enrolment_ended_at,
+            episodeId: null,
+            endReason: null,
+          }))
+          .sort((a, b) => a.childName.localeCompare(b.childName))
+      );
+      // Secondary read -- a failure here doesn't block the roster itself
+      // from rendering, badges just fall back to "incomplete" (every
+      // StatusBadge already renders its own not-yet state for an unknown
+      // passport id, since badgesByPassportId.get() returns undefined).
+      if (badgesResult.error) {
+        console.error("Failed to load child status badges:", badgesResult.error);
+      } else {
+        const map = new Map<string, ChildStatusBadges>();
+        for (const row of (badgesResult.data ?? []) as {
+          passport_id: string;
+          section_a_complete: boolean;
+          has_active_clinician: boolean;
+          has_claimed_guardian: boolean;
+        }[]) {
+          map.set(row.passport_id, {
+            sectionAComplete: row.section_a_complete,
+            hasActiveClinician: row.has_active_clinician,
+            hasClaimedGuardian: row.has_claimed_guardian,
+          });
+        }
+        setBadgesByPassportId(map);
+      }
+      setIsLoading(false);
+    },
+    [isClinic]
+  );
 
   useEffect(() => {
     if (!institutionId) return;
@@ -231,13 +309,31 @@ export function ChildrenList({
     run();
   }, [institutionId, load]);
 
-  const active = children.filter((c) => !c.enrolment_ended_at);
-  const past = children.filter((c) => c.enrolment_ended_at);
+  useEffect(() => {
+    if (!isClinic || !institutionId) return;
+    let isMounted = true;
+    const supabase = createClient();
+    supabase
+      .from("discharge_reasons")
+      .select("id, value")
+      .eq("is_active", true)
+      .or(`institution_id.is.null,institution_id.eq.${institutionId}`)
+      .order("sort_order")
+      .then(({ data }) => {
+        if (isMounted) setDischargeReasons((data ?? []) as DischargeReasonOption[]);
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, [isClinic, institutionId]);
+
+  const active = children.filter((c) => !c.endedAt);
+  const past = children.filter((c) => c.endedAt);
   const filteredActive = query.trim()
-    ? active.filter((c) => c.child_name.toLowerCase().includes(query.trim().toLowerCase()))
+    ? active.filter((c) => c.childName.toLowerCase().includes(query.trim().toLowerCase()))
     : active;
   const filteredPast = query.trim()
-    ? past.filter((c) => c.child_name.toLowerCase().includes(query.trim().toLowerCase()))
+    ? past.filter((c) => c.childName.toLowerCase().includes(query.trim().toLowerCase()))
     : past;
 
   function formatDate(value: string): string {
@@ -246,19 +342,58 @@ export function ChildrenList({
     return d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
   }
 
-  function rowLink(c: { passport_id: string; child_name: string }, muted: boolean) {
+  async function handleDischarge() {
+    if (!dischargeTarget?.episodeId || !selectedReasonId) return;
+    const reason = dischargeReasons.find((r) => r.id === selectedReasonId);
+    if (!reason) return;
+    setIsSubmittingAction(true);
+    setActionError(null);
+    const supabase = createClient();
+    const { error: rpcError } = await supabase.rpc("end_clinic_episode", {
+      p_episode_id: dischargeTarget.episodeId,
+      p_reason: reason.value,
+    });
+    setIsSubmittingAction(false);
+    if (rpcError) {
+      setActionError(rpcError.message);
+      return;
+    }
+    setDischargeTarget(null);
+    setSelectedReasonId("");
+    if (institutionId) load(institutionId);
+  }
+
+  async function handleReopen() {
+    if (!reopenTarget || !institutionId) return;
+    setIsSubmittingAction(true);
+    setActionError(null);
+    const supabase = createClient();
+    const { error: rpcError } = await supabase.rpc("reopen_clinic_episode", {
+      p_institution_id: institutionId,
+      p_passport_id: reopenTarget.passportId,
+    });
+    setIsSubmittingAction(false);
+    if (rpcError) {
+      setActionError(rpcError.message);
+      return;
+    }
+    setReopenTarget(null);
+    load(institutionId);
+  }
+
+  function rowLink(c: RosterRow, muted: boolean) {
     return (
       <Link
-        key={c.passport_id}
-        href={`/principal/passports/${c.passport_id}`}
+        key={c.passportId}
+        href={`/principal/passports/${c.passportId}`}
         onClick={(e) => {
           if (window.matchMedia("(min-width: 1024px)").matches) {
             e.preventDefault();
-            onSelect(c.passport_id);
+            onSelect(c.passportId);
           }
         }}
         className={`block rounded-2xl border p-4 shadow-sm ${
-          c.passport_id === selectedPassportId
+          c.passportId === selectedPassportId
             ? "border-brand-prussian-blue bg-brand-pastel-blue/10"
             : muted
               ? "border-black/5 bg-white/60"
@@ -266,9 +401,9 @@ export function ChildrenList({
         }`}
       >
         <p className="font-heading text-h2 font-semibold text-brand-prussian-blue lg:text-body lg:font-semibold lg:text-brand-neutral-black">
-          {c.child_name}
+          {c.childName}
         </p>
-        <StatusBadgeRow badges={badgesByPassportId.get(c.passport_id)} />
+        {!isClinic && <StatusBadgeRow badges={badgesByPassportId.get(c.passportId)} />}
       </Link>
     );
   }
@@ -290,7 +425,7 @@ export function ChildrenList({
             href="/principal/passports/enrol"
             className="flex-shrink-0 rounded-full bg-brand-prussian-blue px-4 py-2 font-sans text-body font-semibold text-white"
           >
-            + Enrol
+            {isClinic ? "+ Add Client" : "+ Enrol"}
           </Link>
         )}
       </div>
@@ -304,7 +439,7 @@ export function ChildrenList({
         <p className="font-sans text-body text-brand-neutral-black/60">{error}</p>
       ) : children.length === 0 ? (
         <p className="rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-center font-sans text-body text-brand-neutral-black/60">
-          No children linked to this school yet.
+          {isClinic ? "No clients linked to this clinic yet." : "No children linked to this school yet."}
         </p>
       ) : (
         <>
@@ -326,34 +461,157 @@ export function ChildrenList({
             ))}
           </div>
 
-          <StatusBadgeLegend />
+          {!isClinic && <StatusBadgeLegend />}
 
           {segment === "active" ? (
             filteredActive.length === 0 ? (
               <p className="px-1 pt-2 text-center font-sans text-body text-brand-neutral-black/60">
-                {query.trim() ? `No currently enrolled children match "${query}".` : "No children currently enrolled."}
+                {query.trim()
+                  ? `No currently ${isClinic ? "active clients" : "enrolled children"} match "${query}".`
+                  : isClinic
+                    ? "No clients currently active."
+                    : "No children currently enrolled."}
               </p>
             ) : (
-              <div className="flex flex-col gap-2">{filteredActive.map((c) => rowLink(c, false))}</div>
+              <div className="flex flex-col gap-2">
+                {filteredActive.map((c) => (
+                  <div key={c.passportId}>
+                    {rowLink(c, false)}
+                    {isClinic && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDischargeTarget(c);
+                          setActionError(null);
+                        }}
+                        className="mt-1 px-1 font-sans text-eyebrow font-semibold text-brand-golden-brown"
+                      >
+                        Discharge
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
             )
           ) : filteredPast.length === 0 ? (
             <p className="px-1 pt-2 text-center font-sans text-body text-brand-neutral-black/60">
-              {query.trim() ? `No past pupils match "${query}".` : "No past pupils."}
+              {query.trim()
+                ? `No ${isClinic ? "discharged clients" : "past pupils"} match "${query}".`
+                : isClinic
+                  ? "No discharged clients."
+                  : "No past pupils."}
             </p>
           ) : (
             <div className="flex flex-col gap-2">
               {filteredPast.map((c) => (
-                <div key={c.passport_id}>
+                <div key={c.passportId}>
                   {rowLink(c, true)}
                   <p className="mt-0.5 px-1 font-sans text-eyebrow text-brand-neutral-black/50">
-                    Enrolment ended {formatDate(c.enrolment_ended_at!)}
+                    {isClinic ? "Discharged" : "Enrolment ended"} {formatDate(c.endedAt!)}
+                    {isClinic && c.endReason ? ` · ${c.endReason}` : ""}
                   </p>
+                  {isClinic && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setReopenTarget(c);
+                        setActionError(null);
+                      }}
+                      className="mt-1 px-1 font-sans text-eyebrow font-semibold text-brand-prussian-blue"
+                    >
+                      Reopen
+                    </button>
+                  )}
                 </div>
               ))}
             </div>
           )}
         </>
       )}
+
+      <BottomSheet
+        isOpen={Boolean(dischargeTarget)}
+        onClose={() => {
+          if (!isSubmittingAction) {
+            setDischargeTarget(null);
+            setSelectedReasonId("");
+            setActionError(null);
+          }
+        }}
+      >
+        {dischargeTarget && (
+          <div>
+            <h2 className="font-heading text-h2 font-bold text-brand-prussian-blue">
+              Discharge {dischargeTarget.childName}?
+            </h2>
+            <p className="mt-2 font-sans text-body text-brand-neutral-black/70">
+              This ends the episode of care and closes every practitioner&apos;s own caseload access to this client at
+              your clinic. A reason is required.
+            </p>
+            <div className="mt-4">
+              <label className="mb-1.5 block font-accent text-eyebrow font-bold uppercase tracking-wide text-brand-neutral-black/50" htmlFor="discharge-reason">
+                Reason
+              </label>
+              <select
+                id="discharge-reason"
+                value={selectedReasonId}
+                onChange={(e) => setSelectedReasonId(e.target.value)}
+                className="w-full rounded-xl border border-black/10 bg-white px-4 py-3 font-sans text-body text-brand-neutral-black"
+              >
+                <option value="">Select a reason…</option>
+                {dischargeReasons.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.value}
+                  </option>
+                ))}
+              </select>
+            </div>
+            {actionError && (
+              <p role="alert" className="mt-3 font-sans text-body font-medium text-brand-golden-brown">
+                {actionError}
+              </p>
+            )}
+            <Button
+              type="button"
+              onClick={handleDischarge}
+              disabled={!selectedReasonId || isSubmittingAction}
+              className="mt-4 lg:w-auto"
+            >
+              {isSubmittingAction ? "Discharging…" : "Discharge"}
+            </Button>
+          </div>
+        )}
+      </BottomSheet>
+
+      <BottomSheet
+        isOpen={Boolean(reopenTarget)}
+        onClose={() => {
+          if (!isSubmittingAction) {
+            setReopenTarget(null);
+            setActionError(null);
+          }
+        }}
+      >
+        {reopenTarget && (
+          <div>
+            <h2 className="font-heading text-h2 font-bold text-brand-prussian-blue">
+              Reopen {reopenTarget.childName}?
+            </h2>
+            <p className="mt-2 font-sans text-body text-brand-neutral-black/70">
+              Starts a new episode of care for this client at your clinic. Their previous episode stays on record
+              exactly as it ended.
+            </p>
+            {actionError && (
+              <p role="alert" className="mt-3 font-sans text-body font-medium text-brand-golden-brown">
+                {actionError}
+              </p>
+            )}
+            <Button type="button" onClick={handleReopen} disabled={isSubmittingAction} className="mt-4 lg:w-auto">
+              {isSubmittingAction ? "Reopening…" : "Reopen"}
+            </Button>
+          </div>
+        )}
+      </BottomSheet>
     </>
   );
 }

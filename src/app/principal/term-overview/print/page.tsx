@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { useRequireRole } from "@/hooks/useRequireRole";
+import { useGuardSchoolOnlyRoute } from "@/hooks/useGuardSchoolOnlyRoute";
 import { InlineErrorState } from "@/components/ui/InlineErrorState";
 import { BrandMark } from "@/components/ui/BrandMark";
 import { computeTrend, formatTermRange } from "@/lib/termOverviewFormatting";
@@ -56,6 +57,7 @@ interface TermOverviewResult {
 export default function TermOverviewPrintPage() {
   const router = useRouter();
   const { user, isReady } = useRequireRole("principal");
+  const { isChecking: isCheckingClinicGuard, isBlocked } = useGuardSchoolOnlyRoute(user?.id, "/principal/dashboard");
   const searchParams = useSearchParams();
   const start = searchParams.get("start") ?? "";
   const end = searchParams.get("end") ?? "";
@@ -115,7 +117,7 @@ export default function TermOverviewPrintPage() {
     };
   }, [user, start, end, reloadKey]);
 
-  if (!isReady) {
+  if (!isReady || isCheckingClinicGuard || isBlocked) {
     return null;
   }
 

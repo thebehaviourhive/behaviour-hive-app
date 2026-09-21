@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useRequireRole } from "@/hooks/useRequireRole";
+import { useGuardSchoolOnlyRoute } from "@/hooks/useGuardSchoolOnlyRoute";
 import { createClient } from "@/lib/supabase/client";
 import { InlineErrorState } from "@/components/ui/InlineErrorState";
 import { PrincipalBottomNav } from "@/components/principal/PrincipalBottomNav";
@@ -66,6 +67,7 @@ const CLASS_VIEW_EXPLAINER =
 export default function TermOverviewPage() {
   const router = useRouter();
   const { user, isReady } = useRequireRole("principal");
+  const { isChecking: isCheckingClinicGuard, isBlocked } = useGuardSchoolOnlyRoute(user?.id, "/principal/dashboard");
   const [institutionId, setInstitutionId] = useState<string | null>(null);
   const [institutionName, setInstitutionName] = useState<string | null>(null);
 
@@ -136,7 +138,7 @@ export default function TermOverviewPage() {
     };
   }, [institutionId, start, end]);
 
-  if (!isReady) {
+  if (!isReady || isCheckingClinicGuard || isBlocked) {
     return null;
   }
 

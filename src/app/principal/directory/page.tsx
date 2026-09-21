@@ -235,7 +235,12 @@ export default function PrincipalDirectoryPage() {
             />
           )}
           {segment === "children" && (
-            <ChildrenList institutionId={institutionId} selectedPassportId={selectedPassportId} onSelect={setSelectedPassportId} />
+            <ChildrenList
+              institutionId={institutionId}
+              institutionType={institutionType}
+              selectedPassportId={selectedPassportId}
+              onSelect={setSelectedPassportId}
+            />
           )}
           {segment === "temporary-access" && (
             <TemporaryAccessList
