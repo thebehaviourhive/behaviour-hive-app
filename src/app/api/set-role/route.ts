@@ -2,16 +2,31 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 
-// "clinician" deliberately dropped, Sept 2026 model correction: there
-// is no self-service clinician -- every clinician belongs to an
-// organisation (joins by its code, same as class_teacher/sna/
-// principal) or, for the specialty-then-verify path the trial
-// psychologist uses, gets app_metadata.role set manually by Behaviour
-// Hive staff (scripts/admin/set-clinician-role.mjs), never by a client
-// calling this route. Nothing in the app's own UI POSTs role:
-// "clinician" here any more -- see role-select/no-code/page.tsx's own
-// comment for the full reasoning.
-const SELF_SERVICE_ROLES = ["parent", "class_teacher", "sna", "principal"] as const;
+// "clinician" was deliberately dropped here Sept 2026 (the onboarding
+// restructure's own model correction: no INDEPENDENT self-service
+// clinician -- every clinician belongs to an organisation, joins by
+// its code, same as class_teacher/sna/principal). That reasoning was
+// right; this list was just never widened for the case it was
+// describing. PRD 5 Stage 2 built exactly that organisation-code path
+// for clinics (institution_staff.role in ('clinician', 'clinical_lead',
+// 'clinic_admin', 'principal')), but SchoolStaffRoleSelectContent.tsx's
+// own clinic role picker sat behind a placeholder screen until 21 Sept
+// 2026, so nothing in the app's UI ever actually POSTed one of these
+// three roles here -- the gap in this allow-list was invisible until
+// the picker existed to hit it. The INDEPENDENT path (no institution
+// code at all, role-select/no-code/page.tsx) still never sends
+// "clinician" -- that correction stands unchanged; this widening only
+// covers the code-gated, institution_staff-backed path, same posture
+// as class_teacher/sna/principal always had.
+const SELF_SERVICE_ROLES = [
+  "parent",
+  "class_teacher",
+  "sna",
+  "principal",
+  "clinician",
+  "clinical_lead",
+  "clinic_admin",
+] as const;
 type SelfServiceRole = (typeof SELF_SERVICE_ROLES)[number];
 
 function isSelfServiceRole(value: unknown): value is SelfServiceRole {

@@ -6,6 +6,7 @@ import { BrandMark } from "@/components/ui/BrandMark";
 import { createClient } from "@/lib/supabase/client";
 import { friendlyJoinError } from "@/lib/friendlyJoinError";
 import { getInstitutionType, type InstitutionType } from "@/lib/institutionType";
+import { getRoleLabel } from "@/lib/vocabulary";
 
 // Onboarding restructure, Sept 2026: this used to be step two of
 // "who are you" (asked BEFORE any institution code existed). Now it's
@@ -25,10 +26,27 @@ import { getInstitutionType, type InstitutionType } from "@/lib/institutionType"
 // flagging. Re-add the tile (see git history for its exact copy) once
 // that self-service path is actually built -- until then a school-
 // engaged clinician is onboarded manually, per approve_clinician().
-type StaffRole = "class_teacher" | "sna" | "principal";
+//
+// PLACEHOLDER 2 REPLACED, 21 Sept 2026 -- FOUND BY DANIEL'S OWN FIRST
+// CLICK, NOT BY REVIEW. A clinic-typed institution used to dead-end
+// here on a plain "Not set up yet" screen -- live, deployed, reachable
+// by anyone who created a real clinic. PRD 5's seven stages built every
+// clinic role's RLS/RPCs/consent screen/dashboard and verified all of
+// it through fixtures and direct RPC calls; NONE of it was ever
+// verified by a human actually signing up through this screen, because
+// this screen never offered a clinic role to sign up as. The clinic
+// track was fully built and fully unjoinable. See CLAUDE.md's own
+// dedicated entry on this for the standing lesson: a new institution
+// TYPE, like a new ROLE, is only proven once someone has signed up
+// through the real onboarding screens as each of its roles -- every
+// surface after signup can be perfectly correct and it proves nothing
+// about whether anyone can ever reach it.
+type SchoolRole = "class_teacher" | "sna" | "principal";
+type ClinicRole = "principal" | "clinician" | "clinical_lead" | "clinic_admin";
+type StaffRole = SchoolRole | ClinicRole;
 
-const STAFF_ROLES: {
-  value: StaffRole;
+const SCHOOL_ROLES: {
+  value: SchoolRole;
   icon: string;
   title: string;
   subtitle: string;
@@ -50,6 +68,46 @@ const STAFF_ROLES: {
     icon: "🗝️",
     title: "Principal",
     subtitle: "I oversee incident sign-off and records across the school",
+  },
+];
+
+// Titles go through getRoleLabel(role, "clinic") -- PRD 5's own
+// decided vocabulary (src/lib/vocabulary.ts), never hardcoded here --
+// so a future per-institution override (institution_vocabulary_
+// overrides) reaches this screen automatically if one is ever added.
+// Subtitles are this screen's own descriptive copy, same as the school
+// tiles', kept consistent with each role's own consent-screen lede
+// (ClinicianAgreementScreen/ClinicalLeadAgreementScreen/
+// ClinicAdminAgreementScreen/PrincipalAgreementScreen's clinic branch).
+const CLINIC_ROLES: {
+  value: ClinicRole;
+  icon: string;
+  title: string;
+  subtitle: string;
+}[] = [
+  {
+    value: "principal",
+    icon: "🗝️",
+    title: getRoleLabel("principal", "clinic"),
+    subtitle: "I oversee clinical governance and countersign records across the clinic",
+  },
+  {
+    value: "clinician",
+    icon: "🩺",
+    title: getRoleLabel("clinician", "clinic"),
+    subtitle: "I hold a caseload and deliver clinical work with specific children",
+  },
+  {
+    value: "clinical_lead",
+    icon: "🧭",
+    title: getRoleLabel("clinical_lead", "clinic"),
+    subtitle: "I oversee a defined scope of the clinic's caseload, not just my own",
+  },
+  {
+    value: "clinic_admin",
+    icon: "🗂️",
+    title: getRoleLabel("clinic_admin", "clinic"),
+    subtitle: "I manage client onboarding and records, not clinical work",
   },
 ];
 
@@ -76,31 +134,10 @@ export function SchoolStaffRoleSelectContent() {
     return null;
   }
 
-  // PRD 5 GREPPABLE PLACEHOLDER 2: a clinic-typed institution. Live now
-  // -- institutions.type is real (migration 0200) and role-select/
-  // page.tsx forwards it here. Still a placeholder screen, not a real
-  // clinic role picker: clinic roles/onboarding are a later PRD 5
-  // stage, not this one.
-  if (getInstitutionType({ type: institutionTypeParam }) === "clinic") {
-    return (
-      <main className="flex min-h-full flex-1 items-center justify-center bg-brand-off-white/40 px-4 py-10">
-        <div className="w-full max-w-sm text-center">
-          <div className="mb-6 flex flex-col items-center gap-3">
-            <BrandMark />
-          </div>
-          <div className="rounded-3xl border border-black/5 bg-white p-6 shadow-sm">
-            <h1 className="mb-2 font-heading text-xl font-semibold text-brand-neutral-black">
-              Not set up yet
-            </h1>
-            <p className="text-sm leading-relaxed text-black/60">
-              Accounts for this kind of organisation aren&apos;t available here yet. We&apos;ll be
-              in touch when they are.
-            </p>
-          </div>
-        </div>
-      </main>
-    );
-  }
+  const institutionType = getInstitutionType({ type: institutionTypeParam });
+  const roles = institutionType === "clinic" ? CLINIC_ROLES : SCHOOL_ROLES;
+  const heading =
+    institutionType === "clinic" ? "What's your role at the clinic?" : "What's your role at school?";
 
   async function handleSelect(role: StaffRole) {
     if (submittingRole || !institutionId) return;
@@ -142,6 +179,11 @@ export function SchoolStaffRoleSelectContent() {
     // handleJoin() uses -- role comes from the freshly-refreshed
     // server-set claim, never a client-suppliable value, and the DB's
     // own self-link policy enforces this independently either way.
+    // The self-link policy is institution-TYPE-aware (0203/0204): a
+    // school only ever accepts its own four historical role values, a
+    // clinic only accepts principal plus the three clinic-only ones --
+    // this insert will be refused by RLS if role and institutionType
+    // ever disagree, not just by this screen's own tile list.
     const { error: staffError } = await supabase.from("institution_staff").insert({
       institution_id: institutionId,
       user_id: user.id,
@@ -162,9 +204,7 @@ export function SchoolStaffRoleSelectContent() {
       <div className="w-full max-w-sm">
         <div className="mb-6 flex flex-col items-center gap-3 text-center">
           <BrandMark />
-          <h1 className="font-heading text-2xl font-semibold text-brand-neutral-black">
-            What&apos;s your role at school?
-          </h1>
+          <h1 className="font-heading text-2xl font-semibold text-brand-neutral-black">{heading}</h1>
         </div>
 
         <div className="rounded-3xl border border-black/5 bg-white p-6 shadow-sm">
@@ -173,7 +213,7 @@ export function SchoolStaffRoleSelectContent() {
           </p>
 
           <div className="flex flex-col gap-3">
-            {STAFF_ROLES.map((role) => (
+            {roles.map((role) => (
               <button
                 key={role.value}
                 type="button"
