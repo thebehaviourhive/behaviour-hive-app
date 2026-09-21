@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { createClient } from "@/lib/supabase/client";
 import { MyTagChangeRequestsSection } from "@/components/clinic/MyTagChangeRequestsSection";
+import { PendingApprovalState } from "@/components/clinic/PendingApprovalState";
 
 // PRD 10 Stage 3, item 1 -- the admin's own real dashboard, replacing
 // the honest holding page. Four things, per section 5.3: the entire
@@ -49,6 +50,16 @@ export default function ClinicAdminDashboardPage() {
   const [nameByInstitution, setNameByInstitution] = useState<Map<string, string>>(new Map());
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Found live, 21 Sept 2026: an admin who has joined by code but whose
+  // director hasn't approved them yet was shown "Could not find your
+  // clinic" -- a genuine error message on the very first screen a new
+  // admin ever sees, for a completely ordinary, expected state. Same
+  // failure this codebase already names elsewhere for a dashboard
+  // arriving at the front door misrepresenting itself. Distinguished
+  // from a genuinely missing/rejected staff row by a second, unfiltered
+  // query -- only reached when the first (approved-only) lookup found
+  // nothing, so it costs nothing for the common, already-approved case.
+  const [isPendingApproval, setIsPendingApproval] = useState(false);
 
   const load = useCallback(async () => {
     if (!user) return;
@@ -66,6 +77,22 @@ export default function ClinicAdminDashboardPage() {
       .maybeSingle();
 
     if (!staffRow) {
+      const { data: pendingRow } = await supabase
+        .from("institution_staff")
+        .select("id")
+        .eq("user_id", user.id)
+        .eq("role", "clinic_admin")
+        .is("deactivated_at", null)
+        .is("approved_at", null)
+        .is("rejected_at", null)
+        .maybeSingle();
+
+      if (pendingRow) {
+        setIsPendingApproval(true);
+        setIsLoading(false);
+        return;
+      }
+
       setError("Could not find your clinic.");
       setIsLoading(false);
       return;
@@ -126,6 +153,10 @@ export default function ClinicAdminDashboardPage() {
 
   if (!isReady) {
     return null;
+  }
+
+  if (isPendingApproval) {
+    return <PendingApprovalState />;
   }
 
   return (

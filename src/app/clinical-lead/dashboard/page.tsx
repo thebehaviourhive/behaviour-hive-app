@@ -1,9 +1,12 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useState } from "react";
 import { BrandMark } from "@/components/ui/BrandMark";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { useClinicalWorkSwitch } from "@/hooks/useClinicalWorkSwitch";
+import { createClient } from "@/lib/supabase/client";
+import { PendingApprovalState } from "@/components/clinic/PendingApprovalState";
 
 // A real, honest landing page, not a redirect loop. Built 21 Sept 2026
 // alongside the clinic role picker fix -- before this, getPostAuthRedirect()
@@ -15,8 +18,20 @@ import { useClinicalWorkSwitch } from "@/hooks/useClinicalWorkSwitch";
 // deferred call (CLAUDE.md: "THE clinical_lead ROLE HAS NO CLIENT
 // SURFACE ANYWHERE"), same reasoning, just no longer landing on a screen
 // that reads as "you haven't joined."
+//
+// FOUND LIVE, PRD 10 Stage 3 correction, 21 Sept 2026: this page said
+// "You're in" UNCONDITIONALLY -- the exact same message before and after
+// the director actually approves the join. A lead who has joined by code
+// but whose director hasn't approved them yet saw "You're in", which is
+// simply false. Caught during Stage 1's own real-flow proof (the lead's
+// own first visit, pre-approval, showed this text) but not fixed at the
+// time; fixed now alongside the identical admin-side finding. Same fix
+// shape: a second, unfiltered institution_staff query, reached only when
+// the first (approved-only) one finds nothing.
 export default function ClinicalLeadDashboardPage() {
-  const { isReady } = useRequireRole("clinical_lead");
+  const { isReady, user } = useRequireRole("clinical_lead");
+  const [isPendingApproval, setIsPendingApproval] = useState(false);
+  const [isCheckingApproval, setIsCheckingApproval] = useState(true);
   // Director/lead clinical-work switch, 21 Sept 2026 -- this page is
   // the ONLY nav surface a clinical_lead has today (no sidebar, no
   // bottom nav -- see this page's own header comment), so it's the one
@@ -26,8 +41,35 @@ export default function ClinicalLeadDashboardPage() {
   // a clinic), so nothing here depends on it.
   const clinicalWork = useClinicalWorkSwitch(null);
 
-  if (!isReady) {
+  useEffect(() => {
+    if (!user) return;
+    let isMounted = true;
+    const supabase = createClient();
+
+    supabase
+      .from("institution_staff")
+      .select("approved_at, rejected_at")
+      .eq("user_id", user.id)
+      .eq("role", "clinical_lead")
+      .is("deactivated_at", null)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (!isMounted) return;
+        setIsPendingApproval(Boolean(data && data.approved_at === null && data.rejected_at === null));
+        setIsCheckingApproval(false);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [user]);
+
+  if (!isReady || isCheckingApproval) {
     return null;
+  }
+
+  if (isPendingApproval) {
+    return <PendingApprovalState />;
   }
 
   return (
