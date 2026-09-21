@@ -199,7 +199,7 @@ export function HandOverPrincipalSheet({
               id="handover-reason"
               value={reason}
               onChange={(e) => setReason(e.target.value)}
-              placeholder="e.g. Retiring at the end of term"
+              placeholder={institutionType === "clinic" ? "e.g. Stepping back from the clinic" : "e.g. Retiring at the end of term"}
             />
           </div>
 

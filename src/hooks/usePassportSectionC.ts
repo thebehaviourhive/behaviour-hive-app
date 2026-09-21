@@ -96,6 +96,7 @@ export function usePassportSectionC() {
 
   return {
     user,
+    passportId,
     childName,
     record,
     isReady: isRoleReady && !isLoading,

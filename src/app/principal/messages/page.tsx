@@ -78,7 +78,7 @@ export default function PrincipalMessagesPage() {
       p_institution_id: staffRow.institution_id,
     });
     if (rosterErr) {
-      setRosterError("Could not load your school's roster.");
+      setRosterError("Could not load your roster.");
       setIsLoadingRoster(false);
       return;
     }

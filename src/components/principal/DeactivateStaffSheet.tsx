@@ -160,7 +160,7 @@ export function DeactivateStaffSheet({ member, isOpen, onClose, onDeactivated }:
           id="deactivation-reason"
           value={reason}
           onChange={(e) => setReason(e.target.value)}
-          placeholder="e.g. Left the school"
+          placeholder="e.g. Left the organisation"
         />
       </div>
 

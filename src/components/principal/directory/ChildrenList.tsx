@@ -250,7 +250,7 @@ export function ChildrenList({
         supabase.rpc("get_institution_child_status_badges", { p_institution_id: instId }),
       ]);
       if (rosterResult.error) {
-        setError("Could not load the school roster.");
+        setError(isClinic ? "Could not load the clinic roster." : "Could not load the school roster.");
         setIsLoading(false);
         return;
       }

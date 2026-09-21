@@ -11,6 +11,7 @@ import { createClient } from "@/lib/supabase/client";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { useRegions } from "@/hooks/useRegions";
 import { useMyPassport } from "@/hooks/useMyPassport";
+import { useHasSchoolLink } from "@/hooks/useHasSchoolLink";
 import { getPassportProgressPercent } from "@/lib/passportProgress";
 import { IMPORTANT_PEOPLE_TITLE } from "@/lib/passportCopy";
 import { DIAGNOSIS_OTHER } from "@/lib/diagnosisOptions";
@@ -48,6 +49,7 @@ export default function PassportSectionAPage() {
   const router = useRouter();
   const { user, isReady } = useRequireRole("parent");
   const { passportId: existingPassportId, isLoading: isLoadingPassportId } = useMyPassport(user?.id);
+  const hasSchoolLink = useHasSchoolLink(existingPassportId);
 
   const [childName, setChildName] = useState("");
   const [dateOfBirth, setDateOfBirth] = useState("");
@@ -219,6 +221,7 @@ export default function PassportSectionAPage() {
           <PassportProgress
             sectionLabel="Section 1 of 4"
             percent={getPassportProgressPercent(1)}
+            hasSchoolLink={hasSchoolLink}
           />
 
           <form onSubmit={handleSaveAndContinue} className="flex flex-col gap-4">

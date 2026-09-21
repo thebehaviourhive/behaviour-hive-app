@@ -191,6 +191,41 @@ export function ClinicalFileDetail({
   });
   const [isAbcLoggerOpen, setIsAbcLoggerOpen] = useState(false);
   const [timelineRefreshKey, setTimelineRefreshKey] = useState(0);
+  // Finding 1, 22 Sept 2026 -- same fix as ChildDetail's own, mirrored
+  // here for the clinician's own view of the same ABC log. Uses the
+  // identical get_passport_has_school_link() RPC (0265), authorized
+  // against the clinician's OWN currently-standing institution_staff
+  // row rather than the director's -- an independent/parent-engaged
+  // clinician has no institution_staff row at all, so this correctly
+  // stays false (never a school link to claim) for them.
+  const [hasSchoolLink, setHasSchoolLink] = useState(false);
+  useEffect(() => {
+    let isMounted = true;
+    const supabase = createClient();
+    (async () => {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!isMounted || !user) return;
+      const { data: staffRow } = await supabase
+        .from("institution_staff")
+        .select("institution_id")
+        .eq("user_id", user.id)
+        .is("deactivated_at", null)
+        .not("approved_at", "is", null)
+        .limit(1)
+        .maybeSingle();
+      if (!isMounted || !staffRow) return;
+      const { data } = await supabase.rpc("get_passport_has_school_link", {
+        p_passport_id: passportId,
+        p_institution_id: staffRow.institution_id,
+      });
+      if (isMounted) setHasSchoolLink(Boolean(data));
+    })();
+    return () => {
+      isMounted = false;
+    };
+  }, [passportId]);
   const { isLive: isCalmButtonLive, isLoading: isCalmStatusLoading } = useCalmButtonLiveStatus(passportId);
   const {
     items: clinicalContentItems,
@@ -520,6 +555,7 @@ export function ClinicalFileDetail({
               passportId={passportId}
               viewerRole="clinician"
               highlightLogId={searchParams.get("logId")}
+              allowSchoolRoleFilters={hasSchoolLink}
             />
           )}
 

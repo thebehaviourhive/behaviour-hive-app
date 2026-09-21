@@ -18,6 +18,13 @@ interface ABCTimelineProps {
   // also forces both filter rows back to "All" so a stale filter
   // selection can never hide the very card someone was sent to see.
   highlightLogId?: string | null;
+  // Finding 1, 22 Sept 2026 -- "Teacher"/"SNA" were unconditional
+  // reporter-filter chips, offered even for a child with no school
+  // link at all, who can structurally never have either author an
+  // entry. Default true (teacher.tsx/sna.tsx's own call sites are
+  // always school-context, unchanged); every clinic-reachable call
+  // site passes whether THIS passport actually has a school link.
+  allowSchoolRoleFilters?: boolean;
 }
 
 interface RawAbcLogRow {
@@ -131,7 +138,7 @@ function formatDateTime(date: string, time: string): string {
   return `${dateLabel} · ${timeLabel}`;
 }
 
-export function ABCTimeline({ passportId, viewerRole, highlightLogId }: ABCTimelineProps) {
+export function ABCTimeline({ passportId, viewerRole, highlightLogId, allowSchoolRoleFilters = true }: ABCTimelineProps) {
   const [logs, setLogs] = useState<ABCLogRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -297,21 +304,25 @@ export function ABCTimeline({ passportId, viewerRole, highlightLogId }: ABCTimel
           isActive={reporterFilter === "parent"}
           onClick={() => setReporterFilter("parent")}
         />
-        <FilterPill
-          label="Teacher"
-          isActive={reporterFilter === "class_teacher"}
-          onClick={() => setReporterFilter("class_teacher")}
-        />
+        {allowSchoolRoleFilters && (
+          <FilterPill
+            label="Teacher"
+            isActive={reporterFilter === "class_teacher"}
+            onClick={() => setReporterFilter("class_teacher")}
+          />
+        )}
         <FilterPill
           label="Clinician"
           isActive={reporterFilter === "clinician"}
           onClick={() => setReporterFilter("clinician")}
         />
-        <FilterPill
-          label="SNA"
-          isActive={reporterFilter === "sna"}
-          onClick={() => setReporterFilter("sna")}
-        />
+        {allowSchoolRoleFilters && (
+          <FilterPill
+            label="SNA"
+            isActive={reporterFilter === "sna"}
+            onClick={() => setReporterFilter("sna")}
+          />
+        )}
       </div>
 
       {filteredLogs.length === 0 ? (

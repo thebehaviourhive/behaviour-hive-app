@@ -1116,6 +1116,7 @@ export default function PassportDashboardPage() {
               passportId={summary.passportId}
               viewerRole="parent"
               highlightLogId={highlightAbcLogId}
+              allowSchoolRoleFilters={!allConnectedAreClinic}
             />
           </section>
         </ErrorBoundary>

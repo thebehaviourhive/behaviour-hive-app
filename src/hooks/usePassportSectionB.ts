@@ -112,6 +112,7 @@ export function usePassportSectionB() {
 
   return {
     user,
+    passportId,
     record,
     isReady: isRoleReady && !isLoading,
     save,

@@ -8,6 +8,7 @@ import { TextField } from "@/components/ui/TextField";
 import { PillMultiSelect } from "@/components/ui/PillMultiSelect";
 import { PassportProgress } from "@/components/ui/PassportProgress";
 import { usePassportSectionD } from "@/hooks/usePassportSectionD";
+import { useHasSchoolLink } from "@/hooks/useHasSchoolLink";
 import { getPassportProgressPercent } from "@/lib/passportProgress";
 import { createClient } from "@/lib/supabase/client";
 import { logActivity } from "@/lib/logActivity";
@@ -91,6 +92,7 @@ function withLegacySelections(
 export default function PassportSectionDPage4() {
   const router = useRouter();
   const { user, passportId, record, isReady, save } = usePassportSectionD();
+  const hasSchoolLink = useHasSchoolLink(passportId);
 
   const [sensorySeeks, setSensorySeeks] = useState<string[]>([]);
   const [sensorySeeksOther, setSensorySeeksOther] = useState("");
@@ -228,6 +230,7 @@ export default function PassportSectionDPage4() {
             sectionLabel="Section 4 of 4"
             stepLabel="Step 4 of 4"
             percent={getPassportProgressPercent(9)}
+            hasSchoolLink={hasSchoolLink}
           />
 
           <div className="flex flex-col gap-6">

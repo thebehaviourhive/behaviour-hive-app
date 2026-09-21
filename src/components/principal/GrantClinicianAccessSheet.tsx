@@ -4,6 +4,7 @@ import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/Button";
 import { BottomSheet } from "@/components/ui/BottomSheet";
+import { useInstitutionType } from "@/hooks/useInstitutionType";
 
 // PRD 1, Stage 7, Step 2. The institution-side counterpart to
 // ShareBottomSheet's own clinician-code section -- same single-step
@@ -27,18 +28,19 @@ interface GrantClinicianAccessSheetProps {
   onGranted: (clinicianName: string) => void;
 }
 
-function friendlyGrantError(message: string): string {
+function friendlyGrantError(message: string, isClinic: boolean): string {
+  const orgWord = isClinic ? "clinic" : "school";
   if (/engaged by this child's parent/i.test(message)) {
-    return "This clinician is already connected by this child's parent or guardian. A school can't take over a parent's own clinical engagement — connect a different clinician, or ask the family to make the introduction.";
+    return `This clinician is already connected by this child's parent or guardian. A ${orgWord} can't take over a parent's own clinical engagement — connect a different clinician, or ask the family to make the introduction.`;
   }
   if (/engaged by a different school/i.test(message)) {
-    return "This clinician was connected by a different school for this child and can't be reactivated here.";
+    return `This clinician was connected by a different ${orgWord} for this child and can't be reactivated here.`;
   }
   if (/already has active access/i.test(message)) {
     return "This clinician already has active access to this child.";
   }
   if (/no link to your institution/i.test(message)) {
-    return "This child has no connection to your school yet.";
+    return `This child has no connection to your ${orgWord} yet.`;
   }
   if (/couldn't find a clinician/i.test(message)) {
     return "We couldn't find a clinician with that code. Please check with them and try again.";
@@ -54,6 +56,8 @@ export function GrantClinicianAccessSheet({
   onClose,
   onGranted,
 }: GrantClinicianAccessSheetProps) {
+  const { institutionType } = useInstitutionType(institutionId);
+  const isClinic = institutionType === "clinic";
   const [codeInput, setCodeInput] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -86,7 +90,7 @@ export function GrantClinicianAccessSheet({
     );
     if (lookupError) {
       setIsSubmitting(false);
-      setSubmitError(friendlyGrantError(lookupError.message));
+      setSubmitError(friendlyGrantError(lookupError.message, isClinic));
       return;
     }
     const clinician = clinicianRows?.[0] ?? null;
@@ -105,7 +109,7 @@ export function GrantClinicianAccessSheet({
     });
     setIsSubmitting(false);
     if (error) {
-      setSubmitError(friendlyGrantError(error.message));
+      setSubmitError(friendlyGrantError(error.message, isClinic));
       return;
     }
     reset();
@@ -118,9 +122,9 @@ export function GrantClinicianAccessSheet({
         Connect a Clinician to {childName}
       </h2>
       <p className="mt-2 text-sm text-brand-neutral-black/70">
-        Enter the clinician&apos;s own code to connect them on your school&apos;s
+        Enter the clinician&apos;s own code to connect them on your {isClinic ? "clinic" : "school"}&apos;s
         behalf. They&apos;ll be able to see {childName}&apos;s passport as part of
-        your school&apos;s clinical team.
+        your {isClinic ? "clinic" : "school"}&apos;s clinical team.
       </p>
 
       <div className="mt-4">

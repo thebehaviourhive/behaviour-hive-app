@@ -8,6 +8,7 @@ import { TextField } from "@/components/ui/TextField";
 import { PillMultiSelect } from "@/components/ui/PillMultiSelect";
 import { PassportProgress } from "@/components/ui/PassportProgress";
 import { usePassportSectionD } from "@/hooks/usePassportSectionD";
+import { useHasSchoolLink } from "@/hooks/useHasSchoolLink";
 import { getPassportProgressPercent } from "@/lib/passportProgress";
 
 const DURING_DISTRESS_OPTIONS = [
@@ -29,7 +30,8 @@ const DURING_DISTRESS_OPTIONS = [
 
 export default function PassportSectionDPage2() {
   const router = useRouter();
-  const { record, isReady, save } = usePassportSectionD();
+  const { record, isReady, save, passportId } = usePassportSectionD();
+  const hasSchoolLink = useHasSchoolLink(passportId);
 
   const [duringDistress, setDuringDistress] = useState<string[]>([]);
   const [duringDistressOther, setDuringDistressOther] = useState("");
@@ -129,6 +131,7 @@ export default function PassportSectionDPage2() {
             sectionLabel="Section 4 of 4"
             stepLabel="Step 2 of 4"
             percent={getPassportProgressPercent(7)}
+            hasSchoolLink={hasSchoolLink}
           />
 
           <p className="mb-3 text-sm text-black/60">

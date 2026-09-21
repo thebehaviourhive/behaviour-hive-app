@@ -8,6 +8,7 @@ import { TextField } from "@/components/ui/TextField";
 import { PillMultiSelect } from "@/components/ui/PillMultiSelect";
 import { PassportProgress } from "@/components/ui/PassportProgress";
 import { usePassportSectionB } from "@/hooks/usePassportSectionB";
+import { useHasSchoolLink } from "@/hooks/useHasSchoolLink";
 import { getPassportProgressPercent } from "@/lib/passportProgress";
 
 const OKAY_SIGNAL_OPTIONS = [
@@ -28,7 +29,8 @@ const OKAY_SIGNAL_OPTIONS = [
 
 export default function PassportSectionBPage1() {
   const router = useRouter();
-  const { record, isReady, save } = usePassportSectionB();
+  const { record, isReady, save, passportId } = usePassportSectionB();
+  const hasSchoolLink = useHasSchoolLink(passportId);
 
   const [okaySignals, setOkaySignals] = useState<string[]>([]);
   const [okaySignalsOther, setOkaySignalsOther] = useState("");
@@ -108,6 +110,7 @@ export default function PassportSectionBPage1() {
             sectionLabel="Section 2 of 4"
             stepLabel="Step 1 of 3"
             percent={getPassportProgressPercent(2)}
+            hasSchoolLink={hasSchoolLink}
           />
 
           <p className="mb-3 text-sm text-black/60">

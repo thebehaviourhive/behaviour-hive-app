@@ -1,0 +1,130 @@
+{
+  "src/hooks/useAbcFunctionData.ts": {
+    "42:\"Couldn't load incident data.\"": "Generic ABC-log terminology, same as ABCLogger.tsx/ABCTimeline.tsx's own identical usage -- not the formal Incident Log record type."
+  },
+  "src/hooks/useAbcTrendData.ts": {
+    "39:\"Couldn't load incident data.\"": "Same as useAbcFunctionData.ts's own identical line."
+  },
+  "src/components/principal/ReviewStaffJoinSheet.tsx": {
+    "139:\"e.g. Couldn't confirm they work at this school\"": "Finding 1 fix -- the institutionType!=='clinic' branch of a newly-added ternary (clinic branch reads \"...work at this clinic\")."
+  },
+  "src/app/clinician/plan/[planId]/page.tsx": {
+    "229:\"The signed document, if there is one. Never visible to school staff — only this plan's own name, date and summary above are.\"": "clinical_plans (Silo 2) cross to a school by default regardless of institution type -- this states who a shared plan's file is never visible to, correct even when the child has no school link (nothing ever crosses in that case, but the statement itself stays true)."
+  },
+  "src/app/clinician/verify/page.tsx": {
+    "192:\"I confirm I hold valid personal or company-provided professional indemnity insurance cover.\"": "\"cover\" here means insurance coverage, not staff covering an absence -- a different sense of the word, not a school-track leak."
+  },
+  "src/app/morning-checkin/page.tsx": {
+    "354:\"Send to teacher\"": "Morning check-in is fed entirely by a teacher's own end-of-day update; structurally unreachable for a clinic-only child (confirmed live, redirects away). Correct wherever it does render."
+  },
+  "src/app/parent-dashboard/incidents/[incidentId]/page.tsx": {
+    "148:\"Couldn't load this incident.\"": "Generic error text; \"incident\" is this app's own record-type name, not school-specific.",
+    "165:\"Couldn't load this incident.\"": "Same as above.",
+    "234:\"The school has completed this record.\"": "Only rendered for a real incident row, which requires class_teacher/SNA authorship -- structurally can't exist for a clinic-only child (create_incident_stamp() is school-role-gated).",
+    "250:\"They stayed at school for the rest of the day.\"": "Same reasoning as 234 -- only renders per real incident row.",
+    "250:\"They did not stay at school for the rest of the day.\"": "Same reasoning as 234."
+  },
+  "src/app/parent-dashboard/incidents/page.tsx": {
+    "141:\"The school has completed this record.\"": "Same as the [incidentId] page's own identical line -- only renders per real incident row, structurally school-authored."
+  },
+  "src/app/parent-dashboard/page.tsx": {
+    "229:\"Failed to load teacher name:\"": "console.error only, never user-facing.",
+    "236:\"your child's teacher\"": "Fallback only inside `if (todaysUpdate)`, gated on a real teacher_updates row existing -- can't fire for a clinic-only child."
+  },
+  "src/app/passport/claim/page.tsx": {
+    "106:\"You'll see everything the school and clinical team have already added, and you can pick up wherever they left off.\"": "The school branch of an already-correct isClinicOnly ternary (the clinic branch reads \"your clinic's own team\")."
+  },
+  "src/app/passport/dashboard/page.tsx": {
+    "1011:\"What sensory tools and de-escalation strategies work best? Build a quick-reference toolkit for the classroom.\"": "The school branch of an already-correct allConnectedAreClinic ternary.",
+    "1109:\"Incident Timeline\"": "PassportIncidentsSection's own heading, only ever rendered inside `{!allConnectedAreClinic && (...)}` a few lines above -- the whole section is gated, not just relabelled."
+  },
+  "src/app/passport/section-e/page.tsx": {
+    "116:\"This is what a teacher or SNA covering your child's class needs to know quickly — allergies, medical conditions, medication, and what to do in an emergency.\"": "Finding 1 fix -- the hasSchoolLink=true branch of an already-correct ternary.",
+    "140:\"Include anything given during the school day\"": "Finding 1 fix -- the hasSchoolLink=true branch of an already-correct ternary."
+  },
+  "src/app/principal/dashboard/page.tsx": {
+    "439:\"View Term Overview\"": "Dead code for a clinic: institutionType === 'clinic' returns <ClinicDirectorDashboard /> early, well before this line.",
+    "453:\"Record incident\"": "Same -- dead code after the clinic early return.",
+    "538:\"a departed supply teacher\"": "Same -- dead code after the clinic early return.",
+    "598:\"Enrolled, not yet assigned to a class\"": "Same -- dead code after the clinic early return.",
+    "648:\"the reporting teacher\"": "Same -- dead code after the clinic early return."
+  },
+  "src/app/principal/passports/[passportId]/export/page.tsx": {
+    "103:\"this child's school record\"": "The institution.type === 'clinic' ternary's own school branch (p_scope) -- clinic branch reads \"this child's clinical record\".",
+    "173:\"School Record Export\"": "The direction === 'clinic' ternary's own school branch -- clinic branch reads \"Clinical Record Export\"."
+  },
+  "src/app/principal/passports/enrol/page.tsx": {
+    "279:\"Creates a new passport for this child, started by your school. Their parent or guardian claims it later using a code you generate from their own passport page — this doesn't require them to do anything yet.\"": "The school branch of an already-correct institutionType ternary -- the clinic branch (line 278) reads \"Creates a new record for this client, started by your clinic...\"."
+  },
+  "src/components/abc-logger/ABCLogger.tsx": {
+    "815:\"Select any that applied around this incident.\"": "\"Incident\" is this app's own generic ABC-log-entry terminology throughout, not the formal Incident Log record type -- used identically by parent/teacher/clinician/SNA.",
+    "825:\"Select any that applied around this incident.\"": "Same as above."
+  },
+  "src/components/abc-logger/ABCTimeline.tsx": {
+    "162:\"We couldn't load the incident timeline. Please try again.\"": "Same generic ABC-log terminology as ABCLogger.tsx's own identical usage."
+  },
+  "src/components/clinician/assessments/AssessmentResponseSheetEditor.tsx": {
+    "21:\"On behalf of school staff\"": "Finding 1 fix -- RESPONDENT_OPTIONS' own definition; the render site now filters this option out via get_assessment_respondent_candidates() when the child has no real school-role candidate (see the .filter() immediately above the .map() at this file's own render site)."
+  },
+  "src/components/clinician/fba/sections/AssessmentMethodsSection.tsx": {
+    "7:\"Review of school and home incidents\"": "FBA content -- THE FBA IS NOT TO BE TOUCHED (CLAUDE.md standing rule, Daniel's own instruction, PRD 8 Stage 2). Flagged to Daniel rather than fixed; see item 1's own report.",
+    "12:\"Home and School In-Person Observations\"": "Same -- FBA content, deliberately not touched, flagged rather than fixed."
+  },
+  "src/components/clinician/fba/sections/DirectAssessmentSection.tsx": {
+    "256:\"No incident log date range was set.\"": "FBA content -- THE FBA IS NOT TO BE TOUCHED. Flagged rather than fixed.",
+    "257:\"Set a date range to pull incidents from this child's Incident Log.\"": "Same -- FBA content, deliberately not touched."
+  },
+  "src/components/consent/ClinicianAgreementScreen.tsx": {
+    "52:\"If you do not agree, close the app and speak to your principal.\"": "The isClinic-false branch of an already-correct ternary -- the clinic branch reads \"...speak to your clinical director.\"."
+  },
+  "src/components/consent/ParentConsentScreen.tsx": {
+    "51:\"Your child's school creates and keeps their record. You can add what you know from home, and you choose what you share.\"": "The isClinic-false branch of an already-correct ternary (Tier 1 item 4) -- verified live for a clinic-only parent, who sees the clinic branch instead.",
+    "60:\"What you add - how your child slept, what works at home, what to watch for - goes to the people supporting them at school. What the school records about incidents at school is their own record, kept under their own obligations, and stays with them.\"": "Same ternary, school branch.",
+    "61:\"Anything you write is kept in line with your school's own retention policy.\"": "Same ternary, school branch.",
+    "68:\"I understand what this is, and I agree to share what I add here with my child's school and any clinician I connect.\"": "Same ternary, school branch."
+  },
+  "src/components/consent/PrincipalAgreementScreen.tsx": {
+    "57:\"You can see every child enrolled at your school and everything recorded about them, and you decide who else can.\"": "The isClinic-false branch of an already-correct ternary -- verified live for a clinic director, who sees the clinic branch instead.",
+    "85:\"I will use this only for children at my school, and only for their support and safeguarding.\"": "Same ternary, school branch."
+  },
+  "src/components/parent/IncidentNoticeCard.tsx": {
+    "177:\"The school has completed this record.\"": "Only rendered per real incident row -- structurally school-authored, same reasoning as parent-dashboard/incidents."
+  },
+  "src/components/parent/PassportIncidentsSection.tsx": {
+    "93:\"The school has completed this record.\"": "Same as IncidentNoticeCard's own identical line -- and this whole component is only ever mounted when !allConnectedAreClinic (passport/dashboard/page.tsx)."
+  },
+  "src/components/principal/ClinicDirectorDashboard.tsx": {
+    "283:\"Not enough incident history yet to say whether a current plan is working for any client.\"": "PRD 8 Stage 3's own deliberate cross-org feature -- the stagnation queue legitimately reads a clinic client's SCHOOL-authored incident history (via get_institution_incidents_for_director()) when a grant/engagement makes it visible. Not a leak; the word describes real, intended cross-domain content."
+  },
+  "src/components/principal/HandOverPrincipalSheet.tsx": {
+    "202:\"e.g. Retiring at the end of term\"": "Finding 1 fix -- the institutionType!=='clinic' branch of an already-correct ternary; the clinic branch reads \"e.g. Stepping back from the clinic\"."
+  },
+  "src/components/principal/directory/ChildDetail.tsx": {
+    "304:\"Left the school\"": "END_REASON_LABEL, used only inside the institutionType !== 'clinic' branch of the Enrolment/Episode-of-Care tab.",
+    "305:\"Transferred to another school\"": "Same -- END_REASON_LABEL, school-branch only.",
+    "600:\"Failed to load this child's school incidents:\"": "console.error, fires only within the clinic-only get_institution_incidents_for_director() branch -- correctly describes the child's SCHOOL incidents as read by their clinic, cross-org content, not a leak.",
+    "601:\"Couldn't load this child's school incidents.\"": "Same -- user-facing pair of the line above, same reasoning.",
+    "677:\"Failed to load enrolment:\"": "console.error only, dev-facing variable name, never shown to a user.",
+    "994:\"School Incidents\"": "The tab's own deliberate relabelling for institutionType === 'clinic' (tab.key === 'incidents' ? 'School Incidents' : tab.label) -- correct, not a leak.",
+    "1025:\"This child isn't on your school's roster.\"": "The institutionType-false branch of an already-correct ternary.",
+    "1668:\"No school incidents shared with this clinic yet.\"": "Deliberate clinic-specific empty state, correctly describing cross-org content.",
+    "1682:\"School incidents are visible only while this client has an active episode. Reopen the episode of care to see them again.\"": "Same -- deliberate clinic-specific copy about cross-org content."
+  },
+  "src/components/principal/directory/ChildrenList.tsx": {
+    "253:\"Could not load the school roster.\"": "Finding 1 fix -- the isClinic-false branch of a newly-added ternary (isClinic branch reads \"Could not load the clinic roster.\").",
+    "376:\"No children linked to this school yet.\"": "Already the isClinic-false branch of a correct ternary (isClinic branch reads \"No clients linked to this clinic yet.\").",
+    "441:\"Enrolment ended\"": "Already the isClinic-false branch of a correct ternary (isClinic branch reads \"Discharged\")."
+  },
+  "src/components/principal/directory/ClinicianCoverageDetail.tsx": {
+    "526:\"No currently-enrolled children at this school.\"": "The institutionType-false branch of an already-correct ternary (clinic branch reads \"No clients linked to your clinic yet.\")."
+  },
+  "src/components/principal/directory/ClinicianList.tsx": {
+    "114:\"This school hasn't engaged any clinicians yet.\"": "The institutionType-false branch of an already-correct ternary."
+  },
+  "src/components/principal/directory/StaffList.tsx": {
+    "166:\"No staff registered at this school yet.\"": "The institutionType-false branch of an already-correct ternary."
+  },
+  "src/components/ui/PassportProgress.tsx": {
+    "47:\"Everyone working with your child at school can read this.\"": "Finding 1 fix -- the hasSchoolLink=true branch of an already-correct ternary (the false branch reads \"...clinical team can read this.\")."
+  }
+}

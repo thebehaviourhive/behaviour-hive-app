@@ -9,6 +9,7 @@ import { TextField } from "@/components/ui/TextField";
 import { PillMultiSelect } from "@/components/ui/PillMultiSelect";
 import { PassportProgress } from "@/components/ui/PassportProgress";
 import { usePassportSectionC } from "@/hooks/usePassportSectionC";
+import { useHasSchoolLink } from "@/hooks/useHasSchoolLink";
 import { getPassportProgressPercent } from "@/lib/passportProgress";
 
 const COMMUNICATION_METHOD_OPTIONS = [
@@ -29,7 +30,8 @@ const COMMUNICATION_METHOD_OPTIONS = [
 
 export default function PassportSectionCPage() {
   const router = useRouter();
-  const { childName, record, isReady, save } = usePassportSectionC();
+  const { childName, record, isReady, save, passportId } = usePassportSectionC();
+  const hasSchoolLink = useHasSchoolLink(passportId);
 
   const [communicationMethods, setCommunicationMethods] = useState<string[]>([]);
   const [communicationMethodsOther, setCommunicationMethodsOther] = useState("");
@@ -159,6 +161,7 @@ export default function PassportSectionCPage() {
           <PassportProgress
             sectionLabel="Section 3 of 4"
             percent={getPassportProgressPercent(5)}
+            hasSchoolLink={hasSchoolLink}
           />
 
           <div className="flex flex-col gap-5">

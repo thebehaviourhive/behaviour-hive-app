@@ -136,7 +136,7 @@ export function ReviewStaffJoinSheet({
               id="rejection-reason"
               value={reason}
               onChange={(e) => setReason(e.target.value)}
-              placeholder="e.g. Couldn't confirm they work at this school"
+              placeholder={institutionType === "clinic" ? "e.g. Couldn't confirm they work at this clinic" : "e.g. Couldn't confirm they work at this school"}
             />
           </div>
 

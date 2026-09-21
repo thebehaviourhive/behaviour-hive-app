@@ -330,7 +330,20 @@ export function AssessmentResponseSheetEditor({
                   Or, if you&apos;re transcribing this yourself from a completed paper form:
                 </p>
                 <div className="flex flex-wrap gap-2">
-                  {RESPONDENT_OPTIONS.map((opt) => (
+                  {RESPONDENT_OPTIONS
+                    // Finding 1, 22 Sept 2026 -- "On behalf of school
+                    // staff" was offered unconditionally, even for a
+                    // child with no school link at all, who can never
+                    // have real school staff to transcribe for.
+                    // get_assessment_respondent_candidates() already
+                    // resolves exactly this -- its own second branch is
+                    // has_child_access()-derived, which is school-only
+                    // by construction, so any non-'parent' role coming
+                    // back proves a real school-side candidate exists.
+                    // Defaults to shown while candidates are still
+                    // loading (null), never a flash-then-hide.
+                    .filter((opt) => opt.value !== "school_staff" || candidates === null || candidates.some((c) => c.role !== "parent"))
+                    .map((opt) => (
                     <button
                       key={opt.value}
                       type="button"

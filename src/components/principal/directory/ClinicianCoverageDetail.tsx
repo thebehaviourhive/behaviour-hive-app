@@ -107,6 +107,29 @@ export function ClinicianCoverageDetail(props: ClinicianCoverageDetailProps) {
   const [isLoadingRoster, setIsLoadingRoster] = useState(false);
   const [rosterError, setRosterError] = useState<string | null>(null);
 
+  // Item 3b -- a director or lead can hold a caseload only after
+  // picking a specialty (select_director_specialty(), which is what
+  // actually creates their own clinicians row). Nothing told them that
+  // before this: they'd appear in the roster below (get_institution_
+  // roster_clinicians_for_caseload's own coalesce(specialty,
+  // 'unspecified') admits them regardless), get selected, and only
+  // then hit bulk_grant_clinician_access()'s own "No clinician profile
+  // exists for this person yet" -- a confusing dead end with no
+  // indication of what to do about it. Fetched once, only to compare
+  // against a roster row's own userId -- never used for anything else.
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  useEffect(() => {
+    let isMounted = true;
+    createClient()
+      .auth.getUser()
+      .then(({ data }) => {
+        if (isMounted) setCurrentUserId(data.user?.id ?? null);
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
   useEffect(() => {
     if (props.mode !== "new" || institutionType !== "clinic" || resolved) return;
     let isMounted = true;
@@ -374,29 +397,51 @@ export function ClinicianCoverageDetail(props: ClinicianCoverageDetailProps) {
           </p>
         ) : (
           <div className="mt-4 flex flex-col gap-2">
-            {rosterClinicians.map((c) => (
-              <button
-                key={c.userId}
-                type="button"
-                onClick={() =>
-                  setResolved({
-                    clinicianId: c.userId,
-                    fullName: c.fullName,
-                    specialty: c.specialty,
-                    code: null,
-                    rosterUserId: c.userId,
-                    workspaceEmail: null,
-                  })
-                }
-                className="w-full rounded-2xl border border-black/5 bg-white p-4 text-left shadow-sm"
-              >
-                <p className="font-sans text-body font-semibold text-brand-neutral-black">{c.fullName}</p>
-                <p className="mt-0.5 font-sans text-eyebrow text-brand-neutral-black/50">
-                  {CLINICIAN_SPECIALTY_LABEL[c.specialty as ClinicianSpecialty] ?? c.specialty} · {c.coveredChildCount}{" "}
-                  client{c.coveredChildCount === 1 ? "" : "s"} covered
-                </p>
-              </button>
-            ))}
+            {rosterClinicians.map((c) =>
+              c.specialty === "unspecified" ? (
+                <div
+                  key={c.userId}
+                  className="w-full rounded-2xl border-l-4 border-brand-golden-brown bg-brand-safe-ivory/30 p-4 text-left"
+                >
+                  <p className="font-sans text-body font-semibold text-brand-neutral-black">{c.fullName}</p>
+                  <p className="mt-1 font-sans text-eyebrow text-brand-neutral-black/60">
+                    {c.userId === currentUserId
+                      ? "You haven't set your specialty yet, so you can't hold a caseload yet."
+                      : "Hasn't set their specialty yet, so they can't hold a caseload yet."}
+                  </p>
+                  {c.userId === currentUserId && (
+                    <a
+                      href="/clinician/specialty"
+                      className="mt-2 inline-block rounded-full bg-brand-golden-brown px-4 py-2 text-xs font-semibold text-white"
+                    >
+                      Set your specialty
+                    </a>
+                  )}
+                </div>
+              ) : (
+                <button
+                  key={c.userId}
+                  type="button"
+                  onClick={() =>
+                    setResolved({
+                      clinicianId: c.userId,
+                      fullName: c.fullName,
+                      specialty: c.specialty,
+                      code: null,
+                      rosterUserId: c.userId,
+                      workspaceEmail: null,
+                    })
+                  }
+                  className="w-full rounded-2xl border border-black/5 bg-white p-4 text-left shadow-sm"
+                >
+                  <p className="font-sans text-body font-semibold text-brand-neutral-black">{c.fullName}</p>
+                  <p className="mt-0.5 font-sans text-eyebrow text-brand-neutral-black/50">
+                    {CLINICIAN_SPECIALTY_LABEL[c.specialty as ClinicianSpecialty] ?? c.specialty} ·{" "}
+                    {c.coveredChildCount} client{c.coveredChildCount === 1 ? "" : "s"} covered
+                  </p>
+                </button>
+              )
+            )}
           </div>
         )}
       </div>

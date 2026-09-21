@@ -961,6 +961,17 @@ export function ChildDetail({
             // hidden rather than shown empty, matching sessionNotes'
             // own precedent just above.
             .filter((tab) => tab.key !== "incidents" || institutionType !== "clinic" || hasSchoolLink)
+            // Finding 1, 22 Sept 2026 -- grant_passport_access() (0148)
+            // only ever admits a target with role in ('class_teacher',
+            // 'sna') -- a clinic has neither, so "+ Grant Access" was
+            // not just wrongly worded ("teacher or SNA") for a clinic,
+            // it was offering a feature that structurally can never
+            // succeed there. A clinic's own access is passport_access's
+            // wrong tool entirely -- institution_staff standing
+            // (Staff tab) and clinician_access (Clinical Team tab)
+            // already cover it. Hidden, not reworded -- there is no
+            // clinic version of this tab to write.
+            .filter((tab) => tab.key !== "access" || institutionType !== "clinic")
             .map((tab) => (
             <button
               key={tab.key}
@@ -979,7 +990,11 @@ export function ChildDetail({
                   : "border-transparent text-black/40 lg:text-brand-neutral-black/70"
               }`}
             >
-              {tab.key === "incidents" && institutionType === "clinic" ? "School Incidents" : tab.label}
+              {tab.key === "incidents" && institutionType === "clinic"
+                ? "School Incidents"
+                : tab.key === "enrolment" && institutionType === "clinic"
+                  ? "Episode of Care"
+                  : tab.label}
             </button>
           ))}
           {/* lg+ becomes a non-scrolling vertical list -- no fade needed there. */}
@@ -1222,7 +1237,7 @@ export function ChildDetail({
             </>
           )}
 
-          {activeTab === "access" && (
+          {activeTab === "access" && institutionType !== "clinic" && (
             <>
               <section className="mb-6">
                 <div className="mb-2 flex items-center justify-between">
@@ -1706,7 +1721,13 @@ export function ChildDetail({
             )
           )}
 
-          {activeTab === "abcLogs" && <ABCTimeline passportId={passportId} viewerRole="principal" />}
+          {activeTab === "abcLogs" && (
+            <ABCTimeline
+              passportId={passportId}
+              viewerRole="principal"
+              allowSchoolRoleFilters={institutionType !== "clinic" || hasSchoolLink}
+            />
+          )}
 
           {/* "Shared Strategies" -- the content half of the old
               "clinical" naming collision. Same shared component and

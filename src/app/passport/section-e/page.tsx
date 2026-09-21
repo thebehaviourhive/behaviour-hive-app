@@ -8,6 +8,7 @@ import { Textarea } from "@/components/ui/Textarea";
 import { PassportProgress } from "@/components/ui/PassportProgress";
 import { usePassportSectionE } from "@/hooks/usePassportSectionE";
 import { getPassportProgressPercent } from "@/lib/passportProgress";
+import { useHasSchoolLink } from "@/hooks/useHasSchoolLink";
 
 // Section E -- medical and intimate care needs. Five discrete fields,
 // one page (matching Section A/C's own single-page shape, not Section
@@ -17,7 +18,14 @@ import { getPassportProgressPercent } from "@/lib/passportProgress";
 // it in.
 export default function PassportSectionEPage() {
   const router = useRouter();
-  const { record, isReady, save } = usePassportSectionE();
+  const { record, isReady, save, passportId } = usePassportSectionE();
+
+  // Finding 1, 22 Sept 2026 -- every word on this screen assumed a
+  // school ("everyone at school can read this", "a teacher or SNA
+  // covering your child's class", "given during the school day"),
+  // unconditionally, for every parent -- including a clinic-only
+  // family with no school in the picture at all.
+  const hasSchoolLink = useHasSchoolLink(passportId);
 
   const [allergies, setAllergies] = useState("");
   const [medicalConditions, setMedicalConditions] = useState("");
@@ -101,11 +109,12 @@ export default function PassportSectionEPage() {
         </div>
 
         <div className="rounded-3xl border border-black/5 bg-white p-6 shadow-sm">
-          <PassportProgress sectionLabel="Section 5 of 5" percent={getPassportProgressPercent(10)} />
+          <PassportProgress sectionLabel="Section 5 of 5" percent={getPassportProgressPercent(10)} hasSchoolLink={hasSchoolLink} />
 
           <p className="mb-4 text-sm text-black/60">
-            This is what a teacher or SNA covering your child&apos;s class needs to know quickly —
-            allergies, medical conditions, medication, and what to do in an emergency.
+            {hasSchoolLink
+              ? "This is what a teacher or SNA covering your child's class needs to know quickly — allergies, medical conditions, medication, and what to do in an emergency."
+              : "This is what your child's clinical team needs to know quickly — allergies, medical conditions, medication, and what to do in an emergency."}
           </p>
 
           <div className="flex flex-col gap-4">
@@ -128,7 +137,7 @@ export default function PassportSectionEPage() {
               id="section-e-medications"
               value={medications}
               onChange={(e) => setMedications(e.target.value)}
-              placeholder="Include anything given during the school day"
+              placeholder={hasSchoolLink ? "Include anything given during the school day" : "Include timing and dosage"}
             />
             <Textarea
               label="Emergency protocol"

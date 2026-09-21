@@ -37,6 +37,18 @@ export default function MorePage() {
   const [countiesError, setCountiesError] = useState<string | null>(null);
   const [specialty, setSpecialty] = useState<ClinicianSpecialty | null>(null);
   const [domainTags, setDomainTags] = useState<ClinicalDomain[]>([]);
+  // Finding 2, 22 Sept 2026 -- this page's role branching only ever
+  // checked the literal app_metadata value, and a director/lead's own
+  // role is "principal"/"clinical_lead", never "clinician" -- so a
+  // director doing real clinical work (PRD 10 section 4a: every
+  // clinical role is a practitioner) fell straight through every
+  // branch below to the bare final `else`, the PARENT's own fallback,
+  // Calm button included. Resolved the same way useRequireRole()
+  // already resolves this exact ambiguity for every other clinician-
+  // track page -- is_verified_clinic_director_or_lead() -- so this
+  // page's own branch agrees with what every other clinician page
+  // already decided about this same account.
+  const [isVerifiedClinicalPractitioner, setIsVerifiedClinicalPractitioner] = useState(false);
   const { regions } = useRegions();
 
   useEffect(() => {
@@ -59,7 +71,40 @@ export default function MorePage() {
       setRole(userRole);
       setUserId(user.id);
 
-      if (userRole === "clinician") {
+      let isClinicalPractitioner = userRole === "clinician";
+
+      if (userRole === "principal" || userRole === "clinical_lead") {
+        const { data: isVerifiedLeadership } = await supabase.rpc("is_verified_clinic_director_or_lead");
+        if (!isMounted) return;
+        isClinicalPractitioner = Boolean(isVerifiedLeadership);
+        setIsVerifiedClinicalPractitioner(isClinicalPractitioner);
+
+        // Not a practising director/lead -- a school principal (this
+        // check is always false for them, institution type isn't
+        // clinic), or a clinic director/lead who hasn't picked a
+        // specialty yet. Neither has a "More" destination of their
+        // own -- their real nav (PrincipalSidebar/PrincipalBottomNav,
+        // institution-type-aware) has no More tab at all -- so the
+        // correct answer isn't a fabricated director-shaped More page
+        // here, it's their own dashboard, per Daniel's own "on their
+        // own screens, something appropriate to a director" -- their
+        // own screens ARE the appropriate place, not this one.
+        if (!isClinicalPractitioner) {
+          router.replace(userRole === "clinical_lead" ? "/clinical-lead/dashboard" : "/principal/dashboard");
+          return;
+        }
+      } else if (userRole === "clinic_admin") {
+        // Same fallthrough, a role this page's own branch chain never
+        // named at all -- admin is never a clinical role (their own
+        // consent screen says so directly: "You will not see clinical
+        // notes or assessments"), so there is no clinician-page content
+        // to admit them to either. Same fix, same reasoning: their own
+        // dashboard, not this page's parent-shaped fallback.
+        router.replace("/clinic-admin/dashboard");
+        return;
+      }
+
+      if (isClinicalPractitioner) {
         const { data: clinician } = await supabase
           .from("clinicians")
           .select("clinician_code, review_cadence_days, operating_counties, verification_route, specialty, domain_tags")
@@ -174,10 +219,10 @@ export default function MorePage() {
   // lines of shell markup here.
   return (
     <div className="flex min-h-full flex-1">
-      {role === "clinician" && <ClinicianSidebar />}
+      {(role === "clinician" || isVerifiedClinicalPractitioner) && <ClinicianSidebar />}
       <div
         className={`flex min-h-full min-w-0 flex-1 flex-col bg-brand-off-white/40 pb-24 ${
-          role === "clinician" ? "lg:pl-64" : ""
+          role === "clinician" || isVerifiedClinicalPractitioner ? "lg:pl-64" : ""
         }`}
       >
       <header className="px-4 pt-8 pb-2">
@@ -187,7 +232,7 @@ export default function MorePage() {
       </header>
 
       <main className="flex flex-1 flex-col gap-3 px-4 pt-3">
-        {role === "clinician" && (
+        {(role === "clinician" || isVerifiedClinicalPractitioner) && (
           <section className="rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
             <p className="mb-1 font-accent text-xs font-bold uppercase tracking-wide text-brand-neutral-black/50">
               My Clinician Code
@@ -195,6 +240,17 @@ export default function MorePage() {
             {clinicianCode ? (
               <p className="font-heading text-2xl font-bold tracking-widest text-brand-prussian-blue">
                 {clinicianCode}
+              </p>
+            ) : verificationRoute === "organisation" && role === "principal" ? (
+              // Found reusing this section for a director doing
+              // clinical work (item 2/3b, 22 Sept 2026): the practitioner
+              // copy below ("your director assigns your caseload")
+              // is wrong for the account that IS the director -- there
+              // is no one above them to do the assigning. They assign
+              // themselves, from their own clinic's roster.
+              <p className="text-sm text-brand-neutral-black/60">
+                You don&apos;t need a code — assign yourself a caseload from your clinic&apos;s roster, the same way
+                you assign anyone else.
               </p>
             ) : verificationRoute === "organisation" ? (
               // A director-approved clinic practitioner never gets a
@@ -402,7 +458,7 @@ export default function MorePage() {
           sna branch at all. */}
       {role === "class_teacher" ? (
         <TeacherBottomNav />
-      ) : role === "clinician" ? (
+      ) : role === "clinician" || isVerifiedClinicalPractitioner ? (
         <ClinicianBottomNav />
       ) : role === "sna" ? (
         <SnaBottomNav />
