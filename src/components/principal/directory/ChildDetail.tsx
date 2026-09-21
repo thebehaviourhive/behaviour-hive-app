@@ -1578,7 +1578,22 @@ export function ChildDetail({
                 </p>
               ) : schoolIncidents.length === 0 ? (
                 <p className="rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-center text-sm text-brand-neutral-black/60">
-                  No school incidents shared with this clinic yet.
+                  {episodesOfCare.some((e) => !e.endedAt)
+                    ? "No school incidents shared with this clinic yet."
+                    : // Daniel's own instruction, 21 Sept 2026: this is not
+                      // the same fact as the branch above and must never
+                      // read the same -- get_institution_incidents_for_
+                      // director() only returns rows for a passport with a
+                      // CURRENTLY ACTIVE episode (0260's own join). A
+                      // discharged client's tab going silently empty here
+                      // is the identical failure shape as a dashboard
+                      // quietly saying "All clear" -- a director reading
+                      // this blank would conclude no incidents happened,
+                      // when the real fact is they no longer have the
+                      // access to see them. The behaviour (access follows
+                      // the live relationship) is correct; staying silent
+                      // about WHY is the defect.
+                      "School incidents are visible only while this client has an active episode. Reopen the episode of care to see them again."}
                 </p>
               ) : (
                 <div className="flex flex-col gap-2">
