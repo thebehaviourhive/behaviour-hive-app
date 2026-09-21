@@ -7,17 +7,24 @@
 // would silently change what an existing passport's past selection
 // means.
 //
-// One pre-existing finding, resolved (Stage 2, 15 Sept 2026): "Autism"
-// and "ASD (Autism Spectrum Disorder)" were two separate stored values
-// for what most families mean as the same thing -- flagged and
-// deliberately left alone during an earlier presentation-only
-// restructure, now deduped on Daniel's own instruction. Migration 0191
-// remapped every existing passport's stored selection (exactly one, at
-// the time, checked live) from the ASD string to "Autism" -- collapsing
-// to one value on any passport that happened to have both -- before
-// this option was removed below. "Autism" is the one that survives
-// (the shorter, plainer of the two, already Tier 1); the ASD (...)
-// string is gone from this list entirely, not just hidden.
+// One pre-existing finding (Stage 2, 15 Sept 2026): "Autism" and "ASD
+// (Autism Spectrum Disorder)" were two separate stored values for what
+// most families mean as the same thing -- flagged and deliberately
+// left alone during an earlier presentation-only restructure, then
+// deduped on Daniel's own instruction. Migration 0191 remapped every
+// existing passport's stored selection (exactly one, at the time,
+// checked live) from the ASD string to "Autism" and removed the ASD
+// option from this list -- the WRONG direction. Daniel had asked,
+// several times, for the surviving label to be "Autism Spectrum
+// Disorder", not "Autism" -- 0191 followed this file's own earlier
+// comment (an opinion about which of the two was "shorter, plainer")
+// instead of his instruction. Fixed in migration 0278: every passport
+// carrying "Autism" is remapped to "Autism Spectrum Disorder", and
+// that is the value below now -- not "Autism", not "ASD", not "ASD
+// (Autism Spectrum Disorder)". See CLAUDE.md for the standing lesson
+// this earns: a code comment is someone's earlier opinion, an explicit
+// instruction is the decision, and the two are not equal footing when
+// they disagree.
 //
 // One remaining pre-existing finding, still left alone:
 // - "No Formal Diagnosis" already existed and is NOT the same thing as
@@ -31,7 +38,7 @@ export const DIAGNOSIS_OPTIONS: string[] = [
   "ADHD (Attention Deficit Hyperactivity Disorder)",
   "Anxiety",
   "Apraxia",
-  "Autism",
+  "Autism Spectrum Disorder",
   "Awaiting Diagnosis",
   "DLD (Developmental Language Disorder)",
   "DMDD (Disruptive Mood Dysregulation Disorder)",
@@ -71,7 +78,7 @@ export const DIAGNOSIS_OTHER = "Other";
 // candidate this app's brief named) stays in Tier 2, alphabetically
 // near the top.
 export const TIER_1_DIAGNOSES: string[] = [
-  "Autism",
+  "Autism Spectrum Disorder",
   "ADHD (Attention Deficit Hyperactivity Disorder)",
   "Awaiting Diagnosis",
   "No diagnosis",
