@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { createClient } from "@/lib/supabase/client";
 import { Checkbox } from "@/components/ui/Checkbox";
@@ -79,6 +79,8 @@ export default function LeadScopePage() {
   const { isReady } = useRequireRole("principal");
   const params = useParams();
   const staffId = params.staffId as string;
+  const searchParams = useSearchParams();
+  const institutionId = searchParams.get("institutionId");
 
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -90,6 +92,12 @@ export default function LeadScopePage() {
 
   useEffect(() => {
     if (!isReady || !staffId) return;
+    if (!institutionId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setError("Could not find this clinical lead.");
+      setIsLoading(false);
+      return;
+    }
     let isMounted = true;
 
     async function load() {
@@ -97,15 +105,23 @@ export default function LeadScopePage() {
       setIsLoading(true);
       setError(null);
 
-      const { data: leadRow, error: leadError } = await supabase
-        .from("institution_staff")
-        .select("institution_id, full_name, role")
-        .eq("id", staffId)
-        .eq("role", "clinical_lead")
-        .maybeSingle();
+      // institution_staff's own SELECT policy is self-only -- a raw
+      // query for the LEAD's row from the DIRECTOR's own session
+      // returns nothing, RLS-silent (this codebase's own documented
+      // gotcha). get_institution_staff_roster() is the director-
+      // legitimate way to resolve a colleague's row, matching how
+      // StaffDetail itself already reads this same roster.
+      const { data: rosterRows, error: rosterStaffError } = await supabase.rpc("get_institution_staff_roster", {
+        p_institution_id: institutionId,
+        p_include_inactive: false,
+        p_include_pending: false,
+      });
 
       if (!isMounted) return;
-      if (leadError || !leadRow) {
+      const leadRow = ((rosterRows ?? []) as Array<{ id: string; full_name: string; role: string }>).find(
+        (r) => r.id === staffId && r.role === "clinical_lead"
+      );
+      if (rosterStaffError || !leadRow) {
         setError("Could not find this clinical lead.");
         setIsLoading(false);
         return;
@@ -116,12 +132,12 @@ export default function LeadScopePage() {
         supabase
           .from("institution_tags")
           .select("id, dimension, value")
-          .eq("institution_id", leadRow.institution_id)
+          .eq("institution_id", institutionId)
           .eq("is_active", true)
           .order("dimension")
           .order("value"),
         supabase.from("clinical_lead_scope").select("institution_tag_id").eq("institution_staff_id", staffId),
-        supabase.rpc("get_institution_episode_roster", { p_institution_id: leadRow.institution_id, p_include_ended: false }),
+        supabase.rpc("get_institution_episode_roster", { p_institution_id: institutionId, p_include_ended: false }),
       ]);
 
       if (!isMounted) return;
@@ -171,7 +187,7 @@ export default function LeadScopePage() {
     return () => {
       isMounted = false;
     };
-  }, [isReady, staffId]);
+  }, [isReady, staffId, institutionId]);
 
   function toggleTag(tagId: string) {
     setSelectedTagIds((prev) => {

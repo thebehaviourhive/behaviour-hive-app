@@ -143,7 +143,7 @@ export function StaffDetail({
           instruction that it "needs real design care." */}
       {staffRow.is_active && staffRow.role === "clinical_lead" && (
         <Link
-          href={`/principal/clinic/lead/${staffRow.id}/scope`}
+          href={`/principal/clinic/lead/${staffRow.id}/scope?institutionId=${institutionId}`}
           className="mt-4 block w-full lg:w-auto rounded-xl border border-brand-prussian-blue px-6 py-2.5 text-center font-sans text-body font-semibold text-brand-prussian-blue"
         >
           Manage Scope
