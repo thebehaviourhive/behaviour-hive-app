@@ -1,6 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { createClient } from "@/lib/supabase/client";
@@ -56,6 +57,8 @@ export default function PrincipalClinicPage() {
   const [cancellationNoticeHours, setCancellationNoticeHours] = useState<number>(24);
   const [cancellationPolicyText, setCancellationPolicyText] = useState<string | null>(null);
   const [staff, setStaff] = useState<StaffRow[]>([]);
+  const [tagDimensionCount, setTagDimensionCount] = useState<number>(0);
+  const [tagValueCount, setTagValueCount] = useState<number>(0);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isHandOverOpen, setIsHandOverOpen] = useState(false);
@@ -137,6 +140,18 @@ export default function PrincipalClinicPage() {
     if (!rosterError) {
       setStaff((rosterRows ?? []) as StaffRow[]);
     }
+
+    // A lightweight preview for the summary row -- not the full catalog
+    // (that's /principal/clinic/tags' own job), just enough for a
+    // director to see at a glance whether there's anything here yet.
+    const { data: tagRows } = await supabase
+      .from("institution_tags")
+      .select("dimension, is_active")
+      .eq("institution_id", staffRow.institution_id)
+      .eq("is_active", true);
+    const activeTags = tagRows ?? [];
+    setTagValueCount(activeTags.length);
+    setTagDimensionCount(new Set(activeTags.map((t) => t.dimension)).size);
 
     setIsLoading(false);
   }, [user]);
@@ -266,6 +281,26 @@ export default function PrincipalClinicPage() {
                     </button>
                   </div>
                 </div>
+              </section>
+
+              <section className="mt-16">
+                <h2 className="mb-2 font-accent text-eyebrow font-bold uppercase tracking-wide text-brand-prussian-blue">
+                  Tags
+                </h2>
+                <Link
+                  href="/principal/clinic/tags"
+                  className="flex items-center justify-between rounded-2xl border border-black/5 bg-white p-4 shadow-sm"
+                >
+                  <div>
+                    <p className="font-sans text-body font-semibold text-brand-neutral-black">Manage Tags</p>
+                    <p className="mt-0.5 font-sans text-eyebrow text-brand-neutral-black/50">
+                      {tagValueCount === 0
+                        ? "No tags configured yet"
+                        : `${tagDimensionCount} dimension${tagDimensionCount === 1 ? "" : "s"}, ${tagValueCount} value${tagValueCount === 1 ? "" : "s"}`}
+                    </p>
+                  </div>
+                  <span className="flex-shrink-0 text-xl text-brand-prussian-blue">›</span>
+                </Link>
               </section>
 
               <section className="mt-16">
