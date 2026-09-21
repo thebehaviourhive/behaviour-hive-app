@@ -21,13 +21,15 @@ import { Checkbox } from "@/components/ui/Checkbox";
 // against every active episode's own tags -- zero network round-trips
 // per checkbox toggle.
 //
-// BUILT, THEN STOPPED BEFORE WIRING THE SAVE, per Daniel's own
-// explicit instruction ("send screenshots to Daniel, he approves
-// before the save is wired and deployed"). The Save button below is
-// disabled and says so -- everything else on this screen is real and
-// live against real data (institution_tags, episode_tags,
-// clinical_lead_scope's own current state), only the write path is
-// held back.
+// SAVE WIRED, 21 Sept 2026, once Daniel approved the three design-
+// review screenshots. set_clinical_lead_scope() (migration 0271) is
+// an atomic replace -- delete-then-insert inside one PL/pgSQL call,
+// never two raw client calls, so a failed second step can never leave
+// a lead with an empty scope (the exact failure a scope editor must
+// not have, per Daniel's own instruction). After a successful save,
+// selectedTagIds is intentionally left as-is rather than re-fetched --
+// it already IS the saved state, and re-fetching would just be an
+// extra round trip proving what the client already knows.
 //
 // THE MATCH LOGIC IS A DELIBERATE, LINE-FOR-LINE PORT of
 // _lead_episode_in_scope() (0226's own live SQL) -- see
@@ -89,6 +91,9 @@ export default function LeadScopePage() {
   const [tagDimensionById, setTagDimensionById] = useState<Map<string, string>>(new Map());
   const [episodes, setEpisodes] = useState<EpisodeRow[]>([]);
   const [selectedTagIds, setSelectedTagIds] = useState<Set<string>>(new Set());
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [justSaved, setJustSaved] = useState(false);
 
   useEffect(() => {
     if (!isReady || !staffId) return;
@@ -196,6 +201,23 @@ export default function LeadScopePage() {
       else next.add(tagId);
       return next;
     });
+    setJustSaved(false);
+  }
+
+  async function handleSave() {
+    setIsSaving(true);
+    setSaveError(null);
+    const supabase = createClient();
+    const { error: saveErrorResult } = await supabase.rpc("set_clinical_lead_scope", {
+      p_institution_staff_id: staffId,
+      p_institution_tag_ids: [...selectedTagIds],
+    });
+    setIsSaving(false);
+    if (saveErrorResult) {
+      setSaveError(saveErrorResult.message);
+      return;
+    }
+    setJustSaved(true);
   }
 
   const dimensionsWithSelection = useMemo(() => {
@@ -322,13 +344,19 @@ export default function LeadScopePage() {
           )}
         </section>
 
+        {saveError && (
+          <p role="alert" className="mt-4 text-sm font-medium text-brand-golden-brown">
+            {saveError}
+          </p>
+        )}
+
         <button
           type="button"
-          disabled
-          title="Not wired yet -- design review first"
-          className="mt-8 block w-full cursor-not-allowed rounded-2xl bg-brand-prussian-blue/30 py-3 text-center font-sans text-body font-semibold text-white"
+          onClick={handleSave}
+          disabled={isSaving}
+          className="mt-4 block w-full rounded-2xl bg-brand-prussian-blue py-3 text-center font-sans text-body font-semibold text-white disabled:opacity-60"
         >
-          Save (not yet enabled)
+          {isSaving ? "Saving…" : justSaved ? "Saved" : "Save"}
         </button>
       </main>
     </div>
