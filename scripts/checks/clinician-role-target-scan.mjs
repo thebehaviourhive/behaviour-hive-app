@@ -66,10 +66,25 @@ const CALLER_GATE_OR_TARGET_SPECIFIC_BY_DESIGN = {
     "Caller-side check already uses is_verified_clinician() (role-agnostic, true for a verified director/lead too). The one bare 'clinician' reference is message_recipients.recipient_role inside a NOT EXISTS guard against duplicate broad visibility -- an over-admission edge case for a third party, not a director-refusal, and a different bug class from this check's own target.",
   reject_clinician: "Independent-clinician verification track only (logged_by_role on an audit/log table, unrelated to institution_staff or the clinic-institution track).",
   submit_clinician_verification: "Same as reject_clinician -- independent-clinician verification track only.",
-  update_clinician_last_review:
-    "abc_logs.logged_by_role has its own CHECK constraint admitting only parent/class_teacher/clinician/sna -- never principal/clinical_lead -- and ABCLogger's own role prop is passed explicitly per call site (/clinician/log hardcodes role=\"clinician\" for a director/lead too). Checked live this session; not a live bug.",
   _clinic_director_can_read_clinician_session_notes:
     "Dead code -- explicitly dropped by 0233 (`drop function if exists public._clinic_director_can_read_clinician_session_notes(uuid);`) once session_notes' own SELECT policy was repointed to _clinic_director_can_read_clinician_material(), which IS widened. This script's own function-resolution walks migration order but doesn't parse DROP statements, so it still sees 0229's stale definition as \"live\" -- a known, accepted limitation, not a live bug.",
+
+  // Found once TARGET_RE was widened (22 Sept 2026) to catch
+  // 'clinician' anywhere in a role IN-list, not just first position --
+  // the fix that caught abc_logs_logged_by_role_check also surfaced
+  // these four. All genuinely already admit a director/lead; they just
+  // don't match WIDENED_RE's specific clinician-then-clinical_lead-
+  // then-principal (or reverse) adjacency, because each list also
+  // contains OTHER roles (class_teacher, sna, clinic_admin, ...)
+  // interleaved. Reviewed individually below, not batch-waved through.
+  "institution_staff.institution_staff_role_check":
+    "The WHOLE-TABLE role enum (0203, live) -- 'class_teacher', 'institution_admin', 'sna', 'principal', 'clinician', 'clinical_lead', 'clinic_admin' all appear. Not a \"does this admit a director as a clinician-like target\" check at all; a director/lead is already a first-class legal value here.",
+  "consents.consents_role_check":
+    "Same shape as institution_staff_role_check -- the whole-table role enum (0208, live), already includes 'principal' and 'clinical_lead' alongside every other real role.",
+  "principal_handovers.principal_handovers_staying_role_check":
+    "Deliberately does NOT include 'principal' -- CLAUDE.md's own PRD 5 Stage 2 entry documents why: one can't \"stay\" as principal when handing the principal role over, by definition. Already includes 'clinician' and 'clinical_lead' (0204, live); the missing value here is correct, not a bug.",
+  get_institution_staff_candidates:
+    "The staff-messaging recipient-candidate list (0205, live) -- role in ('class_teacher', 'sna', 'principal', 'clinician', 'clinical_lead', 'clinic_admin'), already includes a director/lead as a valid message recipient.",
 };
 
 function walkMigrations() {
@@ -79,7 +94,14 @@ function walkMigrations() {
     .map((f) => join(MIGRATIONS_DIR, f));
 }
 
-const TARGET_RE = /role\s*=\s*'clinician'|role\s+in\s*\(\s*'clinician'/i;
+// Found live, 22 Sept 2026: the original `role\s+in\s*\(\s*'clinician'`
+// only matched 'clinician' as the FIRST value in an IN-list --
+// abc_logs_logged_by_role_check's own list has it third
+// (parent/class_teacher/clinician/sna), so this never matched at all
+// and the constraint was silently invisible to this check from the
+// day it shipped. Widened to match 'clinician' ANYWHERE inside a
+// `role in (...)` clause.
+const TARGET_RE = /role\s*=\s*'clinician'|role\s+in\s*\([^)]*'clinician'/i;
 const WIDENED_RE = /role\s+in\s*\([^)]*'clinician'[^)]*'clinical_lead'[^)]*'principal'|role\s+in\s*\([^)]*'clinician'[^)]*'principal'[^)]*'clinical_lead'/i;
 
 function findFunctionDefinitions(files) {
@@ -107,7 +129,80 @@ function findFunctionDefinitions(files) {
       }
       const body = lines.slice(i, end + 1).join("\n");
       const list = defsByName.get(name) ?? [];
-      list.push({ file: basename(file), body });
+      list.push({ file: basename(file), body, kind: "function" });
+      defsByName.set(name, list);
+    }
+  }
+  return defsByName;
+}
+
+// Found live, 22 Sept 2026, the same day as the four target-checks
+// above: this function-only search NEVER SAW the actual bug in item 1
+// of Daniel's own two-part follow-up. "Clinicians can insert abc logs
+// for passports they access" (0029) requires `logged_by_role =
+// 'clinician'` in a bare `with check (...)` clause on a CREATE POLICY
+// statement -- not a `create function` body at all, so
+// findFunctionDefinitions() above never captured it, in either its
+// buggy or fixed state. A raw `alter table ... add constraint ... check
+// (logged_by_role in (...))` (abc_logs_logged_by_role_check, 0065) has
+// the identical blind spot -- a CHECK CONSTRAINT is not a function
+// either. Extended here rather than left as a documented gap, matching
+// this session's own "found the check missed something, so fix the
+// check" precedent (clinic-copy-scan.mjs's own src/hooks/ addition,
+// same day, found by its own sanity test).
+//
+// Policies and constraints have no `$$;` terminator (that's PL/pgSQL-
+// specific) -- bounded here by scanning to the next line whose trimmed
+// text ends in a bare `;`, which is how every CREATE POLICY / ALTER
+// TABLE ADD CONSTRAINT in this schema's own migrations is formatted.
+// Named as `table.policy_or_constraint_name` so it shares the
+// CALLER_GATE_OR_TARGET_SPECIFIC_BY_DESIGN allowlist's own shape
+// without colliding with a same-named function.
+function findPolicyAndConstraintDefinitions(files) {
+  const defsByName = new Map();
+  for (const file of files) {
+    const text = readFileSync(file, "utf8");
+    const lines = text.split("\n");
+    for (let i = 0; i < lines.length; i++) {
+      // ALTER POLICY updates an EXISTING named policy's own USING/WITH
+      // CHECK in place -- this schema's own established way to repoint
+      // a policy at a newly-fixed helper (0251's own "repoint both live
+      // policies to the new signatures" is exactly this). Tracked as
+      // the SAME name as its own CREATE POLICY, appended to the same
+      // list, so "last in file order" correctly resolves to the ALTER,
+      // not the original CREATE -- caught live the first time this
+      // script ran against session_notes' own policy, which 0251
+      // widened via ALTER POLICY and this scanner, before this fix,
+      // still reported as 0228's original, unwidened text.
+      const policyMatch = lines[i].match(/create\s+policy\s+"([^"]+)"/i) ?? lines[i].match(/alter\s+policy\s+"([^"]+)"/i);
+      const constraintMatch = lines[i].match(/add\s+constraint\s+([a-z0-9_]+)/i);
+      if (!policyMatch && !constraintMatch) continue;
+
+      // The table name is on this line or the next couple (policy's own
+      // `on public.TABLE` clause) -- OR, for a constraint, on the
+      // PRECEDING `alter table public.TABLE` line, this schema's own
+      // established two-line drop-then-add convention. Checked
+      // backward first: a constraint's own table is never restated on
+      // the "add constraint" line itself.
+      let table = null;
+      for (let k = Math.max(0, i - 2); k <= Math.min(i + 3, lines.length - 1); k++) {
+        const tableMatch = lines[k].match(/\bpublic\.([a-z0-9_]+)/i);
+        if (tableMatch) {
+          table = tableMatch[1];
+          break;
+        }
+      }
+      const rawName = policyMatch ? policyMatch[1] : constraintMatch[1];
+      const name = `${table ?? "unknown_table"}.${rawName}`;
+
+      let end = i;
+      for (let j = i; j < lines.length; j++) {
+        end = j;
+        if (/;\s*$/.test(lines[j])) break;
+      }
+      const body = lines.slice(i, end + 1).join("\n");
+      const list = defsByName.get(name) ?? [];
+      list.push({ file: basename(file), body, kind: policyMatch ? "policy" : "constraint" });
       defsByName.set(name, list);
     }
   }
@@ -117,6 +212,7 @@ function findFunctionDefinitions(files) {
 function main() {
   const files = walkMigrations();
   const defsByName = findFunctionDefinitions(files);
+  const policyDefsByName = findPolicyAndConstraintDefinitions(files);
   const problems = [];
 
   for (const [name, defs] of defsByName) {
@@ -127,20 +223,37 @@ function main() {
     if (!TARGET_RE.test(live.body)) continue;
     if (WIDENED_RE.test(live.body)) continue; // already admits director/lead
     if (Object.prototype.hasOwnProperty.call(CALLER_GATE_OR_TARGET_SPECIFIC_BY_DESIGN, name)) continue;
-    problems.push({ name, file: live.file });
+    problems.push({ name, file: live.file, kind: "function" });
   }
 
+  // Same "last definition in file order is live" resolution, and the
+  // same known limitation as _clinic_director_can_read_clinician_
+  // session_notes above: a policy/constraint DROPped in a later
+  // migration with no replacement still looks "live" here. Accepted for
+  // the same reason -- adding DROP-awareness is real, separate work,
+  // not something to half-do under this fix.
+  for (const [name, defs] of policyDefsByName) {
+    const live = defs[defs.length - 1];
+    if (!TARGET_RE.test(live.body)) continue;
+    if (WIDENED_RE.test(live.body)) continue;
+    if (Object.prototype.hasOwnProperty.call(CALLER_GATE_OR_TARGET_SPECIFIC_BY_DESIGN, name)) continue;
+    problems.push({ name, file: live.file, kind: live.kind });
+  }
+
+  const totalDefs = defsByName.size + policyDefsByName.size;
+
   if (problems.length === 0) {
-    console.log(`clinician-role-target-scan: clean (${defsByName.size} functions checked).`);
+    console.log(`clinician-role-target-scan: clean (${totalDefs} functions/policies/constraints checked).`);
     return;
   }
 
-  console.error(`clinician-role-target-scan: ${problems.length} unreviewed function(s) checking role = 'clinician' without also admitting a director/lead:\n`);
+  console.error(`clinician-role-target-scan: ${problems.length} unreviewed function/policy/constraint(s) checking role = 'clinician' without also admitting a director/lead:\n`);
   for (const p of problems) {
-    console.error(`  ${p.name}() -- live in ${p.file}`);
+    const suffix = p.kind === "function" ? "()" : ` [${p.kind}]`;
+    console.error(`  ${p.name}${suffix} -- live in ${p.file}`);
   }
   console.error(
-    `\nFor each: if this checks a TARGET (someone other than the caller), it's very likely this session's own bug class -- widen to role in ('clinician', 'clinical_lead', 'principal') the way 0275/0276 did. If it's the caller's own gate or target-specific by design for a real reason, add the function name to CALLER_GATE_OR_TARGET_SPECIFIC_BY_DESIGN in scripts/checks/clinician-role-target-scan.mjs with that reason.`
+    `\nFor each: if this checks a TARGET (someone other than the caller), it's very likely this session's own bug class -- widen to role in ('clinician', 'clinical_lead', 'principal') the way 0275/0276/0277 did. If it's the caller's own gate or target-specific by design for a real reason, add the name to CALLER_GATE_OR_TARGET_SPECIFIC_BY_DESIGN in scripts/checks/clinician-role-target-scan.mjs with that reason (functions by name; policies/constraints as "table.policy_or_constraint_name").`
   );
   process.exit(1);
 }

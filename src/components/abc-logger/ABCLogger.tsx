@@ -159,6 +159,11 @@ export function ABCLogger({
   // The confirmation step only waits for an explicit tap when there's
   // something to tap -- clinician-authored logs (no onOfferMessage
   // passed at all) keep the original auto-dismiss behaviour untouched.
+  // 0277 -- checked, not widened: /clinician/log never passes
+  // onOfferMessage at all, for clinician, principal, or clinical_lead
+  // alike, so Boolean(onOfferMessage) is already false for every
+  // director/lead call site this fix creates. The role !== "clinician"
+  // half only matters for a caller this app doesn't have yet.
   const canOfferMessage = role !== "clinician" && Boolean(onOfferMessage);
 
   useEffect(() => {
@@ -394,7 +399,11 @@ export function ABCLogger({
       clearDraft(passportId);
 
       let roleLabel: string = getRoleLabel(role, institutionType, vocabularyOverrides);
-      if (role === "clinician") {
+      // 0277 -- a director/lead reaching this point genuinely has a
+      // clinicians row too (select_director_specialty() creates one,
+      // same table, same specialty column), so the identical
+      // specialty-over-generic-label enrichment applies to them.
+      if (role === "clinician" || role === "principal" || role === "clinical_lead") {
         const { data: clinicianRow, error: specialtyError } = await supabase
           .from("clinicians")
           .select("specialty")

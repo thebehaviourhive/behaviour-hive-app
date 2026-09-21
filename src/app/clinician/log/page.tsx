@@ -8,6 +8,7 @@ import { useClinicianReviewState } from "@/hooks/useClinicianReviewState";
 import { ClinicianAccessGate } from "@/components/clinician/ClinicianAccessGate";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 import { ABCLogger } from "@/components/abc-logger/ABCLogger";
+import type { ABCLoggerRole } from "@/components/abc-logger/roleConfig";
 import { ClinicalFileIcon } from "@/components/ui/icons";
 import { InlineErrorState } from "@/components/ui/InlineErrorState";
 
@@ -212,7 +213,17 @@ export default function ClinicianAddLogPage() {
         <ABCLogger
           passportId={selectedPassport.passport_id}
           childName={selectedPassport.child_name}
-          role="clinician"
+          // 0277 -- was hardcoded "clinician" regardless of the real
+          // caller. useRequireRole("clinician") admits exactly three
+          // real app_metadata.role values here: 'clinician' itself, or
+          // a verified director/lead ('principal'/'clinical_lead') via
+          // is_verified_clinic_director_or_lead(). Sending the literal
+          // value is what makes abc_logs.logged_by_role an honest claim
+          // instead of a role the caller doesn't hold -- see this
+          // file's own migration 0277 for why that matters (the CHECK
+          // constraint, the insert RLS policy, and
+          // update_clinician_last_review() all read this same column).
+          role={(user.app_metadata?.role as ABCLoggerRole | undefined) ?? "clinician"}
           onComplete={() => {
             setIsAbcLoggerOpen(false);
             router.push("/clinician/dashboard");

@@ -5,15 +5,19 @@
 // Everything that reads from these (ABCLogger's step content, ABCTimeline's
 // footer/reporter-filter labels) picks up a new entry automatically.
 // "principal" added for ABCTimeline's own new read-only tab
-// (ChildDetail.tsx's "ABC Logs" tab) -- a principal never AUTHORS an
-// entry (ABCLogger, the creation form, is never opened by this role),
-// so ABC_ROLE_CONFIG's own principal entry below is never actually
-// read; it exists only because this type is a Record key set.
+// (ChildDetail.tsx's "ABC Logs" tab) -- ORIGINALLY because "a principal
+// never AUTHORS an entry", but that premise stopped being true once
+// PRD 10 made a director a genuine practitioner: /clinician/log now
+// sends the caller's own real role, and a verified director doing
+// clinical work reaches ABCLogger directly (0277). "clinical_lead"
+// added the same migration, for the identical reason -- a lead is the
+// same kind of practitioner. Both entries in ABC_ROLE_CONFIG below are
+// live, authored content now, not dead Record-key filler.
 // Role LABEL display (PRD 5 Stage 1) went through getRoleLabel()/
 // <RoleLabel> instead, once this file's own ABC_ROLE_DISPLAY_LABEL was
 // found to be one of nine independent copies of the same map -- deleted
 // from here, not left importable alongside the shared one.
-export type ABCLoggerRole = "parent" | "class_teacher" | "clinician" | "sna" | "principal";
+export type ABCLoggerRole = "parent" | "class_teacher" | "clinician" | "sna" | "principal" | "clinical_lead";
 
 // Vocabulary refresh (2026-08): every chip step's "Other" option is now
 // literally labelled "Other (please describe)" rather than a bare
@@ -137,8 +141,18 @@ export const ABC_ROLE_CONFIG: Record<ABCLoggerRole, ABCRoleConfig> = {
     behaviour: UNIFIED_BEHAVIOUR,
     consequence: UNIFIED_CONSEQUENCE,
   },
-  // Never actually reached -- see this file's own ABCLoggerRole comment.
+  // Live since 0277 -- a director doing clinical work reaches ABCLogger
+  // via /clinician/log with their own real role, not a hardcoded
+  // "clinician" stand-in. Same content as clinician's own entry.
   principal: {
+    intensityLabel: "Intensity Level",
+    antecedent: UNIFIED_ANTECEDENT,
+    behaviour: UNIFIED_BEHAVIOUR,
+    consequence: UNIFIED_CONSEQUENCE,
+  },
+  // Live since 0277, same reasoning as principal above -- a clinical
+  // lead is the same kind of practitioner.
+  clinical_lead: {
     intensityLabel: "Intensity Level",
     antecedent: UNIFIED_ANTECEDENT,
     behaviour: UNIFIED_BEHAVIOUR,
