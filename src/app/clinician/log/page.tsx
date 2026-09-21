@@ -21,8 +21,14 @@ type LogType = "abc" | "fba" | "bsp";
 export default function ClinicianAddLogPage() {
   const router = useRouter();
   const { user, isReady } = useRequireRole("clinician");
-  const { isLoading: isLoadingReview, profile, reviewState, error: reviewError, refresh: refreshReview } =
-    useClinicianReviewState(user?.id ?? null);
+  const {
+    isLoading: isLoadingReview,
+    profile,
+    reviewState,
+    institutionJoinPending,
+    error: reviewError,
+    refresh: refreshReview,
+  } = useClinicianReviewState(user?.id ?? null);
 
   const [passports, setPassports] = useState<ClinicianPassportOption[]>([]);
   const [isLoadingPassports, setIsLoadingPassports] = useState(true);
@@ -86,6 +92,7 @@ export default function ClinicianAddLogPage() {
       isLoading={isLoadingReview}
       profile={profile}
       reviewState={reviewState}
+      institutionJoinPending={institutionJoinPending}
       error={reviewError}
       onRetry={refreshReview}
     >

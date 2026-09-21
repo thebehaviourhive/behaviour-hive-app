@@ -28,8 +28,14 @@ import { MessageChildPickerSheet } from "@/components/messages/MessageChildPicke
 // Clinical File tab, just aggregated here across every case at once.
 export default function ClinicianMessagesPage() {
   const { user, isReady: isRoleReady } = useRequireRole("clinician");
-  const { isLoading: isLoadingReview, profile, reviewState, error: reviewError, refresh: refreshReview } =
-    useClinicianReviewState(user?.id ?? null);
+  const {
+    isLoading: isLoadingReview,
+    profile,
+    reviewState,
+    institutionJoinPending,
+    error: reviewError,
+    refresh: refreshReview,
+  } = useClinicianReviewState(user?.id ?? null);
   const { isLoading: isLoadingPassports, passports, error, refresh: refreshPassports } = useClinicianPassports(user?.id ?? null);
   const { groups, nameById, isLoading, loadError, refresh } = useMessageTriage(passports);
 
@@ -68,6 +74,7 @@ export default function ClinicianMessagesPage() {
       isLoading={isLoadingReview}
       profile={profile}
       reviewState={reviewState}
+      institutionJoinPending={institutionJoinPending}
       error={reviewError}
       onRetry={refreshReview}
     >

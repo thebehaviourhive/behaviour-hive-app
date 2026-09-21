@@ -97,6 +97,17 @@ export default function ClinicianDashboardPage() {
   const messagesAwaitingCount = useMessagesAwaitingActionCount(user?.id ?? null);
 
   const [profile, setProfile] = useState<ClinicianProfile | null>(null);
+  // See useClinicianReviewState.ts's own doc comment on the identical
+  // field -- this page has its own separate, un-migrated copy of that
+  // hook's logic (see the header comment on ClinicianProfile above) and
+  // carried the identical bug independently: no clinicians row was
+  // ALWAYS read as "go pick a specialty," even for someone who joined a
+  // clinic by code and is waiting on their director. Found live, 21
+  // Sept 2026, the same session that found the clinic role picker
+  // itself was a placeholder -- both bugs share the same root cause,
+  // an onboarding path this dashboard's own logic had never been
+  // updated for.
+  const [institutionJoinPending, setInstitutionJoinPending] = useState(false);
   const [isLoadingProfile, setIsLoadingProfile] = useState(true);
   const [profileLoadError, setProfileLoadError] = useState<string | null>(null);
   const [isCheckingStatus, setIsCheckingStatus] = useState(false);
@@ -128,10 +139,36 @@ export default function ClinicianDashboardPage() {
     }
 
     if (!loaded) {
+      // Before redirecting to the independent path's own "pick a
+      // specialty" screen, check whether this is actually a clinic
+      // join in progress -- 'clinician' is never a legal
+      // institution_staff role at a school (0203), so a pending row
+      // here is unambiguously a clinic join, no institution-type check
+      // needed. A real pending join renders the dashboard's own
+      // waiting state below instead of being redirected away from it.
+      const supabase = createClient();
+      const { data: pendingJoin } = await supabase
+        .from("institution_staff")
+        .select("id")
+        .eq("user_id", user.id)
+        .eq("role", "clinician")
+        .is("deactivated_at", null)
+        .is("approved_at", null)
+        .is("rejected_at", null)
+        .limit(1)
+        .maybeSingle();
+
+      if (pendingJoin) {
+        setInstitutionJoinPending(true);
+        setIsLoadingProfile(false);
+        return;
+      }
+
       router.replace("/clinician/specialty");
       return;
     }
 
+    setInstitutionJoinPending(false);
     setProfile(loaded);
     setIsLoadingProfile(false);
   }, [user, router]);
@@ -264,6 +301,27 @@ export default function ClinicianDashboardPage() {
     return (
       <div className="flex min-h-full flex-1 flex-col items-center justify-center gap-4 bg-brand-off-white/40 px-4 pb-24 text-center">
         <InlineErrorState message={profileLoadError} onRetry={loadProfile} />
+      </div>
+    );
+  }
+
+  if (!profile && institutionJoinPending) {
+    return (
+      <div className="flex min-h-full flex-1 flex-col bg-brand-off-white/40 pb-24">
+        <main className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
+          <span className="mb-1 flex h-20 w-20 items-center justify-center rounded-full bg-brand-pastel-blue/40 text-brand-prussian-blue">
+            <LockIcon className="h-10 w-10" />
+          </span>
+          <h1 className="font-heading text-2xl font-bold text-brand-prussian-blue">
+            You&apos;re not in yet
+          </h1>
+          <p className="max-w-[280px] text-sm text-brand-neutral-black/70">
+            Your request is with your clinical director. They&apos;ve been notified and can approve
+            you from their own dashboard — there&apos;s nothing else for you to do. You&apos;ll get
+            access the moment they confirm it.
+          </p>
+        </main>
+        <ClinicianBottomNav />
       </div>
     );
   }

@@ -31,6 +31,7 @@ export function ClinicianAccessGate({
   isLoading,
   profile,
   reviewState,
+  institutionJoinPending = false,
   error,
   onRetry,
   children,
@@ -38,6 +39,10 @@ export function ClinicianAccessGate({
   isLoading: boolean;
   profile: ClinicianReviewProfile | null;
   reviewState: ClinicianReviewState | null;
+  // See useClinicianReviewState.ts's own doc comment on this field.
+  // Optional (defaults false) so every existing call site keeps
+  // compiling; the real fix is passing it through from the hook.
+  institutionJoinPending?: boolean;
   error: string | null;
   onRetry: () => void;
   children: ReactNode;
@@ -52,9 +57,24 @@ export function ClinicianAccessGate({
     );
   }
 
-  // No clinicians row at all -- hasn't even reached specialty selection
-  // yet. Not normally reachable once role-select has run, but a locked
-  // fallback rather than silently rendering the real page either way.
+  // Joined a clinic by code, no director approval yet -- found live,
+  // 21 Sept 2026, building the clinic role picker's own real-signup
+  // proof: this used to fall into the branch below and tell someone
+  // who joined by code to go pick a specialty, the INDEPENDENT path's
+  // own next step, actively wrong for this person. Checked first,
+  // before the generic no-profile fallback -- a clinic join in
+  // progress is a more specific fact than "no clinicians row exists".
+  if (!profile && institutionJoinPending) {
+    return (
+      <LockedCard message="Your request is with your clinical director. They've been notified and can approve you from their own dashboard -- there's nothing else for you to do. You'll get access the moment they confirm it." />
+    );
+  }
+
+  // No clinicians row at all, and no clinic join pending either --
+  // hasn't even reached specialty selection yet (the independent
+  // path's own first step). Not normally reachable once role-select
+  // has run, but a locked fallback rather than silently rendering the
+  // real page either way.
   if (!profile || reviewState === null) {
     return (
       <LockedCard

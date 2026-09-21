@@ -53,8 +53,14 @@ function getDiagnosisPills(diagnoses: string[] | null, diagnosisOther: string | 
 
 export default function ClinicianPassportsPage() {
   const { user, isReady } = useRequireRole("clinician");
-  const { isLoading: isLoadingReview, profile, reviewState, error: reviewError, refresh: refreshReview } =
-    useClinicianReviewState(user?.id ?? null);
+  const {
+    isLoading: isLoadingReview,
+    profile,
+    reviewState,
+    institutionJoinPending,
+    error: reviewError,
+    refresh: refreshReview,
+  } = useClinicianReviewState(user?.id ?? null);
   const [passports, setPassports] = useState<ClinicianPassportRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -100,6 +106,7 @@ export default function ClinicianPassportsPage() {
       isLoading={isLoadingReview}
       profile={profile}
       reviewState={reviewState}
+      institutionJoinPending={institutionJoinPending}
       error={reviewError}
       onRetry={refreshReview}
     >

@@ -26,8 +26,14 @@ interface ClinicianActivityEntry {
 
 export default function ClinicianActivityPage() {
   const { user, isReady } = useRequireRole("clinician");
-  const { isLoading: isLoadingReview, profile, reviewState, error: reviewError, refresh: refreshReview } =
-    useClinicianReviewState(user?.id ?? null);
+  const {
+    isLoading: isLoadingReview,
+    profile,
+    reviewState,
+    institutionJoinPending,
+    error: reviewError,
+    refresh: refreshReview,
+  } = useClinicianReviewState(user?.id ?? null);
 
   const fetchPage = useCallback(async (limit: number, offset: number) => {
     const supabase = createClient();
@@ -46,6 +52,7 @@ export default function ClinicianActivityPage() {
       isLoading={isLoadingReview}
       profile={profile}
       reviewState={reviewState}
+      institutionJoinPending={institutionJoinPending}
       error={reviewError}
       onRetry={refreshReview}
     >

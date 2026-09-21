@@ -24,8 +24,14 @@ const STATUS_LABEL: Record<string, string> = {
 export default function FbaWorkspacePage() {
   const { fbaId } = useParams<{ fbaId: string }>();
   const { user, isReady } = useRequireRole("clinician");
-  const { isLoading: isLoadingReview, profile: reviewProfile, reviewState, error: reviewError, refresh: refreshReview } =
-    useClinicianReviewState(user?.id ?? null);
+  const {
+    isLoading: isLoadingReview,
+    profile: reviewProfile,
+    reviewState,
+    institutionJoinPending,
+    error: reviewError,
+    refresh: refreshReview,
+  } = useClinicianReviewState(user?.id ?? null);
   const { report, isLoading, loadError, reload } = useFbaReport(fbaId);
   const { assessments: aflsAssessments } = useAflsAssessmentsForFba(fbaId);
 
@@ -80,6 +86,7 @@ export default function FbaWorkspacePage() {
       isLoading={isLoadingReview}
       profile={reviewProfile}
       reviewState={reviewState}
+      institutionJoinPending={institutionJoinPending}
       error={reviewError}
       onRetry={refreshReview}
     >

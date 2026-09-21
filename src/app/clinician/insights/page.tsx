@@ -44,8 +44,14 @@ type Selection = { strategyTypeId: string | null } | undefined;
 // recommends" posture as Stage 3.
 export default function ClinicianInsightsPage() {
   const { user, isReady } = useRequireRole("clinician");
-  const { isLoading: isLoadingReview, profile, reviewState, error: reviewError, refresh: refreshReview } =
-    useClinicianReviewState(user?.id ?? null);
+  const {
+    isLoading: isLoadingReview,
+    profile,
+    reviewState,
+    institutionJoinPending,
+    error: reviewError,
+    refresh: refreshReview,
+  } = useClinicianReviewState(user?.id ?? null);
   const [setting, setSetting] = useState<InsightsSetting>(null);
   const [rangeKey, setRangeKey] = useState<ProgressRangeKey>("all");
   const [selection, setSelection] = useState<Selection>(undefined);
@@ -64,6 +70,7 @@ export default function ClinicianInsightsPage() {
       isLoading={isLoadingReview}
       profile={profile}
       reviewState={reviewState}
+      institutionJoinPending={institutionJoinPending}
       error={reviewError}
       onRetry={refreshReview}
     >

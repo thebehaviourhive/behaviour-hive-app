@@ -34,6 +34,7 @@ export default function ClinicalPlanPage() {
     isLoading: isLoadingReview,
     profile: reviewProfile,
     reviewState,
+    institutionJoinPending,
     error: reviewError,
     refresh: refreshReview,
   } = useClinicianReviewState(user?.id ?? null);
@@ -88,6 +89,7 @@ export default function ClinicalPlanPage() {
         isLoading={isLoadingReview}
         profile={reviewProfile}
         reviewState={reviewState}
+        institutionJoinPending={institutionJoinPending}
         error={reviewError}
         onRetry={refreshReview}
       >

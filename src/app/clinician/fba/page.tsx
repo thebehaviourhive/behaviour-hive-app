@@ -50,8 +50,14 @@ const UNIQUE_VIOLATION = "23505";
 export default function ClinicianFbaListPage() {
   const router = useRouter();
   const { user, isReady } = useRequireRole("clinician");
-  const { isLoading: isLoadingReview, profile: reviewProfile, reviewState, error: reviewError, refresh: refreshReview } =
-    useClinicianReviewState(user?.id ?? null);
+  const {
+    isLoading: isLoadingReview,
+    profile: reviewProfile,
+    reviewState,
+    institutionJoinPending,
+    error: reviewError,
+    refresh: refreshReview,
+  } = useClinicianReviewState(user?.id ?? null);
 
   const [tab, setTab] = useState<"active" | "completed">("active");
   const [fbas, setFbas] = useState<ClinicianFbaRow[]>([]);
@@ -212,6 +218,7 @@ export default function ClinicianFbaListPage() {
       isLoading={isLoadingReview}
       profile={reviewProfile}
       reviewState={reviewState}
+      institutionJoinPending={institutionJoinPending}
       error={reviewError}
       onRetry={refreshReview}
     >
