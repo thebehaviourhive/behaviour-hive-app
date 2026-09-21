@@ -281,36 +281,66 @@ export function EpisodeTagsSection({ passportId }: { passportId: string }) {
 
       {!isActive ? (
         <p className="mt-2 text-xs text-brand-neutral-black/50">This episode has ended — tags are historical.</p>
-      ) : callerRole === null ? null : hasPendingRequest ? (
-        <div className="mt-3 rounded-2xl border border-dashed border-brand-golden-brown/40 bg-brand-safe-ivory/30 p-3">
-          <p className="text-xs font-semibold text-brand-golden-brown">Pending director review</p>
-          <div className="mt-1.5 flex flex-wrap gap-1.5">
-            {mostRecentRequest!.proposedTags.map((t, i) => (
-              <span key={i} className="rounded-full bg-white px-2.5 py-0.5 text-xs text-brand-neutral-black/70">
-                {t.dimension}: {t.value}
-              </span>
-            ))}
-          </div>
-          <p className="mt-1.5 text-xs text-brand-neutral-black/60">{mostRecentRequest!.reason}</p>
-        </div>
-      ) : (
+      ) : callerRole === null ? null : (
         <>
-          <button
-            type="button"
-            onClick={openSheet}
-            className="mt-2 text-xs font-semibold text-brand-prussian-blue"
-          >
-            {isDirect ? "Edit Tags" : "Request a Change"}
-          </button>
+          {/* A director's own direct-edit action is ALWAYS available,
+              unconditional on any other request's own state -- "a
+              director changing a tag themselves raises no request"
+              (section 4) is not qualified by whether someone else's
+              request happens to be pending. Only a REQUEST-mode caller
+              (practitioner, lead, or an admin once the one-shot window
+              has closed) is held to the pending card below, since
+              raising a second, conflicting proposal while one is
+              already awaiting review would just create confusion the
+              director would have to sort out anyway. */}
+          {isDirect ? (
+            <>
+              <button
+                type="button"
+                onClick={openSheet}
+                className="mt-2 text-xs font-semibold text-brand-prussian-blue"
+              >
+                Edit Tags
+              </button>
+              {hasPendingRequest && (
+                <p className="mt-2 text-xs text-brand-golden-brown">
+                  A change request from {mostRecentRequest!.reason ? `"${mostRecentRequest!.reason}"` : "a colleague"} is
+                  pending review.
+                </p>
+              )}
+            </>
+          ) : hasPendingRequest ? (
+            <div className="mt-3 rounded-2xl border border-dashed border-brand-golden-brown/40 bg-brand-safe-ivory/30 p-3">
+              <p className="text-xs font-semibold text-brand-golden-brown">Pending director review</p>
+              <div className="mt-1.5 flex flex-wrap gap-1.5">
+                {mostRecentRequest!.proposedTags.map((t, i) => (
+                  <span key={i} className="rounded-full bg-white px-2.5 py-0.5 text-xs text-brand-neutral-black/70">
+                    {t.dimension}: {t.value}
+                  </span>
+                ))}
+              </div>
+              <p className="mt-1.5 text-xs text-brand-neutral-black/60">{mostRecentRequest!.reason}</p>
+            </div>
+          ) : (
+            <>
+              <button
+                type="button"
+                onClick={openSheet}
+                className="mt-2 text-xs font-semibold text-brand-prussian-blue"
+              >
+                Request a Change
+              </button>
 
-          {mostRecentRequest && mostRecentRequest.status !== "pending" && (
-            <p className="mt-2 text-xs text-brand-neutral-black/50">
-              Last request {mostRecentRequest.status}
-              {mostRecentRequest.status === "declined" && mostRecentRequest.declineReason
-                ? ` — ${mostRecentRequest.declineReason}`
-                : ""}
-              {mostRecentRequest.decidedAt ? ` · ${formatDate(mostRecentRequest.decidedAt)}` : ""}
-            </p>
+              {mostRecentRequest && mostRecentRequest.status !== "pending" && (
+                <p className="mt-2 text-xs text-brand-neutral-black/50">
+                  Last request {mostRecentRequest.status}
+                  {mostRecentRequest.status === "declined" && mostRecentRequest.declineReason
+                    ? ` — ${mostRecentRequest.declineReason}`
+                    : ""}
+                  {mostRecentRequest.decidedAt ? ` · ${formatDate(mostRecentRequest.decidedAt)}` : ""}
+                </p>
+              )}
+            </>
           )}
         </>
       )}
