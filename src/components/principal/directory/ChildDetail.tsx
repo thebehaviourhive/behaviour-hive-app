@@ -137,6 +137,17 @@ interface EpisodeOfCareRow {
   endReason: string | null;
 }
 
+interface OverseeingLeadRowRaw {
+  institution_staff_id: string;
+  lead_user_id: string;
+  full_name: string;
+}
+
+interface OverseeingLeadRow {
+  id: string;
+  fullName: string;
+}
+
 // The Incidents tab's own clinic decision, per Daniel's explicit
 // instruction not to decide silently -- recorded here, not just in a
 // commit message, so the next reader sees the reasoning in place.
@@ -376,6 +387,13 @@ export function ChildDetail({
   // Stage 4 -- Previous Clinicians (get_passport_clinician_history, 0128).
   const [clinicianHistory, setClinicianHistory] = useState<ClinicianHistoryRow[]>([]);
   const [clinicianHistoryError, setClinicianHistoryError] = useState<string | null>(null);
+
+  // PRD 10 Stage 5, item 4 -- "which leads oversee this client," on the
+  // director's own view, director-only by construction (this component
+  // is gated useRequireRole("principal"), which never widens for a
+  // clinical_lead). get_episode_overseeing_leads() (0227) has existed
+  // since PRD 5 Stage 7 with zero client callers until now.
+  const [overseeingLeads, setOverseeingLeads] = useState<OverseeingLeadRow[]>([]);
 
   const [passportProfile, setPassportProfile] = useState<PassportProfile | null>(null);
   const [passportProfileError, setPassportProfileError] = useState<string | null>(null);
@@ -847,6 +865,29 @@ export function ChildDetail({
   useEffect(() => {
     onChildNameChange?.(childName);
   }, [childName, onChildNameChange]);
+
+  // PRD 10 Stage 5, item 4 -- fetched separately from the main load()
+  // since it depends on the current episode, which the main load
+  // resolves first. Silently empty (not an error) for a school -- this
+  // RPC's own director-only, clinic-only caller check would refuse a
+  // school principal outright, so it's never even attempted for one.
+  const currentEpisodeId = episodesOfCare.find((e) => !e.endedAt)?.id ?? null;
+  useEffect(() => {
+    if (institutionType !== "clinic" || !currentEpisodeId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setOverseeingLeads([]);
+      return;
+    }
+    let isMounted = true;
+    const supabase = createClient();
+    supabase.rpc("get_episode_overseeing_leads", { p_episode_id: currentEpisodeId }).then(({ data, error }) => {
+      if (!isMounted) return;
+      setOverseeingLeads(error ? [] : ((data ?? []) as OverseeingLeadRowRaw[]).map((r) => ({ id: r.institution_staff_id, fullName: r.full_name })));
+    });
+    return () => {
+      isMounted = false;
+    };
+  }, [institutionType, currentEpisodeId]);
 
   // Issues a fresh code -- covers both "the first code for this child"
   // and "a second guardian needs their own code" (the coexistence case
@@ -1401,6 +1442,25 @@ export function ChildDetail({
                   </p>
                 )}
               </section>
+
+              {/* PRD 10 Stage 5, item 4 -- clinic-only, and genuinely
+                  absent (no heading, no empty state) rather than an
+                  always-shown "0 leads" row for a school, where the
+                  concept doesn't exist at all. */}
+              {institutionType === "clinic" && overseeingLeads.length > 0 && (
+                <section className="mb-6">
+                  <h2 className="mb-2 font-heading text-sm font-bold uppercase tracking-wide text-brand-neutral-black/60">
+                    Overseeing Leads ({overseeingLeads.length})
+                  </h2>
+                  <div className="flex flex-col gap-2">
+                    {overseeingLeads.map((lead) => (
+                      <div key={lead.id} className="rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
+                        <p className="text-sm font-semibold text-brand-neutral-black">{lead.fullName}</p>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              )}
 
               {/* Stage 4: Previous Clinicians -- revoked or stepped-back
                   engagements, name/role/date ended/reason retained.
