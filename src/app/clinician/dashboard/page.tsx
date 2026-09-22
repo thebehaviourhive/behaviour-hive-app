@@ -10,6 +10,7 @@ import { ClinicianBottomNav } from "@/components/clinician/ClinicianBottomNav";
 import { ClinicianActivityCard } from "@/components/clinician/ClinicianActivityCard";
 import { ClinicianQuickActions } from "@/components/clinician/ClinicianQuickActions";
 import { MyTagChangeRequestsSection } from "@/components/clinic/MyTagChangeRequestsSection";
+import { BookingSyncQueueSection } from "@/components/clinician/BookingSyncQueueSection";
 import { CalmEscalationNoticeList } from "@/components/clinician/CalmEscalationNoticeList";
 import { ClinicalFileIcon, LockIcon } from "@/components/ui/icons";
 import { InlineErrorState } from "@/components/ui/InlineErrorState";
@@ -402,6 +403,8 @@ export default function ClinicianDashboardPage() {
               />
             </div>
           )}
+
+          <BookingSyncQueueSection />
 
           <div className="px-4">
             <ClinicianActivityCard />

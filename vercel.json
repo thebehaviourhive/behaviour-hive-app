@@ -1,6 +1,7 @@
 {
   "crons": [
     { "path": "/api/cron/fail-stale-bookings", "schedule": "0 4 * * *" },
-    { "path": "/api/cron/sweep-discharged-bookings", "schedule": "0 3 * * *" }
+    { "path": "/api/cron/sweep-discharged-bookings", "schedule": "0 3 * * *" },
+    { "path": "/api/cron/detect-booking-drift", "schedule": "0 5 * * *" }
   ]
 }

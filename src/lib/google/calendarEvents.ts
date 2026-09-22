@@ -94,3 +94,44 @@ export async function deleteCalendarEvent(workspaceEmail: string, eventId: strin
   const ok = response.ok || response.status === 404 || response.status === 410;
   return { ok, status: response.status };
 }
+
+export interface FetchedCalendarEvent {
+  status: string; // "confirmed" | "tentative" | "cancelled" (Google's own soft-delete state)
+  startISO: string | null;
+  endISO: string | null;
+}
+
+export type CalendarEventLookup = { found: true; event: FetchedCalendarEvent } | { found: false };
+
+// PRD 9, section 7 -- the sync/poll mechanism's own read primitive, the
+// one GET this file never needed until now (create/delete only, above).
+// found: false covers BOTH a hard 404/410 and Google's own soft-delete
+// (a genuinely deleted event still GETs successfully for a period,
+// carrying status: "cancelled" -- the caller (the detect-drift cron)
+// treats both identically as "this event no longer represents a real
+// booked session," per this migration's own Decision 1). A non-404/410
+// error response is a GENUINE failure (network, auth, quota) and is
+// thrown, never silently read as deletion -- the caller must be able to
+// tell "we couldn't check" from "we checked and it's gone."
+export async function getCalendarEvent(workspaceEmail: string, eventId: string): Promise<CalendarEventLookup> {
+  const accessToken = await getImpersonatedAccessToken(workspaceEmail, CALENDAR_SCOPE);
+  const response = await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${eventId}`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (response.status === 404 || response.status === 410) {
+    return { found: false };
+  }
+  if (!response.ok) {
+    const errorBody = await response.text().catch(() => "");
+    throw new Error(`Google event fetch failed for ${workspaceEmail} (${response.status}): ${errorBody || "no response body"}`);
+  }
+  const data = (await response.json()) as { status?: string; start?: { dateTime?: string }; end?: { dateTime?: string } };
+  return {
+    found: true,
+    event: {
+      status: data.status ?? "confirmed",
+      startISO: data.start?.dateTime ?? null,
+      endISO: data.end?.dateTime ?? null,
+    },
+  };
+}
