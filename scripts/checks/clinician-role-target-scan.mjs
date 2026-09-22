@@ -64,8 +64,6 @@ const CALLER_GATE_OR_TARGET_SPECIFIC_BY_DESIGN = {
     "Target-specific by design -- creates a NEWLY-APPROVED PRACTITIONER's own clinicians row on approval. A director/lead gets theirs via select_director_specialty() instead, a separate, correct mechanism -- this branch isn't meant to admit them.",
   can_view_message:
     "Caller-side check already uses is_verified_clinician() (role-agnostic, true for a verified director/lead too). The one bare 'clinician' reference is message_recipients.recipient_role inside a NOT EXISTS guard against duplicate broad visibility -- an over-admission edge case for a third party, not a director-refusal, and a different bug class from this check's own target.",
-  reject_clinician: "Independent-clinician verification track only (logged_by_role on an audit/log table, unrelated to institution_staff or the clinic-institution track).",
-  submit_clinician_verification: "Same as reject_clinician -- independent-clinician verification track only.",
   _clinic_director_can_read_clinician_session_notes:
     "Dead code -- explicitly dropped by 0233 (`drop function if exists public._clinic_director_can_read_clinician_session_notes(uuid);`) once session_notes' own SELECT policy was repointed to _clinic_director_can_read_clinician_material(), which IS widened. This script's own function-resolution walks migration order but doesn't parse DROP statements, so it still sees 0229's stale definition as \"live\" -- a known, accepted limitation, not a live bug.",
 
@@ -86,6 +84,27 @@ const CALLER_GATE_OR_TARGET_SPECIFIC_BY_DESIGN = {
   get_institution_staff_candidates:
     "The staff-messaging recipient-candidate list (0205, live) -- role in ('class_teacher', 'sna', 'principal', 'clinician', 'clinical_lead', 'clinic_admin'), already includes a director/lead as a valid message recipient.",
 };
+
+// FULL AUDIT, 22 Sept 2026, per Daniel's own instruction after the
+// abc_logs entry turned out to have been added on an unverified
+// inference (see CLAUDE.md's own "AN ALLOWLIST ENTRY IS A CLAIM, NOT A
+// FORMALITY" entry) -- every entry above was re-checked two ways: (1)
+// read the LIVE definition directly and confirm the stated reason is
+// still true today, not just plausible; (2) removed the entry and
+// re-ran this script to confirm it is actually flagged without it --
+// proof the entry does something, not decoration. Two entries failed
+// (2), not (1): `reject_clinician` and `submit_clinician_verification`
+// were REMOVED here -- neither function's live body contains the word
+// "role" anywhere at all (both gate on clinicians.verification_status,
+// not any role column), so TARGET_RE never matched them in the first
+// place and they were never going to be flagged with or without an
+// allowlist entry. Their own stated reasons ("independent-clinician
+// verification track only") were not FALSE, just answering a question
+// the scanner was never going to ask -- added by the same reasoning-
+// without-testing habit this audit exists to catch, just with a
+// harmless outcome this time instead of a silenced bug. Every
+// remaining entry passed both checks and is recorded above with the
+// live migration/table it was verified against.
 
 function walkMigrations() {
   return readdirSync(MIGRATIONS_DIR)
