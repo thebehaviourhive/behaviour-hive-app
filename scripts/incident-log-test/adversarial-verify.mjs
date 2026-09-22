@@ -13817,9 +13817,21 @@ async function main() {
     const { data: reqQQQAfter } = await admin.from("fba_instrument_requests").select("status").eq("id", reqQQQ.id).single();
     record("QQQ-5 the outstanding instrument request from QQQ-2 was auto-cancelled by finalize_fba_report()", reqQQQAfter?.status === "cancelled", JSON.stringify(reqQQQAfter));
 
+    // Superseded by migration 0291, 22 Sept 2026 -- 0199's own design
+    // (keep a cancelled request visible, muted, so it doesn't "vanish
+    // without trace") is deliberately reversed: it left a cancelled
+    // request stuck on the recipient's dashboard indefinitely with no
+    // dismiss control anywhere, the literal shape of a real reported
+    // bug. get_my_instrument_requests() now matches its own newer
+    // sibling mechanism (assessments.assigned_respondent_id, PRD 7),
+    // which already does the simple thing on resolution: a resolved
+    // item just stops being returned, nothing left to explain or
+    // dismiss. This assertion is the mirror image of QQQ-5b's own
+    // original claim -- proving the NEW guarantee, not the one 0199
+    // shipped.
     const { data: myReqsQQQ } = await (await signedInClient("qqq.recipient@thebehaviourhive.com")).rpc("get_my_instrument_requests");
-    const cancelledVisibleQQQ = (myReqsQQQ ?? []).some((r) => r.id === reqQQQ.id && r.status === "cancelled");
-    record("QQQ-5b get_my_instrument_requests() still surfaces the cancelled request to its recipient (visible, not vanished)", cancelledVisibleQQQ, JSON.stringify(myReqsQQQ));
+    const cancelledGoneQQQ = !(myReqsQQQ ?? []).some((r) => r.id === reqQQQ.id);
+    record("QQQ-5b get_my_instrument_requests() no longer surfaces a cancelled request at all -- it leaves the recipient's dashboard on its own (0291)", cancelledGoneQQQ, JSON.stringify(myReqsQQQ));
 
     // ---- QQQ-6: the ORIGINAL lock (fba_reports' own UPDATE policy,
     // live since 0040, untouched by 0199) -- regression anchor, not a
