@@ -16,6 +16,7 @@ import { useRegions } from "@/hooks/useRegions";
 import { RegionMultiSelect } from "@/components/ui/RegionMultiSelect";
 import { CLINICIAN_SPECIALTY_LABEL, type ClinicianSpecialty } from "@/lib/clinicianSpecialties";
 import { CLINICAL_DOMAIN_LABEL, type ClinicalDomain } from "@/lib/clinicalDomains";
+import { PassportIdBadge } from "@/components/clinic/PassportIdBadge";
 
 const CADENCE_OPTIONS = [14, 30, 60, 90] as const;
 
@@ -32,6 +33,7 @@ export default function MorePage() {
   const [isSavingCadence, setIsSavingCadence] = useState(false);
   const [cadenceError, setCadenceError] = useState<string | null>(null);
   const [childName, setChildName] = useState<string | null>(null);
+  const [passportIds, setPassportIds] = useState<{ childName: string; passportReference: string }[]>([]);
   const [operatingCounties, setOperatingCounties] = useState<string[]>([]);
   const [isSavingCounties, setIsSavingCounties] = useState(false);
   const [countiesError, setCountiesError] = useState<string | null>(null);
@@ -135,9 +137,22 @@ export default function MorePage() {
         // pointless passport lookup that can never match an SNA's own
         // row.
         const { data: myPassports } = await supabase.rpc("get_my_passports");
-        const rows = (myPassports ?? []) as { passport_id: string; child_name: string }[];
+        const rows = (myPassports ?? []) as { passport_id: string; child_name: string; passport_reference: string }[];
 
-        if (isMounted) setChildName(rows[0]?.child_name ?? null);
+        if (isMounted) {
+          setChildName(rows[0]?.child_name ?? null);
+          // Passport ID -- Share sheet fix, 23 Sept 2026 -- moved here
+          // from the (now-deleted) Share sheet, plainly labelled, never
+          // under "Share": a reference for identifying a child when a
+          // parent contacts the clinic, not an access credential. Every
+          // connected child shown, not just the first -- unlike the
+          // Progress tile above, a parent with more than one child in
+          // the system needs the right ID for the right child, and
+          // showing only one would be actively wrong, not just limited.
+          setPassportIds(
+            rows.map((r) => ({ childName: r.child_name, passportReference: r.passport_reference }))
+          );
+        }
       }
 
       setIsReady(true);
@@ -398,6 +413,32 @@ export default function MorePage() {
                 ›
               </span>
             </button>
+          </section>
+        )}
+
+        {/* Passport ID -- Share sheet fix, 23 Sept 2026. Plain reference,
+            never an access credential: a clinic can identify a child by
+            this when a parent calls or writes in. Deliberately NOT under
+            a "Share" heading and NOT presented as something to hand
+            anyone -- that's what the (now-removed) passport code used to
+            look like, and it's exactly the confusion Daniel named. */}
+        {role === "parent" && passportIds.length > 0 && (
+          <section className="rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
+            <p className="mb-1 font-accent text-xs font-bold uppercase tracking-wide text-brand-neutral-black/50">
+              Passport ID
+            </p>
+            <p className="mb-3 text-xs text-brand-neutral-black/50">
+              An identifier for contacting your child&apos;s clinic -- not a code to share, and not needed
+              anywhere else in the app.
+            </p>
+            <div className="flex flex-col gap-2">
+              {passportIds.map((p) => (
+                <div key={p.passportReference} className="flex items-center justify-between gap-3">
+                  <span className="text-sm font-semibold text-brand-neutral-black">{p.childName}</span>
+                  <PassportIdBadge reference={p.passportReference} />
+                </div>
+              ))}
+            </div>
           </section>
         )}
 
