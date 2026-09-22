@@ -1,16 +1,20 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { useMyPassport } from "@/hooks/useMyPassport";
 import { createClient } from "@/lib/supabase/client";
-import { CLINICIAN_SPECIALTY_LABEL, type ClinicianSpecialty } from "@/lib/clinicianSpecialties";
 import { Button } from "@/components/ui/Button";
 import { CheckIcon } from "@/components/ui/icons";
+import { StepIndicator } from "@/components/parent/booking/StepIndicator";
+import { ClinicianCard, type BookableClinician } from "@/components/parent/booking/ClinicianCard";
+import { SessionTypeCard, type BookableSessionType } from "@/components/parent/booking/SessionTypeCard";
+import { SlotPicker, type AvailableSlot } from "@/components/parent/booking/SlotPicker";
+import { BookingSummaryCard, type BookingSummaryDetails } from "@/components/parent/booking/BookingSummaryCard";
 
-// PRD 9, Stage 2 -- the parent-facing booking flow. Lives under
+// Booking-flow redesign (design brief, Sept 2026). Lives under
 // /passport/* deliberately, not as a fourth nav tab: this app's own
 // nav is three tabs (Home/Passport/More, BottomNav.tsx), and booking is
 // an action a parent initiates, not a record they review -- the
@@ -23,73 +27,28 @@ import { CheckIcon } from "@/components/ui/icons";
 // while a parent is mid-booking, at zero cost to the nav itself -- no
 // new tab, no new matcher, nothing else changes.
 //
-// Reached two ways, both real: a "Book a Session" tile on Home
-// (QuickActionButtons, no clinicianId -- shows the picker below) or a
-// contextual "Book" button beside a specific clinician's name in
-// YourTeamCard (?clinicianId=... -- skips straight to session type).
-// Both are legitimate, per Daniel's own instruction: the contextual one
-// is free and it's where the thought happens ("I should book"); the
-// tile is there for a parent who starts from intent rather than from
-// looking at a clinician's name.
-//
-// Five steps: clinician (skipped if arriving with one already) -> type
-// -> slot -> policy consent -> confirm. Type chosen before availability
-// is computed (PRD 9 section 3a).
-//
-// Session types, fixed -> clinic-configurable catalogue (migration
-// 0281) -- the "type" step used to be two hardcoded buttons (Online,
-// In-person). It's now a real per-clinic catalogue read via
-// get_bookable_session_types(), which already excludes anything
-// retired or staff-only (is_active/is_parent_bookable both filtered
-// server-side) -- this screen never needs its own boundary check the
-// way the old literal-string comparison did, since a type that
-// shouldn't be offered simply never appears in the list.
+// Five steps (brief section 5): clinician -> type -> slot -> consent
+// -> confirmed ("Booked"). The first two are genuinely skippable --
+// "Skipped entirely when the child has one bookable clinician" /
+// "A clinic offering a single kind of session should skip this step
+// entirely" -- tracked via didSkipClinicianStep/didSkipTypeStep so
+// both the step indicator's own total and the back button's own
+// target correctly account for whichever steps this specific parent
+// never actually saw. The booking LOGIC underneath is unchanged
+// (brief section 9) -- this file only reorganises how the existing
+// RPCs/routes are called and rendered.
 
-interface BookableClinician {
-  clinicianId: string;
-  fullName: string;
-  specialty: string;
-}
-
-interface BookableSessionType {
-  id: string;
-  name: string;
-  description: string | null;
-  locationMode: string;
-  lengthMinutes: number;
-}
-
-interface AvailableSlot {
-  startISO: string;
-  endISO: string;
+interface AvailabilityResponse {
+  clinicianName: string;
+  clinicianSpecialty: string;
+  slots: AvailableSlot[];
+  bookingWindowDays: number;
+  institutionId: string | null;
+  cancellationNoticeHours: number;
+  cancellationPolicyText: string | null;
 }
 
 type Step = "clinician" | "type" | "slot" | "consent" | "confirmed";
-
-function groupSlotsByDay(slots: AvailableSlot[]): { dateLabel: string; slots: AvailableSlot[] }[] {
-  const groups = new Map<string, AvailableSlot[]>();
-  for (const slot of slots) {
-    const date = new Date(slot.startISO);
-    const key = date.toDateString();
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key)!.push(slot);
-  }
-  return Array.from(groups.entries()).map(([key, daySlots]) => ({
-    dateLabel: new Date(key).toLocaleDateString([], { weekday: "long", day: "numeric", month: "long" }),
-    slots: daySlots,
-  }));
-}
-
-function formatSlotTime(iso: string): string {
-  return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-}
-
-function formatTypeSubtitle(type: BookableSessionType): string {
-  if (type.description) return type.description;
-  const modeLabel =
-    type.locationMode === "online" ? "by video call" : type.locationMode === "in_person" ? "at the clinic" : "in person";
-  return `${type.lengthMinutes} minutes, ${modeLabel}`;
-}
 
 export default function BookSessionPage() {
   const router = useRouter();
@@ -100,6 +59,9 @@ export default function BookSessionPage() {
   const preselectedClinicianId = searchParams.get("clinicianId");
 
   const [step, setStep] = useState<Step>(preselectedClinicianId ? "type" : "clinician");
+  const [didSkipClinicianStep, setDidSkipClinicianStep] = useState(false);
+  const [didSkipTypeStep, setDidSkipTypeStep] = useState(false);
+
   const [clinicians, setClinicians] = useState<BookableClinician[]>([]);
   const [isLoadingClinicians, setIsLoadingClinicians] = useState(false);
   const [cliniciansError, setCliniciansError] = useState<string | null>(null);
@@ -115,24 +77,26 @@ export default function BookSessionPage() {
   const [slots, setSlots] = useState<AvailableSlot[]>([]);
   const [isLoadingSlots, setIsLoadingSlots] = useState(false);
   const [slotsError, setSlotsError] = useState<string | null>(null);
+  const [bookingWindowDays, setBookingWindowDays] = useState(30);
+  const [institutionId, setInstitutionId] = useState<string | null>(null);
+  const [institutionAddress, setInstitutionAddress] = useState<string | null>(null);
   const [cancellationNoticeHours, setCancellationNoticeHours] = useState(24);
   const [cancellationPolicyText, setCancellationPolicyText] = useState<string | null>(null);
+  const [slotGoneMessage, setSlotGoneMessage] = useState<string | null>(null);
 
   const [selectedSlot, setSelectedSlot] = useState<AvailableSlot | null>(null);
   const [hasAgreedToPolicy, setHasAgreedToPolicy] = useState(false);
 
   const [isBooking, setIsBooking] = useState(false);
   const [bookingError, setBookingError] = useState<string | null>(null);
-  const [confirmedSummary, setConfirmedSummary] = useState<{
-    clinicianName: string;
-    sessionTypeName: string;
-    startISO: string;
-    endISO: string;
-    meetLink: string | null;
-  } | null>(null);
+  const [confirmedMeetLink, setConfirmedMeetLink] = useState<string | null>(null);
 
+  // Always fetched, regardless of entry point -- a contextual arrival
+  // (?clinicianId=...) already knows WHICH clinician, but still needs
+  // this RPC's own organisation name/specialty for later screens
+  // (design brief: "the organisation they practise at, small").
   useEffect(() => {
-    if (step !== "clinician" || !passportId) return;
+    if (!passportId) return;
     let isMounted = true;
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setIsLoadingClinicians(true);
@@ -147,21 +111,49 @@ export default function BookSessionPage() {
           setIsLoadingClinicians(false);
           return;
         }
-        const rows = (data ?? []) as { clinician_id: string; full_name: string; specialty: string; engaged_by: string }[];
+        const rows = (data ?? []) as {
+          clinician_id: string;
+          full_name: string;
+          specialty: string;
+          engaged_by: string;
+          engaged_by_institution_name: string | null;
+        }[];
         // Only institution-engaged clinicians are bookable this way --
         // a parent-engaged clinician (connected by the parent's own
         // code) is never on a clinic caseload for scheduling purposes,
         // matching get_bookable_clinician_details()'s own gate exactly.
-        const bookable = rows
+        const bookable: BookableClinician[] = rows
           .filter((row) => row.engaged_by === "institution")
-          .map((row) => ({ clinicianId: row.clinician_id, fullName: row.full_name, specialty: row.specialty }));
+          .map((row) => ({
+            clinicianId: row.clinician_id,
+            fullName: row.full_name,
+            specialty: row.specialty,
+            organisationName: row.engaged_by_institution_name,
+          }));
         setClinicians(bookable);
         setIsLoadingClinicians(false);
+
+        if (preselectedClinicianId) {
+          const match = bookable.find((c) => c.clinicianId === preselectedClinicianId);
+          if (match) {
+            setSelectedClinicianName(match.fullName);
+          }
+        } else if (bookable.length === 1) {
+          // Design brief: "Skipped entirely when the child has one
+          // bookable clinician... Most parents will never see this
+          // screen." Not just the contextual-entry case -- also true
+          // from the general "Book a Session" tile whenever there's
+          // only ever one real choice.
+          setSelectedClinicianId(bookable[0].clinicianId);
+          setSelectedClinicianName(bookable[0].fullName);
+          setDidSkipClinicianStep(true);
+          setStep("type");
+        }
       });
     return () => {
       isMounted = false;
     };
-  }, [step, passportId]);
+  }, [passportId, preselectedClinicianId]);
 
   useEffect(() => {
     if (step !== "type" || !passportId || !selectedClinicianId) return;
@@ -186,16 +178,23 @@ export default function BookSessionPage() {
           location_mode: string;
           length_minutes: number;
         }[];
-        setSessionTypes(
-          rows.map((row) => ({
-            id: row.id,
-            name: row.name,
-            description: row.description,
-            locationMode: row.location_mode,
-            lengthMinutes: row.length_minutes,
-          }))
-        );
+        const types: BookableSessionType[] = rows.map((row) => ({
+          id: row.id,
+          name: row.name,
+          description: row.description,
+          locationMode: row.location_mode,
+          lengthMinutes: row.length_minutes,
+        }));
+        setSessionTypes(types);
         setIsLoadingTypes(false);
+        if (types.length === 1) {
+          // Design brief: "A clinic offering a single kind of session
+          // should skip this step entirely, as the clinician step
+          // already does."
+          setSelectedType(types[0]);
+          setDidSkipTypeStep(true);
+          setStep("slot");
+        }
       });
     return () => {
       isMounted = false;
@@ -210,13 +209,15 @@ export default function BookSessionPage() {
     try {
       const params = new URLSearchParams({ passportId, clinicianId: selectedClinicianId, sessionTypeId: selectedType.id });
       const response = await fetch(`/api/scheduling/availability?${params.toString()}`);
-      const data = await response.json();
+      const data: AvailabilityResponse & { error?: string } = await response.json();
       if (!response.ok) {
         setSlotsError(data.error ?? "Couldn't load availability.");
         setIsLoadingSlots(false);
         return;
       }
       setSlots(data.slots ?? []);
+      setBookingWindowDays(data.bookingWindowDays ?? 30);
+      setInstitutionId(data.institutionId ?? null);
       setCancellationNoticeHours(data.cancellationNoticeHours ?? 24);
       setCancellationPolicyText(data.cancellationPolicyText ?? null);
       setSelectedClinicianName((prev) => prev ?? data.clinicianName ?? null);
@@ -234,6 +235,28 @@ export default function BookSessionPage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step, selectedClinicianId, selectedType]);
+
+  // The clinic's own address (design brief step 4: "the clinic's
+  // address for in-person"). institutions' own SELECT policy is
+  // `using (true)` (0013) -- a direct client read, not a second RPC,
+  // once institutionId is known from the availability response.
+  useEffect(() => {
+    if (!institutionId) return;
+    let isMounted = true;
+    const supabase = createClient();
+    supabase
+      .from("institutions")
+      .select("address")
+      .eq("id", institutionId)
+      .maybeSingle()
+      .then(({ data }: { data: { address: string | null } | null }) => {
+        if (!isMounted) return;
+        setInstitutionAddress(data?.address ?? null);
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, [institutionId]);
 
   function pickClinician(clinician: BookableClinician) {
     setSelectedClinicianId(clinician.clinicianId);
@@ -272,23 +295,20 @@ export default function BookSessionPage() {
       const data = await response.json();
       setIsBooking(false);
       if (!response.ok) {
-        // First come, first served -- if someone else got there first,
-        // say so plainly and send the parent back to a freshly-loaded
-        // slot list, never a silent retry.
-        setBookingError(data.error ?? "Something went wrong. Please try again.");
         if (response.status === 409) {
+          // Design brief, section 6: "the slot has just gone... design
+          // it as a gentle interruption, not an error." A dedicated
+          // message (never bookingError's own generic styling) shown
+          // above a freshly-reloaded SlotPicker, not a dead end.
+          setSlotGoneMessage("That time was just taken. Here's what's still available.");
           setStep("slot");
           loadSlots();
+          return;
         }
+        setBookingError(data.error ?? "Something went wrong. Please try again.");
         return;
       }
-      setConfirmedSummary({
-        clinicianName: data.clinicianName,
-        sessionTypeName: data.sessionTypeName,
-        startISO: data.sessionStartISO,
-        endISO: data.sessionEndISO,
-        meetLink: data.meetLink ?? null,
-      });
+      setConfirmedMeetLink(data.meetLink ?? null);
       setStep("confirmed");
     } catch {
       setIsBooking(false);
@@ -297,20 +317,40 @@ export default function BookSessionPage() {
   }
 
   function back() {
-    // Bug 5, 22 Sept 2026 -- screen 1 (the clinician picker) had no
-    // back arrow at all, unlike every later screen. There's no earlier
-    // step in this flow to return to, so this leaves the flow entirely
-    // -- the same destination the "Done" button on the confirmed
-    // screen already uses.
-    if (step === "clinician") router.push("/parent-dashboard");
-    else if (step === "type" && !preselectedClinicianId) setStep("clinician");
-    // Contextual entry (arriving with a clinician already chosen) has
-    // no "clinician" step to return to from "type" either -- same
-    // destination as above, not a dead button.
-    else if (step === "type" && preselectedClinicianId) router.push("/parent-dashboard");
-    else if (step === "slot") setStep("type");
-    else if (step === "consent") setStep("slot");
+    if (step === "clinician") {
+      router.push("/parent-dashboard");
+    } else if (step === "type") {
+      if (didSkipClinicianStep || preselectedClinicianId) router.push("/parent-dashboard");
+      else setStep("clinician");
+    } else if (step === "slot") {
+      setSlotGoneMessage(null);
+      if (didSkipTypeStep) {
+        if (didSkipClinicianStep || preselectedClinicianId) router.push("/parent-dashboard");
+        else setStep("clinician");
+      } else {
+        setStep("type");
+      }
+    } else if (step === "consent") {
+      setStep("slot");
+    }
   }
+
+  const visibleStepCount = useMemo(() => {
+    let count = 2; // slot, consent -- always present
+    if (!didSkipClinicianStep && !preselectedClinicianId) count += 1;
+    if (!didSkipTypeStep) count += 1;
+    return count;
+  }, [didSkipClinicianStep, didSkipTypeStep, preselectedClinicianId]);
+
+  const currentStepNumber = useMemo(() => {
+    const hasClinicianStep = !didSkipClinicianStep && !preselectedClinicianId;
+    const hasTypeStep = !didSkipTypeStep;
+    if (step === "clinician") return 1;
+    if (step === "type") return hasClinicianStep ? 2 : 1;
+    if (step === "slot") return (hasClinicianStep ? 1 : 0) + (hasTypeStep ? 1 : 0) + 1;
+    if (step === "consent") return (hasClinicianStep ? 1 : 0) + (hasTypeStep ? 1 : 0) + 2;
+    return visibleStepCount;
+  }, [step, didSkipClinicianStep, didSkipTypeStep, preselectedClinicianId, visibleStepCount]);
 
   if (!isReady || isPassportLoading) {
     return null;
@@ -324,9 +364,22 @@ export default function BookSessionPage() {
     );
   }
 
+  const summaryDetails: BookingSummaryDetails | null =
+    selectedSlot && selectedType && selectedClinicianName
+      ? {
+          clinicianName: selectedClinicianName,
+          sessionTypeName: selectedType.name,
+          locationMode: selectedType.locationMode,
+          startISO: selectedSlot.startISO,
+          endISO: selectedSlot.endISO,
+          address: institutionAddress,
+          meetLink: confirmedMeetLink,
+        }
+      : null;
+
   return (
     <div className="flex min-h-full flex-1 flex-col bg-brand-off-white/40 pb-24">
-      <header className="flex items-center gap-3 px-4 pt-6 pb-4">
+      <header className="flex items-center gap-3 px-4 pt-6 pb-2">
         {step !== "confirmed" && (
           <button type="button" onClick={back} aria-label="Back" className="text-brand-prussian-blue">
             ←
@@ -337,6 +390,8 @@ export default function BookSessionPage() {
           {childName && <p className="mt-0.5 font-sans text-body text-brand-neutral-black/60">{childName}</p>}
         </div>
       </header>
+
+      {step !== "confirmed" && <StepIndicator current={currentStepNumber} total={visibleStepCount} />}
 
       <main className="flex-1 px-4">
         <div className="lg:max-w-[66.6667%]">
@@ -357,17 +412,7 @@ export default function BookSessionPage() {
                 <div className="flex flex-col gap-2">
                   <p className="mb-2 font-sans text-body text-brand-neutral-black/60">Who would you like to book with?</p>
                   {clinicians.map((clinician) => (
-                    <button
-                      key={clinician.clinicianId}
-                      type="button"
-                      onClick={() => pickClinician(clinician)}
-                      className="rounded-2xl border border-black/5 bg-white p-4 text-left shadow-sm"
-                    >
-                      <p className="font-sans text-body font-semibold text-brand-neutral-black">{clinician.fullName}</p>
-                      <p className="mt-0.5 font-sans text-eyebrow text-brand-neutral-black/50">
-                        {CLINICIAN_SPECIALTY_LABEL[clinician.specialty as ClinicianSpecialty] ?? clinician.specialty}
-                      </p>
-                    </button>
+                    <ClinicianCard key={clinician.clinicianId} clinician={clinician} onSelect={() => pickClinician(clinician)} />
                   ))}
                 </div>
               )}
@@ -376,6 +421,11 @@ export default function BookSessionPage() {
 
           {step === "type" && (
             <>
+              {selectedClinicianName && (
+                <p className="mb-3 font-sans text-eyebrow font-semibold uppercase tracking-wide text-brand-neutral-black/40">
+                  Booking with {selectedClinicianName}
+                </p>
+              )}
               {isLoadingTypes ? (
                 <div className="flex flex-col gap-2">
                   <div className="h-16 animate-pulse rounded-2xl bg-white" />
@@ -389,19 +439,9 @@ export default function BookSessionPage() {
                 </p>
               ) : (
                 <div className="flex flex-col gap-2">
-                  <p className="mb-2 font-sans text-body text-brand-neutral-black/60">
-                    {selectedClinicianName ? `Booking with ${selectedClinicianName}. ` : ""}What kind of session?
-                  </p>
+                  <p className="mb-2 font-sans text-body text-brand-neutral-black/60">What kind of session?</p>
                   {sessionTypes.map((type) => (
-                    <button
-                      key={type.id}
-                      type="button"
-                      onClick={() => pickType(type)}
-                      className="rounded-2xl border border-black/5 bg-white p-4 text-left shadow-sm"
-                    >
-                      <p className="font-sans text-body font-semibold text-brand-neutral-black">{type.name}</p>
-                      <p className="mt-0.5 font-sans text-eyebrow text-brand-neutral-black/50">{formatTypeSubtitle(type)}</p>
-                    </button>
+                    <SessionTypeCard key={type.id} type={type} onSelect={() => pickType(type)} />
                   ))}
                 </div>
               )}
@@ -410,71 +450,52 @@ export default function BookSessionPage() {
 
           {step === "slot" && (
             <>
-              {bookingError && (
+              {(selectedClinicianName || selectedType) && (
+                <p className="mb-3 font-sans text-eyebrow font-semibold uppercase tracking-wide text-brand-neutral-black/40">
+                  {selectedType?.name}
+                  {selectedType && selectedClinicianName ? " with " : ""}
+                  {selectedClinicianName}
+                </p>
+              )}
+              {slotGoneMessage && (
                 <p role="alert" className="mb-3 rounded-xl bg-brand-golden-brown/10 px-4 py-3 font-sans text-body font-medium text-brand-golden-brown">
-                  {bookingError}
+                  {slotGoneMessage}
                 </p>
               )}
               {isLoadingSlots ? (
-                <div className="flex flex-col gap-2">
-                  <div className="h-10 animate-pulse rounded-xl bg-white" />
-                  <div className="h-10 animate-pulse rounded-xl bg-white" />
+                // Design brief, section 6: "a calm loading state, not a
+                // blank screen" -- a day-strip-shaped skeleton, not a
+                // generic bar, so the screen already reads as "the time
+                // picker" before the real data lands.
+                <div className="flex flex-col gap-4">
+                  <div className="h-16 animate-pulse rounded-2xl bg-white" />
+                  <div className="flex gap-2">
+                    {Array.from({ length: 7 }, (_, i) => (
+                      <div key={i} className="h-16 w-[52px] flex-shrink-0 animate-pulse rounded-xl bg-white" />
+                    ))}
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <div className="h-11 w-20 animate-pulse rounded-xl bg-white" />
+                    <div className="h-11 w-20 animate-pulse rounded-xl bg-white" />
+                    <div className="h-11 w-20 animate-pulse rounded-xl bg-white" />
+                  </div>
                 </div>
               ) : slotsError ? (
                 <p className="font-sans text-body text-brand-neutral-black/60">{slotsError}</p>
-              ) : slots.length === 0 ? (
-                <p className="rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-center font-sans text-body text-brand-neutral-black/60">
-                  No availability found in the current booking window. Please try again later.
-                </p>
               ) : (
-                <div className="flex flex-col gap-4">
-                  {groupSlotsByDay(slots).map((group) => (
-                    <div key={group.dateLabel}>
-                      <p className="mb-2 font-accent text-eyebrow font-bold uppercase tracking-wide text-brand-neutral-black/50">
-                        {group.dateLabel}
-                      </p>
-                      <div className="flex flex-wrap gap-2">
-                        {group.slots.map((slot) => (
-                          <button
-                            key={slot.startISO}
-                            type="button"
-                            onClick={() => pickSlot(slot)}
-                            className="rounded-xl border border-brand-prussian-blue px-4 py-2 font-sans text-body font-semibold text-brand-prussian-blue"
-                          >
-                            {formatSlotTime(slot.startISO)}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                <SlotPicker slots={slots} bookingWindowDays={bookingWindowDays} onSelectSlot={pickSlot} />
               )}
             </>
           )}
 
-          {step === "consent" && selectedSlot && selectedType && (
+          {step === "consent" && summaryDetails && (
             <div className="flex flex-col gap-4">
-              <div className="rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
-                <p className="font-sans text-body font-semibold text-brand-neutral-black">
-                  {selectedType.name} with {selectedClinicianName}
-                </p>
-                <p className="mt-0.5 font-sans text-body text-brand-neutral-black/60">
-                  {new Date(selectedSlot.startISO).toLocaleDateString([], { weekday: "long", day: "numeric", month: "long" })}
-                  {" · "}
-                  {formatSlotTime(selectedSlot.startISO)}–{formatSlotTime(selectedSlot.endISO)}
-                </p>
-              </div>
+              <BookingSummaryCard details={summaryDetails} />
 
               <div className="rounded-2xl bg-brand-safe-ivory/40 p-4">
                 <p className="font-accent text-eyebrow font-bold uppercase tracking-wide text-brand-neutral-black/50">
                   Cancellation Policy
                 </p>
-                {/* Bug 3, 22 Sept 2026 -- this used to render BOTH the
-                    director's own text AND a generated notice-period
-                    sentence together, saying the same thing twice. The
-                    generated sentence is now only the fallback for a
-                    clinic that hasn't written a policy at all -- never
-                    shown alongside the director's own words. */}
                 {cancellationPolicyText ? (
                   <p className="mt-2 font-sans text-body text-brand-neutral-black/80">{cancellationPolicyText}</p>
                 ) : (
@@ -506,33 +527,34 @@ export default function BookSessionPage() {
             </div>
           )}
 
-          {step === "confirmed" && confirmedSummary && (
-            <div className="flex flex-col items-center gap-2 rounded-2xl bg-white p-8 text-center shadow-sm">
-              <CheckIcon className="mb-2 h-8 w-8 text-brand-prussian-blue" />
-              <p className="font-heading text-h2 font-semibold text-brand-neutral-black">Booked.</p>
-              <p className="font-sans text-body text-brand-neutral-black/70">
-                {confirmedSummary.sessionTypeName} with {confirmedSummary.clinicianName}
-                <br />
-                {new Date(confirmedSummary.startISO).toLocaleDateString([], { weekday: "long", day: "numeric", month: "long" })}
-                {" · "}
-                {formatSlotTime(confirmedSummary.startISO)}–{formatSlotTime(confirmedSummary.endISO)}
-              </p>
-              <p className="mt-2 font-sans text-eyebrow text-brand-neutral-black/50">
-                A calendar invite has been sent to your email.
-              </p>
-              {confirmedSummary.meetLink && (
-                <a
-                  href={confirmedSummary.meetLink}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="mt-3 w-full rounded-2xl border border-brand-prussian-blue bg-brand-pastel-blue/20 px-6 py-3.5 text-center font-sans text-body font-semibold text-brand-prussian-blue"
-                >
-                  Join by video call
-                </a>
-              )}
+          {step === "confirmed" && summaryDetails && (
+            <div className="flex flex-col gap-4">
+              <div className="flex flex-col items-center gap-1 rounded-2xl bg-white p-6 text-center shadow-sm">
+                <CheckIcon className="mb-1 h-8 w-8 text-brand-prussian-blue" />
+                <p className="font-heading text-h2 font-semibold text-brand-neutral-black">Booked.</p>
+              </div>
+
+              <BookingSummaryCard details={summaryDetails} />
+
+              <div className="rounded-2xl bg-brand-pastel-blue/15 p-4">
+                <p className="font-sans text-body text-brand-neutral-black/80">
+                  This is on your calendar and in the app, under Upcoming on Home.
+                  {summaryDetails.locationMode === "online" && " The joining link above is on your calendar invitation too."}
+                </p>
+              </div>
+
+              <div className="rounded-2xl bg-brand-safe-ivory/40 p-4">
+                <p className="font-accent text-eyebrow font-bold uppercase tracking-wide text-brand-neutral-black/50">
+                  Need to cancel?
+                </p>
+                <p className="mt-2 font-sans text-body text-brand-neutral-black/80">
+                  You can cancel from Home, under Upcoming. Please give at least {cancellationNoticeHours} hours&apos; notice.
+                </p>
+              </div>
+
               <Link
                 href="/parent-dashboard"
-                className="mt-4 rounded-2xl bg-brand-prussian-blue px-6 py-3 font-sans text-body font-semibold text-white"
+                className="rounded-2xl bg-brand-prussian-blue px-6 py-3.5 text-center font-sans text-body font-semibold text-white"
               >
                 Done
               </Link>

@@ -93,6 +93,17 @@ export async function GET(request: Request) {
     clinicianName: details.full_name,
     clinicianSpecialty: details.specialty,
     slots,
+    // Booking-flow redesign, Sept 2026 -- the day strip (step 3) needs
+    // to know the real booking window to correctly bound its own
+    // pagination, and the summary card (step 4) needs the institution
+    // id to look up the clinic's own address (institutions' SELECT
+    // policy is `using (true)`, so the client reads it directly --
+    // see BookingSummaryCard.tsx's own caller in book/page.tsx).
+    // Returned here rather than a second RPC round trip, since this
+    // route already has both values in hand from get_bookable_
+    // clinician_details().
+    bookingWindowDays: details.booking_window_days ?? 30,
+    institutionId: details.institution_id ?? null,
     // Stage 2's own consent step needs these to show the parent what
     // they're agreeing to -- returned here rather than a second round
     // trip back through get_bookable_clinician_details(), since this

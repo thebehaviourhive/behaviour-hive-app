@@ -12,6 +12,7 @@ import { PrincipalBottomNav } from "@/components/principal/PrincipalBottomNav";
 import { HandOverPrincipalSheet } from "@/components/principal/HandOverPrincipalSheet";
 import { SetClinicHoursSheet } from "@/components/principal/SetClinicHoursSheet";
 import { SetWorkingDaysSheet } from "@/components/principal/SetWorkingDaysSheet";
+import { SetClinicAddressSheet } from "@/components/principal/SetClinicAddressSheet";
 import { SetBookingBufferSheet } from "@/components/principal/SetBookingBufferSheet";
 import { SetBookingWindowSheet } from "@/components/principal/SetBookingWindowSheet";
 import { SetCancellationNoticeSheet } from "@/components/principal/SetCancellationNoticeSheet";
@@ -143,6 +144,7 @@ export default function PrincipalClinicPage() {
   const [bookingWindowDays, setBookingWindowDays] = useState<number>(30);
   const [cancellationNoticeHours, setCancellationNoticeHours] = useState<number>(24);
   const [cancellationPolicyText, setCancellationPolicyText] = useState<string | null>(null);
+  const [clinicAddress, setClinicAddress] = useState<string | null>(null);
   const [staff, setStaff] = useState<StaffRow[]>([]);
   const [tagDimensionCount, setTagDimensionCount] = useState<number>(0);
   const [tagValueCount, setTagValueCount] = useState<number>(0);
@@ -164,6 +166,7 @@ export default function PrincipalClinicPage() {
   const [isBookingWindowOpen, setIsBookingWindowOpen] = useState(false);
   const [isCancellationNoticeOpen, setIsCancellationNoticeOpen] = useState(false);
   const [isCancellationPolicyOpen, setIsCancellationPolicyOpen] = useState(false);
+  const [isClinicAddressOpen, setIsClinicAddressOpen] = useState(false);
   const [institutionId, setInstitutionId] = useState<string | null>(null);
   const [isLogOutOpen, setIsLogOutOpen] = useState(false);
   const [isSigningOut, setIsSigningOut] = useState(false);
@@ -187,7 +190,7 @@ export default function PrincipalClinicPage() {
     const { data: staffRow, error: staffError } = await supabase
       .from("institution_staff")
       .select(
-        "institution_id, institutions(name, institution_code, clinic_hours_start_time, clinic_hours_end_time, working_days, booking_buffer_minutes, booking_window_days, cancellation_notice_hours, cancellation_policy_text)"
+        "institution_id, institutions(name, institution_code, clinic_hours_start_time, clinic_hours_end_time, working_days, booking_buffer_minutes, booking_window_days, cancellation_notice_hours, cancellation_policy_text, address)"
       )
       .eq("user_id", user.id)
       .eq("role", "principal")
@@ -211,6 +214,7 @@ export default function PrincipalClinicPage() {
       booking_window_days: number | null;
       cancellation_notice_hours: number | null;
       cancellation_policy_text: string | null;
+      address: string | null;
     }
     const institutionRecord = staffRow.institutions as unknown as ClinicSettingsRecord | ClinicSettingsRecord[] | null;
     const record = Array.isArray(institutionRecord) ? institutionRecord[0] : institutionRecord;
@@ -230,6 +234,7 @@ export default function PrincipalClinicPage() {
       setCancellationNoticeHours(record.cancellation_notice_hours);
     }
     setCancellationPolicyText(record?.cancellation_policy_text ?? null);
+    setClinicAddress(record?.address ?? null);
 
     const { data: rosterRows, error: rosterError } = await supabase.rpc("get_institution_staff_roster", {
       p_institution_id: staffRow.institution_id,
@@ -402,6 +407,22 @@ export default function PrincipalClinicPage() {
                     <button
                       type="button"
                       onClick={() => setIsWorkingDaysOpen(true)}
+                      className="flex-shrink-0 font-sans text-body font-semibold text-brand-prussian-blue"
+                    >
+                      Change
+                    </button>
+                  </div>
+
+                  <div className="flex items-center justify-between rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
+                    <div>
+                      <p className="font-sans text-body font-semibold text-brand-neutral-black">Address</p>
+                      <p className="mt-0.5 font-sans text-eyebrow text-brand-neutral-black/50">
+                        {clinicAddress ?? <span className="text-brand-golden-brown">Not set -- parents booking in-person won&apos;t see one</span>}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setIsClinicAddressOpen(true)}
                       className="flex-shrink-0 font-sans text-body font-semibold text-brand-prussian-blue"
                     >
                       Change
@@ -656,6 +677,19 @@ export default function PrincipalClinicPage() {
           onSaved={(newWorkingDays) => {
             setWorkingDays(newWorkingDays);
             setIsWorkingDaysOpen(false);
+          }}
+        />
+      )}
+
+      {institutionId && (
+        <SetClinicAddressSheet
+          isOpen={isClinicAddressOpen}
+          institutionId={institutionId}
+          currentAddress={clinicAddress}
+          onClose={() => setIsClinicAddressOpen(false)}
+          onSaved={(newAddress) => {
+            setClinicAddress(newAddress);
+            setIsClinicAddressOpen(false);
           }}
         />
       )}

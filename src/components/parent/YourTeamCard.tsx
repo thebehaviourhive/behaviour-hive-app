@@ -7,6 +7,7 @@ import { PeopleIcon } from "@/components/ui/icons";
 import { InlineErrorState } from "@/components/ui/InlineErrorState";
 import { RoleLabel } from "@/components/ui/RoleLabel";
 import { usePassportInstitutionVocabulary } from "@/hooks/usePassportInstitutionVocabulary";
+import { getInitials } from "@/lib/initials";
 
 interface TeamMember {
   teacherId: string;
@@ -17,12 +18,6 @@ interface TeamMember {
 const ROLE_STYLE: Record<string, string> = {
   clinician: "bg-brand-golden-brown/10 text-brand-golden-brown",
 };
-function getInitials(fullName: string): string {
-  const parts = fullName.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return "?";
-  if (parts.length === 1) return parts[0][0]?.toUpperCase() ?? "?";
-  return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase();
-}
 
 function getLastName(fullName: string): string {
   const parts = fullName.trim().split(/\s+/).filter(Boolean);
