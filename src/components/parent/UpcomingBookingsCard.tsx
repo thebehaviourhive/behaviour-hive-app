@@ -61,6 +61,12 @@ export function UpcomingBookingsCard({ passportId }: { passportId: string | null
   const [cancelTarget, setCancelTarget] = useState<UpcomingBooking | null>(null);
   const [isCancelling, setIsCancelling] = useState(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
+  // Standing rule, 22 Sept 2026 -- everything on the parent dashboard
+  // is dismissible. A cancelled booking is a DEAD item (already closed,
+  // nothing left to do): dismiss just hides it, no warning, per
+  // dismiss_upcoming_booking_notice() (0291) -- per-guardian, so one
+  // guardian dismissing never hides it from another.
+  const [dismissingId, setDismissingId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!passportId) return;
@@ -132,6 +138,19 @@ export function UpcomingBookingsCard({ passportId }: { passportId: string | null
       setIsCancelling(false);
       setCancelError("Couldn't cancel this session.");
     }
+  }
+
+  async function handleDismiss(bookingId: string) {
+    setDismissingId(bookingId);
+    const supabase = createClient();
+    const { error } = await supabase.rpc("dismiss_upcoming_booking_notice", { p_booking_id: bookingId });
+    if (error) {
+      console.error("Failed to dismiss booking notice:", error);
+      setDismissingId(null);
+      return;
+    }
+    setBookings((prev) => prev.filter((b) => b.bookingId !== bookingId));
+    setDismissingId(null);
   }
 
   if (isLoading || bookings.length === 0) {
@@ -245,6 +264,17 @@ export function UpcomingBookingsCard({ passportId }: { passportId: string | null
                     Cancel session
                   </button>
                 ))}
+
+              {isCancelled && (
+                <button
+                  type="button"
+                  onClick={() => handleDismiss(booking.bookingId)}
+                  disabled={dismissingId === booking.bookingId}
+                  className="mt-2 text-xs font-semibold text-brand-neutral-black/50 disabled:opacity-40"
+                >
+                  {dismissingId === booking.bookingId ? "Dismissing…" : "Dismiss"}
+                </button>
+              )}
             </div>
           );
         })}

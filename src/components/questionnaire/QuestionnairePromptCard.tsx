@@ -95,12 +95,8 @@ export function QuestionnairePromptCard({
       <div className={stackClassName}>
         {requests.map((request) => {
           const instrumentLabel = INSTRUMENT_LABELS[request.instrumentType];
-          const isCancelled = request.status === "cancelled";
-          const title = isCancelled
-            ? (track === "teacher" || track === "sna"
-                ? `${getChildDisplayName(request.childName)}'s ${instrumentLabel} request was cancelled -- the assessment has been finalised`
-                : `Your ${instrumentLabel} request about ${request.childName} was cancelled -- the assessment has been finalised`)
-            : track === "teacher" || track === "sna"
+          const title =
+            track === "teacher" || track === "sna"
               ? `${getChildDisplayName(request.childName)}'s clinician has asked you to fill out a ${instrumentLabel} questionnaire`
               : `Your clinician has asked you to fill out a ${instrumentLabel} questionnaire about ${request.childName}`;
           return (
@@ -112,45 +108,32 @@ export function QuestionnairePromptCard({
             // card's own instrument-naming copy are what keep the two
             // visually distinguishable when both are stacked.
             //
-            // Cancelled (migration 0199/0197's own finalize_fba_report())
-            // gets a deliberately DIFFERENT, muted treatment -- the
-            // golden "act now" language would be actively wrong for
-            // something that no longer needs action. Still tappable
-            // (opens QuestionnaireFlow's own explanatory screen), just
-            // not urging anything.
+            // A cancelled request (finalize_fba_report()'s own auto-
+            // cancel, migration 0199) is never returned by
+            // get_my_instrument_requests() at all any more (0291) -- it
+            // just stops being here, the same "resolved item simply
+            // disappears" shape AssessmentRequestPromptCard's own
+            // sibling mechanism already uses. No cancelled treatment to
+            // render, no dismiss needed for it.
             <button
               key={request.id}
               type="button"
               onClick={() => setActiveRequest(request)}
-              className={`flex w-full items-center gap-3 rounded-2xl border-l-4 p-4 text-left transition-transform active:scale-[0.99] ${
-                isCancelled
-                  ? "border-black/15 bg-white shadow-sm"
-                  : "border-brand-golden-brown bg-brand-safe-ivory/30 shadow-md"
-              }`}
+              className="flex w-full items-center gap-3 rounded-2xl border-l-4 border-brand-golden-brown bg-brand-safe-ivory/30 p-4 text-left shadow-md transition-transform active:scale-[0.99]"
             >
               <span
                 aria-hidden
-                className={`flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full text-lg ${
-                  isCancelled ? "bg-black/5" : "animate-pulse bg-brand-golden-brown/20"
-                }`}
+                className="flex h-10 w-10 flex-shrink-0 animate-pulse items-center justify-center rounded-full bg-brand-golden-brown/20 text-lg"
               >
-                {isCancelled ? "🚫" : "📋"}
+                📋
               </span>
+              <span className="flex-1 text-sm font-semibold text-brand-neutral-black">{title}</span>
               <span
-                className={`flex-1 text-sm font-semibold ${
-                  isCancelled ? "text-brand-neutral-black/60" : "text-brand-neutral-black"
-                }`}
+                aria-hidden
+                className="flex-shrink-0 rounded-full bg-brand-golden-brown px-4 py-2 text-xs font-semibold text-white"
               >
-                {title}
+                {request.status === "in_progress" ? "Continue" : "Start"}
               </span>
-              {!isCancelled && (
-                <span
-                  aria-hidden
-                  className="flex-shrink-0 rounded-full bg-brand-golden-brown px-4 py-2 text-xs font-semibold text-white"
-                >
-                  {request.status === "in_progress" ? "Continue" : "Start"}
-                </span>
-              )}
             </button>
           );
         })}

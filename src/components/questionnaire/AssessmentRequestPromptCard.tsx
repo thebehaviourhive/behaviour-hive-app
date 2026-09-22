@@ -46,6 +46,13 @@ export function AssessmentRequestPromptCard({
   const [requests, setRequests] = useState<MyAssessmentToComplete[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [activeRequest, setActiveRequest] = useState<MyAssessmentToComplete | null>(null);
+  // Standing rule, 22 Sept 2026 -- everything on the parent dashboard is
+  // dismissible. A LIVE REQUEST: dismiss with a warning naming what
+  // it's for, and the assigning clinician sees "Dismissed by the
+  // respondent" (AssessmentResponseSheetEditor.tsx). A Remind clears
+  // the dismissal -- a fresh ask.
+  const [confirmDismissId, setConfirmDismissId] = useState<string | null>(null);
+  const [isDismissing, setIsDismissing] = useState(false);
 
   const load = useCallback(async () => {
     setIsLoading(true);
@@ -65,6 +72,19 @@ export function AssessmentRequestPromptCard({
     load();
   }, [load]);
 
+  async function handleDismiss(assessmentId: string) {
+    setIsDismissing(true);
+    const supabase = createClient();
+    const { error } = await supabase.rpc("dismiss_assessment_response_request", { p_assessment_id: assessmentId });
+    setIsDismissing(false);
+    if (error) {
+      console.error("Failed to dismiss assessment request:", error);
+      return;
+    }
+    setConfirmDismissId(null);
+    setRequests((prev) => prev.filter((r) => r.id !== assessmentId));
+  }
+
   if (isLoading || requests.length === 0) {
     return null;
   }
@@ -79,29 +99,68 @@ export function AssessmentRequestPromptCard({
           // QuestionnairePromptCard -- a distinct icon (📝) keeps the
           // two visually distinguishable when both are stacked on the
           // same dashboard.
-          <button
+          <div
             key={request.id}
-            type="button"
-            onClick={() => setActiveRequest(request)}
-            className="flex w-full items-center gap-3 rounded-2xl border-l-4 border-brand-golden-brown bg-brand-safe-ivory/30 p-4 text-left shadow-md transition-transform active:scale-[0.99]"
+            className="rounded-2xl border-l-4 border-brand-golden-brown bg-brand-safe-ivory/30 p-4 shadow-md"
           >
-            <span
-              aria-hidden
-              className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-brand-golden-brown/20 text-lg animate-pulse"
+            <button
+              type="button"
+              onClick={() => setActiveRequest(request)}
+              className="flex w-full items-center gap-3 text-left transition-transform active:scale-[0.99]"
             >
-              📝
-            </span>
-            <span className="flex-1 text-sm font-semibold text-brand-neutral-black">
-              {request.clinicianName} has asked you to fill out a {request.instrumentName} for{" "}
-              {getChildDisplayName(request.childName)}
-            </span>
-            <span
-              aria-hidden
-              className="flex-shrink-0 rounded-full bg-brand-golden-brown px-4 py-2 text-xs font-semibold text-white"
-            >
-              Start
-            </span>
-          </button>
+              <span
+                aria-hidden
+                className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-brand-golden-brown/20 text-lg animate-pulse"
+              >
+                📝
+              </span>
+              <span className="flex-1 text-sm font-semibold text-brand-neutral-black">
+                {request.clinicianName} has asked you to fill out a {request.instrumentName} for{" "}
+                {getChildDisplayName(request.childName)}
+              </span>
+              <span
+                aria-hidden
+                className="flex-shrink-0 rounded-full bg-brand-golden-brown px-4 py-2 text-xs font-semibold text-white"
+              >
+                Start
+              </span>
+            </button>
+
+            {confirmDismissId === request.id ? (
+              <div className="mt-3 rounded-xl bg-white/60 p-3">
+                <p className="text-xs text-brand-neutral-black/80">
+                  Are you sure you want to dismiss this? It may be needed for {request.clinicianName}&apos;s{" "}
+                  {request.instrumentName} for {getChildDisplayName(request.childName)}.
+                </p>
+                <div className="mt-2 flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleDismiss(request.id)}
+                    disabled={isDismissing}
+                    className="rounded-full bg-brand-golden-brown px-4 py-1.5 text-xs font-semibold text-white disabled:opacity-40"
+                  >
+                    {isDismissing ? "Dismissing…" : "Yes, dismiss"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setConfirmDismissId(null)}
+                    disabled={isDismissing}
+                    className="rounded-full border border-black/10 px-4 py-1.5 text-xs font-semibold text-black/60"
+                  >
+                    Keep it
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setConfirmDismissId(request.id)}
+                className="mt-2 text-xs font-semibold text-brand-neutral-black/50"
+              >
+                Not needed?
+              </button>
+            )}
+          </div>
         ))}
       </div>
 

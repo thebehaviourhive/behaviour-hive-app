@@ -48,6 +48,11 @@ export interface Assessment {
   assignedAt: string | null;
   lastRemindedAt: string | null;
   instruction: string;
+  // Standing rule, 22 Sept 2026 -- the respondent dismissed this from
+  // their own dashboard (dismiss_assessment_response_request(), 0291).
+  // Read-only here: cleared only by remind_assessment_respondent()'s
+  // own fresh ask, never by a client-side patch.
+  respondentDismissedAt: string | null;
 }
 
 interface AssessmentRow {
@@ -70,6 +75,7 @@ interface AssessmentRow {
   assigned_at: string | null;
   last_reminded_at: string | null;
   instruction: string | null;
+  respondent_dismissed_at: string | null;
   assessment_instruments: { name: string; item_count: number | null; response_scale: string[] | null } | null;
 }
 
@@ -97,6 +103,7 @@ function mapAssessment(row: AssessmentRow): Assessment {
     assignedAt: row.assigned_at,
     lastRemindedAt: row.last_reminded_at,
     instruction: row.instruction ?? "",
+    respondentDismissedAt: row.respondent_dismissed_at,
   };
 }
 

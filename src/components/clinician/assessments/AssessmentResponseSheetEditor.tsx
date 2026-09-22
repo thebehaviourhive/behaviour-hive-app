@@ -224,8 +224,18 @@ export function AssessmentResponseSheetEditor({
   const isAssigned = !!assessment.assignedRespondentId;
   const assignedCandidate = candidates?.find((c) => c.recipientId === assessment.assignedRespondentId);
   const answeredCount = Object.keys(assessment.responses ?? {}).length;
-  const assignedStatus =
-    answeredCount === 0 ? "Not started" : answeredCount < rowNumbers.length ? "In progress" : "All rows answered";
+  // Standing rule, 22 Sept 2026 -- a dismissed request is a fact this
+  // screen must surface, not just a silent absence: dismissed_at is
+  // cleared by remind_assessment_respondent() (a fresh ask), so Remind
+  // doubles as "ask again" for a dismissed request, not just a nudge.
+  const isDismissedByRespondent = !!assessment.respondentDismissedAt;
+  const assignedStatus = isDismissedByRespondent
+    ? "Dismissed by the respondent"
+    : answeredCount === 0
+      ? "Not started"
+      : answeredCount < rowNumbers.length
+        ? "In progress"
+        : "All rows answered";
 
   return (
     <div className="flex min-h-full flex-1 flex-col bg-brand-off-white/40">
@@ -290,7 +300,11 @@ export function AssessmentResponseSheetEditor({
                 <p className="text-sm font-semibold text-brand-neutral-black">
                   Assigned to {assignedCandidate?.fullName ?? "the assigned respondent"}
                 </p>
-                <p className="mt-1 text-xs text-brand-neutral-black/60">
+                <p
+                  className={`mt-1 text-xs ${
+                    isDismissedByRespondent ? "font-semibold text-brand-golden-brown" : "text-brand-neutral-black/60"
+                  }`}
+                >
                   {assignedStatus}
                   {assessment.lastRemindedAt &&
                     ` · Last reminded ${new Date(assessment.lastRemindedAt).toLocaleDateString("en-IE")}`}

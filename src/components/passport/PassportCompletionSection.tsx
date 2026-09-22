@@ -8,6 +8,7 @@ interface RequestRow {
   recipient_name: string | null;
   target_section: "a" | "e";
   created_at: string;
+  dismissed_at: string | null;
 }
 
 const SECTION_LABEL: Record<"a" | "e", string> = {
@@ -108,6 +109,15 @@ export function PassportCompletionSection({
             {requests.map((r) => (
               <li key={r.id} className="text-sm text-black/70">
                 {r.recipient_name ?? "A guardian"}
+                {/* Standing rule, 22 Sept 2026 -- a dismissed live
+                    request must be visible to whoever asked, so they
+                    aren't left waiting for an answer that's never
+                    coming. request_passport_completion() (0291) clears
+                    this the moment this same person is asked again --
+                    "Ask another guardian" below is that re-ask. */}
+                {r.dismissed_at && (
+                  <span className="ml-1.5 font-semibold text-brand-golden-brown">— Dismissed</span>
+                )}
               </li>
             ))}
           </ul>
