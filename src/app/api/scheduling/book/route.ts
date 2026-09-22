@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getFreebusy } from "@/lib/google/freebusy";
 import { createCalendarEvent, deleteCalendarEvent } from "@/lib/google/calendarEvents";
-import { hasConflict, TRAVEL_MINUTES, getSessionMode, type BookableSessionType } from "@/lib/scheduling/availability";
+import { hasConflict } from "@/lib/scheduling/availability";
 import { formatPassportReference } from "@/lib/scheduling/passportReference";
 
 // PRD 9, Stage 2 -- the all-or-nothing write. Three real steps, in
@@ -13,8 +13,9 @@ import { formatPassportReference } from "@/lib/scheduling/passportReference";
 // call (create_pending_booking() -- its own EXCLUDE constraint is the
 // real, final backstop against a race this re-check might still have
 // missed, caught here, before Google is ever touched); (3) the real
-// Google event(s) -- one for online, three for in-person (travel,
-// session, travel).
+// Google event(s) -- travel-before/session/travel-after, one, two, or
+// three events depending on what the chosen type's own travel minutes
+// call for.
 //
 // THE HONEST LIMIT ON "ALL-OR-NOTHING": Google's Calendar API has no
 // transaction primitive. A best-effort rollback (deleting whatever
@@ -26,26 +27,42 @@ import { formatPassportReference } from "@/lib/scheduling/passportReference";
 // the same principle Stage 1 already established for drift. The parent
 // gets a plain, synchronous failure message, never a spinner or a
 // silent pending state.
+//
+// Session types, fixed -> clinic-configurable catalogue (migration
+// 0281). sessionType (a literal "online"/"in_person" string) is now
+// sessionTypeId (a real session_types row's id) -- resolved server-side
+// via get_bookable_session_types(), under the same authorization check
+// create_pending_booking() itself re-derives independently ("validate
+// at write time, don't trust the caller" applies to the calling ROUTE
+// just as much as a client UI, since create_pending_booking() is a
+// SECURITY DEFINER RPC a crafted request could call directly). Travel-
+// block creation is now driven by the TYPE'S OWN travel_before_minutes/
+// travel_after_minutes independently (Decision 1 -- never assumed
+// symmetric, never derived from location_mode) -- an in-person type's
+// seeded 30/30 produces both blocks exactly as before; an online type
+// with genuine prep time configured (Decision 2) would produce them
+// too, even though it's "online". Only the Meet link is gated on
+// location_mode, since that's genuinely what it means (a video call
+// link belongs on an online session, never an in-person or elsewhere
+// one) -- everything else is driven by the type's own real numbers.
 export async function POST(request: Request) {
   const body = await request.json().catch(() => null);
   if (!body) {
     return NextResponse.json({ error: "Invalid request." }, { status: 400 });
   }
-  const { passportId, clinicianId, sessionType, sessionStartISO, sessionEndISO } = body as {
+  const { passportId, clinicianId, sessionTypeId, sessionStartISO, sessionEndISO } = body as {
     passportId?: string;
     clinicianId?: string;
-    sessionType?: string;
+    sessionTypeId?: string;
     sessionStartISO?: string;
     sessionEndISO?: string;
   };
 
-  if (!passportId || !clinicianId || !sessionStartISO || !sessionEndISO) {
-    return NextResponse.json({ error: "passportId, clinicianId, sessionStartISO, and sessionEndISO are all required." }, { status: 400 });
-  }
-  // school_observation refused at the boundary, same as the
-  // availability route -- never bookable by a parent, real or crafted.
-  if (sessionType !== "online" && sessionType !== "in_person") {
-    return NextResponse.json({ error: "This session type isn't available to book here." }, { status: 400 });
+  if (!passportId || !clinicianId || !sessionTypeId || !sessionStartISO || !sessionEndISO) {
+    return NextResponse.json(
+      { error: "passportId, clinicianId, sessionTypeId, sessionStartISO, and sessionEndISO are all required." },
+      { status: 400 }
+    );
   }
 
   const supabase = await createClient();
@@ -64,6 +81,27 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: detailsError?.message ?? "Couldn't resolve this clinician." }, { status: 403 });
   }
 
+  const { data: types, error: typesError } = await supabase.rpc("get_bookable_session_types", {
+    p_passport_id: passportId,
+    p_clinician_id: clinicianId,
+  });
+  if (typesError) {
+    return NextResponse.json({ error: typesError.message }, { status: 403 });
+  }
+  const sessionType = (
+    (types ?? []) as {
+      id: string;
+      name: string;
+      location_mode: string;
+      length_minutes: number;
+      travel_before_minutes: number;
+      travel_after_minutes: number;
+    }[]
+  ).find((t) => t.id === sessionTypeId);
+  if (!sessionType) {
+    return NextResponse.json({ error: "This session type isn't available to book here." }, { status: 400 });
+  }
+
   // Bug 2, 22 Sept 2026 -- the availability route already refuses to
   // OFFER a non-working day (Europe/Dublin wall-clock, matching
   // computeAvailableSlots' own convention), but this route never
@@ -79,20 +117,14 @@ export async function POST(request: Request) {
   }
 
   // Travel bounds computed server-side, never trusted from the client
-  // -- the same TRAVEL_MINUTES constant computeAvailableSlots() itself
-  // uses, imported rather than re-typed.
+  // -- each independently either present or absent depending on the
+  // chosen type's own configured minutes (Decision 1).
   const sessionStart = new Date(sessionStartISO);
   const sessionEnd = new Date(sessionEndISO);
-  // Bug 4, 22 Sept 2026 -- both of these used to compare sessionType
-  // directly against a literal string. Session types are about to
-  // become clinic-configurable, so both now ask what MODE the chosen
-  // type is (does it need travel blocks, does it need a video link) --
-  // see getSessionMode()'s own header for why this is the one place
-  // that changes when that lands, not every call site.
-  const sessionMode = getSessionMode(sessionType as BookableSessionType);
-  const isInPerson = sessionMode === "in_person";
-  const travelBeforeStart = isInPerson ? new Date(sessionStart.getTime() - TRAVEL_MINUTES * 60000) : null;
-  const travelAfterEnd = isInPerson ? new Date(sessionEnd.getTime() + TRAVEL_MINUTES * 60000) : null;
+  const travelBeforeStart =
+    sessionType.travel_before_minutes > 0 ? new Date(sessionStart.getTime() - sessionType.travel_before_minutes * 60000) : null;
+  const travelAfterEnd =
+    sessionType.travel_after_minutes > 0 ? new Date(sessionEnd.getTime() + sessionType.travel_after_minutes * 60000) : null;
 
   const candidateStart = travelBeforeStart ?? sessionStart;
   const candidateEnd = travelAfterEnd ?? sessionEnd;
@@ -116,7 +148,7 @@ export async function POST(request: Request) {
   const { data: bookingId, error: createError } = await supabase.rpc("create_pending_booking", {
     p_passport_id: passportId,
     p_clinician_id: clinicianId,
-    p_session_type: sessionType,
+    p_session_type_id: sessionTypeId,
     p_session_start_at: sessionStart.toISOString(),
     p_session_end_at: sessionEnd.toISOString(),
     p_travel_before_start_at: travelBeforeStart?.toISOString() ?? null,
@@ -142,11 +174,11 @@ export async function POST(request: Request) {
   let meetLink: string | null = null;
 
   try {
-    if (isInPerson) {
+    if (travelBeforeStart) {
       const before = await createCalendarEvent({
         workspaceEmail: details.workspace_email,
         summary: "Travel time",
-        startISO: travelBeforeStart!.toISOString(),
+        startISO: travelBeforeStart.toISOString(),
         endISO: sessionStart.toISOString(),
       });
       created.push(before);
@@ -161,12 +193,16 @@ export async function POST(request: Request) {
       // entirely this app's own UI, not Google's one shared summary
       // field -- see this route's own header for why PRD section 6's
       // "different title per side" can't be literal on one Google
-      // event with one attendee).
+      // event with one attendee). Deliberately never the type's own
+      // NAME (Decision 6) -- a director-authored type name ("ADHD
+      // Assessment") on a shared calendar would put a diagnosis on it,
+      // exactly what the passport reference convention exists to
+      // prevent.
       summary: `Clinical Session - ${passportReference}`,
       startISO: sessionStart.toISOString(),
       endISO: sessionEnd.toISOString(),
       attendeeEmail: user.email,
-      withMeetLink: sessionMode === "online",
+      withMeetLink: sessionType.location_mode === "online",
       privateProperties: { passport_id: passportId, booking_id: bookingId },
     });
     created.push(session);
@@ -174,12 +210,12 @@ export async function POST(request: Request) {
     etag = session.etag;
     meetLink = session.meetLink ?? null;
 
-    if (isInPerson) {
+    if (travelAfterEnd) {
       const after = await createCalendarEvent({
         workspaceEmail: details.workspace_email,
         summary: "Travel time",
         startISO: sessionEnd.toISOString(),
-        endISO: travelAfterEnd!.toISOString(),
+        endISO: travelAfterEnd.toISOString(),
       });
       created.push(after);
       travelAfterEventId = after.id;
@@ -216,7 +252,8 @@ export async function POST(request: Request) {
   return NextResponse.json({
     bookingId,
     clinicianName: details.full_name,
-    sessionType,
+    sessionTypeName: sessionType.name,
+    sessionTypeMode: sessionType.location_mode,
     sessionStartISO: sessionStart.toISOString(),
     sessionEndISO: sessionEnd.toISOString(),
     meetLink,

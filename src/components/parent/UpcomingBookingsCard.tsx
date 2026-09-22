@@ -21,7 +21,7 @@ import { createClient } from "@/lib/supabase/client";
 interface UpcomingBooking {
   bookingId: string;
   clinicianName: string;
-  sessionType: string;
+  sessionTypeName: string;
   sessionStartAt: string;
   sessionEndAt: string;
   googleSyncStatus: string;
@@ -47,11 +47,11 @@ export function UpcomingBookingsCard({ passportId }: { passportId: string | null
     const { data, error } = await supabase.rpc("get_my_upcoming_bookings", { p_passport_id: passportId });
     if (!error) {
       setBookings(
-        ((data ?? []) as { booking_id: string; clinician_name: string; session_type: string; session_start_at: string; session_end_at: string; google_sync_status: string; google_meet_link: string | null }[]).map(
+        ((data ?? []) as { booking_id: string; clinician_name: string; session_type_name: string; session_start_at: string; session_end_at: string; google_sync_status: string; google_meet_link: string | null }[]).map(
           (row) => ({
             bookingId: row.booking_id,
             clinicianName: row.clinician_name,
-            sessionType: row.session_type,
+            sessionTypeName: row.session_type_name,
             sessionStartAt: row.session_start_at,
             sessionEndAt: row.session_end_at,
             googleSyncStatus: row.google_sync_status,
@@ -108,7 +108,7 @@ export function UpcomingBookingsCard({ passportId }: { passportId: string | null
               </span>
               <div className="flex-1">
                 <p className="text-sm font-semibold text-brand-neutral-black">
-                  {booking.sessionType === "online" ? "Online" : "In-person"} with {booking.clinicianName}
+                  {booking.sessionTypeName} with {booking.clinicianName}
                 </p>
                 <p className="text-xs text-black/50">{formatWhen(booking.sessionStartAt)}</p>
                 {booking.googleSyncStatus === "sync_failed" && (

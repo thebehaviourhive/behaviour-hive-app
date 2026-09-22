@@ -34,8 +34,16 @@ import { CheckIcon } from "@/components/ui/icons";
 //
 // Five steps: clinician (skipped if arriving with one already) -> type
 // -> slot -> policy consent -> confirm. Type chosen before availability
-// is computed (PRD 9 section 3a) -- the API boundary already refuses
-// school_observation; this UI never offers it as an option at all.
+// is computed (PRD 9 section 3a).
+//
+// Session types, fixed -> clinic-configurable catalogue (migration
+// 0281) -- the "type" step used to be two hardcoded buttons (Online,
+// In-person). It's now a real per-clinic catalogue read via
+// get_bookable_session_types(), which already excludes anything
+// retired or staff-only (is_active/is_parent_bookable both filtered
+// server-side) -- this screen never needs its own boundary check the
+// way the old literal-string comparison did, since a type that
+// shouldn't be offered simply never appears in the list.
 
 interface BookableClinician {
   clinicianId: string;
@@ -43,12 +51,19 @@ interface BookableClinician {
   specialty: string;
 }
 
+interface BookableSessionType {
+  id: string;
+  name: string;
+  description: string | null;
+  locationMode: string;
+  lengthMinutes: number;
+}
+
 interface AvailableSlot {
   startISO: string;
   endISO: string;
 }
 
-type SessionType = "online" | "in_person";
 type Step = "clinician" | "type" | "slot" | "consent" | "confirmed";
 
 function groupSlotsByDay(slots: AvailableSlot[]): { dateLabel: string; slots: AvailableSlot[] }[] {
@@ -69,6 +84,13 @@ function formatSlotTime(iso: string): string {
   return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
+function formatTypeSubtitle(type: BookableSessionType): string {
+  if (type.description) return type.description;
+  const modeLabel =
+    type.locationMode === "online" ? "by video call" : type.locationMode === "in_person" ? "at the clinic" : "in person";
+  return `${type.lengthMinutes} minutes, ${modeLabel}`;
+}
+
 export default function BookSessionPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -84,7 +106,11 @@ export default function BookSessionPage() {
 
   const [selectedClinicianId, setSelectedClinicianId] = useState<string | null>(preselectedClinicianId);
   const [selectedClinicianName, setSelectedClinicianName] = useState<string | null>(null);
-  const [sessionType, setSessionType] = useState<SessionType | null>(null);
+
+  const [sessionTypes, setSessionTypes] = useState<BookableSessionType[]>([]);
+  const [isLoadingTypes, setIsLoadingTypes] = useState(false);
+  const [typesError, setTypesError] = useState<string | null>(null);
+  const [selectedType, setSelectedType] = useState<BookableSessionType | null>(null);
 
   const [slots, setSlots] = useState<AvailableSlot[]>([]);
   const [isLoadingSlots, setIsLoadingSlots] = useState(false);
@@ -99,7 +125,7 @@ export default function BookSessionPage() {
   const [bookingError, setBookingError] = useState<string | null>(null);
   const [confirmedSummary, setConfirmedSummary] = useState<{
     clinicianName: string;
-    sessionType: SessionType;
+    sessionTypeName: string;
     startISO: string;
     endISO: string;
     meetLink: string | null;
@@ -137,13 +163,52 @@ export default function BookSessionPage() {
     };
   }, [step, passportId]);
 
+  useEffect(() => {
+    if (step !== "type" || !passportId || !selectedClinicianId) return;
+    let isMounted = true;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setIsLoadingTypes(true);
+    setTypesError(null);
+    const supabase = createClient();
+    supabase
+      .rpc("get_bookable_session_types", { p_passport_id: passportId, p_clinician_id: selectedClinicianId })
+      .then(({ data, error }: { data: unknown; error: { message: string } | null }) => {
+        if (!isMounted) return;
+        if (error) {
+          setTypesError("Couldn't load session types.");
+          setIsLoadingTypes(false);
+          return;
+        }
+        const rows = (data ?? []) as {
+          id: string;
+          name: string;
+          description: string | null;
+          location_mode: string;
+          length_minutes: number;
+        }[];
+        setSessionTypes(
+          rows.map((row) => ({
+            id: row.id,
+            name: row.name,
+            description: row.description,
+            locationMode: row.location_mode,
+            lengthMinutes: row.length_minutes,
+          }))
+        );
+        setIsLoadingTypes(false);
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, [step, passportId, selectedClinicianId]);
+
   const loadSlots = useCallback(async () => {
-    if (!passportId || !selectedClinicianId || !sessionType) return;
+    if (!passportId || !selectedClinicianId || !selectedType) return;
     setIsLoadingSlots(true);
     setSlotsError(null);
     setSelectedSlot(null);
     try {
-      const params = new URLSearchParams({ passportId, clinicianId: selectedClinicianId, sessionType });
+      const params = new URLSearchParams({ passportId, clinicianId: selectedClinicianId, sessionTypeId: selectedType.id });
       const response = await fetch(`/api/scheduling/availability?${params.toString()}`);
       const data = await response.json();
       if (!response.ok) {
@@ -160,7 +225,7 @@ export default function BookSessionPage() {
       setSlotsError("Couldn't load availability.");
       setIsLoadingSlots(false);
     }
-  }, [passportId, selectedClinicianId, sessionType]);
+  }, [passportId, selectedClinicianId, selectedType]);
 
   useEffect(() => {
     if (step === "slot") {
@@ -168,7 +233,7 @@ export default function BookSessionPage() {
       loadSlots();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [step, selectedClinicianId, sessionType]);
+  }, [step, selectedClinicianId, selectedType]);
 
   function pickClinician(clinician: BookableClinician) {
     setSelectedClinicianId(clinician.clinicianId);
@@ -176,8 +241,8 @@ export default function BookSessionPage() {
     setStep("type");
   }
 
-  function pickType(type: SessionType) {
-    setSessionType(type);
+  function pickType(type: BookableSessionType) {
+    setSelectedType(type);
     setStep("slot");
   }
 
@@ -189,7 +254,7 @@ export default function BookSessionPage() {
   }
 
   async function confirmBooking() {
-    if (!passportId || !selectedClinicianId || !sessionType || !selectedSlot) return;
+    if (!passportId || !selectedClinicianId || !selectedType || !selectedSlot) return;
     setIsBooking(true);
     setBookingError(null);
     try {
@@ -199,7 +264,7 @@ export default function BookSessionPage() {
         body: JSON.stringify({
           passportId,
           clinicianId: selectedClinicianId,
-          sessionType,
+          sessionTypeId: selectedType.id,
           sessionStartISO: selectedSlot.startISO,
           sessionEndISO: selectedSlot.endISO,
         }),
@@ -219,7 +284,7 @@ export default function BookSessionPage() {
       }
       setConfirmedSummary({
         clinicianName: data.clinicianName,
-        sessionType: data.sessionType,
+        sessionTypeName: data.sessionTypeName,
         startISO: data.sessionStartISO,
         endISO: data.sessionEndISO,
         meetLink: data.meetLink ?? null,
@@ -310,27 +375,37 @@ export default function BookSessionPage() {
           )}
 
           {step === "type" && (
-            <div className="flex flex-col gap-2">
-              <p className="mb-2 font-sans text-body text-brand-neutral-black/60">
-                {selectedClinicianName ? `Booking with ${selectedClinicianName}. ` : ""}What kind of session?
-              </p>
-              <button
-                type="button"
-                onClick={() => pickType("online")}
-                className="rounded-2xl border border-black/5 bg-white p-4 text-left shadow-sm"
-              >
-                <p className="font-sans text-body font-semibold text-brand-neutral-black">Online</p>
-                <p className="mt-0.5 font-sans text-eyebrow text-brand-neutral-black/50">One hour, by video call</p>
-              </button>
-              <button
-                type="button"
-                onClick={() => pickType("in_person")}
-                className="rounded-2xl border border-black/5 bg-white p-4 text-left shadow-sm"
-              >
-                <p className="font-sans text-body font-semibold text-brand-neutral-black">In-person</p>
-                <p className="mt-0.5 font-sans text-eyebrow text-brand-neutral-black/50">One hour, at the clinic</p>
-              </button>
-            </div>
+            <>
+              {isLoadingTypes ? (
+                <div className="flex flex-col gap-2">
+                  <div className="h-16 animate-pulse rounded-2xl bg-white" />
+                  <div className="h-16 animate-pulse rounded-2xl bg-white" />
+                </div>
+              ) : typesError ? (
+                <p className="font-sans text-body text-brand-neutral-black/60">{typesError}</p>
+              ) : sessionTypes.length === 0 ? (
+                <p className="rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-center font-sans text-body text-brand-neutral-black/60">
+                  Your clinic hasn&apos;t set up anything bookable here yet. Please contact them directly.
+                </p>
+              ) : (
+                <div className="flex flex-col gap-2">
+                  <p className="mb-2 font-sans text-body text-brand-neutral-black/60">
+                    {selectedClinicianName ? `Booking with ${selectedClinicianName}. ` : ""}What kind of session?
+                  </p>
+                  {sessionTypes.map((type) => (
+                    <button
+                      key={type.id}
+                      type="button"
+                      onClick={() => pickType(type)}
+                      className="rounded-2xl border border-black/5 bg-white p-4 text-left shadow-sm"
+                    >
+                      <p className="font-sans text-body font-semibold text-brand-neutral-black">{type.name}</p>
+                      <p className="mt-0.5 font-sans text-eyebrow text-brand-neutral-black/50">{formatTypeSubtitle(type)}</p>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </>
           )}
 
           {step === "slot" && (
@@ -377,11 +452,11 @@ export default function BookSessionPage() {
             </>
           )}
 
-          {step === "consent" && selectedSlot && (
+          {step === "consent" && selectedSlot && selectedType && (
             <div className="flex flex-col gap-4">
               <div className="rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
                 <p className="font-sans text-body font-semibold text-brand-neutral-black">
-                  {sessionType === "online" ? "Online" : "In-person"} with {selectedClinicianName}
+                  {selectedType.name} with {selectedClinicianName}
                 </p>
                 <p className="mt-0.5 font-sans text-body text-brand-neutral-black/60">
                   {new Date(selectedSlot.startISO).toLocaleDateString([], { weekday: "long", day: "numeric", month: "long" })}
@@ -436,7 +511,7 @@ export default function BookSessionPage() {
               <CheckIcon className="mb-2 h-8 w-8 text-brand-prussian-blue" />
               <p className="font-heading text-h2 font-semibold text-brand-neutral-black">Booked.</p>
               <p className="font-sans text-body text-brand-neutral-black/70">
-                {confirmedSummary.sessionType === "online" ? "Online" : "In-person"} with {confirmedSummary.clinicianName}
+                {confirmedSummary.sessionTypeName} with {confirmedSummary.clinicianName}
                 <br />
                 {new Date(confirmedSummary.startISO).toLocaleDateString([], { weekday: "long", day: "numeric", month: "long" })}
                 {" · "}

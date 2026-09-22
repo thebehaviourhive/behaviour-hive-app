@@ -94,7 +94,7 @@
     "93:\"The school has completed this record.\"": "Same as IncidentNoticeCard's own identical line -- and this whole component is only ever mounted when !allConnectedAreClinic (passport/dashboard/page.tsx)."
   },
   "src/components/principal/ClinicDirectorDashboard.tsx": {
-    "283:\"Not enough incident history yet to say whether a current plan is working for any client.\"": "PRD 8 Stage 3's own deliberate cross-org feature -- the stagnation queue legitimately reads a clinic client's SCHOOL-authored incident history (via get_institution_incidents_for_director()) when a grant/engagement makes it visible. Not a leak; the word describes real, intended cross-domain content."
+    "293:\"Not enough incident history yet to say whether a current plan is working for any client.\"": "PRD 8 Stage 3's own deliberate cross-org feature -- the stagnation queue legitimately reads a clinic client's SCHOOL-authored incident history (via get_institution_incidents_for_director()) when a grant/engagement makes it visible. Not a leak; the word describes real, intended cross-domain content. Line renumbered 283->293 by the session-types dashboard bucket's own additions above it (22 Sept 2026) -- same string, confirmed unchanged, not re-verified beyond that."
   },
   "src/components/principal/HandOverPrincipalSheet.tsx": {
     "202:\"e.g. Retiring at the end of term\"": "Finding 1 fix -- the institutionType!=='clinic' branch of an already-correct ternary; the clinic branch reads \"e.g. Stepping back from the clinic\"."

@@ -146,6 +146,7 @@ export default function PrincipalClinicPage() {
   const [staff, setStaff] = useState<StaffRow[]>([]);
   const [tagDimensionCount, setTagDimensionCount] = useState<number>(0);
   const [tagValueCount, setTagValueCount] = useState<number>(0);
+  const [activeSessionTypeCount, setActiveSessionTypeCount] = useState<number>(0);
   const [toggles, setToggles] = useState<Record<ToggleDefinition["key"], boolean>>({
     lead_can_reassign_within_scope: true,
     lead_can_discharge_within_scope: true,
@@ -250,6 +251,16 @@ export default function PrincipalClinicPage() {
     const activeTags = tagRows ?? [];
     setTagValueCount(activeTags.length);
     setTagDimensionCount(new Set(activeTags.map((t) => t.dimension)).size);
+
+    // A lightweight preview for the summary row, matching Tags' own --
+    // just the active count, not the full catalogue (that's this
+    // page's own /session-types sub-page).
+    const { count: sessionTypeCount } = await supabase
+      .from("session_types")
+      .select("id", { count: "exact", head: true })
+      .eq("institution_id", staffRow.institution_id)
+      .eq("is_active", true);
+    setActiveSessionTypeCount(sessionTypeCount ?? 0);
 
     const { data: toggleRow, error: toggleError } = await supabase
       .rpc("get_institution_toggles", { p_institution_id: staffRow.institution_id })
@@ -429,6 +440,26 @@ export default function PrincipalClinicPage() {
                     </button>
                   </div>
                 </div>
+              </section>
+
+              <section className="mt-16">
+                <h2 className="mb-2 font-accent text-eyebrow font-bold uppercase tracking-wide text-brand-prussian-blue">
+                  Session Types
+                </h2>
+                <Link
+                  href="/principal/clinic/session-types"
+                  className="flex items-center justify-between rounded-2xl border border-black/5 bg-white p-4 shadow-sm"
+                >
+                  <div>
+                    <p className="font-sans text-body font-semibold text-brand-neutral-black">Manage Session Types</p>
+                    <p className="mt-0.5 font-sans text-eyebrow text-brand-neutral-black/50">
+                      {activeSessionTypeCount === 0
+                        ? "None configured -- parents cannot book yet"
+                        : `${activeSessionTypeCount} bookable type${activeSessionTypeCount === 1 ? "" : "s"}`}
+                    </p>
+                  </div>
+                  <span className="flex-shrink-0 text-xl text-brand-prussian-blue">›</span>
+                </Link>
               </section>
 
               <section className="mt-16">

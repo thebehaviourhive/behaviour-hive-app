@@ -20,7 +20,7 @@
 // stage development. Every check from V onward is independently
 // self-contained (own institution, own accounts, own cleanup) and
 // individually selectable: V, W, X, Y, Z, AA, BB, CC, DD, EE, FF, GG,
-// HH, II, JJ, KK, LL, MM, NN, OO, PP, QQ, RR, SS, TT, UU, VV, WW, XX, YY, ZZ, AAA, BBB, CCC, DDD, EEE, FFF, GGG, HHH, III, JJJ, KKK, LLL, MMM, NNN, OOO, PPP, QQQ, RRR, SSS, TTT. Selecting none of these (ONLY_CHECKS unset) is the full run --
+// HH, II, JJ, KK, LL, MM, NN, OO, PP, QQ, RR, SS, TT, UU, VV, WW, XX, YY, ZZ, AAA, BBB, CCC, DDD, EEE, FFF, GGG, HHH, III, JJJ, KKK, LLL, MMM, NNN, OOO, PPP, QQQ, RRR, SSS, TTT, UUU. Selecting none of these (ONLY_CHECKS unset) is the full run --
 // the one that gates deploys -- and its behavior is unchanged: same
 // checks, same order, same pass/fail counts. The only observable
 // difference is where the top-level fixture's own cleanup log line
@@ -14260,6 +14260,282 @@ async function main() {
       dualPrincipalTTTId, successorXTTTId, successorYTTTId,
       rejoinedTTTId, recipientTTTId,
     ]) {
+      await admin.from("clinicians").delete().eq("user_id", id);
+      await admin.auth.admin.deleteUser(id);
+    }
+  }
+
+  console.log(`\n== CHECK UUU: session types, fixed -> clinic-configurable catalogue (migration 0281/0282) -- real coverage for a rewritten booking data model, per Daniel's own Decision 8 ("build real booking checks into the standing suite, not another one-off script -- the suite currently has zero booking coverage, confirmed directly"). Covers exactly the NEW, risky surfaces this migration introduced: session_types' own RLS (broad staff read, director-only write, cross-institution isolation), create_pending_booking()'s type validation (retired/staff-only/wrong-clinic all refused, a valid type succeeds), THE SNAPSHOT-VS-FK GUARANTEE (Decision 5 -- editing or retiring a type after a booking exists must never retroactively relabel that booking's own history), the travel-columns trigger that replaced bookings_travel_paired (Decision 7 -- type-agnostic, checks the record's own internal consistency, never looks up session_types), and get_institution_has_no_bookable_session_types() (Item 5 of the session-types recon -- how a director is told their clinic has nothing bookable). Not a re-proof of PRD 9's own booking mechanics (Freebusy, Google Calendar writes, cancellation) -- those stay covered by their own dedicated one-off scripts; this is the catalogue layer specifically. ==`);
+  if (shouldRun("UUU")) {
+    const rand = () => Math.floor(Math.random() * 100000);
+
+    const { data: clinicUUUA } = await admin.from("institutions").insert({ name: "UUU Clinic A", institution_code: "UUUCLINICA" + rand(), status: "verified", type: "clinic" }).select("id").single();
+    const { data: clinicUUUB } = await admin.from("institutions").insert({ name: "UUU Clinic B", institution_code: "UUUCLINICB" + rand(), status: "verified", type: "clinic" }).select("id").single();
+
+    const directorAUUUId = await createUser("uuu.directora@thebehaviourhive.com", "UUU Director A", "principal");
+    const directorBUUUId = await createUser("uuu.directorb@thebehaviourhive.com", "UUU Director B", "principal");
+    const clinicianUUUId = await createUser("uuu.clinician@thebehaviourhive.com", "UUU Practitioner", "clinician");
+    const parentUUUId = await createUser("uuu.parent@thebehaviourhive.com", "UUU Parent", "parent");
+
+    await admin.from("institution_staff").insert({ institution_id: clinicUUUA.id, user_id: directorAUUUId, role: "principal", approved_at: new Date().toISOString(), approval_source: "bootstrap" });
+    await admin.from("institution_staff").insert({ institution_id: clinicUUUB.id, user_id: directorBUUUId, role: "principal", approved_at: new Date().toISOString(), approval_source: "bootstrap" });
+
+    const directorAUUU = await signedInClient("uuu.directora@thebehaviourhive.com");
+    const directorBUUU = await signedInClient("uuu.directorb@thebehaviourhive.com");
+    const clinicianUUU = await signedInClient("uuu.clinician@thebehaviourhive.com");
+    const parentUUU = await signedInClient("uuu.parent@thebehaviourhive.com");
+
+    await clinicianUUU.from("institution_staff").insert({ institution_id: clinicUUUA.id, user_id: clinicianUUUId, role: "clinician" });
+    {
+      const { data: staffRow } = await admin.from("institution_staff").select("id").eq("institution_id", clinicUUUA.id).eq("user_id", clinicianUUUId).single();
+      const { error } = await directorAUUU.rpc("approve_staff_join", { p_institution_staff_id: staffRow.id });
+      if (error) throw error;
+    }
+
+    const { data: passportUUU } = await admin.from("passports").insert({ user_id: parentUUUId, child_name: "UUU Child", passport_status: "complete" }).select().single();
+    await admin.from("passport_institution_links").insert({ passport_id: passportUUU.id, institution_id: clinicUUUA.id, approved_by_parent: true });
+    await admin.from("episodes_of_care").insert({ passport_id: passportUUU.id, institution_id: clinicUUUA.id, started_by: directorAUUUId });
+    {
+      const { data, error } = await directorAUUU.rpc("bulk_grant_clinician_access", { p_institution_id: clinicUUUA.id, p_passport_ids: [passportUUU.id], p_roster_user_id: clinicianUUUId });
+      if (error) throw error;
+      if (data?.[0]?.status !== "granted") throw new Error(`bulk_grant_clinician_access did not grant: ${JSON.stringify(data)}`);
+    }
+
+    // -------------------------------------------------------------------
+    // UUU-B -- a real type, created by the director, resolved correctly
+    // through get_bookable_session_types() with its full travel shape
+    // (0282's own fix -- travel_before/after minutes, not just length).
+    // Deliberately BEFORE UUU-A below: Clinic A is a brand-new clinic
+    // created inside THIS fixture, after 0281 already ran, so (matching
+    // UUU-F1's own point) it starts with genuinely zero session_types --
+    // the RLS read checks below need at least one real row to read.
+    // -------------------------------------------------------------------
+    const { data: bookableTypeUUU } = await directorAUUU
+      .from("session_types")
+      .insert({ institution_id: clinicUUUA.id, name: "UUU Assessment", description: "A real bookable type.", location_mode: "in_person", length_minutes: 45, travel_before_minutes: 20, travel_after_minutes: 25 })
+      .select()
+      .single();
+    record("UUU-B1 the director's own real insert succeeds", Boolean(bookableTypeUUU), JSON.stringify(bookableTypeUUU));
+
+    const { data: staffOnlyTypeUUU } = await directorAUUU
+      .from("session_types")
+      .insert({ institution_id: clinicUUUA.id, name: "UUU Staff Only", location_mode: "elsewhere", length_minutes: 60, travel_before_minutes: 15, travel_after_minutes: 15, is_parent_bookable: false })
+      .select()
+      .single();
+    record("UUU-B2 a staff-arrange-only type (is_parent_bookable=false) also inserts cleanly", Boolean(staffOnlyTypeUUU), JSON.stringify(staffOnlyTypeUUU));
+
+    // -------------------------------------------------------------------
+    // UUU-A -- RLS on session_types itself. Now that Clinic A genuinely
+    // has two real rows (above), the read checks assert something real.
+    // -------------------------------------------------------------------
+    {
+      const { data: byDirector } = await directorAUUU.from("session_types").select("id, name").eq("institution_id", clinicUUUA.id);
+      record("UUU-A1 the director can read their own clinic's session_types", (byDirector?.length ?? 0) > 0, `rows=${byDirector?.length}`);
+
+      const { data: byClinician } = await clinicianUUU.from("session_types").select("id, name").eq("institution_id", clinicUUUA.id);
+      record("UUU-A2 an ordinary practitioner (broad staff read, not director-only) can read them too", (byClinician?.length ?? 0) > 0, `rows=${byClinician?.length}`);
+
+      const { error: practitionerWriteErr } = await clinicianUUU.from("session_types").insert({ institution_id: clinicUUUA.id, name: "UUU Practitioner Attempt", location_mode: "online", length_minutes: 30 });
+      record("UUU-A3 a practitioner (not the director) CANNOT create a session type -- refused by RLS, not merely hidden client-side", Boolean(practitionerWriteErr), practitionerWriteErr?.message);
+
+      const { data: byDirectorB } = await directorBUUU.from("session_types").select("id").eq("institution_id", clinicUUUA.id);
+      record("UUU-A4 a DIFFERENT clinic's own director gets zero rows for Clinic A's catalogue -- cross-institution isolation", (byDirectorB?.length ?? 0) === 0, `rows=${byDirectorB?.length}`);
+    }
+
+    {
+      const { data: bookable, error: bookableErr } = await parentUUU.rpc("get_bookable_session_types", { p_passport_id: passportUUU.id, p_clinician_id: clinicianUUUId });
+      record("UUU-B3 get_bookable_session_types() succeeds for the real parent", !bookableErr, bookableErr?.message);
+      const ids = (bookable ?? []).map((t) => t.id);
+      record("UUU-B4 the real bookable type is included", ids.includes(bookableTypeUUU.id), JSON.stringify(ids));
+      record("UUU-B5 the staff-arrange-only type is NOT included (is_parent_bookable=false, exactly like school_observation before this migration)", !ids.includes(staffOnlyTypeUUU.id), JSON.stringify(ids));
+      const resolved = (bookable ?? []).find((t) => t.id === bookableTypeUUU.id);
+      record(
+        "UUU-B6 0282's own fix: travel_before_minutes/travel_after_minutes are present and correct on the returned row, not just length_minutes",
+        resolved?.travel_before_minutes === 20 && resolved?.travel_after_minutes === 25,
+        JSON.stringify(resolved)
+      );
+    }
+
+    // -------------------------------------------------------------------
+    // UUU-C -- create_pending_booking() type validation: refuses the
+    // staff-only type, refuses a wrong-clinic type, refuses an unknown
+    // id, succeeds for the real one.
+    // -------------------------------------------------------------------
+    const bookingStartUUU = new Date(Date.now() + 60 * 86400000); // 60 days out -- clear of every other check's own fixture windows
+    const bookingEndUUU = new Date(bookingStartUUU.getTime() + 45 * 60000);
+
+    {
+      const { error: staffOnlyBookErr } = await parentUUU.rpc("create_pending_booking", {
+        p_passport_id: passportUUU.id, p_clinician_id: clinicianUUUId, p_session_type_id: staffOnlyTypeUUU.id,
+        p_session_start_at: bookingStartUUU.toISOString(), p_session_end_at: bookingEndUUU.toISOString(),
+        p_travel_before_start_at: null, p_travel_after_end_at: null,
+        p_google_calendar_id: "uuu-test@example.com", p_cancellation_policy_snapshot: null,
+      });
+      record("UUU-C1 create_pending_booking() REFUSES a staff-only type even called directly, not just hidden from the picker", Boolean(staffOnlyBookErr), staffOnlyBookErr?.message);
+    }
+
+    {
+      const { data: wrongClinicType } = await directorBUUU.from("session_types").insert({ institution_id: clinicUUUB.id, name: "UUU Clinic B Type", location_mode: "online", length_minutes: 30 }).select().single();
+      const { error: wrongClinicBookErr } = await parentUUU.rpc("create_pending_booking", {
+        p_passport_id: passportUUU.id, p_clinician_id: clinicianUUUId, p_session_type_id: wrongClinicType.id,
+        p_session_start_at: bookingStartUUU.toISOString(), p_session_end_at: bookingEndUUU.toISOString(),
+        p_travel_before_start_at: null, p_travel_after_end_at: null,
+        p_google_calendar_id: "uuu-test@example.com", p_cancellation_policy_snapshot: null,
+      });
+      record("UUU-C2 create_pending_booking() REFUSES a type belonging to a DIFFERENT clinic than the one actually engaging this clinician", Boolean(wrongClinicBookErr), wrongClinicBookErr?.message);
+      await admin.from("session_types").delete().eq("id", wrongClinicType.id);
+    }
+
+    let realBookingUUUId = null;
+    {
+      const { data, error } = await parentUUU.rpc("create_pending_booking", {
+        p_passport_id: passportUUU.id, p_clinician_id: clinicianUUUId, p_session_type_id: bookableTypeUUU.id,
+        p_session_start_at: bookingStartUUU.toISOString(), p_session_end_at: bookingEndUUU.toISOString(),
+        p_travel_before_start_at: null, p_travel_after_end_at: null,
+        p_google_calendar_id: "uuu-test@example.com", p_cancellation_policy_snapshot: "UUU test policy.",
+      });
+      record("UUU-C3 create_pending_booking() SUCCEEDS for the real, valid, parent-bookable type", !error, error?.message);
+      realBookingUUUId = data ?? null;
+    }
+
+    if (realBookingUUUId) {
+      const { data: bookingRow } = await admin.from("bookings").select("session_type_id, session_type_name, session_type_mode").eq("id", realBookingUUUId).single();
+      record(
+        "UUU-C4 the booking's own snapshot (session_type_name/session_type_mode) matches the type as it was AT BOOKING TIME",
+        bookingRow?.session_type_id === bookableTypeUUU.id && bookingRow?.session_type_name === "UUU Assessment" && bookingRow?.session_type_mode === "in_person",
+        JSON.stringify(bookingRow)
+      );
+    }
+
+    // -------------------------------------------------------------------
+    // UUU-D -- THE SNAPSHOT-VS-FK GUARANTEE (Decision 5). Rename AND
+    // retire the type the real booking above already used; the
+    // booking's own frozen snapshot must not move, even though its FK
+    // now points at a renamed, retired row.
+    // -------------------------------------------------------------------
+    await directorAUUU.from("session_types").update({ name: "UUU Assessment (renamed after booking)", is_active: false }).eq("id", bookableTypeUUU.id);
+
+    if (realBookingUUUId) {
+      const { data: bookingAfterRename } = await admin.from("bookings").select("session_type_name, session_type_mode").eq("id", realBookingUUUId).single();
+      record(
+        "UUU-D1 THE POINT OF THIS CHECK: the already-made booking's own session_type_name is STILL the ORIGINAL name -- renaming/retiring the live catalogue row never retroactively relabels history",
+        bookingAfterRename?.session_type_name === "UUU Assessment",
+        JSON.stringify(bookingAfterRename)
+      );
+    }
+
+    {
+      const { error: postRetireBookErr } = await parentUUU.rpc("create_pending_booking", {
+        p_passport_id: passportUUU.id, p_clinician_id: clinicianUUUId, p_session_type_id: bookableTypeUUU.id,
+        p_session_start_at: new Date(bookingStartUUU.getTime() + 3 * 86400000).toISOString(),
+        p_session_end_at: new Date(bookingStartUUU.getTime() + 3 * 86400000 + 45 * 60000).toISOString(),
+        p_travel_before_start_at: null, p_travel_after_end_at: null,
+        p_google_calendar_id: "uuu-test@example.com", p_cancellation_policy_snapshot: null,
+      });
+      record("UUU-D2 a FRESH booking attempt against the now-retired type is refused -- retiring genuinely stops new bookings, it only ever preserved the old one", Boolean(postRetireBookErr), postRetireBookErr?.message);
+    }
+
+    // -------------------------------------------------------------------
+    // UUU-E -- the travel-columns trigger (Decision 7), tested directly
+    // via raw admin inserts against bookings itself -- bypassing
+    // create_pending_booking() entirely, since this is a database-level
+    // guarantee that must hold regardless of caller. Type-agnostic by
+    // construction (never looks up session_types), so every case below
+    // uses the same real session_type_id/name/mode throughout -- what's
+    // varied is only the travel columns being tested.
+    // -------------------------------------------------------------------
+    const { data: onlineTypeUUU } = await directorAUUU.from("session_types").insert({ institution_id: clinicUUUA.id, name: "UUU Online For Trigger", location_mode: "online", length_minutes: 30 }).select().single();
+
+    function rawBookingUUU(offsetDays, overrides) {
+      const start = new Date(Date.now() + (90 + offsetDays) * 86400000); // 90+ days out -- clear of C/D's own bookings above
+      const end = new Date(start.getTime() + 30 * 60000);
+      return {
+        passport_id: passportUUU.id, clinician_id: clinicianUUUId, institution_id: clinicUUUA.id,
+        session_type_id: onlineTypeUUU.id, session_type_name: onlineTypeUUU.name, session_type_mode: "online",
+        session_start_at: start.toISOString(), session_end_at: end.toISOString(),
+        google_calendar_id: "uuu-trigger-test@example.com", created_by: parentUUUId, consented_at: new Date().toISOString(),
+        ...overrides,
+      };
+    }
+
+    {
+      const row = rawBookingUUU(1, { travel_before_start_at: new Date(Date.now() + 91 * 86400000 + 5 * 60000).toISOString() }); // AFTER session_start_at, deliberately backwards
+      // row's own session_start_at is 91 days out -- travel_before_start_at set 5 minutes past it, so it's >= session_start_at.
+      const { error } = await admin.from("bookings").insert(row);
+      record("UUU-E1 trigger REFUSES travel_before_start_at >= session_start_at", Boolean(error), error?.message);
+    }
+    {
+      const start = new Date(Date.now() + 92 * 86400000);
+      const end = new Date(start.getTime() + 30 * 60000);
+      const row = rawBookingUUU(2, { session_start_at: start.toISOString(), session_end_at: end.toISOString(), travel_after_end_at: new Date(end.getTime() - 5 * 60000).toISOString() }); // BEFORE session_end_at, deliberately backwards
+      const { error } = await admin.from("bookings").insert(row);
+      record("UUU-E2 trigger REFUSES travel_after_end_at <= session_end_at", Boolean(error), error?.message);
+    }
+    {
+      const row = rawBookingUUU(3, { travel_before_event_id: "fake-event-id", travel_before_start_at: null });
+      const { error } = await admin.from("bookings").insert(row);
+      record("UUU-E3 trigger REFUSES travel_before_event_id set with no travel_before_start_at window for it", Boolean(error), error?.message);
+    }
+    {
+      const row = rawBookingUUU(4, { travel_after_event_id: "fake-event-id", travel_after_end_at: null });
+      const { error } = await admin.from("bookings").insert(row);
+      record("UUU-E4 trigger REFUSES travel_after_event_id set with no travel_after_end_at window for it", Boolean(error), error?.message);
+    }
+    {
+      const row = rawBookingUUU(5, {});
+      const { error } = await admin.from("bookings").insert(row);
+      record("UUU-E5 trigger ALLOWS a genuinely valid row with NEITHER travel window set (an online type, no travel)", !error, error?.message);
+    }
+    {
+      const start = new Date(Date.now() + 96 * 86400000);
+      const end = new Date(start.getTime() + 30 * 60000);
+      const row = rawBookingUUU(6, {
+        session_start_at: start.toISOString(), session_end_at: end.toISOString(),
+        travel_before_start_at: new Date(start.getTime() - 15 * 60000).toISOString(),
+        travel_after_end_at: new Date(end.getTime() + 15 * 60000).toISOString(),
+      });
+      const { error } = await admin.from("bookings").insert(row);
+      record("UUU-E6 trigger ALLOWS a genuinely valid row with BOTH travel windows properly bracketing the session", !error, error?.message);
+    }
+
+    // -------------------------------------------------------------------
+    // UUU-F -- get_institution_has_no_bookable_session_types(). Clinic B
+    // has never had a type created for it in this fixture -- and,
+    // proving the "no auto-seed for a clinic created after migration
+    // 0281" design directly, was never auto-seeded either.
+    // -------------------------------------------------------------------
+    {
+      const { data: hasNoneB, error: hasNoneBErr } = await directorBUUU.rpc("get_institution_has_no_bookable_session_types", { p_institution_id: clinicUUUB.id });
+      record("UUU-F1 Clinic B (never given a type, and never auto-seeded -- confirms a clinic created after this migration starts genuinely empty) reports true", hasNoneB === true, JSON.stringify({ hasNoneB, hasNoneBErr: hasNoneBErr?.message }));
+
+      const { data: hasNoneA } = await directorAUUU.rpc("get_institution_has_no_bookable_session_types", { p_institution_id: clinicUUUA.id });
+      record("UUU-F2 Clinic A (has real active parent-bookable types) reports false", hasNoneA === false, JSON.stringify(hasNoneA));
+
+      const { error: practitionerCheckErr } = await clinicianUUU.rpc("get_institution_has_no_bookable_session_types", { p_institution_id: clinicUUUA.id });
+      record("UUU-F3 a practitioner (not the director) is refused this check entirely", Boolean(practitionerCheckErr), practitionerCheckErr?.message);
+
+      const { error: crossInstCheckErr } = await directorBUUU.rpc("get_institution_has_no_bookable_session_types", { p_institution_id: clinicUUUA.id });
+      record("UUU-F4 Clinic B's own director is refused checking Clinic A", Boolean(crossInstCheckErr), crossInstCheckErr?.message);
+    }
+
+    console.log("UUU summary complete.");
+
+    // -------------------------------------------------------------------
+    // Teardown -- everything this check created.
+    // -------------------------------------------------------------------
+    await admin.from("bookings").delete().eq("passport_id", passportUUU.id);
+    await admin.from("clinician_access").delete().eq("passport_id", passportUUU.id);
+    await admin.from("episodes_of_care").delete().eq("passport_id", passportUUU.id);
+    await admin.from("passport_institution_links").delete().eq("passport_id", passportUUU.id);
+    await admin.from("passport_guardians").delete().eq("passport_id", passportUUU.id);
+    await admin.from("passports").delete().eq("id", passportUUU.id);
+
+    for (const instId of [clinicUUUA.id, clinicUUUB.id]) {
+      await admin.from("session_types").delete().eq("institution_id", instId);
+      await admin.from("institution_staff").delete().eq("institution_id", instId);
+      await admin.from("institutions").delete().eq("id", instId);
+    }
+    for (const id of [directorAUUUId, directorBUUUId, clinicianUUUId, parentUUUId]) {
       await admin.from("clinicians").delete().eq("user_id", id);
       await admin.auth.admin.deleteUser(id);
     }

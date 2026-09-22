@@ -1,31 +1,30 @@
 import { addDays, addMinutes, isAfter, isBefore, startOfDay } from "date-fns";
 import type { BusyInterval } from "@/lib/google/freebusy";
 
-export type BookableSessionType = "online" | "in_person";
-export type SessionMode = "online" | "in_person";
+// Session types, fixed -> clinic-configurable catalogue (migration
+// 0281). BookableSessionType/getSessionMode() are gone -- there is no
+// longer a fixed "online" | "in_person" literal to switch on anywhere
+// in this file. A session type is now a real row (session_types),
+// resolved server-side per booking/availability request via
+// get_bookable_session_types(); its own length_minutes/
+// travel_before_minutes/travel_after_minutes ARE the numbers this
+// module needs, passed in directly rather than re-derived from a mode
+// string. location_mode still exists on the type (online/in_person/
+// elsewhere) but this module has no reason to read it -- only the
+// booking route does, and only to decide whether to request a Meet
+// link, never to decide travel/length.
 
-// Bug 4, 22 Sept 2026 -- session types are fixed today (BookableSessionType
-// above), but a clinic will soon be able to define its own named session
-// types. Everything that currently decides "does this need a video link"
-// or "does this need travel blocks" by comparing sessionType === "online"
-// directly is asking the wrong question -- it should ask what MODE the
-// type is, not what it's literally called. Today that's a static 1:1
-// map; once clinic-configurable types exist, only THIS function's body
-// changes (to a real lookup against that config) -- no call site does.
-export function getSessionMode(sessionType: BookableSessionType): SessionMode {
-  return sessionType === "online" ? "online" : "in_person";
-}
-
-const SESSION_MINUTES = 60;
-// Exported -- PRD 9, Stage 2's own booking route needs this exact same
-// constant to compute travel-block bounds server-side (never trusting
-// a client-supplied travel window), so both files share one number
-// rather than risking two copies quietly drifting apart.
-export const TRAVEL_MINUTES = 30;
 const SLOT_STEP_MINUTES = 30; // slots offered on a half-hour grid, not only on the hour
 
 export interface AvailabilityInput {
-  sessionType: BookableSessionType;
+  // The chosen type's own numbers (PRD 9 section 3a -- the type is
+  // picked before availability is computed). Independent before/after
+  // travel (Decision 1, session-types recon) -- packing up after a
+  // home visit genuinely takes longer than setting out, so these are
+  // never assumed equal or derived from one another.
+  sessionLengthMinutes: number;
+  travelBeforeMinutes: number;
+  travelAfterMinutes: number;
   windowStartISO: string;
   windowEndISO: string;
   clinicHoursStart: string; // "HH:MM:SS" or "HH:MM"
@@ -47,19 +46,6 @@ export interface AvailabilityInput {
 export interface AvailableSlot {
   startISO: string;
   endISO: string;
-}
-
-// The type is chosen before availability is shown (PRD 9 section 3a) --
-// this is the one function that answers "given that choice, how much
-// clear time does a candidate gap actually need". In-person needs a
-// full two-hour clear window (30 min travel, 60 min session, 30 min
-// travel) to offer a one-hour slot; online needs sixty minutes. Only
-// the middle hour is ever offered to a parent as the bookable slot --
-// the travel blocks themselves are written to Google at booking time
-// (Stage 2), never here; this only needs to know how much clear time
-// must exist to safely OFFER one at all.
-function requiredClearMinutes(sessionType: BookableSessionType): number {
-  return sessionType === "online" ? SESSION_MINUTES : TRAVEL_MINUTES + SESSION_MINUTES + TRAVEL_MINUTES;
 }
 
 function parseTimeOfDay(value: string): { hours: number; minutes: number } {
@@ -85,11 +71,9 @@ function atTimeOfDay(day: Date, timeOfDay: { hours: number; minutes: number }): 
 // this inherits that assumption rather than deciding it fresh. Revisit
 // if this product is ever deployed somewhere else.
 export function computeAvailableSlots(input: AvailabilityInput): AvailableSlot[] {
-  const { sessionType, busyIntervals, bufferMinutes } = input;
+  const { sessionLengthMinutes, travelBeforeMinutes, travelAfterMinutes, busyIntervals, bufferMinutes } = input;
   const windowStart = new Date(input.windowStartISO);
   const windowEnd = new Date(input.windowEndISO);
-  const clearMinutes = requiredClearMinutes(sessionType);
-  const travelMinutes = sessionType === "online" ? 0 : TRAVEL_MINUTES;
   const workingDays = new Set(input.workingDays ?? [1, 2, 3, 4, 5]);
 
   const clinicStart = parseTimeOfDay(input.clinicHoursStart);
@@ -134,10 +118,10 @@ export function computeAvailableSlots(input: AvailabilityInput): AvailableSlot[]
       let cursor = dayStart;
       for (const busy of dayBusy) {
         const gapEnd = busy.start < dayEnd ? busy.start : dayEnd;
-        offerSlotsInGap(cursor, gapEnd, clearMinutes, travelMinutes, slots);
+        offerSlotsInGap(cursor, gapEnd, sessionLengthMinutes, travelBeforeMinutes, travelAfterMinutes, slots);
         cursor = busy.end > cursor ? busy.end : cursor;
       }
-      offerSlotsInGap(cursor, dayEnd, clearMinutes, travelMinutes, slots);
+      offerSlotsInGap(cursor, dayEnd, sessionLengthMinutes, travelBeforeMinutes, travelAfterMinutes, slots);
     }
 
     day = addDays(day, 1);
@@ -165,17 +149,23 @@ export function hasConflict(busyIntervals: BusyInterval[], candidateStartISO: st
   });
 }
 
+// The gap needs enough clear time for travelBefore + the session itself
+// + travelAfter, and the session always starts travelBeforeMinutes
+// after the candidate clear-window's own start -- independent numbers,
+// never assumed symmetric (Decision 1).
 function offerSlotsInGap(
   gapStart: Date,
   gapEnd: Date,
-  clearMinutes: number,
-  travelMinutes: number,
+  sessionLengthMinutes: number,
+  travelBeforeMinutes: number,
+  travelAfterMinutes: number,
   out: AvailableSlot[]
 ): void {
+  const clearMinutes = travelBeforeMinutes + sessionLengthMinutes + travelAfterMinutes;
   let candidateClearStart = gapStart;
   while (!isAfter(addMinutes(candidateClearStart, clearMinutes), gapEnd)) {
-    const sessionStart = addMinutes(candidateClearStart, travelMinutes);
-    const sessionEnd = addMinutes(sessionStart, SESSION_MINUTES);
+    const sessionStart = addMinutes(candidateClearStart, travelBeforeMinutes);
+    const sessionEnd = addMinutes(sessionStart, sessionLengthMinutes);
     out.push({ startISO: sessionStart.toISOString(), endISO: sessionEnd.toISOString() });
     candidateClearStart = addMinutes(candidateClearStart, SLOT_STEP_MINUTES);
   }

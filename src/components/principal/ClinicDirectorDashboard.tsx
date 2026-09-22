@@ -183,6 +183,12 @@ export function ClinicDirectorDashboard({
   const [pendingGrants, setPendingGrants] = useState<PendingGrantRow[]>([]);
   const [caseloadSizes, setCaseloadSizes] = useState<CaseloadRow[]>([]);
   const [stagnationQueue, setStagnationQueue] = useState<StagnationQueueRow[]>([]);
+  // Session types, fixed -> clinic-configurable catalogue (migration
+  // 0281) -- a single fact, not a list (get_institution_has_no_
+  // bookable_session_types()'s own migration comment: "boolean...
+  // rendered as one WorkQueueRow when true, not a row-per-something
+  // bucket like its seven siblings").
+  const [hasNoBookableSessionTypes, setHasNoBookableSessionTypes] = useState(false);
 
   const [reviewJoinTarget, setReviewJoinTarget] = useState<PendingStaffJoinRow | null>(null);
   const [approvingTagChangeId, setApprovingTagChangeId] = useState<string | null>(null);
@@ -204,6 +210,7 @@ export function ClinicDirectorDashboard({
       grantsResult,
       caseloadResult,
       stagnationResult,
+      noBookableSessionTypesResult,
     ] = await Promise.all([
       supabase.rpc("get_institution_episodes_without_active_practitioner", { p_institution_id: institutionId }),
       supabase.rpc("get_institution_pending_staff_joins", { p_institution_id: institutionId }),
@@ -214,6 +221,7 @@ export function ClinicDirectorDashboard({
       supabase.rpc("get_institution_pending_cross_org_grants", { p_institution_id: institutionId }),
       supabase.rpc("get_institution_caseload_sizes", { p_institution_id: institutionId }),
       supabase.rpc("get_institution_stagnation_queue", { p_institution_id: institutionId }),
+      supabase.rpc("get_institution_has_no_bookable_session_types", { p_institution_id: institutionId }),
     ]);
 
     if (episodesResult.error) {
@@ -231,6 +239,7 @@ export function ClinicDirectorDashboard({
     if (!grantsResult.error) setPendingGrants((grantsResult.data ?? []) as PendingGrantRow[]);
     if (!caseloadResult.error) setCaseloadSizes((caseloadResult.data ?? []) as CaseloadRow[]);
     if (!stagnationResult.error) setStagnationQueue((stagnationResult.data ?? []) as StagnationQueueRow[]);
+    if (!noBookableSessionTypesResult.error) setHasNoBookableSessionTypes(Boolean(noBookableSessionTypesResult.data));
 
     setIsLoading(false);
   }, [institutionId]);
@@ -260,7 +269,8 @@ export function ClinicDirectorDashboard({
     draftBsps.length +
     incompleteAssessments.length +
     pendingTagChanges.length +
-    pendingGrants.length;
+    pendingGrants.length +
+    (hasNoBookableSessionTypes ? 1 : 0);
 
   const nothingOutstanding = !isLoading && !error && outstandingCount === 0;
 
@@ -332,6 +342,15 @@ export function ClinicDirectorDashboard({
                   Outstanding Work
                 </h2>
                 <div className="flex flex-col gap-2">
+                  {hasNoBookableSessionTypes && (
+                    <WorkQueueRow
+                      entity={institutionName ?? "Your clinic"}
+                      exception="No bookable session types -- parents cannot book anything yet"
+                      actionLabel="Set up"
+                      href="/principal/clinic/session-types"
+                    />
+                  )}
+
                   {episodesWithoutPractitioner.map((row) => (
                     <WorkQueueRow
                       key={row.episode_id}

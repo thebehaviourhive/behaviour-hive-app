@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getFreebusy } from "@/lib/google/freebusy";
-import { computeAvailableSlots, type BookableSessionType } from "@/lib/scheduling/availability";
+import { computeAvailableSlots } from "@/lib/scheduling/availability";
 
 // PRD 9, Stage 1 -- the parent-facing availability read. Booking
 // itself (the actual row+event creation) is Stage 2 and does not exist
@@ -12,22 +12,24 @@ import { computeAvailableSlots, type BookableSessionType } from "@/lib/schedulin
 // lookup entirely inside Postgres first, so this route never queries
 // application tables directly with anything but the caller's own
 // already-scoped RPC result.
+//
+// Session types, fixed -> clinic-configurable catalogue (migration
+// 0281) -- sessionType (a literal "online"/"in_person" string) is now
+// sessionTypeId (a real session_types row's id). The type's own
+// length/travel minutes come from get_bookable_session_types(), the
+// same RPC the type-selection screen itself calls to list every
+// bookable type -- resolved here by filtering for the one id the
+// parent already picked, under the identical authorization check
+// (owns_passport + a live institution-engaged clinician_access row),
+// never trusted from the query string directly.
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const passportId = searchParams.get("passportId");
   const clinicianId = searchParams.get("clinicianId");
-  const sessionType = searchParams.get("sessionType");
+  const sessionTypeId = searchParams.get("sessionTypeId");
 
-  if (!passportId || !clinicianId || !sessionType) {
-    return NextResponse.json({ error: "passportId, clinicianId, and sessionType are all required." }, { status: 400 });
-  }
-
-  // school_observation exists in the model (a clinician can record one)
-  // but is deliberately never offered to parents (PRD 9 section 3a) --
-  // refused here at the boundary, not just left out of the UI, so a
-  // crafted request can't reach it either.
-  if (sessionType !== "online" && sessionType !== "in_person") {
-    return NextResponse.json({ error: "This session type isn't available to book here." }, { status: 400 });
+  if (!passportId || !clinicianId || !sessionTypeId) {
+    return NextResponse.json({ error: "passportId, clinicianId, and sessionTypeId are all required." }, { status: 400 });
   }
 
   const supabase = await createClient();
@@ -46,6 +48,20 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: detailsError?.message ?? "Couldn't resolve this clinician." }, { status: 403 });
   }
 
+  const { data: types, error: typesError } = await supabase.rpc("get_bookable_session_types", {
+    p_passport_id: passportId,
+    p_clinician_id: clinicianId,
+  });
+  if (typesError) {
+    return NextResponse.json({ error: typesError.message }, { status: 403 });
+  }
+  const sessionType = ((types ?? []) as { id: string; length_minutes: number; travel_before_minutes: number; travel_after_minutes: number }[]).find(
+    (t) => t.id === sessionTypeId
+  );
+  if (!sessionType) {
+    return NextResponse.json({ error: "This session type isn't available to book here." }, { status: 400 });
+  }
+
   const now = new Date();
   const windowEnd = new Date(now);
   windowEnd.setDate(windowEnd.getDate() + (details.booking_window_days ?? 30));
@@ -61,7 +77,9 @@ export async function GET(request: Request) {
   }
 
   const slots = computeAvailableSlots({
-    sessionType: sessionType as BookableSessionType,
+    sessionLengthMinutes: sessionType.length_minutes,
+    travelBeforeMinutes: sessionType.travel_before_minutes,
+    travelAfterMinutes: sessionType.travel_after_minutes,
     windowStartISO: now.toISOString(),
     windowEndISO: windowEnd.toISOString(),
     clinicHoursStart: details.clinic_hours_start_time ?? "09:00:00",

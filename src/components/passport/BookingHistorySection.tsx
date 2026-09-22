@@ -13,7 +13,7 @@ import { createClient } from "@/lib/supabase/client";
 interface HistoryRow {
   bookingId: string;
   clinicianName: string;
-  sessionType: string;
+  sessionTypeName: string;
   sessionStartAt: string;
   cancelledAt: string | null;
   cancelledVia: string | null;
@@ -44,7 +44,7 @@ export function BookingHistorySection({ passportId }: { passportId: string | nul
         const raw = (data ?? []) as {
           booking_id: string;
           clinician_name: string;
-          session_type: string;
+          session_type_name: string;
           session_start_at: string;
           cancelled_at: string | null;
           cancelled_via: string | null;
@@ -54,7 +54,7 @@ export function BookingHistorySection({ passportId }: { passportId: string | nul
           raw.map((r) => ({
             bookingId: r.booking_id,
             clinicianName: r.clinician_name,
-            sessionType: r.session_type,
+            sessionTypeName: r.session_type_name,
             sessionStartAt: r.session_start_at,
             cancelledAt: r.cancelled_at,
             cancelledVia: r.cancelled_via,
@@ -80,7 +80,7 @@ export function BookingHistorySection({ passportId }: { passportId: string | nul
         {rows.map((row) => (
           <div key={row.bookingId} className="py-3">
             <p className="font-sans text-base font-bold text-brand-neutral-black">
-              {row.sessionType === "online" ? "Online" : "In-person"} with {row.clinicianName}
+              {row.sessionTypeName} with {row.clinicianName}
             </p>
             <p className="mt-0.5 font-sans text-xs text-brand-neutral-black/50">
               {new Date(row.sessionStartAt).toLocaleDateString([], { day: "numeric", month: "long", year: "numeric" })}
