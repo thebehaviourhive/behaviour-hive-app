@@ -2,9 +2,12 @@
 
 import Link from "next/link";
 import { use, useCallback, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { createClient } from "@/lib/supabase/client";
 import { EpisodeTagsSection } from "@/components/clinic/EpisodeTagsSection";
+import { ClientContactInfoSection } from "@/components/clinic/ClientContactInfoSection";
+import { ClientGuardianAndClaimCodeSection } from "@/components/clinic/ClientGuardianAndClaimCodeSection";
 
 // PRD 10 Stage 3, item 3 -- the admin's own new client record, "the
 // same guarantee as the list: identity, episodes, tags, requests,
@@ -20,6 +23,20 @@ import { EpisodeTagsSection } from "@/components/clinic/EpisodeTagsSection";
 // clinical table either). There is no tab strip, no "Clinical" section,
 // nothing to accidentally wire a clinical component into later without
 // it being an obvious, visible addition to this short file.
+//
+// Client Info (clinic-only), Daniel's decisions, Sept 2026. Two
+// additions, both holding the same guarantee as everything else on this
+// page: ClientContactInfoSection (the only client-info component an
+// admin ever sees -- ClientClinicalIntakeSection is never imported
+// here, at all) and ClientGuardianAndClaimCodeSection, reachable now
+// that the claim-code RPCs admit clinic_admin at a clinic (migration
+// 0287) -- closing the exact gap the recon named: an admin who onboards
+// a client previously had no way to generate the code to hand the
+// parent.
+//
+// ?missingSection=contact (decision 1) shows a plain banner -- the only
+// section that can ever be flagged here, since this page never renders
+// clinical intake at all.
 
 interface RosterRow {
   episodeId: string;
@@ -37,6 +54,8 @@ function formatDate(value: string): string {
 export default function ClinicAdminClientDetailPage({ params }: { params: Promise<{ passportId: string }> }) {
   const { passportId } = use(params);
   const { user, isReady } = useRequireRole("clinic_admin");
+  const searchParams = useSearchParams();
+  const missingSection = searchParams.get("missingSection");
   const [row, setRow] = useState<RosterRow | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -126,6 +145,12 @@ export default function ClinicAdminClientDetailPage({ params }: { params: Promis
             <p className="text-sm text-brand-neutral-black/60">{error}</p>
           ) : row ? (
             <>
+              {missingSection === "contact" && (
+                <p role="alert" className="mb-4 rounded-2xl bg-brand-golden-brown/10 p-3 text-sm font-medium text-brand-golden-brown">
+                  Contact info didn&apos;t save when this client was added — fill it in below when you can.
+                </p>
+              )}
+
               <section className="mb-6">
                 <h2 className="mb-2 font-heading text-sm font-bold uppercase tracking-wide text-brand-neutral-black/60">
                   Episode of Care
@@ -146,7 +171,11 @@ export default function ClinicAdminClientDetailPage({ params }: { params: Promis
                 </div>
               </section>
 
-              <EpisodeTagsSection passportId={row.passportId} />
+              <ClientContactInfoSection passportId={row.passportId} />
+              <ClientGuardianAndClaimCodeSection passportId={row.passportId} childName={row.childName} />
+              <div className="mt-6">
+                <EpisodeTagsSection passportId={row.passportId} />
+              </div>
             </>
           ) : null}
         </div>

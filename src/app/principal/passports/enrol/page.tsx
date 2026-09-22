@@ -58,6 +58,49 @@ interface TagOption {
 
 type CallerRole = "principal" | "clinic_admin" | "clinician";
 
+// Client Info (clinic-only), Daniel's decisions, Sept 2026. Entered as
+// part of THIS flow, not a separate place -- two follow-up RPCs called
+// right after onboard_clinic_client() succeeds, matching the tag
+// step's own already-established precedent immediately below. Contact
+// fields show whenever the caller can onboard at all (the same
+// authorization set set_client_contact_info() itself checks -- an
+// admin included); clinical fields show only when the caller isn't an
+// admin (director, or a toggle-enabled practitioner), matching
+// set_client_clinical_intake()'s own narrower check.
+interface ContactFields {
+  guardianFullName: string;
+  relationshipToChild: string;
+  contactEmail: string;
+  contactPhone: string;
+  referralSource: string;
+  homeAddress: string;
+}
+const EMPTY_CONTACT: ContactFields = {
+  guardianFullName: "",
+  relationshipToChild: "",
+  contactEmail: "",
+  contactPhone: "",
+  referralSource: "",
+  homeAddress: "",
+};
+
+interface ClinicalFields {
+  suspectedDiagnosis: string;
+  mainConcerns: string;
+  previousSupport: boolean | null;
+  previousSupportDescription: string;
+  clinicGoals: string;
+  additionalNotes: string;
+}
+const EMPTY_CLINICAL: ClinicalFields = {
+  suspectedDiagnosis: "",
+  mainConcerns: "",
+  previousSupport: null,
+  previousSupportDescription: "",
+  clinicGoals: "",
+  additionalNotes: "",
+};
+
 export default function EnrolChildPage() {
   const router = useRouter();
   const { user, isReady } = useRequireRole(["principal", "clinic_admin", "clinician"]);
@@ -73,6 +116,9 @@ export default function EnrolChildPage() {
   const [tagOptions, setTagOptions] = useState<TagOption[]>([]);
   const [selectedTagIds, setSelectedTagIds] = useState<Set<string>>(new Set());
   const [isLoadingTags, setIsLoadingTags] = useState(false);
+
+  const [contact, setContact] = useState<ContactFields>(EMPTY_CONTACT);
+  const [clinical, setClinical] = useState<ClinicalFields>(EMPTY_CLINICAL);
 
   // Resolves which of the caller's own institution_staff rows is the
   // one that actually applies here -- a school-engaged clinician (a
@@ -140,6 +186,12 @@ export default function EnrolChildPage() {
     (isClinic
       ? callerRole === "principal" || callerRole === "clinic_admin" || (callerRole === "clinician" && practitionerCanOnboard)
       : callerRole === "principal");
+  // Matches set_client_contact_info()'s own check exactly -- anyone who
+  // can onboard can enter contact details, admin included.
+  const canShowContact = isClinic && canOnboard;
+  // Matches set_client_clinical_intake()'s own check -- narrower than
+  // contact: never an admin, regardless of anything else.
+  const canShowClinical = isClinic && canOnboard && callerRole !== "clinic_admin";
 
   useEffect(() => {
     if (!canTag || !institutionId) return;
@@ -228,23 +280,88 @@ export default function EnrolChildPage() {
       }
     }
 
+    // Client Info (clinic-only), Daniel's decision 1: entered as part
+    // of this same flow, but the passport already exists by the time
+    // either of these runs -- a failure here means "fill it in later",
+    // never a broken client, and never a reason to offer redoing
+    // onboarding (which would create a duplicate child). Each call is
+    // independent; a blank section is simply skipped (nothing was
+    // typed, nothing to save), matching the tag step's own "zero
+    // selection, nothing to call" convention above. On a genuine
+    // failure, the section is flagged via a query param rather than
+    // blocking the redirect -- the client record itself is where it
+    // gets retried, per Daniel's own instruction.
+    let missingSection: "contact" | "clinical" | null = null;
+
+    const hasContactInput = Object.values(contact).some((v) => v.trim() !== "");
+    if (canShowContact && hasContactInput) {
+      const { error: contactError } = await supabase.rpc("set_client_contact_info", {
+        p_passport_id: passportId,
+        p_institution_id: institutionId,
+        p_guardian_full_name: contact.guardianFullName,
+        p_relationship_to_child: contact.relationshipToChild,
+        p_contact_email: contact.contactEmail,
+        p_contact_phone: contact.contactPhone,
+        p_referral_source: contact.referralSource,
+        p_home_address: contact.homeAddress,
+      });
+      if (contactError) missingSection = "contact";
+    }
+
+    const hasClinicalInput =
+      clinical.suspectedDiagnosis.trim() !== "" ||
+      clinical.mainConcerns.trim() !== "" ||
+      clinical.previousSupport !== null ||
+      clinical.previousSupportDescription.trim() !== "" ||
+      clinical.clinicGoals.trim() !== "" ||
+      clinical.additionalNotes.trim() !== "";
+    if (canShowClinical && hasClinicalInput) {
+      const { error: clinicalError } = await supabase.rpc("set_client_clinical_intake", {
+        p_passport_id: passportId,
+        p_institution_id: institutionId,
+        p_suspected_diagnosis: clinical.suspectedDiagnosis,
+        p_main_concerns: clinical.mainConcerns,
+        p_previous_support: clinical.previousSupport,
+        p_previous_support_description: clinical.previousSupportDescription,
+        p_clinic_goals: clinical.clinicGoals,
+        p_additional_notes: clinical.additionalNotes,
+      });
+      // Contact's own failure (if any) takes priority -- only ever one
+      // section flagged at a time, and contact is entered first.
+      if (clinicalError && !missingSection) missingSection = "clinical";
+    }
+
     setIsSubmitting(false);
+
+    const missingParam = missingSection ? `?missingSection=${missingSection}` : "";
 
     // Found proving this flow live: /principal/passports/[passportId]
     // is principal-only, correctly -- decision #3's own boundary ("an
     // admin sees no clinical content") means an admin must never reach
-    // it, and that page's own gate already refuses them. Left as
-    // router.push below, an admin would bounce off that refusal and
-    // land on their own dashboard anyway, via an extra redirect they'd
-    // never see the reason for. The admin's own client list is PRD 10's
-    // next stage (5.3), not built yet -- until it exists, sending them
-    // there directly is the honest version of the same outcome, not a
-    // new capability.
+    // it, and that page's own gate already refuses them. The admin's
+    // own client record (/clinic-admin/client/[passportId]) is where
+    // Contact Info -- the only section an admin can ever see -- and the
+    // claim-code section both live.
     if (callerRole === "clinic_admin") {
-      router.push("/clinic-admin/dashboard");
+      router.push(`/clinic-admin/client/${passportId}${missingParam}`);
       return;
     }
-    router.push(`/principal/passports/${passportId}`);
+    // A practitioner's own client record is ClinicalFileDetail
+    // (/clinician/passport/[passportId], gated useRequireRole
+    // "clinician") -- a genuinely separate, role-exclusive surface from
+    // the director's ChildDetail (useRequireRole "principal"). Sending
+    // a clinician to the director's own route was a real, pre-existing
+    // bug this flow's own onboarding gate already outgrew (a
+    // toggle-enabled practitioner could onboard here since PRD 10 Stage
+    // 2, but every redirect afterward sent them somewhere their own
+    // role gate refuses) -- fixed here since "editable afterward from
+    // the client's record" (decision 1) is unsatisfiable for this role
+    // otherwise.
+    if (callerRole === "clinician") {
+      router.push(`/clinician/passport/${passportId}${missingParam}`);
+      return;
+    }
+    router.push(`/principal/passports/${passportId}${missingParam}`);
   }
 
   if (!isReady) {
@@ -290,6 +407,133 @@ export default function EnrolChildPage() {
               placeholder="e.g. Sam Murphy"
               className="mt-1.5 w-full rounded-xl border border-black/10 bg-white px-4 py-3 text-base text-brand-neutral-black placeholder:text-black/30 focus:border-brand-prussian-blue focus:outline-none focus:ring-2 focus:ring-brand-pastel-blue"
             />
+
+            {canShowContact && (
+              <div className="mt-6">
+                <p className="mb-1 font-sans text-sm font-semibold text-brand-neutral-black">Contact Info (optional)</p>
+                <p className="mb-3 text-xs text-brand-neutral-black/50">
+                  Rather than asking the family to enter this again, enter what your pre-consultation form already
+                  collected -- the parent confirms it&apos;s right when they claim. Leave anything blank to fill in later.
+                </p>
+                <div className="flex flex-col gap-3">
+                  <input
+                    type="text"
+                    value={contact.guardianFullName}
+                    onChange={(e) => setContact((c) => ({ ...c, guardianFullName: e.target.value }))}
+                    placeholder="Parent or guardian's full name"
+                    className="w-full rounded-xl border border-black/10 bg-white px-4 py-3 text-base text-brand-neutral-black placeholder:text-black/30 focus:border-brand-prussian-blue focus:outline-none focus:ring-2 focus:ring-brand-pastel-blue"
+                  />
+                  <input
+                    type="text"
+                    value={contact.relationshipToChild}
+                    onChange={(e) => setContact((c) => ({ ...c, relationshipToChild: e.target.value }))}
+                    placeholder="Relationship to the child"
+                    className="w-full rounded-xl border border-black/10 bg-white px-4 py-3 text-base text-brand-neutral-black placeholder:text-black/30 focus:border-brand-prussian-blue focus:outline-none focus:ring-2 focus:ring-brand-pastel-blue"
+                  />
+                  <input
+                    type="email"
+                    value={contact.contactEmail}
+                    onChange={(e) => setContact((c) => ({ ...c, contactEmail: e.target.value }))}
+                    placeholder="Contact email"
+                    className="w-full rounded-xl border border-black/10 bg-white px-4 py-3 text-base text-brand-neutral-black placeholder:text-black/30 focus:border-brand-prussian-blue focus:outline-none focus:ring-2 focus:ring-brand-pastel-blue"
+                  />
+                  <input
+                    type="tel"
+                    value={contact.contactPhone}
+                    onChange={(e) => setContact((c) => ({ ...c, contactPhone: e.target.value }))}
+                    placeholder="Phone"
+                    className="w-full rounded-xl border border-black/10 bg-white px-4 py-3 text-base text-brand-neutral-black placeholder:text-black/30 focus:border-brand-prussian-blue focus:outline-none focus:ring-2 focus:ring-brand-pastel-blue"
+                  />
+                  <input
+                    type="text"
+                    value={contact.referralSource}
+                    onChange={(e) => setContact((c) => ({ ...c, referralSource: e.target.value }))}
+                    placeholder="How they heard about the clinic"
+                    className="w-full rounded-xl border border-black/10 bg-white px-4 py-3 text-base text-brand-neutral-black placeholder:text-black/30 focus:border-brand-prussian-blue focus:outline-none focus:ring-2 focus:ring-brand-pastel-blue"
+                  />
+                  <input
+                    type="text"
+                    value={contact.homeAddress}
+                    onChange={(e) => setContact((c) => ({ ...c, homeAddress: e.target.value }))}
+                    placeholder="Home address"
+                    className="w-full rounded-xl border border-black/10 bg-white px-4 py-3 text-base text-brand-neutral-black placeholder:text-black/30 focus:border-brand-prussian-blue focus:outline-none focus:ring-2 focus:ring-brand-pastel-blue"
+                  />
+                </div>
+              </div>
+            )}
+
+            {canShowClinical && (
+              <div className="mt-6">
+                <p className="mb-1 font-sans text-sm font-semibold text-brand-neutral-black">Clinical Intake (optional)</p>
+                <p className="mb-3 text-xs text-brand-neutral-black/50">
+                  Never visible to a school, and never becomes a formal diagnosis on the passport. Leave anything
+                  blank to fill in later.
+                </p>
+                <div className="flex flex-col gap-3">
+                  <input
+                    type="text"
+                    value={clinical.suspectedDiagnosis}
+                    onChange={(e) => setClinical((c) => ({ ...c, suspectedDiagnosis: e.target.value }))}
+                    placeholder="Suspected diagnosis"
+                    className="w-full rounded-xl border border-black/10 bg-white px-4 py-3 text-base text-brand-neutral-black placeholder:text-black/30 focus:border-brand-prussian-blue focus:outline-none focus:ring-2 focus:ring-brand-pastel-blue"
+                  />
+                  <input
+                    type="text"
+                    value={clinical.mainConcerns}
+                    onChange={(e) => setClinical((c) => ({ ...c, mainConcerns: e.target.value }))}
+                    placeholder="Main concerns or behaviours"
+                    className="w-full rounded-xl border border-black/10 bg-white px-4 py-3 text-base text-brand-neutral-black placeholder:text-black/30 focus:border-brand-prussian-blue focus:outline-none focus:ring-2 focus:ring-brand-pastel-blue"
+                  />
+                  <div>
+                    <p className="mb-1.5 text-sm text-brand-neutral-black/70">Previous support or services?</p>
+                    <div className="flex gap-2">
+                      {[
+                        { label: "Yes", value: true },
+                        { label: "No", value: false },
+                      ].map((option) => {
+                        const isSelected = clinical.previousSupport === option.value;
+                        return (
+                          <button
+                            key={option.label}
+                            type="button"
+                            onClick={() => setClinical((c) => ({ ...c, previousSupport: option.value }))}
+                            aria-pressed={isSelected}
+                            className={`min-h-11 rounded-xl border px-4 py-2.5 text-sm font-semibold transition-colors ${
+                              isSelected
+                                ? "border-brand-prussian-blue bg-brand-pastel-blue/40 text-brand-prussian-blue"
+                                : "border-black/10 bg-white text-brand-neutral-black/60"
+                            }`}
+                          >
+                            {option.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  <input
+                    type="text"
+                    value={clinical.previousSupportDescription}
+                    onChange={(e) => setClinical((c) => ({ ...c, previousSupportDescription: e.target.value }))}
+                    placeholder="Description of previous support"
+                    className="w-full rounded-xl border border-black/10 bg-white px-4 py-3 text-base text-brand-neutral-black placeholder:text-black/30 focus:border-brand-prussian-blue focus:outline-none focus:ring-2 focus:ring-brand-pastel-blue"
+                  />
+                  <input
+                    type="text"
+                    value={clinical.clinicGoals}
+                    onChange={(e) => setClinical((c) => ({ ...c, clinicGoals: e.target.value }))}
+                    placeholder="What they want from working with the clinic"
+                    className="w-full rounded-xl border border-black/10 bg-white px-4 py-3 text-base text-brand-neutral-black placeholder:text-black/30 focus:border-brand-prussian-blue focus:outline-none focus:ring-2 focus:ring-brand-pastel-blue"
+                  />
+                  <input
+                    type="text"
+                    value={clinical.additionalNotes}
+                    onChange={(e) => setClinical((c) => ({ ...c, additionalNotes: e.target.value }))}
+                    placeholder="Anything else they want the clinic to know"
+                    className="w-full rounded-xl border border-black/10 bg-white px-4 py-3 text-base text-brand-neutral-black placeholder:text-black/30 focus:border-brand-prussian-blue focus:outline-none focus:ring-2 focus:ring-brand-pastel-blue"
+                  />
+                </div>
+              </div>
+            )}
 
             {canTag && (
               <div className="mt-6">

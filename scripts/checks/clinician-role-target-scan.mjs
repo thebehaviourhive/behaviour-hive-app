@@ -83,6 +83,28 @@ const CALLER_GATE_OR_TARGET_SPECIFIC_BY_DESIGN = {
     "Deliberately does NOT include 'principal' -- CLAUDE.md's own PRD 5 Stage 2 entry documents why: one can't \"stay\" as principal when handing the principal role over, by definition. Already includes 'clinician' and 'clinical_lead' (0204, live); the missing value here is correct, not a bug.",
   get_institution_staff_candidates:
     "The staff-messaging recipient-candidate list (0205, live) -- role in ('class_teacher', 'sna', 'principal', 'clinician', 'clinical_lead', 'clinic_admin'), already includes a director/lead as a valid message recipient.",
+
+  // Client Info (clinic-only), 0287, live -- all four are CALLER-side
+  // gates (s.user_id = auth.uid()), the same shape onboard_clinic_client
+  // /reopen_clinic_episode already have an entry for above, not a
+  // target check. clinical_lead's absence from all four is deliberate,
+  // matching Daniel's own explicit decision: he named admin/director/
+  // practitioner for entering contact details, director/practitioner
+  // only for clinical intake -- clinical_lead was never named for
+  // either, and the recon behind this build confirmed leads are not
+  // onboarders at all today (onboard_clinic_client/reopen_clinic_
+  // episode's own header: "clinical_lead is NOT an onboarder"). Read
+  // access for a lead's own SCOPED oversight is a genuinely open
+  // question Daniel's decision didn't address either way -- not folded
+  // in here as an assumption.
+  _client_info_readable:
+    "Caller's own gate -- role in ('principal','clinic_admin','clinician'), no toggle. clinical_lead deliberately absent: not named in Daniel's decision, and leads have no established client-record role in this schema today.",
+  _client_info_contact_writable:
+    "Caller's own gate -- director/admin always, a toggle-gated practitioner otherwise. clinical_lead deliberately absent, same reasoning as onboard_clinic_client's own entry above (leads are not onboarders).",
+  _client_info_clinical_readable:
+    "Caller's own gate -- role in ('principal','clinician') only, clinic_admin structurally excluded by design (Daniel's own decision: an admin sees no clinical content). clinical_lead deliberately absent -- never named for clinical intake either.",
+  _client_info_clinical_writable:
+    "Caller's own gate -- director always, a toggle-gated practitioner otherwise, same shape as the contact-write helper. clinical_lead deliberately absent, same reasoning.",
 };
 
 // FULL AUDIT, 22 Sept 2026, per Daniel's own instruction after the

@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { BrandMark } from "@/components/ui/BrandMark";
 import { Button } from "@/components/ui/Button";
+import { TextField } from "@/components/ui/TextField";
 import { createClient } from "@/lib/supabase/client";
 import { useRequireRole } from "@/hooks/useRequireRole";
 
@@ -24,6 +25,27 @@ import { useRequireRole } from "@/hooks/useRequireRole";
 // exception is "not found": that case is a deliberate ZERO-ROW SUCCESS,
 // not a thrown error (0116's own fix, so the rate-limit insert ahead of
 // it survives) -- this screen supplies its own copy for that one case.
+//
+// Client Info (clinic-only), Daniel's decisions, Sept 2026. Decision 2:
+// the parent can EDIT their contact details here, not just acknowledge
+// them -- their own information, Sections A-D are already
+// guardian-editable, correcting it is their right under GDPR. A raw
+// client_contact_info row is fetched right after a successful claim
+// (owns_passport() already covers this the instant redeem_passport_
+// claim_code() creates the guardian row); a school-claimed passport, or
+// a clinic one where nothing was entered yet, simply has no row -- the
+// confirm step is skipped entirely, straight to the existing success
+// screen, never an empty form shown for nothing. Plan A, per decision
+// 4: clinical intake is never fetched or shown here, at all.
+interface ContactInfo {
+  guardianFullName: string;
+  relationshipToChild: string;
+  contactEmail: string;
+  contactPhone: string;
+  referralSource: string;
+  homeAddress: string;
+}
+
 export default function PassportClaimPage() {
   const router = useRouter();
   const { isReady } = useRequireRole("parent");
@@ -31,6 +53,7 @@ export default function PassportClaimPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [claimedChildName, setClaimedChildName] = useState<string | null>(null);
+  const [claimedPassportId, setClaimedPassportId] = useState<string | null>(null);
   // Tier 1 item 4, 21 Sept 2026 -- unknown until AFTER a successful
   // claim (a code could belong to either a school or a clinic; nothing
   // before the claim resolves it), so the pre-lookup copy stays
@@ -39,6 +62,11 @@ export default function PassportClaimPage() {
   // success screen resolves the real institution(s) this passport is
   // now linked to, exactly once, to say something true instead.
   const [isClinicOnly, setIsClinicOnly] = useState(false);
+
+  const [contact, setContact] = useState<ContactInfo | null>(null);
+  const [isSavingContact, setIsSavingContact] = useState(false);
+  const [contactError, setContactError] = useState<string | null>(null);
+  const [hasConfirmedContact, setHasConfirmedContact] = useState(false);
 
   async function handleClaim() {
     if (!code.trim()) return;
@@ -78,12 +106,136 @@ export default function PassportClaimPage() {
       setIsClinicOnly(types.has("clinic") && !types.has("school"));
     }
 
+    const { data: contactRows } = await supabase
+      .from("client_contact_info")
+      .select("guardian_full_name, relationship_to_child, contact_email, contact_phone, referral_source, home_address")
+      .eq("passport_id", claimed.passport_id);
+    const contactRow = contactRows?.[0] ?? null;
+    if (contactRow) {
+      setContact({
+        guardianFullName: contactRow.guardian_full_name ?? "",
+        relationshipToChild: contactRow.relationship_to_child ?? "",
+        contactEmail: contactRow.contact_email ?? "",
+        contactPhone: contactRow.contact_phone ?? "",
+        referralSource: contactRow.referral_source ?? "",
+        homeAddress: contactRow.home_address ?? "",
+      });
+    }
+
     setIsSubmitting(false);
+    setClaimedPassportId(claimed.passport_id);
     setClaimedChildName(claimed.child_name);
+  }
+
+  function updateContactField<K extends keyof ContactInfo>(key: K, value: string) {
+    setContact((current) => (current ? { ...current, [key]: value } : current));
+  }
+
+  async function handleSaveContact() {
+    if (!contact || !claimedPassportId) return;
+    setIsSavingContact(true);
+    setContactError(null);
+    const supabase = createClient();
+    const { error } = await supabase
+      .from("client_contact_info")
+      .update({
+        guardian_full_name: contact.guardianFullName.trim() || null,
+        relationship_to_child: contact.relationshipToChild.trim() || null,
+        contact_email: contact.contactEmail.trim() || null,
+        contact_phone: contact.contactPhone.trim() || null,
+        referral_source: contact.referralSource.trim() || null,
+        home_address: contact.homeAddress.trim() || null,
+      })
+      .eq("passport_id", claimedPassportId);
+    setIsSavingContact(false);
+    if (error) {
+      setContactError(error.message);
+      return;
+    }
+    await handleConfirmContact();
+  }
+
+  async function handleConfirmContact() {
+    if (!claimedPassportId) return;
+    setIsSavingContact(true);
+    setContactError(null);
+    const supabase = createClient();
+    const { error } = await supabase.rpc("confirm_client_contact_info", { p_passport_id: claimedPassportId });
+    setIsSavingContact(false);
+    if (error) {
+      setContactError(error.message);
+      return;
+    }
+    setHasConfirmedContact(true);
   }
 
   if (!isReady) {
     return null;
+  }
+
+  // Decision 3: confirmation is a shared fact about the family record,
+  // not per-guardian -- this screen doesn't need to check whether a
+  // DIFFERENT guardian already confirmed it before showing this step;
+  // confirm_client_contact_info() itself is a no-op-safe re-confirm if
+  // it was already true, and the parent seeing (and being free to
+  // correct) the details again on their own first claim is the point.
+  if (claimedChildName && contact && !hasConfirmedContact) {
+    return (
+      <main className="flex min-h-full flex-1 items-center justify-center bg-brand-off-white/40 px-4 py-10">
+        <div className="w-full max-w-sm">
+          <div className="mb-6 flex flex-col items-center gap-3">
+            <BrandMark />
+            <h1 className="font-heading text-2xl font-semibold text-brand-neutral-black text-center">Confirm your details</h1>
+          </div>
+
+          <div className="rounded-3xl border border-black/5 bg-white p-6 shadow-sm">
+            <p className="text-sm leading-relaxed text-black/70">
+              Your clinic already has this on file. Check it&apos;s right -- you can correct anything below.
+            </p>
+
+            <div className="mt-4 flex flex-col gap-3">
+              <TextField
+                label="Your full name"
+                value={contact.guardianFullName}
+                onChange={(e) => updateContactField("guardianFullName", e.target.value)}
+              />
+              <TextField
+                label="Relationship to the child"
+                value={contact.relationshipToChild}
+                onChange={(e) => updateContactField("relationshipToChild", e.target.value)}
+              />
+              <TextField
+                label="Contact email"
+                type="email"
+                value={contact.contactEmail}
+                onChange={(e) => updateContactField("contactEmail", e.target.value)}
+              />
+              <TextField
+                label="Phone"
+                type="tel"
+                value={contact.contactPhone}
+                onChange={(e) => updateContactField("contactPhone", e.target.value)}
+              />
+              <TextField
+                label="Home address"
+                value={contact.homeAddress}
+                onChange={(e) => updateContactField("homeAddress", e.target.value)}
+              />
+            </div>
+
+            {contactError && (
+              <p role="alert" className="mt-3 text-sm font-medium text-red-600">
+                {contactError}
+              </p>
+            )}
+
+            <Button type="button" onClick={handleSaveContact} disabled={isSavingContact} className="mt-5">
+              {isSavingContact ? "Saving…" : "This looks right"}
+            </Button>
+          </div>
+        </div>
+      </main>
+    );
   }
 
   if (claimedChildName) {

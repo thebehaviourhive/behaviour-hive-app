@@ -32,7 +32,7 @@
     "237:\"your child's teacher\"": "Fallback only inside `if (todaysUpdate)`, gated on a real teacher_updates row existing -- can't fire for a clinic-only child."
   },
   "src/app/passport/claim/page.tsx": {
-    "106:\"You'll see everything the school and clinical team have already added, and you can pick up wherever they left off.\"": "The school branch of an already-correct isClinicOnly ternary (the clinic branch reads \"your clinic's own team\")."
+    "258:\"You'll see everything the school and clinical team have already added, and you can pick up wherever they left off.\"": "The school branch of an already-correct isClinicOnly ternary (the clinic branch reads \"your clinic's own team\")."
   },
   "src/app/passport/dashboard/page.tsx": {
     "1022:\"What sensory tools and de-escalation strategies work best? Build a quick-reference toolkit for the classroom.\"": "The school branch of an already-correct allConnectedAreClinic ternary.",
@@ -54,7 +54,7 @@
     "173:\"School Record Export\"": "The direction === 'clinic' ternary's own school branch -- clinic branch reads \"Clinical Record Export\"."
   },
   "src/app/principal/passports/enrol/page.tsx": {
-    "279:\"Creates a new passport for this child, started by your school. Their parent or guardian claims it later using a code you generate from their own passport page — this doesn't require them to do anything yet.\"": "The school branch of an already-correct institutionType ternary -- the clinic branch (line 278) reads \"Creates a new record for this client, started by your clinic...\"."
+    "396:\"Creates a new passport for this child, started by your school. Their parent or guardian claims it later using a code you generate from their own passport page — this doesn't require them to do anything yet.\"": "The school branch of an already-correct institutionType ternary -- the clinic branch (line 395) reads \"Creates a new record for this client, started by your clinic...\"."
   },
   "src/components/abc-logger/ABCLogger.tsx": {
     "824:\"Select any that applied around this incident.\"": "\"Incident\" is this app's own generic ABC-log-entry terminology throughout, not the formal Incident Log record type -- used identically by parent/teacher/clinician/SNA.",
@@ -100,15 +100,15 @@
     "202:\"e.g. Retiring at the end of term\"": "Finding 1 fix -- the institutionType!=='clinic' branch of an already-correct ternary; the clinic branch reads \"e.g. Stepping back from the clinic\"."
   },
   "src/components/principal/directory/ChildDetail.tsx": {
-    "304:\"Left the school\"": "END_REASON_LABEL, used only inside the institutionType !== 'clinic' branch of the Enrolment/Episode-of-Care tab.",
-    "305:\"Transferred to another school\"": "Same -- END_REASON_LABEL, school-branch only.",
-    "600:\"Failed to load this child's school incidents:\"": "console.error, fires only within the clinic-only get_institution_incidents_for_director() branch -- correctly describes the child's SCHOOL incidents as read by their clinic, cross-org content, not a leak.",
-    "601:\"Couldn't load this child's school incidents.\"": "Same -- user-facing pair of the line above, same reasoning.",
-    "677:\"Failed to load enrolment:\"": "console.error only, dev-facing variable name, never shown to a user.",
-    "994:\"School Incidents\"": "The tab's own deliberate relabelling for institutionType === 'clinic' (tab.key === 'incidents' ? 'School Incidents' : tab.label) -- correct, not a leak.",
-    "1025:\"This child isn't on your school's roster.\"": "The institutionType-false branch of an already-correct ternary.",
-    "1668:\"No school incidents shared with this clinic yet.\"": "Deliberate clinic-specific empty state, correctly describing cross-org content.",
-    "1682:\"School incidents are visible only while this client has an active episode. Reopen the episode of care to see them again.\"": "Same -- deliberate clinic-specific copy about cross-org content."
+    "315:\"Left the school\"": "END_REASON_LABEL, used only inside the institutionType !== 'clinic' branch of the Enrolment/Episode-of-Care tab.",
+    "316:\"Transferred to another school\"": "Same -- END_REASON_LABEL, school-branch only.",
+    "617:\"Failed to load this child's school incidents:\"": "console.error, fires only within the clinic-only get_institution_incidents_for_director() branch -- correctly describes the child's SCHOOL incidents as read by their clinic, cross-org content, not a leak.",
+    "618:\"Couldn't load this child's school incidents.\"": "Same -- user-facing pair of the line above, same reasoning.",
+    "694:\"Failed to load enrolment:\"": "console.error only, dev-facing variable name, never shown to a user.",
+    "1012:\"School Incidents\"": "The tab's own deliberate relabelling for institutionType === 'clinic' (tab.key === 'incidents' ? 'School Incidents' : tab.label) -- correct, not a leak.",
+    "1043:\"This child isn't on your school's roster.\"": "The institutionType-false branch of an already-correct ternary.",
+    "1700:\"No school incidents shared with this clinic yet.\"": "Deliberate clinic-specific empty state, correctly describing cross-org content.",
+    "1714:\"School incidents are visible only while this client has an active episode. Reopen the episode of care to see them again.\"": "Same -- deliberate clinic-specific copy about cross-org content."
   },
   "src/components/principal/directory/ChildrenList.tsx": {
     "253:\"Could not load the school roster.\"": "Finding 1 fix -- the isClinic-false branch of a newly-added ternary (isClinic branch reads \"Could not load the clinic roster.\").",

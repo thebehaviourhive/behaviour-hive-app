@@ -19,6 +19,8 @@ import { ClinicalPlansSection } from "@/components/passport/clinical-team/Clinic
 import { DirectorSessionNotesTab } from "@/components/principal/directory/DirectorSessionNotesTab";
 import { EpisodeTagsSection } from "@/components/clinic/EpisodeTagsSection";
 import { GrantManagementSection } from "@/components/clinic/GrantManagementSection";
+import { ClientContactInfoSection } from "@/components/clinic/ClientContactInfoSection";
+import { ClientClinicalIntakeSection } from "@/components/clinic/ClientClinicalIntakeSection";
 import { PassportCompletionSection } from "@/components/passport/PassportCompletionSection";
 import { PassportMessagesTab } from "@/components/passport/PassportMessagesTab";
 import { ProgressSurface } from "@/components/progress/ProgressSurface";
@@ -263,6 +265,7 @@ interface PassportProfile {
 // that needs to stay one tap away, not buried in a longer combined page.
 type TabKey =
   | "enrolment"
+  | "clientInfo"
   | "access"
   | "passport"
   | "medicalCare"
@@ -276,6 +279,14 @@ type TabKey =
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: "enrolment", label: "Enrolment" },
+  // Client Info (clinic-only), Daniel's decisions, Sept 2026. Its own
+  // tab, not folded into Enrolment -- distinct enough content (a
+  // family's contact details and, director-only, clinical intake) to
+  // want its own discoverable place, matching Medical & Care's own
+  // precedent of staying separate rather than being absorbed. Filtered
+  // out below for a school principal, same shape Session Notes already
+  // uses -- these two tables only ever have rows for a clinic.
+  { key: "clientInfo", label: "Client Info" },
   { key: "access", label: "Access" },
   { key: "passport", label: "Passport" },
   { key: "medicalCare", label: "Medical & Care" },
@@ -328,10 +339,16 @@ export function ChildDetail({
 
   // Same lazy-initializer idiom as /clinician/passport/[passportId] --
   // read once on mount, never synced back to the URL on tab change.
+  // ?missingSection=contact|clinical (decision 1) lands directly on the
+  // Client Info tab, same as an explicit ?tab= would, since that's
+  // where the unsaved section actually lives -- never a redo-onboarding
+  // offer, just the client's own record with the gap visible.
   const [activeTab, setActiveTab] = useState<TabKey>(() => {
     const requested = searchParams.get("tab");
+    if (searchParams.get("missingSection")) return "clientInfo";
     return TABS.some((t) => t.key === requested) ? (requested as TabKey) : "enrolment";
   });
+  const missingSection = searchParams.get("missingSection");
 
   const [childName, setChildName] = useState<string | null>(null);
   const [institutionId, setInstitutionId] = useState<string | null>(null);
@@ -956,6 +973,7 @@ export function ChildDetail({
       {!isLoading && !error && !notOnRoster && (
         <div className="relative flex gap-1 overflow-x-auto border-b border-black/5 px-4 lg:w-52 lg:flex-shrink-0 lg:flex-col lg:gap-0.5 lg:overflow-visible lg:border-b-0 lg:border-r lg:border-black/5 lg:px-2 lg:py-2">
           {TABS.filter((tab) => tab.key !== "sessionNotes" || institutionType === "clinic")
+            .filter((tab) => tab.key !== "clientInfo" || institutionType === "clinic")
             // Tier 1 item 2 -- a clinic-only child (no school link at
             // all) has no school-incidents data structurally, ever;
             // hidden rather than shown empty, matching sessionNotes'
@@ -1234,6 +1252,20 @@ export function ChildDetail({
                   </p>
                 )}
               </section>
+            </>
+          )}
+
+          {activeTab === "clientInfo" && institutionType === "clinic" && (
+            <>
+              {missingSection && (
+                <p role="alert" className="mb-4 rounded-2xl bg-brand-golden-brown/10 p-3 text-sm font-medium text-brand-golden-brown">
+                  {missingSection === "contact"
+                    ? "Contact info didn't save when this client was added — fill it in below when you can."
+                    : "Clinical intake didn't save when this client was added — fill it in below when you can."}
+                </p>
+              )}
+              <ClientContactInfoSection passportId={passportId} />
+              <ClientClinicalIntakeSection passportId={passportId} />
             </>
           )}
 

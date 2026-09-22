@@ -19,6 +19,8 @@ import { ClinicalFilePlansTab } from "@/components/clinician/plans/ClinicalFileP
 import { ClinicalFileMessagesTab } from "@/components/clinician/ClinicalFileMessagesTab";
 import { ClinicalFileIncidentsTab } from "@/components/clinician/ClinicalFileIncidentsTab";
 import { EpisodeTagsSection } from "@/components/clinic/EpisodeTagsSection";
+import { ClientContactInfoSection } from "@/components/clinic/ClientContactInfoSection";
+import { ClientClinicalIntakeSection } from "@/components/clinic/ClientClinicalIntakeSection";
 import { ClinicalFileSessionNotesTab } from "@/components/clinician/ClinicalFileSessionNotesTab";
 import { ClinicalFileAssessmentsTab } from "@/components/clinician/assessments/ClinicalFileAssessmentsTab";
 import { EffectivenessSurface } from "@/components/clinician/passport/EffectivenessSurface";
@@ -73,6 +75,7 @@ type TabKey =
   | "incidents"
   | "incidentLog"
   | "clinicalTeam"
+  | "clientInfo"
   | "fba"
   | "bsp"
   | "plans"
@@ -105,6 +108,13 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: "incidents", label: "ABC Logs" },
   { key: "incidentLog", label: "Incident Log" },
   { key: "clinicalTeam", label: "Clinical Team" },
+  // Client Info (clinic-only), Daniel's decisions, Sept 2026. Read
+  // never toggle-gated (an engaged practitioner needs the family's
+  // contact details and clinical intake regardless of whether their
+  // clinic lets practitioners onboard); write is, via the two shared
+  // section components' own RPC calls -- their refusal, if any, shows
+  // inline rather than being guessed at here.
+  { key: "clientInfo", label: "Client Info" },
   { key: "fba", label: "FBA" },
   // PRD 7 Stage 4 -- a separate, standalone Silo-2 document, not a
   // replacement for FBA's own Section 12 recommendations. Placed right
@@ -185,10 +195,16 @@ export function ClinicalFileDetail({
   // manually switching tabs afterwards behaves exactly as it always has
   // (plain local state, no URL sync back out). An invalid/unknown value
   // falls back to "summary" rather than rendering nothing.
+  // ?missingSection=contact|clinical (decision 1) lands directly on
+  // Client Info, same shape as ChildDetail's own equivalent -- the
+  // client's own record is where an unsaved section from onboarding
+  // gets flagged and retried, never a redo-onboarding offer.
   const [activeTab, setActiveTab] = useState<TabKey>(() => {
     const requested = searchParams.get("tab");
+    if (searchParams.get("missingSection")) return "clientInfo";
     return TABS.some((t) => t.key === requested) ? (requested as TabKey) : "summary";
   });
+  const missingSection = searchParams.get("missingSection");
   const [isAbcLoggerOpen, setIsAbcLoggerOpen] = useState(false);
   const [timelineRefreshKey, setTimelineRefreshKey] = useState(0);
   // Finding 1, 22 Sept 2026 -- same fix as ChildDetail's own, mirrored
@@ -575,6 +591,20 @@ export function ClinicalFileDetail({
               ) : (
                 <ClinicalTeamSection items={clinicalContentItems} viewerRole="clinician" />
               )}
+            </>
+          )}
+
+          {activeTab === "clientInfo" && (
+            <>
+              {missingSection && (
+                <p role="alert" className="mb-4 rounded-2xl bg-brand-golden-brown/10 p-3 text-sm font-medium text-brand-golden-brown">
+                  {missingSection === "contact"
+                    ? "Contact info didn't save when this client was added — fill it in below when you can."
+                    : "Clinical intake didn't save when this client was added — fill it in below when you can."}
+                </p>
+              )}
+              <ClientContactInfoSection passportId={passportId} />
+              <ClientClinicalIntakeSection passportId={passportId} />
             </>
           )}
 
