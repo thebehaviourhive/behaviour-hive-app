@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
 import { LifeBuoy } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { formatClinicianReference } from "@/lib/clinicianDisplayName";
@@ -118,27 +117,27 @@ export function CalmUnlockSheet({
   const [isInfoSheetOpen, setIsInfoSheetOpen] = useState(false);
   const name = childName ?? "your child";
 
+  // Parent-track Share sheet fix, 23 Sept 2026 -- "no-clinician" used
+  // to offer a "Link your clinician" action, deep-linking into
+  // ShareBottomSheet's own clinician-code field. That field is gone
+  // (Part 1's own recon: zero real, connectable clinician codes exist
+  // today -- every clinician joins via an organisation). Every state
+  // here is informational only now, matching what clinician-no-fba/
+  // fba-in-progress/the default state already were -- no action to
+  // offer until the real connection path this recon found missing is
+  // built (see CLAUDE.md's own deferred-work entry).
   let body: string;
-  let primaryAction: { label: string; href: string } | null;
 
   if (!state || isLoading) {
     body = "In difficult moments, the Calm button gives you instant, step-by-step strategies designed by your clinician specifically for your child.";
-    primaryAction = null;
   } else if (state.kind === "no-clinician") {
     body = "In difficult moments, the Calm button gives you instant, step-by-step strategies designed by your clinician specifically for your child.";
-    primaryAction = {
-      label: "Link your clinician",
-      href: state.passportId ? "/passport/dashboard?openShare=1" : "/passport/welcome",
-    };
   } else if (state.kind === "clinician-no-fba") {
     body = `Talk to ${state.clinicianReference} about a Functional Behaviour Assessment for ${name}.`;
-    primaryAction = null;
   } else if (state.kind === "fba-in-progress") {
     body = `${state.clinicianReference} is currently conducting ${name}'s assessment. The Calm button will unlock once it's complete and your clinician has published Calm Cards.`;
-    primaryAction = null;
   } else {
     body = `Your clinician is preparing ${name}'s Calm Cards — they'll appear here soon.`;
-    primaryAction = null;
   }
 
   return (
@@ -155,15 +154,6 @@ export function CalmUnlockSheet({
               It unlocks when {name}&apos;s Functional Behaviour Assessment is completed through The Behaviour Hive.
             </p>
           </div>
-
-          {primaryAction && (
-            <Link
-              href={primaryAction.href}
-              className="w-full rounded-2xl bg-brand-prussian-blue py-3.5 text-center text-base font-semibold text-white"
-            >
-              {primaryAction.label}
-            </Link>
-          )}
 
           <button
             type="button"

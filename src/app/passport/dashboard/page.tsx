@@ -2,11 +2,10 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { BottomNav } from "@/components/ui/BottomNav";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { InlineErrorState } from "@/components/ui/InlineErrorState";
-import { ShareBottomSheet } from "@/components/parent/ShareBottomSheet";
 import { ClaimCodeEntry } from "@/components/parent/ClaimCodeEntry";
 import { ReasonConfirmSheet } from "@/components/shared/ReasonConfirmSheet";
 import { ABCLogger } from "@/components/abc-logger/ABCLogger";
@@ -16,7 +15,6 @@ import { ClinicalTeamSection } from "@/components/passport/clinical-team/Clinica
 import { BookingHistorySection } from "@/components/passport/BookingHistorySection";
 import { usePassportClinicalContent } from "@/hooks/usePassportClinicalContent";
 import { useStrategyEffectiveness } from "@/hooks/useStrategyEffectiveness";
-import { revalidateParentCalmAccess } from "@/hooks/useParentCalmAccess";
 import { createClient } from "@/lib/supabase/client";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { useMyPassport } from "@/hooks/useMyPassport";
@@ -57,7 +55,6 @@ interface ConnectedClinician {
 
 interface PassportSummaryData {
   passportId: string;
-  passportCode: string | null;
   childName: string;
   age: number | null;
   school: string | null;
@@ -80,16 +77,6 @@ interface PassportSummaryData {
 
 const CARD_CLASSNAME =
   "rounded-2xl border border-brand-off-white/50 bg-white p-5 shadow-[0_4px_20px_rgba(0,79,113,0.05)]";
-
-// Same dismiss-once localStorage convention as parent-dashboard's own
-// getDismissKey (passportCardDismissed:${userId}) -- keyed by passportId
-// here since the hint is about THIS passport's own share history, not a
-// per-user preference. Permanent once written: opening the share sheet
-// (from any of its three entry points) writes this immediately, so a
-// force-quit mid-flow still leaves the hint gone on reload.
-function getShareHintDismissKey(passportId: string) {
-  return `shareHintDismissed:${passportId}`;
-}
 
 function calculateAge(dateOfBirth: string | null | undefined): number | null {
   if (!dateOfBirth) return null;
@@ -150,9 +137,6 @@ export default function PassportDashboardPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [approvedInstitutions, setApprovedInstitutions] = useState<ApprovedInstitution[]>([]);
   const [connectedClinicians, setConnectedClinicians] = useState<ConnectedClinician[]>([]);
-  const [isShareOpen, setIsShareOpen] = useState(false);
-  const [focusClinicianCodeOnOpen, setFocusClinicianCodeOnOpen] = useState(false);
-  const [isShareHintDismissed, setIsShareHintDismissed] = useState(false);
   const [clinicianRevokeConfirmation, setClinicianRevokeConfirmation] = useState<string | null>(null);
   const [clinicianRevokeError, setClinicianRevokeError] = useState<string | null>(null);
   const [clinicianRevokeTarget, setClinicianRevokeTarget] = useState<ConnectedClinician | null>(null);
@@ -226,7 +210,6 @@ export default function PassportDashboardPage() {
   // clinicalTeamItems below, for the same rules-of-hooks reason.
   const [helpedCounts, setHelpedCounts] = useState<Record<string, number>>({});
   const hasHandledHashRef = useRef(false);
-  const hasReadShareHintDismissRef = useRef(false);
 
   function toggleSection(id: string) {
     setExpandedSections((prev) => {
@@ -254,38 +237,6 @@ export default function PassportDashboardPage() {
     }, 350);
     return () => clearTimeout(timer);
   }, [summary]);
-
-  // Reads the dismiss flag exactly once per mount (the ref guard matters
-  // here, not just the `summary` dependency -- summary's own identity
-  // changes again once code generation resolves, and re-reading then
-  // would just read back the "true" this same session already wrote).
-  useEffect(() => {
-    if (!summary || hasReadShareHintDismissRef.current) return;
-    hasReadShareHintDismissRef.current = true;
-    setIsShareHintDismissed(
-      window.localStorage.getItem(getShareHintDismissKey(summary.passportId)) === "true"
-    );
-  }, [summary]);
-
-  // The one function every "open the share sheet" entry point calls --
-  // the header pill, the Manage Access primary button, AND the
-  // ?openShare=1 deep link below -- so the first-time hint's permanent
-  // dismissal (constraint 3) can never be missed from one entry point
-  // while wired correctly from another. Writing the flag on OPEN rather
-  // than on some later success event is deliberate: the hint's whole
-  // job is done the moment a parent finds and taps the share affordance,
-  // regardless of what they do inside the sheet next.
-  const openShareSheet = useCallback(
-    (focusClinician = false) => {
-      if (summary && !isShareHintDismissed) {
-        window.localStorage.setItem(getShareHintDismissKey(summary.passportId), "true");
-        setIsShareHintDismissed(true);
-      }
-      setIsShareOpen(true);
-      if (focusClinician) setFocusClinicianCodeOnOpen(true);
-    },
-    [summary, isShareHintDismissed]
-  );
 
   // PRD 3, Stage 2 -- dropped the .eq("approved_by_parent", true) filter.
   // That flag was a genuine consent record when a parent approving a
@@ -400,7 +351,7 @@ export default function PassportDashboardPage() {
           supabase
             .from("passports")
             .select(
-              "user_id, passport_code, child_name, date_of_birth, school, important_people, diagnoses, diagnosis_other, passport_status, section_a_complete"
+              "user_id, child_name, date_of_birth, school, important_people, diagnoses, diagnosis_other, passport_status, section_a_complete"
             )
             .eq("id", passportId)
             .maybeSingle(),
@@ -441,7 +392,6 @@ export default function PassportDashboardPage() {
 
         setSummary({
           passportId,
-          passportCode: (passport?.passport_code as string | null) ?? null,
           childName: (passport?.child_name as string | null) || "Your child",
           age: calculateAge(passport?.date_of_birth),
           school: (passport?.school as string | null) ?? null,
@@ -513,16 +463,6 @@ export default function PassportDashboardPage() {
     if (behaviour) setCalmBehaviour(behaviour);
     router.replace("/passport/dashboard");
   }, [summary, searchParams, router]);
-
-  // Deep-link from the Clinical Support card's "Link your clinician" CTA
-  // (parent already has a passport, just no clinician linked yet) --
-  // same query-param-then-replace pattern as logIncident above.
-  useEffect(() => {
-    if (!summary || searchParams.get("openShare") !== "1") return;
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    openShareSheet(true);
-    router.replace("/passport/dashboard");
-  }, [summary, searchParams, router, openShareSheet]);
 
   if (!isRoleReady || isLoading) {
     return null;
@@ -597,19 +537,6 @@ export default function PassportDashboardPage() {
   // this is "is EVERY link a clinic," not a single yes/no.
   const allConnectedAreClinic = approvedInstitutions.length > 0 && approvedInstitutions.every((i) => i.institutionType === "clinic");
 
-  // "Never shared" per the brief's own three-part definition: no code
-  // ever generated (passportCode is only ever set the moment the share
-  // sheet is first opened, via generateCode's auto-trigger -- see
-  // ShareBottomSheet), no approved schools, no connected clinicians.
-  // showShareHint additionally requires the dismiss flag not already
-  // set, so a passport that WAS genuinely shared but somehow lost its
-  // localStorage flag (a different device/browser) still correctly
-  // shows no cue -- the data check alone is what "a shared passport
-  // shows no cue" actually depends on.
-  const hasNeverShared =
-    !summary.passportCode && approvedInstitutions.length === 0 && connectedClinicians.length === 0;
-  const showShareHint = hasNeverShared && !isShareHintDismissed;
-
   const hasOkay = (summary.okaySignals?.length ?? 0) > 0;
   const hasHard = (summary.hardSignals?.length ?? 0) > 0;
   const hasTriggers = (summary.hardTriggers?.length ?? 0) > 0;
@@ -663,13 +590,6 @@ export default function PassportDashboardPage() {
   return (
     <div className="flex min-h-full flex-1 flex-col bg-brand-off-white/40 pb-24">
       <header className="px-4 pt-8 pb-6">
-        {/* Header Share pill removed (UI refinements round) -- the
-            Manage Access card's "Share [child]'s Passport" button below
-            is now the sole canonical entry point; it calls the exact
-            same openShareSheet() as this pill used to, so the sheet
-            itself and the ?openShare=1 deep link (FBA card, Calm unlock
-            sheet) are entirely unaffected. Child identity remains the
-            header's sole anchor. */}
         <p className="font-accent text-sm uppercase tracking-wide text-brand-neutral-black">
           The Behavioural Passport Of
         </p>
@@ -737,33 +657,6 @@ export default function PassportDashboardPage() {
           <ErrorBoundary fallback={fallbackCard}>
             <section className={CARD_CLASSNAME}>
               <h2 className="mb-4 font-heading text-lg font-bold text-brand-prussian-blue">Manage Access</h2>
-
-              {/* The primary door into sharing (constraint 2) -- the
-                  pinned access cards are exactly where a hunting parent
-                  looks first. Same shared sheet as the header pill, via
-                  the same openShareSheet() entry point -- one flow, two
-                  doors. showShareHint's one-time "Start here" badge
-                  (constraint 3) sits on this button specifically since
-                  it's the button most naturally in a first-time
-                  parent's eyeline, not the smaller header pill. */}
-              <div className="relative mb-4">
-                <button
-                  type="button"
-                  onClick={() => openShareSheet()}
-                  className="flex w-full items-center justify-center gap-2 rounded-2xl bg-brand-prussian-blue py-3.5 text-base font-semibold text-white"
-                >
-                  <ShareIcon />
-                  Share {summary.childName}&apos;s Passport
-                </button>
-                {showShareHint && (
-                  <span
-                    aria-hidden
-                    className="absolute -right-2 -top-2 animate-pulse rounded-full bg-brand-golden-brown px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-white shadow-sm"
-                  >
-                    Start here
-                  </span>
-                )}
-              </div>
 
               {/* Deliberately read-only and purely informational -- PRD 3
                   Stage 2 resolved the open question this comment used to
@@ -1162,30 +1055,6 @@ export default function PassportDashboardPage() {
         )}
       </main>
 
-      <ShareBottomSheet
-        isOpen={isShareOpen}
-        onClose={() => {
-          setIsShareOpen(false);
-          setFocusClinicianCodeOnOpen(false);
-        }}
-        passportId={summary.passportId}
-        childName={summary.childName}
-        passportCode={summary.passportCode}
-        focusClinicianCode={focusClinicianCodeOnOpen}
-        onCodeGenerated={(code) =>
-          setSummary((prev) => (prev ? { ...prev, passportCode: code } : prev))
-        }
-        onClinicianConnected={() => {
-          loadConnectedClinicians(summary.passportId);
-          // Connecting a clinician is the concrete moment the unlock
-          // sheet's own "link a clinician" journey completes -- a
-          // genuinely access-changing event worth an immediate
-          // revalidate rather than waiting for the next natural
-          // navigation (which would pick it up anyway, just later).
-          revalidateParentCalmAccess();
-        }}
-      />
-
       <ReasonConfirmSheet
         isOpen={Boolean(clinicianRevokeTarget)}
         title="Revoke clinician access"
@@ -1272,20 +1141,6 @@ export default function PassportDashboardPage() {
 
       <BottomNav passportHref="/passport/dashboard" />
     </div>
-  );
-}
-
-function ShareIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" aria-hidden>
-      <path
-        d="M12 3v12m0-12l4 4m-4-4l-4 4M5 12v7a1 1 0 001 1h12a1 1 0 001-1v-7"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
   );
 }
 

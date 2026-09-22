@@ -223,19 +223,20 @@ function FbaCard({
 }) {
   switch (state.kind) {
     case "no-clinician":
+      // Parent-track Share sheet fix, 23 Sept 2026 -- "Link your
+      // clinician" used to deep-link into ShareBottomSheet's own
+      // clinician-code field, now removed (Part 1's own recon:
+      // zero real, connectable clinician codes exist -- every
+      // clinician joins via an organisation now). No action left to
+      // offer here until the real connection path this recon found
+      // missing is built (see CLAUDE.md's own deferred-work entry) --
+      // informational only, matching the clinician-no-fba/fba-in-
+      // progress states immediately below, which already have no
+      // primaryAction either.
       return (
         <ClinicalDocumentCard
           title="Functional Behaviour Assessment"
           body={<p>Find out more about an FBA for your child.</p>}
-          primaryAction={{
-            label: "Link your clinician",
-            // Can't link a clinician to a passport that doesn't exist yet --
-            // creation is the true next step when there's no passport at
-            // all. Once a passport exists, deep-link straight to the
-            // access/linking area on the passport page, landing with the
-            // clinician-code entry visible.
-            href: state.passportId ? "/passport/dashboard?openShare=1" : "/passport/welcome",
-          }}
           secondaryAction={{ label: "Find out more", onClick: onOpenInfo }}
         />
       );
