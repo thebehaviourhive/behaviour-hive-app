@@ -129,8 +129,12 @@ export function AssessmentRequestPromptCard({
             {confirmDismissId === request.id ? (
               <div className="mt-3 rounded-xl bg-white/60 p-3">
                 <p className="text-xs text-brand-neutral-black/80">
+                  {/* getChildDisplayName() can already end in a period
+                      (a redacted surname initial, "Sammy T.") -- never
+                      append a second one on top of it. */}
                   Are you sure you want to dismiss this? It may be needed for {request.clinicianName}&apos;s{" "}
-                  {request.instrumentName} for {getChildDisplayName(request.childName)}.
+                  {request.instrumentName} for {getChildDisplayName(request.childName)}
+                  {getChildDisplayName(request.childName).endsWith(".") ? "" : "."}
                 </p>
                 <div className="mt-2 flex gap-2">
                   <button
