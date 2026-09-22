@@ -40,20 +40,6 @@ export function InstrumentRequestChip({
   const [isSending, setIsSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // 22 Sept 2026 -- a cancelled request only ever exists because
-  // finalize_fba_report() (0199) cancelled it in the same transaction
-  // that completed this FBA, so it's dead the moment it's possible: the
-  // FBA is already locked, nothing more can happen with it. Rendered as
-  // nothing rather than a muted "Cancelled" chip -- the finalised
-  // section shouldn't keep showing a request that can never be acted
-  // on again. This is a render-only change: the underlying `requests`
-  // array (and everything IndirectAssessmentSection.tsx derives from
-  // its length -- indirectAssessmentSummary, the empty-state check) is
-  // completely untouched, since that file is not touched by this fix.
-  if (request.status === "cancelled") {
-    return null;
-  }
-
   async function handleReminder() {
     setError(null);
     setIsSending(true);
@@ -81,9 +67,7 @@ export function InstrumentRequestChip({
         </span>
       </div>
 
-      {/* "cancelled" is excluded by the early return above -- TypeScript
-          already knows request.status can't be "cancelled" here. */}
-      {request.status !== "completed" && !readOnly && (
+      {request.status !== "completed" && request.status !== "cancelled" && !readOnly && (
         <div className="mt-3 flex items-center gap-3 border-t border-black/5 pt-3">
           <button
             type="button"
