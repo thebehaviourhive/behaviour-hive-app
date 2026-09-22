@@ -20,7 +20,7 @@
 // stage development. Every check from V onward is independently
 // self-contained (own institution, own accounts, own cleanup) and
 // individually selectable: V, W, X, Y, Z, AA, BB, CC, DD, EE, FF, GG,
-// HH, II, JJ, KK, LL, MM, NN, OO, PP, QQ, RR, SS, TT, UU, VV, WW, XX, YY, ZZ, AAA, BBB, CCC, DDD, EEE, FFF, GGG, HHH, III, JJJ, KKK, LLL, MMM, NNN, OOO, PPP, QQQ, RRR, SSS, TTT, UUU. Selecting none of these (ONLY_CHECKS unset) is the full run --
+// HH, II, JJ, KK, LL, MM, NN, OO, PP, QQ, RR, SS, TT, UU, VV, WW, XX, YY, ZZ, AAA, BBB, CCC, DDD, EEE, FFF, GGG, HHH, III, JJJ, KKK, LLL, MMM, NNN, OOO, PPP, QQQ, RRR, SSS, TTT, UUU, VVV. Selecting none of these (ONLY_CHECKS unset) is the full run --
 // the one that gates deploys -- and its behavior is unchanged: same
 // checks, same order, same pass/fail counts. The only observable
 // difference is where the top-level fixture's own cleanup log line
@@ -14536,6 +14536,212 @@ async function main() {
       await admin.from("institutions").delete().eq("id", instId);
     }
     for (const id of [directorAUUUId, directorBUUUId, clinicianUUUId, parentUUUId]) {
+      await admin.from("clinicians").delete().eq("user_id", id);
+      await admin.auth.admin.deleteUser(id);
+    }
+  }
+
+  console.log(`\n== CHECK VVV: Client Info (clinic-only), migration 0287/0288 -- the suite's own count stayed 1199 through the entire build, which is the finding: everything client_contact_info/client_clinical_intake guarantee was proven by a one-off script, never added to standing coverage. A real family's contact details and clinical intake go into these tables next week. Covers exactly the five things Daniel named: an admin gets nothing from client_clinical_intake and is refused writing it; a school principal reads NEITHER table, proven the sharp way (a fake row scoped to the SCHOOL's own institution_id, read attempted through that school's own real principal session -- the same shape that caught 0287's own incomplete session_types fix); a parent reads and edits client_contact_info, and gets nothing from client_clinical_intake (Plan A -- no parent-facing policy on that table at all); suspected_diagnosis never reaches passports.diagnoses; and the claim-code RPCs work for clinic_admin at a clinic only, not at a school. ==`);
+  if (shouldRun("VVV")) {
+    const rand = () => Math.floor(Math.random() * 100000);
+
+    const { data: clinicVVV } = await admin.from("institutions").insert({ name: "VVV Clinic", institution_code: "VVVCLINIC" + rand(), status: "verified", type: "clinic" }).select("id").single();
+    const { data: schoolVVV } = await admin.from("institutions").insert({ name: "VVV School", institution_code: "VVVSCHOOL" + rand(), status: "verified", type: "school" }).select("id").single();
+
+    const directorVVVId = await createUser("vvv.director@thebehaviourhive.com", "VVV Director", "principal");
+    const adminVVVId = await createUser("vvv.admin@thebehaviourhive.com", "VVV Admin", "clinic_admin");
+    const schoolPrincipalVVVId = await createUser("vvv.schoolprincipal@thebehaviourhive.com", "VVV School Principal", "principal");
+    const schoolAdminAttemptVVVId = await createUser("vvv.schooladminattempt@thebehaviourhive.com", "VVV School Admin Attempt", "clinic_admin");
+    const parentVVVId = await createUser("vvv.parent@thebehaviourhive.com", "VVV Parent", "parent");
+
+    await admin.from("institution_staff").insert({ institution_id: clinicVVV.id, user_id: directorVVVId, role: "principal", approved_at: new Date().toISOString(), approval_source: "bootstrap" });
+    await admin.from("institution_staff").insert({ institution_id: schoolVVV.id, user_id: schoolPrincipalVVVId, role: "principal", approved_at: new Date().toISOString(), approval_source: "bootstrap" });
+
+    const directorVVV = await signedInClient("vvv.director@thebehaviourhive.com");
+    const adminVVV = await signedInClient("vvv.admin@thebehaviourhive.com");
+    const schoolPrincipalVVV = await signedInClient("vvv.schoolprincipal@thebehaviourhive.com");
+    const schoolAdminAttemptVVV = await signedInClient("vvv.schooladminattempt@thebehaviourhive.com");
+    const parentVVV = await signedInClient("vvv.parent@thebehaviourhive.com");
+
+    await adminVVV.from("institution_staff").insert({ institution_id: clinicVVV.id, user_id: adminVVVId, role: "clinic_admin" });
+    {
+      const { data: staffRow } = await admin.from("institution_staff").select("id").eq("institution_id", clinicVVV.id).eq("user_id", adminVVVId).single();
+      const { error } = await directorVVV.rpc("approve_staff_join", { p_institution_staff_id: staffRow.id });
+      if (error) throw error;
+    }
+
+    const { data: passportVVV } = await admin.from("passports").insert({ child_name: "VVV Child", passport_status: "complete" }).select().single();
+    await admin.from("passport_institution_links").insert({ passport_id: passportVVV.id, institution_id: clinicVVV.id, approved_by_parent: true });
+    await admin.from("episodes_of_care").insert({ passport_id: passportVVV.id, institution_id: clinicVVV.id, started_by: directorVVVId });
+    const originalDiagnosesVVV = passportVVV.diagnoses;
+
+    // -------------------------------------------------------------------
+    // VVV-A -- the claim-code RPCs work for clinic_admin AT A CLINIC
+    // ONLY (0287/0288's own widening). Structural proof of the "only at
+    // a clinic" half first -- clinic_admin cannot even self-link at a
+    // school, so the widened caller check's own inst.type = 'clinic'
+    // clause is never reachable from the wrong institution type in the
+    // first place, not just refused after the fact.
+    // -------------------------------------------------------------------
+    {
+      const { error: schoolSelfLinkErr } = await schoolAdminAttemptVVV.from("institution_staff").insert({ institution_id: schoolVVV.id, user_id: schoolAdminAttemptVVVId, role: "clinic_admin" });
+      record("VVV-A1 clinic_admin cannot even self-link at a SCHOOL -- refused by the type-aware self-link policy, not merely by the claim-code RPCs afterward", Boolean(schoolSelfLinkErr), schoolSelfLinkErr?.message);
+    }
+
+    let firstCodeVVV = null;
+    {
+      const { data, error } = await adminVVV.rpc("generate_passport_claim_code", { p_institution_id: clinicVVV.id, p_passport_id: passportVVV.id });
+      record("VVV-A2 a real clinic_admin's own real session generates a claim code at their own clinic", !error, error?.message);
+      firstCodeVVV = data ?? null;
+    }
+
+    {
+      const { data, error } = await parentVVV.rpc("redeem_passport_claim_code", { p_code: firstCodeVVV });
+      record("VVV-A3 the real parent redeems that code -- becomes a genuine claimed guardian, satisfying owns_passport() for everything below", !error && data?.[0]?.passport_id === passportVVV.id, JSON.stringify({ error: error?.message, data }));
+    }
+
+    let secondCodeVVV = null;
+    {
+      const { data, error } = await adminVVV.rpc("generate_passport_claim_code", { p_institution_id: clinicVVV.id, p_passport_id: passportVVV.id });
+      record("VVV-A4 admin generates a SECOND code (for a second guardian) -- the widened generate/status RPCs keep working after the first code is claimed", !error, error?.message);
+      secondCodeVVV = data ?? null;
+    }
+    {
+      const { data: statusRows, error: statusErr } = await adminVVV.rpc("get_passport_claim_code_status", { p_institution_id: clinicVVV.id, p_passport_id: passportVVV.id });
+      record("VVV-A5 admin's own get_passport_claim_code_status() sees the outstanding second code", !statusErr && statusRows?.[0]?.code === secondCodeVVV, JSON.stringify({ statusErr: statusErr?.message, statusRows }));
+      const codeId = statusRows?.[0]?.id;
+      const { error: revokeErr } = await adminVVV.rpc("revoke_passport_claim_code", { p_claim_code_id: codeId, p_reason: "VVV test revoke" });
+      record("VVV-A6 admin's own revoke_passport_claim_code() succeeds with a real reason", !revokeErr, revokeErr?.message);
+    }
+
+    // -------------------------------------------------------------------
+    // VVV-B -- contact info: admin writes it for real (positive control,
+    // and the row every later refusal check needs), the parent reads
+    // and genuinely EDITS their own contact details.
+    // -------------------------------------------------------------------
+    {
+      const { data, error } = await adminVVV.rpc("set_client_contact_info", {
+        p_passport_id: passportVVV.id, p_institution_id: clinicVVV.id,
+        p_guardian_full_name: "VVV Guardian", p_relationship_to_child: "Mother",
+        p_contact_email: "vvv.guardian@example.com", p_contact_phone: "0870000000",
+        p_referral_source: "GP referral", p_home_address: "1 VVV Street",
+      });
+      record("VVV-B1 admin's own real session writes contact info via set_client_contact_info()", !error, error?.message);
+    }
+    {
+      const { data: parentRead } = await parentVVV.from("client_contact_info").select("*").eq("passport_id", passportVVV.id);
+      record("VVV-B2 the real parent reads the contact info admin just entered", parentRead?.[0]?.guardian_full_name === "VVV Guardian", JSON.stringify(parentRead));
+
+      const { data: parentUpdate, error: parentUpdateErr } = await parentVVV.from("client_contact_info").update({ contact_phone: "0879999999" }).eq("passport_id", passportVVV.id).select();
+      record("VVV-B3 the real parent EDITS their own contact details directly -- not just acknowledges them", !parentUpdateErr && parentUpdate?.[0]?.contact_phone === "0879999999", JSON.stringify({ parentUpdateErr: parentUpdateErr?.message, parentUpdate }));
+
+      const { data: afterEdit } = await admin.from("client_contact_info").select("contact_phone, entered_by").eq("passport_id", passportVVV.id).single();
+      record("VVV-B4 attribution survives the parent's own edit -- entered_by is still the admin who originally wrote it, not silently reassigned to the parent", afterEdit?.entered_by === adminVVVId, JSON.stringify(afterEdit));
+    }
+
+    // -------------------------------------------------------------------
+    // VVV-C -- clinical intake: the director writes it (positive
+    // control), the admin gets nothing reading it and is refused
+    // writing it -- both halves, not just one.
+    // -------------------------------------------------------------------
+    const SUSPECTED_DIAGNOSIS_MARKER_VVV = "VVV Suspected Diagnosis Marker -- must never reach passports.diagnoses";
+    {
+      const { error } = await directorVVV.rpc("set_client_clinical_intake", {
+        p_passport_id: passportVVV.id, p_institution_id: clinicVVV.id,
+        p_suspected_diagnosis: SUSPECTED_DIAGNOSIS_MARKER_VVV, p_main_concerns: "VVV concerns",
+        p_previous_support: false, p_previous_support_description: null,
+        p_clinic_goals: "VVV goals", p_additional_notes: null,
+      });
+      record("VVV-C1 the real director writes clinical intake via set_client_clinical_intake()", !error, error?.message);
+    }
+    {
+      const { data: adminRead } = await adminVVV.from("client_clinical_intake").select("*").eq("passport_id", passportVVV.id);
+      record("VVV-C2 THE POINT OF THIS CHECK: admin's own real session reads client_clinical_intake and gets NOTHING -- RLS-silent, not an error", (adminRead?.length ?? 0) === 0, `rows=${adminRead?.length}`);
+
+      const { error: adminWriteErr } = await adminVVV.rpc("set_client_clinical_intake", {
+        p_passport_id: passportVVV.id, p_institution_id: clinicVVV.id,
+        p_suspected_diagnosis: "ADMIN TAMPER ATTEMPT", p_main_concerns: null,
+        p_previous_support: null, p_previous_support_description: null,
+        p_clinic_goals: null, p_additional_notes: null,
+      });
+      record("VVV-C3 admin's own real session is REFUSED writing clinical intake via the RPC -- not merely hidden, a real refusal", Boolean(adminWriteErr), adminWriteErr?.message);
+
+      const { data: unchanged } = await admin.from("client_clinical_intake").select("suspected_diagnosis").eq("passport_id", passportVVV.id).single();
+      record("VVV-C4 the tamper attempt left the real clinical intake untouched", unchanged?.suspected_diagnosis === SUSPECTED_DIAGNOSIS_MARKER_VVV, JSON.stringify(unchanged));
+    }
+
+    // -------------------------------------------------------------------
+    // VVV-D -- a school principal reads NEITHER table, proven the sharp
+    // way: a fake row scoped to the SCHOOL's own institution_id (service
+    // role, bypassing the app -- nothing normally writes these for a
+    // school), read attempted through that school's own real principal
+    // session. The exact shape that caught 0287's own incomplete
+    // session_types fix -- an empty result against a row that was never
+    // written would prove nothing; this proves the type check itself
+    // refuses a school reading ITS OWN institution's row.
+    // -------------------------------------------------------------------
+    const { data: fakeContactVVV } = await admin.from("client_contact_info").insert({
+      passport_id: passportVVV.id, institution_id: schoolVVV.id, guardian_full_name: "VVV Fake School Row", entered_by: schoolPrincipalVVVId,
+    }).select().single();
+    const { data: fakeClinicalVVV } = await admin.from("client_clinical_intake").insert({
+      passport_id: passportVVV.id, institution_id: schoolVVV.id, suspected_diagnosis: "VVV Fake School Row", entered_by: schoolPrincipalVVVId,
+    }).select().single();
+
+    {
+      const { data: schoolReadsContact } = await schoolPrincipalVVV.from("client_contact_info").select("*").eq("institution_id", schoolVVV.id);
+      record("VVV-D1 a school principal reading their OWN institution's contact-info row gets nothing -- the clinic-type check, not just cross-institution scoping", (schoolReadsContact?.length ?? 0) === 0, `rows=${schoolReadsContact?.length}`);
+
+      const { data: schoolReadsClinical } = await schoolPrincipalVVV.from("client_clinical_intake").select("*").eq("institution_id", schoolVVV.id);
+      record("VVV-D2 a school principal reading their OWN institution's clinical-intake row gets nothing, same reason", (schoolReadsClinical?.length ?? 0) === 0, `rows=${schoolReadsClinical?.length}`);
+    }
+    await admin.from("client_contact_info").delete().eq("id", fakeContactVVV.id);
+    await admin.from("client_clinical_intake").delete().eq("id", fakeClinicalVVV.id);
+
+    // -------------------------------------------------------------------
+    // VVV-E -- the parent, already proven able to read/edit contact info
+    // above (VVV-B), gets NOTHING from clinical intake -- Plan A, no
+    // parent-facing policy on that table at all.
+    // -------------------------------------------------------------------
+    {
+      const { data: parentClinicalRead } = await parentVVV.from("client_clinical_intake").select("*").eq("passport_id", passportVVV.id);
+      record("VVV-E1 the same real parent who can read/edit contact info gets NOTHING from client_clinical_intake", (parentClinicalRead?.length ?? 0) === 0, `rows=${parentClinicalRead?.length}`);
+    }
+
+    // -------------------------------------------------------------------
+    // VVV-F -- suspected_diagnosis never reaches passports.diagnoses.
+    // The director's own real write above (VVV-C1) is still live on the
+    // real table; this reads the CHILD'S OWN passport row directly and
+    // confirms the marker never crossed and diagnoses is exactly what it
+    // was before the clinical intake was ever written.
+    // -------------------------------------------------------------------
+    {
+      const { data: passportAfter } = await admin.from("passports").select("diagnoses").eq("id", passportVVV.id).single();
+      const diagnosesStr = JSON.stringify(passportAfter?.diagnoses ?? null);
+      record(
+        "VVV-F1 THE ONE THAT MATTERS MOST: passports.diagnoses never contains the suspected_diagnosis marker, and is exactly what it was before clinical intake was ever written",
+        !diagnosesStr.includes("VVV Suspected Diagnosis") && diagnosesStr === JSON.stringify(originalDiagnosesVVV ?? null),
+        JSON.stringify({ before: originalDiagnosesVVV, after: passportAfter?.diagnoses })
+      );
+    }
+
+    console.log("VVV summary complete.");
+
+    // -------------------------------------------------------------------
+    // Teardown -- everything this check created.
+    // -------------------------------------------------------------------
+    await admin.from("client_contact_info").delete().eq("passport_id", passportVVV.id);
+    await admin.from("client_clinical_intake").delete().eq("passport_id", passportVVV.id);
+    await admin.from("passport_claim_codes").delete().eq("passport_id", passportVVV.id);
+    await admin.from("passport_guardians").delete().eq("passport_id", passportVVV.id);
+    await admin.from("episodes_of_care").delete().eq("passport_id", passportVVV.id);
+    await admin.from("passport_institution_links").delete().eq("passport_id", passportVVV.id);
+    await admin.from("passports").delete().eq("id", passportVVV.id);
+
+    for (const instId of [clinicVVV.id, schoolVVV.id]) {
+      await admin.from("institution_staff").delete().eq("institution_id", instId);
+      await admin.from("institutions").delete().eq("id", instId);
+    }
+    for (const id of [directorVVVId, adminVVVId, schoolPrincipalVVVId, schoolAdminAttemptVVVId, parentVVVId]) {
       await admin.from("clinicians").delete().eq("user_id", id);
       await admin.auth.admin.deleteUser(id);
     }
