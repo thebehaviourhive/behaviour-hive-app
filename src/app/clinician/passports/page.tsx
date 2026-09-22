@@ -10,6 +10,7 @@ import { ClinicianAccessGate } from "@/components/clinician/ClinicianAccessGate"
 import { ClinicianBottomNav } from "@/components/clinician/ClinicianBottomNav";
 import { ClinicalFileDetail } from "@/components/clinician/ClinicalFileDetail";
 import { InlineErrorState } from "@/components/ui/InlineErrorState";
+import { PassportIdBadge } from "@/components/clinic/PassportIdBadge";
 
 interface ClinicianPassportRow {
   clinician_access_id: string;
@@ -28,6 +29,12 @@ interface ClinicianPassportRow {
   // principal's own view of the same relationship.
   engaged_by: "parent" | "institution";
   engaged_by_institution_name: string | null;
+  // Clinic-only (Daniel's own instruction) -- a caseload has both
+  // school-engaged and parent-engaged cases mixed in with clinic ones,
+  // so Passport ID only ever renders when the engaging institution is
+  // genuinely a clinic, never inferred from engaged_by alone.
+  engaged_by_institution_type: string | null;
+  passport_reference: string;
 }
 
 function calculateAge(dateOfBirth: string | null): number | null {
@@ -159,14 +166,19 @@ export default function ClinicianPassportsPage() {
                           : "border-black/5 bg-white"
                       }`}
                     >
-                      <h2 className="font-heading text-xl font-bold text-brand-neutral-black">
-                        {passport.child_name}
-                        {age !== null && (
-                          <span className="ml-1.5 font-sans text-sm font-normal text-brand-neutral-black/50">
-                            {age} yrs
-                          </span>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h2 className="font-heading text-xl font-bold text-brand-neutral-black">
+                          {passport.child_name}
+                          {age !== null && (
+                            <span className="ml-1.5 font-sans text-sm font-normal text-brand-neutral-black/50">
+                              {age} yrs
+                            </span>
+                          )}
+                        </h2>
+                        {passport.engaged_by === "institution" && passport.engaged_by_institution_type === "clinic" && (
+                          <PassportIdBadge reference={passport.passport_reference} copyable={false} />
                         )}
-                      </h2>
+                      </div>
 
                       {pills.length > 0 && (
                         <div className="mt-2 flex flex-wrap gap-1.5">

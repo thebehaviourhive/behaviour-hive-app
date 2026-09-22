@@ -100,20 +100,20 @@
     "202:\"e.g. Retiring at the end of term\"": "Finding 1 fix -- the institutionType!=='clinic' branch of an already-correct ternary; the clinic branch reads \"e.g. Stepping back from the clinic\"."
   },
   "src/components/principal/directory/ChildDetail.tsx": {
-    "315:\"Left the school\"": "END_REASON_LABEL, used only inside the institutionType !== 'clinic' branch of the Enrolment/Episode-of-Care tab.",
-    "316:\"Transferred to another school\"": "Same -- END_REASON_LABEL, school-branch only.",
-    "617:\"Failed to load this child's school incidents:\"": "console.error, fires only within the clinic-only get_institution_incidents_for_director() branch -- correctly describes the child's SCHOOL incidents as read by their clinic, cross-org content, not a leak.",
-    "618:\"Couldn't load this child's school incidents.\"": "Same -- user-facing pair of the line above, same reasoning.",
-    "694:\"Failed to load enrolment:\"": "console.error only, dev-facing variable name, never shown to a user.",
-    "1012:\"School Incidents\"": "The tab's own deliberate relabelling for institutionType === 'clinic' (tab.key === 'incidents' ? 'School Incidents' : tab.label) -- correct, not a leak.",
-    "1043:\"This child isn't on your school's roster.\"": "The institutionType-false branch of an already-correct ternary.",
-    "1700:\"No school incidents shared with this clinic yet.\"": "Deliberate clinic-specific empty state, correctly describing cross-org content.",
-    "1714:\"School incidents are visible only while this client has an active episode. Reopen the episode of care to see them again.\"": "Same -- deliberate clinic-specific copy about cross-org content."
+    "316:\"Left the school\"": "END_REASON_LABEL, used only inside the institutionType !== 'clinic' branch of the Enrolment/Episode-of-Care tab.",
+    "317:\"Transferred to another school\"": "Same -- END_REASON_LABEL, school-branch only.",
+    "622:\"Failed to load this child's school incidents:\"": "console.error, fires only within the clinic-only get_institution_incidents_for_director() branch -- correctly describes the child's SCHOOL incidents as read by their clinic, cross-org content, not a leak.",
+    "623:\"Couldn't load this child's school incidents.\"": "Same -- user-facing pair of the line above, same reasoning.",
+    "699:\"Failed to load enrolment:\"": "console.error only, dev-facing variable name, never shown to a user.",
+    "1022:\"School Incidents\"": "The tab's own deliberate relabelling for institutionType === 'clinic' (tab.key === 'incidents' ? 'School Incidents' : tab.label) -- correct, not a leak.",
+    "1053:\"This child isn't on your school's roster.\"": "The institutionType-false branch of an already-correct ternary.",
+    "1710:\"No school incidents shared with this clinic yet.\"": "Deliberate clinic-specific empty state, correctly describing cross-org content.",
+    "1724:\"School incidents are visible only while this client has an active episode. Reopen the episode of care to see them again.\"": "Same -- deliberate clinic-specific copy about cross-org content."
   },
   "src/components/principal/directory/ChildrenList.tsx": {
-    "253:\"Could not load the school roster.\"": "Finding 1 fix -- the isClinic-false branch of a newly-added ternary (isClinic branch reads \"Could not load the clinic roster.\").",
-    "376:\"No children linked to this school yet.\"": "Already the isClinic-false branch of a correct ternary (isClinic branch reads \"No clients linked to this clinic yet.\").",
-    "441:\"Enrolment ended\"": "Already the isClinic-false branch of a correct ternary (isClinic branch reads \"Discharged\")."
+    "263:\"Could not load the school roster.\"": "Finding 1 fix -- the isClinic-false branch of a newly-added ternary (isClinic branch reads \"Could not load the clinic roster.\").",
+    "392:\"No children linked to this school yet.\"": "Already the isClinic-false branch of a correct ternary (isClinic branch reads \"No clients linked to this clinic yet.\").",
+    "457:\"Enrolment ended\"": "Already the isClinic-false branch of a correct ternary (isClinic branch reads \"Discharged\")."
   },
   "src/components/principal/directory/ClinicianCoverageDetail.tsx": {
     "526:\"No currently-enrolled children at this school.\"": "The institutionType-false branch of an already-correct ternary (clinic branch reads \"No clients linked to your clinic yet.\")."

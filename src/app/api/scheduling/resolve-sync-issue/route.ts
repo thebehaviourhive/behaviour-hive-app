@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createCalendarEvent, deleteCalendarEvent, getCalendarEvent } from "@/lib/google/calendarEvents";
-import { formatPassportReference } from "@/lib/scheduling/passportReference";
 
 // PRD 9, section 7 -- the clinician's own four resolution actions,
 // reusing createCalendarEvent()/deleteCalendarEvent() throughout
@@ -51,8 +50,18 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Booking not found." }, { status: 404 });
   }
 
-  const passportReference = formatPassportReference(booking.passport_id);
-  const summary = `Clinical Session - ${passportReference}`;
+  // Reads the STORED reference (migration 0289) -- the single source of
+  // truth every display site also reads, so a recreated event and the
+  // app can never disagree.
+  const { data: passportRow, error: passportRowError } = await supabase
+    .from("passports")
+    .select("passport_reference")
+    .eq("id", booking.passport_id)
+    .single();
+  if (passportRowError || !passportRow?.passport_reference) {
+    return NextResponse.json({ error: "Couldn't resolve this child's passport reference." }, { status: 500 });
+  }
+  const summary = `Clinical Session - ${passportRow.passport_reference}`;
   const isOnline = booking.session_type_mode === "online";
 
   try {

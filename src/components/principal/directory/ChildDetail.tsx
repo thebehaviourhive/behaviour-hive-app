@@ -21,6 +21,7 @@ import { EpisodeTagsSection } from "@/components/clinic/EpisodeTagsSection";
 import { GrantManagementSection } from "@/components/clinic/GrantManagementSection";
 import { ClientContactInfoSection } from "@/components/clinic/ClientContactInfoSection";
 import { ClientClinicalIntakeSection } from "@/components/clinic/ClientClinicalIntakeSection";
+import { PassportIdBadge } from "@/components/clinic/PassportIdBadge";
 import { PassportCompletionSection } from "@/components/passport/PassportCompletionSection";
 import { PassportMessagesTab } from "@/components/passport/PassportMessagesTab";
 import { ProgressSurface } from "@/components/progress/ProgressSurface";
@@ -351,6 +352,7 @@ export function ChildDetail({
   const missingSection = searchParams.get("missingSection");
 
   const [childName, setChildName] = useState<string | null>(null);
+  const [passportReference, setPassportReference] = useState<string | null>(null);
   const [institutionId, setInstitutionId] = useState<string | null>(null);
   const { institutionType, overrides: vocabularyOverrides } = useInstitutionType(institutionId);
   const [access, setAccess] = useState<{ active: AccessRow[]; past: AccessRow[] }>({ active: [], past: [] });
@@ -496,13 +498,16 @@ export function ChildDetail({
       setIsLoading(false);
       return;
     }
-    const rosterMatch = (rosterRows ?? []).find((r: { passport_id: string; child_name: string }) => r.passport_id === passportId);
+    const rosterMatch = (rosterRows ?? []).find(
+      (r: { passport_id: string; child_name: string }) => r.passport_id === passportId
+    ) as { passport_id: string; child_name: string; passport_reference?: string } | undefined;
     if (!rosterMatch) {
       setNotOnRoster(true);
       setIsLoading(false);
       return;
     }
     setChildName(rosterMatch.child_name);
+    setPassportReference(rosterMatch.passport_reference ?? null);
 
     const startOfToday = new Date();
     startOfToday.setHours(0, 0, 0, 0);
@@ -962,6 +967,11 @@ export function ChildDetail({
 
   return (
     <>
+      {!isLoading && !error && !notOnRoster && institutionType === "clinic" && passportReference && (
+        <div className="px-4 pt-4">
+          <PassportIdBadge reference={passportReference} />
+        </div>
+      )}
       {/* Stage 4, item 1: ten tabs is too many for a horizontal
           scroller at 375px (see this file's own build report -- kept
           as a scroller below lg per Daniel's own instruction, "look at

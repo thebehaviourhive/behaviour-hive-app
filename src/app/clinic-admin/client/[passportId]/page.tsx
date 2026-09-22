@@ -8,6 +8,7 @@ import { createClient } from "@/lib/supabase/client";
 import { EpisodeTagsSection } from "@/components/clinic/EpisodeTagsSection";
 import { ClientContactInfoSection } from "@/components/clinic/ClientContactInfoSection";
 import { ClientGuardianAndClaimCodeSection } from "@/components/clinic/ClientGuardianAndClaimCodeSection";
+import { PassportIdBadge } from "@/components/clinic/PassportIdBadge";
 
 // PRD 10 Stage 3, item 3 -- the admin's own new client record, "the
 // same guarantee as the list: identity, episodes, tags, requests,
@@ -42,6 +43,7 @@ interface RosterRow {
   episodeId: string;
   passportId: string;
   childName: string;
+  passportReference: string;
   startedAt: string;
   endedAt: string | null;
   endReason: string | null;
@@ -95,7 +97,15 @@ export default function ClinicAdminClientDetailPage({ params }: { params: Promis
     const match = (rosterRows ?? []).find(
       (r: { passport_id: string }) => r.passport_id === passportId
     ) as
-      | { episode_id: string; passport_id: string; child_name: string; started_at: string; ended_at: string | null; end_reason: string | null }
+      | {
+          episode_id: string;
+          passport_id: string;
+          child_name: string;
+          passport_reference: string;
+          started_at: string;
+          ended_at: string | null;
+          end_reason: string | null;
+        }
       | undefined;
 
     if (!match) {
@@ -108,6 +118,7 @@ export default function ClinicAdminClientDetailPage({ params }: { params: Promis
       episodeId: match.episode_id,
       passportId: match.passport_id,
       childName: match.child_name,
+      passportReference: match.passport_reference,
       startedAt: match.started_at,
       endedAt: match.ended_at,
       endReason: match.end_reason,
@@ -139,6 +150,11 @@ export default function ClinicAdminClientDetailPage({ params }: { params: Promis
 
       <main className="flex-1 px-4">
         <div className="lg:max-w-[66.6667%]">
+          {row?.passportReference && (
+            <div className="mb-4">
+              <PassportIdBadge reference={row.passportReference} />
+            </div>
+          )}
           {isLoading ? (
             <div className="h-[100px] animate-pulse rounded-2xl bg-white" />
           ) : error ? (

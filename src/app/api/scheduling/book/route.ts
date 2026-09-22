@@ -3,7 +3,6 @@ import { createClient } from "@/lib/supabase/server";
 import { getFreebusy } from "@/lib/google/freebusy";
 import { createCalendarEvent, deleteCalendarEvent } from "@/lib/google/calendarEvents";
 import { hasConflict } from "@/lib/scheduling/availability";
-import { formatPassportReference } from "@/lib/scheduling/passportReference";
 
 // PRD 9, Stage 2 -- the all-or-nothing write. Three real steps, in
 // order: (1) a fresh, narrowly-scoped Freebusy re-check against the
@@ -164,8 +163,18 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: createError?.message ?? "This time is no longer available. Please choose another slot." }, { status: 409 });
   }
 
-  // Step 3: the real Google event(s).
-  const passportReference = formatPassportReference(passportId);
+  // Step 3: the real Google event(s). Reads the STORED reference
+  // (migration 0289) -- the single source of truth every display site
+  // also reads, so a calendar event and the app can never disagree.
+  const { data: passportRow, error: passportRowError } = await supabase
+    .from("passports")
+    .select("passport_reference")
+    .eq("id", passportId)
+    .single();
+  if (passportRowError || !passportRow?.passport_reference) {
+    return NextResponse.json({ error: "Couldn't resolve this child's passport reference." }, { status: 500 });
+  }
+  const passportReference = passportRow.passport_reference;
   const created: { id: string }[] = [];
   let sessionEventId: string | null = null;
   let travelBeforeEventId: string | null = null;

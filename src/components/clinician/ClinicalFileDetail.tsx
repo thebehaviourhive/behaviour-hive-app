@@ -25,6 +25,7 @@ import { ClinicalFileSessionNotesTab } from "@/components/clinician/ClinicalFile
 import { ClinicalFileAssessmentsTab } from "@/components/clinician/assessments/ClinicalFileAssessmentsTab";
 import { EffectivenessSurface } from "@/components/clinician/passport/EffectivenessSurface";
 import { ReasonConfirmSheet } from "@/components/shared/ReasonConfirmSheet";
+import { PassportIdBadge } from "@/components/clinic/PassportIdBadge";
 
 // Clinician desktop pass, Stage 2 -- extracted from
 // clinician/passport/[passportId]/page.tsx, same move as PRD 4's own
@@ -134,6 +135,7 @@ interface ClinicalProfile {
   // view teachers get -- clinical records require certainty of identity.
   // Deliberate product decision, pending clinical sign-off.
   childFullName: string;
+  passportReference: string;
   diagnoses: string[];
   diagnosisOther: string | null;
   communicationMethods: string[];
@@ -187,6 +189,7 @@ export function ClinicalFileDetail({
     clinicianAccessId: string;
     engagedBy: "parent" | "institution";
     engagedByInstitutionName: string | null;
+    engagedByInstitutionType: string | null;
   } | null>(null);
   const [isEndInvolvementOpen, setIsEndInvolvementOpen] = useState(false);
   // Read once at mount, e.g. from Strategy Insights' per-child drill-down
@@ -261,7 +264,7 @@ export function ClinicalFileDetail({
         await Promise.all([
           supabase
             .from("passports")
-            .select("child_name, diagnoses, diagnosis_other")
+            .select("child_name, passport_reference, diagnoses, diagnosis_other")
             .eq("id", passportId)
             .maybeSingle(),
           supabase
@@ -300,6 +303,7 @@ export function ClinicalFileDetail({
                 clinicianAccessId: own.clinician_access_id,
                 engagedBy: own.engaged_by,
                 engagedByInstitutionName: own.engaged_by_institution_name,
+                engagedByInstitutionType: own.engaged_by_institution_type,
               }
             : null
         );
@@ -312,6 +316,7 @@ export function ClinicalFileDetail({
 
       setProfile({
         childFullName: passport.child_name,
+        passportReference: passport.passport_reference,
         diagnoses: Array.isArray(passport.diagnoses) ? passport.diagnoses : [],
         diagnosisOther: passport.diagnosis_other,
         communicationMethods: Array.isArray(sectionC?.communication_methods)
@@ -407,6 +412,12 @@ export function ClinicalFileDetail({
 
   return (
     <>
+      {engagement?.engagedBy === "institution" && engagement.engagedByInstitutionType === "clinic" && (
+        <div className="px-4 pt-4">
+          <PassportIdBadge reference={profile.passportReference} />
+        </div>
+      )}
+
       {(!isCalmStatusLoading || engagement) && (
         <div className="flex flex-col gap-2 px-4 pt-4 pb-1">
           {!isCalmStatusLoading && (

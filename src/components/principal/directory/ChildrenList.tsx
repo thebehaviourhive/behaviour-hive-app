@@ -8,6 +8,7 @@ import { ClinicalFileIcon } from "@/components/ui/icons";
 import type { InstitutionType } from "@/lib/institutionType";
 import { DischargeEpisodeSheet } from "@/components/principal/DischargeEpisodeSheet";
 import { ReopenEpisodeSheet } from "@/components/principal/ReopenEpisodeSheet";
+import { PassportIdBadge } from "@/components/clinic/PassportIdBadge";
 
 type ChildrenSegment = "active" | "past";
 
@@ -178,6 +179,7 @@ interface RosterRow {
   endedAt: string | null;
   episodeId: string | null;
   endReason: string | null;
+  passportReference: string | null;
 }
 
 export function ChildrenList({
@@ -230,7 +232,14 @@ export function ChildrenList({
         }
         setChildren(
           (
-            (data ?? []) as { episode_id: string; passport_id: string; child_name: string; ended_at: string | null; end_reason: string | null }[]
+            (data ?? []) as {
+              episode_id: string;
+              passport_id: string;
+              child_name: string;
+              ended_at: string | null;
+              end_reason: string | null;
+              passport_reference: string;
+            }[]
           )
             .map((r) => ({
               passportId: r.passport_id,
@@ -238,6 +247,7 @@ export function ChildrenList({
               endedAt: r.ended_at,
               episodeId: r.episode_id,
               endReason: r.end_reason,
+              passportReference: r.passport_reference,
             }))
             .sort((a, b) => a.childName.localeCompare(b.childName))
         );
@@ -262,6 +272,7 @@ export function ChildrenList({
             endedAt: r.enrolment_ended_at,
             episodeId: null,
             endReason: null,
+            passportReference: null,
           }))
           .sort((a, b) => a.childName.localeCompare(b.childName))
       );
@@ -337,6 +348,11 @@ export function ChildrenList({
         <p className="font-heading text-h2 font-semibold text-brand-prussian-blue lg:text-body lg:font-semibold lg:text-brand-neutral-black">
           {c.childName}
         </p>
+        {isClinic && c.passportReference && (
+          <div className="mt-1.5">
+            <PassportIdBadge reference={c.passportReference} copyable={false} />
+          </div>
+        )}
         {!isClinic && <StatusBadgeRow badges={badgesByPassportId.get(c.passportId)} />}
       </Link>
     );
