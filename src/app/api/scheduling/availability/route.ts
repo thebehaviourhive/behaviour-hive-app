@@ -66,6 +66,7 @@ export async function GET(request: Request) {
     windowEndISO: windowEnd.toISOString(),
     clinicHoursStart: details.clinic_hours_start_time ?? "09:00:00",
     clinicHoursEnd: details.clinic_hours_end_time ?? "17:00:00",
+    workingDays: details.working_days ?? [1, 2, 3, 4, 5],
     bufferMinutes: details.booking_buffer_minutes ?? 15,
     busyIntervals,
   });

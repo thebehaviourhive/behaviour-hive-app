@@ -25,6 +25,7 @@ interface UpcomingBooking {
   sessionStartAt: string;
   sessionEndAt: string;
   googleSyncStatus: string;
+  googleMeetLink: string | null;
 }
 
 function formatWhen(iso: string): string {
@@ -46,7 +47,7 @@ export function UpcomingBookingsCard({ passportId }: { passportId: string | null
     const { data, error } = await supabase.rpc("get_my_upcoming_bookings", { p_passport_id: passportId });
     if (!error) {
       setBookings(
-        ((data ?? []) as { booking_id: string; clinician_name: string; session_type: string; session_start_at: string; session_end_at: string; google_sync_status: string }[]).map(
+        ((data ?? []) as { booking_id: string; clinician_name: string; session_type: string; session_start_at: string; session_end_at: string; google_sync_status: string; google_meet_link: string | null }[]).map(
           (row) => ({
             bookingId: row.booking_id,
             clinicianName: row.clinician_name,
@@ -54,6 +55,7 @@ export function UpcomingBookingsCard({ passportId }: { passportId: string | null
             sessionStartAt: row.session_start_at,
             sessionEndAt: row.session_end_at,
             googleSyncStatus: row.google_sync_status,
+            googleMeetLink: row.google_meet_link,
           })
         )
       );
@@ -113,6 +115,16 @@ export function UpcomingBookingsCard({ passportId }: { passportId: string | null
                   <p className="mt-1 text-xs font-medium text-brand-golden-brown">
                     Your clinic is aware there may be a calendar issue with this session.
                   </p>
+                )}
+                {booking.googleMeetLink && (
+                  <a
+                    href={booking.googleMeetLink}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="mt-1.5 inline-block text-xs font-semibold text-brand-prussian-blue"
+                  >
+                    Join by video call
+                  </a>
                 )}
               </div>
             </div>

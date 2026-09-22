@@ -24,6 +24,14 @@ export interface CreateEventInput {
 export interface CreatedEvent {
   id: string;
   etag: string;
+  // Bug 4, 22 Sept 2026 -- the request side of this already asked
+  // Google for one (conferenceDataVersion=1, conferenceData.createRequest
+  // below) whenever withMeetLink is true; the response's own link was
+  // simply never read. hangoutLink is Google's own flat convenience
+  // field for exactly this (the fuller conferenceData.entryPoints[] is
+  // more general but this is the one Meet link a hangoutsMeet request
+  // ever produces). Undefined whenever withMeetLink wasn't set.
+  meetLink?: string;
 }
 
 export async function createCalendarEvent(input: CreateEventInput): Promise<CreatedEvent> {
@@ -64,11 +72,11 @@ export async function createCalendarEvent(input: CreateEventInput): Promise<Crea
     throw new Error(`Google event creation failed for ${input.workspaceEmail} (${response.status}): ${errorBody || "no response body"}`);
   }
 
-  const data = (await response.json()) as { id?: string; etag?: string };
+  const data = (await response.json()) as { id?: string; etag?: string; hangoutLink?: string };
   if (!data.id) {
     throw new Error(`Google event creation for ${input.workspaceEmail} returned no event id.`);
   }
-  return { id: data.id, etag: data.etag ?? "" };
+  return { id: data.id, etag: data.etag ?? "", meetLink: data.hangoutLink };
 }
 
 // Deliberately tolerant of "already gone" -- a 404/410 here means the

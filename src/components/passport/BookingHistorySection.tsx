@@ -17,6 +17,7 @@ interface HistoryRow {
   sessionStartAt: string;
   cancelledAt: string | null;
   cancelledVia: string | null;
+  googleMeetLink: string | null;
 }
 
 const CANCELLED_VIA_LABEL: Record<string, string> = {
@@ -47,6 +48,7 @@ export function BookingHistorySection({ passportId }: { passportId: string | nul
           session_start_at: string;
           cancelled_at: string | null;
           cancelled_via: string | null;
+          google_meet_link: string | null;
         }[];
         setRows(
           raw.map((r) => ({
@@ -56,6 +58,7 @@ export function BookingHistorySection({ passportId }: { passportId: string | nul
             sessionStartAt: r.session_start_at,
             cancelledAt: r.cancelled_at,
             cancelledVia: r.cancelled_via,
+            googleMeetLink: r.google_meet_link,
           }))
         );
         setIsLoading(false);
@@ -88,6 +91,16 @@ export function BookingHistorySection({ passportId }: { passportId: string | nul
               <p className="mt-0.5 font-accent text-[10px] font-bold uppercase tracking-wide text-brand-golden-brown">
                 {CANCELLED_VIA_LABEL[row.cancelledVia] ?? "Cancelled"}
               </p>
+            )}
+            {!row.cancelledAt && row.googleMeetLink && (
+              <a
+                href={row.googleMeetLink}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-0.5 inline-block font-sans text-xs font-semibold text-brand-prussian-blue"
+              >
+                Video link
+              </a>
             )}
           </div>
         ))}

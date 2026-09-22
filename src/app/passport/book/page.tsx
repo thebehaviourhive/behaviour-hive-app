@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { useMyPassport } from "@/hooks/useMyPassport";
 import { createClient } from "@/lib/supabase/client";
@@ -70,6 +70,7 @@ function formatSlotTime(iso: string): string {
 }
 
 export default function BookSessionPage() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const { user, isReady } = useRequireRole("parent");
   const { passportId, childName, isLoading: isPassportLoading } = useMyPassport(user?.id);
@@ -101,6 +102,7 @@ export default function BookSessionPage() {
     sessionType: SessionType;
     startISO: string;
     endISO: string;
+    meetLink: string | null;
   } | null>(null);
 
   useEffect(() => {
@@ -220,6 +222,7 @@ export default function BookSessionPage() {
         sessionType: data.sessionType,
         startISO: data.sessionStartISO,
         endISO: data.sessionEndISO,
+        meetLink: data.meetLink ?? null,
       });
       setStep("confirmed");
     } catch {
@@ -229,7 +232,17 @@ export default function BookSessionPage() {
   }
 
   function back() {
-    if (step === "type" && !preselectedClinicianId) setStep("clinician");
+    // Bug 5, 22 Sept 2026 -- screen 1 (the clinician picker) had no
+    // back arrow at all, unlike every later screen. There's no earlier
+    // step in this flow to return to, so this leaves the flow entirely
+    // -- the same destination the "Done" button on the confirmed
+    // screen already uses.
+    if (step === "clinician") router.push("/parent-dashboard");
+    else if (step === "type" && !preselectedClinicianId) setStep("clinician");
+    // Contextual entry (arriving with a clinician already chosen) has
+    // no "clinician" step to return to from "type" either -- same
+    // destination as above, not a dead button.
+    else if (step === "type" && preselectedClinicianId) router.push("/parent-dashboard");
     else if (step === "slot") setStep("type");
     else if (step === "consent") setStep("slot");
   }
@@ -249,7 +262,7 @@ export default function BookSessionPage() {
   return (
     <div className="flex min-h-full flex-1 flex-col bg-brand-off-white/40 pb-24">
       <header className="flex items-center gap-3 px-4 pt-6 pb-4">
-        {step !== "clinician" && step !== "confirmed" && (
+        {step !== "confirmed" && (
           <button type="button" onClick={back} aria-label="Back" className="text-brand-prussian-blue">
             ←
           </button>
@@ -381,16 +394,17 @@ export default function BookSessionPage() {
                 <p className="font-accent text-eyebrow font-bold uppercase tracking-wide text-brand-neutral-black/50">
                   Cancellation Policy
                 </p>
+                {/* Bug 3, 22 Sept 2026 -- this used to render BOTH the
+                    director's own text AND a generated notice-period
+                    sentence together, saying the same thing twice. The
+                    generated sentence is now only the fallback for a
+                    clinic that hasn't written a policy at all -- never
+                    shown alongside the director's own words. */}
                 {cancellationPolicyText ? (
-                  <>
-                    <p className="mt-2 font-sans text-body text-brand-neutral-black/80">{cancellationPolicyText}</p>
-                    <p className="mt-2 font-sans text-eyebrow text-brand-neutral-black/50">
-                      Please give at least {cancellationNoticeHours} hours&apos; notice to cancel or change this session.
-                    </p>
-                  </>
+                  <p className="mt-2 font-sans text-body text-brand-neutral-black/80">{cancellationPolicyText}</p>
                 ) : (
-                  <p className="mt-2 font-sans text-body text-brand-neutral-black/60">
-                    Your clinic hasn&apos;t set a cancellation policy yet.
+                  <p className="mt-2 font-sans text-body text-brand-neutral-black/80">
+                    Please give at least {cancellationNoticeHours} hours&apos; notice to cancel or change this session.
                   </p>
                 )}
               </div>
@@ -431,6 +445,16 @@ export default function BookSessionPage() {
               <p className="mt-2 font-sans text-eyebrow text-brand-neutral-black/50">
                 A calendar invite has been sent to your email.
               </p>
+              {confirmedSummary.meetLink && (
+                <a
+                  href={confirmedSummary.meetLink}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mt-3 w-full rounded-2xl border border-brand-prussian-blue bg-brand-pastel-blue/20 px-6 py-3.5 text-center font-sans text-body font-semibold text-brand-prussian-blue"
+                >
+                  Join by video call
+                </a>
+              )}
               <Link
                 href="/parent-dashboard"
                 className="mt-4 rounded-2xl bg-brand-prussian-blue px-6 py-3 font-sans text-body font-semibold text-white"

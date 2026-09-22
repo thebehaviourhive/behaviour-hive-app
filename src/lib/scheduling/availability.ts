@@ -2,6 +2,19 @@ import { addDays, addMinutes, isAfter, isBefore, startOfDay } from "date-fns";
 import type { BusyInterval } from "@/lib/google/freebusy";
 
 export type BookableSessionType = "online" | "in_person";
+export type SessionMode = "online" | "in_person";
+
+// Bug 4, 22 Sept 2026 -- session types are fixed today (BookableSessionType
+// above), but a clinic will soon be able to define its own named session
+// types. Everything that currently decides "does this need a video link"
+// or "does this need travel blocks" by comparing sessionType === "online"
+// directly is asking the wrong question -- it should ask what MODE the
+// type is, not what it's literally called. Today that's a static 1:1
+// map; once clinic-configurable types exist, only THIS function's body
+// changes (to a real lookup against that config) -- no call site does.
+export function getSessionMode(sessionType: BookableSessionType): SessionMode {
+  return sessionType === "online" ? "online" : "in_person";
+}
 
 const SESSION_MINUTES = 60;
 // Exported -- PRD 9, Stage 2's own booking route needs this exact same
@@ -17,6 +30,16 @@ export interface AvailabilityInput {
   windowEndISO: string;
   clinicHoursStart: string; // "HH:MM:SS" or "HH:MM"
   clinicHoursEnd: string;
+  // Bug 2, 22 Sept 2026 -- clinic hours were a start/end TIME only, no
+  // day-of-week concept at all, so every day of the week got identical
+  // treatment and Saturday/Sunday slots were offered alongside Monday's.
+  // Date.getDay() convention (0=Sunday..6=Saturday), matching
+  // institutions.working_days -- both produced and consumed entirely in
+  // TypeScript, so no conversion step is needed anywhere. Defaults to
+  // Monday-Friday only as a defensive fallback for a caller that
+  // doesn't pass one; the real default lives on the institutions column
+  // itself (migration 0279).
+  workingDays?: number[];
   bufferMinutes: number;
   busyIntervals: BusyInterval[];
 }
@@ -51,8 +74,11 @@ function atTimeOfDay(day: Date, timeOfDay: { hours: number; minutes: number }): 
 }
 
 // Clinic hours minus the clinician's Freebusy blocks, with a buffer
-// between sessions (PRD 9 section 4) -- computed per calendar day
-// across the rolling booking window, in Europe/Dublin wall-clock time.
+// between sessions (PRD 9 section 4) -- computed per WORKING calendar
+// day across the rolling booking window, in Europe/Dublin wall-clock
+// time. A non-working day (Saturday/Sunday by default) is skipped
+// entirely, not merely offered with zero slots -- see workingDays on
+// AvailabilityInput.
 // Hardcoded, not read from any setting: every existing day-scoped
 // feature in this schema (temporary_access_start_time/cutoff_time)
 // already assumes a single fixed timezone with no column to say so --
@@ -64,6 +90,7 @@ export function computeAvailableSlots(input: AvailabilityInput): AvailableSlot[]
   const windowEnd = new Date(input.windowEndISO);
   const clearMinutes = requiredClearMinutes(sessionType);
   const travelMinutes = sessionType === "online" ? 0 : TRAVEL_MINUTES;
+  const workingDays = new Set(input.workingDays ?? [1, 2, 3, 4, 5]);
 
   const clinicStart = parseTimeOfDay(input.clinicHoursStart);
   const clinicEnd = parseTimeOfDay(input.clinicHoursEnd);
@@ -91,6 +118,11 @@ export function computeAvailableSlots(input: AvailabilityInput): AvailableSlot[]
   const lastDay = startOfDay(windowEnd);
 
   while (!isAfter(day, lastDay)) {
+    if (!workingDays.has(day.getDay())) {
+      day = addDays(day, 1);
+      continue;
+    }
+
     const dayClinicStart = atTimeOfDay(day, clinicStart);
     const dayClinicEnd = atTimeOfDay(day, clinicEnd);
     const dayStart = dayClinicStart > windowStart ? dayClinicStart : windowStart;

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getFreebusy } from "@/lib/google/freebusy";
 import { createCalendarEvent, deleteCalendarEvent } from "@/lib/google/calendarEvents";
-import { hasConflict, TRAVEL_MINUTES } from "@/lib/scheduling/availability";
+import { hasConflict, TRAVEL_MINUTES, getSessionMode, type BookableSessionType } from "@/lib/scheduling/availability";
 import { formatPassportReference } from "@/lib/scheduling/passportReference";
 
 // PRD 9, Stage 2 -- the all-or-nothing write. Three real steps, in
@@ -64,12 +64,33 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: detailsError?.message ?? "Couldn't resolve this clinician." }, { status: 403 });
   }
 
+  // Bug 2, 22 Sept 2026 -- the availability route already refuses to
+  // OFFER a non-working day (Europe/Dublin wall-clock, matching
+  // computeAvailableSlots' own convention), but this route never
+  // re-checked it -- a crafted POST straight at this endpoint could
+  // still book a Saturday. Validated here too, matching this schema's
+  // own standing "validate at write time, don't trust the UI" rule
+  // (the Freebusy re-check immediately below is the same discipline
+  // applied to a different question).
+  const workingDays: number[] = details.working_days ?? [1, 2, 3, 4, 5];
+  const sessionDayOfWeek = new Date(sessionStartISO).getDay();
+  if (!workingDays.includes(sessionDayOfWeek)) {
+    return NextResponse.json({ error: "This clinic isn't open on that day. Please choose another slot." }, { status: 400 });
+  }
+
   // Travel bounds computed server-side, never trusted from the client
   // -- the same TRAVEL_MINUTES constant computeAvailableSlots() itself
   // uses, imported rather than re-typed.
   const sessionStart = new Date(sessionStartISO);
   const sessionEnd = new Date(sessionEndISO);
-  const isInPerson = sessionType === "in_person";
+  // Bug 4, 22 Sept 2026 -- both of these used to compare sessionType
+  // directly against a literal string. Session types are about to
+  // become clinic-configurable, so both now ask what MODE the chosen
+  // type is (does it need travel blocks, does it need a video link) --
+  // see getSessionMode()'s own header for why this is the one place
+  // that changes when that lands, not every call site.
+  const sessionMode = getSessionMode(sessionType as BookableSessionType);
+  const isInPerson = sessionMode === "in_person";
   const travelBeforeStart = isInPerson ? new Date(sessionStart.getTime() - TRAVEL_MINUTES * 60000) : null;
   const travelAfterEnd = isInPerson ? new Date(sessionEnd.getTime() + TRAVEL_MINUTES * 60000) : null;
 
@@ -118,6 +139,7 @@ export async function POST(request: Request) {
   let travelBeforeEventId: string | null = null;
   let travelAfterEventId: string | null = null;
   let etag = "";
+  let meetLink: string | null = null;
 
   try {
     if (isInPerson) {
@@ -144,12 +166,13 @@ export async function POST(request: Request) {
       startISO: sessionStart.toISOString(),
       endISO: sessionEnd.toISOString(),
       attendeeEmail: user.email,
-      withMeetLink: sessionType === "online",
+      withMeetLink: sessionMode === "online",
       privateProperties: { passport_id: passportId, booking_id: bookingId },
     });
     created.push(session);
     sessionEventId = session.id;
     etag = session.etag;
+    meetLink = session.meetLink ?? null;
 
     if (isInPerson) {
       const after = await createCalendarEvent({
@@ -184,6 +207,7 @@ export async function POST(request: Request) {
     p_travel_before_event_id: travelBeforeEventId,
     p_travel_after_event_id: travelAfterEventId,
     p_google_etag: etag,
+    p_google_meet_link: meetLink,
   });
   if (syncError) {
     console.error("mark_booking_synced failed after a genuinely successful Google write:", syncError);
@@ -195,5 +219,6 @@ export async function POST(request: Request) {
     sessionType,
     sessionStartISO: sessionStart.toISOString(),
     sessionEndISO: sessionEnd.toISOString(),
+    meetLink,
   });
 }

@@ -11,6 +11,7 @@ import { getRoleLabel } from "@/lib/vocabulary";
 import { PrincipalBottomNav } from "@/components/principal/PrincipalBottomNav";
 import { HandOverPrincipalSheet } from "@/components/principal/HandOverPrincipalSheet";
 import { SetClinicHoursSheet } from "@/components/principal/SetClinicHoursSheet";
+import { SetWorkingDaysSheet } from "@/components/principal/SetWorkingDaysSheet";
 import { SetBookingBufferSheet } from "@/components/principal/SetBookingBufferSheet";
 import { SetBookingWindowSheet } from "@/components/principal/SetBookingWindowSheet";
 import { SetCancellationNoticeSheet } from "@/components/principal/SetCancellationNoticeSheet";
@@ -107,6 +108,28 @@ const TOGGLE_DEFINITIONS: ToggleDefinition[] = [
   },
 ];
 
+const DAY_LABELS: Record<number, string> = { 0: "Sun", 1: "Mon", 2: "Tue", 3: "Wed", 4: "Thu", 5: "Fri", 6: "Sat" };
+
+// Bug 2, 22 Sept 2026 -- a plain, honest summary of the current
+// working-days set, in real week order (Mon..Sun) regardless of the
+// stored array's own order. "Mon-Fri" for the common contiguous
+// weekday case; a plain comma list otherwise (e.g. a clinic open
+// Tue/Thu/Sat) -- never claims a range that isn't a real one.
+function formatWorkingDays(days: number[]): string {
+  const weekOrder = [1, 2, 3, 4, 5, 6, 0];
+  const sorted = weekOrder.filter((d) => days.includes(d));
+  if (sorted.length === 0) return "No days set";
+  const isContiguousWeekdays =
+    sorted.length >= 2 &&
+    sorted.every((d, i) => i === 0 || d === sorted[i - 1] + 1) &&
+    !sorted.includes(0) &&
+    !sorted.includes(6);
+  if (isContiguousWeekdays) {
+    return `${DAY_LABELS[sorted[0]]}–${DAY_LABELS[sorted[sorted.length - 1]]}`;
+  }
+  return sorted.map((d) => DAY_LABELS[d]).join(", ");
+}
+
 export default function PrincipalClinicPage() {
   const router = useRouter();
   const { user, isReady } = useRequireRole("principal");
@@ -115,6 +138,7 @@ export default function PrincipalClinicPage() {
   const [isCodeCopied, setIsCodeCopied] = useState(false);
   const [clinicHoursStart, setClinicHoursStart] = useState<string>("09:00:00");
   const [clinicHoursEnd, setClinicHoursEnd] = useState<string>("17:00:00");
+  const [workingDays, setWorkingDays] = useState<number[]>([1, 2, 3, 4, 5]);
   const [bookingBufferMinutes, setBookingBufferMinutes] = useState<number>(15);
   const [bookingWindowDays, setBookingWindowDays] = useState<number>(30);
   const [cancellationNoticeHours, setCancellationNoticeHours] = useState<number>(24);
@@ -134,6 +158,7 @@ export default function PrincipalClinicPage() {
   const [error, setError] = useState<string | null>(null);
   const [isHandOverOpen, setIsHandOverOpen] = useState(false);
   const [isClinicHoursOpen, setIsClinicHoursOpen] = useState(false);
+  const [isWorkingDaysOpen, setIsWorkingDaysOpen] = useState(false);
   const [isBookingBufferOpen, setIsBookingBufferOpen] = useState(false);
   const [isBookingWindowOpen, setIsBookingWindowOpen] = useState(false);
   const [isCancellationNoticeOpen, setIsCancellationNoticeOpen] = useState(false);
@@ -161,7 +186,7 @@ export default function PrincipalClinicPage() {
     const { data: staffRow, error: staffError } = await supabase
       .from("institution_staff")
       .select(
-        "institution_id, institutions(name, institution_code, clinic_hours_start_time, clinic_hours_end_time, booking_buffer_minutes, booking_window_days, cancellation_notice_hours, cancellation_policy_text)"
+        "institution_id, institutions(name, institution_code, clinic_hours_start_time, clinic_hours_end_time, working_days, booking_buffer_minutes, booking_window_days, cancellation_notice_hours, cancellation_policy_text)"
       )
       .eq("user_id", user.id)
       .eq("role", "principal")
@@ -180,6 +205,7 @@ export default function PrincipalClinicPage() {
       institution_code: string;
       clinic_hours_start_time: string | null;
       clinic_hours_end_time: string | null;
+      working_days: number[] | null;
       booking_buffer_minutes: number | null;
       booking_window_days: number | null;
       cancellation_notice_hours: number | null;
@@ -192,6 +218,7 @@ export default function PrincipalClinicPage() {
     setInstitutionId(staffRow.institution_id);
     if (record?.clinic_hours_start_time) setClinicHoursStart(record.clinic_hours_start_time);
     if (record?.clinic_hours_end_time) setClinicHoursEnd(record.clinic_hours_end_time);
+    if (record?.working_days && record.working_days.length > 0) setWorkingDays(record.working_days);
     if (record?.booking_buffer_minutes !== null && record?.booking_buffer_minutes !== undefined) {
       setBookingBufferMinutes(record.booking_buffer_minutes);
     }
@@ -342,12 +369,28 @@ export default function PrincipalClinicPage() {
                     <div>
                       <p className="font-sans text-body font-semibold text-brand-neutral-black">Clinic hours</p>
                       <p className="mt-0.5 font-sans text-eyebrow text-brand-neutral-black/50">
-                        {formatTimeOfDay(clinicHoursStart)} – {formatTimeOfDay(clinicHoursEnd)}, every day
+                        {formatTimeOfDay(clinicHoursStart)} – {formatTimeOfDay(clinicHoursEnd)}
                       </p>
                     </div>
                     <button
                       type="button"
                       onClick={() => setIsClinicHoursOpen(true)}
+                      className="flex-shrink-0 font-sans text-body font-semibold text-brand-prussian-blue"
+                    >
+                      Change
+                    </button>
+                  </div>
+
+                  <div className="flex items-center justify-between rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
+                    <div>
+                      <p className="font-sans text-body font-semibold text-brand-neutral-black">Working days</p>
+                      <p className="mt-0.5 font-sans text-eyebrow text-brand-neutral-black/50">
+                        {formatWorkingDays(workingDays)}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setIsWorkingDaysOpen(true)}
                       className="flex-shrink-0 font-sans text-body font-semibold text-brand-prussian-blue"
                     >
                       Change
@@ -569,6 +612,19 @@ export default function PrincipalClinicPage() {
             setClinicHoursStart(newStart);
             setClinicHoursEnd(newEnd);
             setIsClinicHoursOpen(false);
+          }}
+        />
+      )}
+
+      {institutionId && (
+        <SetWorkingDaysSheet
+          isOpen={isWorkingDaysOpen}
+          institutionId={institutionId}
+          currentWorkingDays={workingDays}
+          onClose={() => setIsWorkingDaysOpen(false)}
+          onSaved={(newWorkingDays) => {
+            setWorkingDays(newWorkingDays);
+            setIsWorkingDaysOpen(false);
           }}
         />
       )}
