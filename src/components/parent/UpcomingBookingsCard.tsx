@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { cancellationSource, formatCancelledVia } from "@/lib/scheduling/bookingCancellation";
+import { formatLocationDetails } from "@/lib/scheduling/locationDetails";
 
 // PRD 9, Stage 2 -- answers PRD section 11's own open question ("what a
 // parent sees of their own booking history, as distinct from what is
@@ -37,6 +38,8 @@ interface UpcomingBooking {
   bookingId: string;
   clinicianName: string;
   sessionTypeName: string;
+  sessionTypeMode: string;
+  sessionTypeLocationDetails: string | null;
   sessionStartAt: string;
   sessionEndAt: string;
   googleSyncStatus: string;
@@ -70,6 +73,8 @@ export function UpcomingBookingsCard({ passportId }: { passportId: string | null
             booking_id: string;
             clinician_name: string;
             session_type_name: string;
+            session_type_mode: string;
+            session_type_location_details: string | null;
             session_start_at: string;
             session_end_at: string;
             google_sync_status: string;
@@ -82,6 +87,8 @@ export function UpcomingBookingsCard({ passportId }: { passportId: string | null
           bookingId: row.booking_id,
           clinicianName: row.clinician_name,
           sessionTypeName: row.session_type_name,
+          sessionTypeMode: row.session_type_mode,
+          sessionTypeLocationDetails: row.session_type_location_details,
           sessionStartAt: row.session_start_at,
           sessionEndAt: row.session_end_at,
           googleSyncStatus: row.google_sync_status,
@@ -182,7 +189,7 @@ export function UpcomingBookingsCard({ passportId }: { passportId: string | null
                           Your clinic is aware there may be a calendar issue with this session.
                         </p>
                       )}
-                      {booking.googleMeetLink && (
+                      {booking.googleMeetLink ? (
                         <a
                           href={booking.googleMeetLink}
                           target="_blank"
@@ -191,6 +198,11 @@ export function UpcomingBookingsCard({ passportId }: { passportId: string | null
                         >
                           Join by video call
                         </a>
+                      ) : (
+                        (() => {
+                          const whereText = formatLocationDetails(booking.sessionTypeMode, booking.sessionTypeLocationDetails);
+                          return whereText ? <p className="mt-1 text-xs text-brand-neutral-black/60">{whereText}</p> : null;
+                        })()
                       )}
                     </>
                   )}

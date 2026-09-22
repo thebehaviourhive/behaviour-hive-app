@@ -13,6 +13,7 @@ import { ClinicianCard, type BookableClinician } from "@/components/parent/booki
 import { SessionTypeCard, type BookableSessionType } from "@/components/parent/booking/SessionTypeCard";
 import { SlotPicker, type AvailableSlot } from "@/components/parent/booking/SlotPicker";
 import { BookingSummaryCard, type BookingSummaryDetails } from "@/components/parent/booking/BookingSummaryCard";
+import { formatNoticePeriod } from "@/lib/scheduling/cancellationNotice";
 
 // Booking-flow redesign (design brief, Sept 2026). Lives under
 // /passport/* deliberately, not as a fourth nav tab: this app's own
@@ -78,8 +79,6 @@ export default function BookSessionPage() {
   const [isLoadingSlots, setIsLoadingSlots] = useState(false);
   const [slotsError, setSlotsError] = useState<string | null>(null);
   const [bookingWindowDays, setBookingWindowDays] = useState(30);
-  const [institutionId, setInstitutionId] = useState<string | null>(null);
-  const [institutionAddress, setInstitutionAddress] = useState<string | null>(null);
   const [cancellationNoticeHours, setCancellationNoticeHours] = useState(24);
   const [cancellationPolicyText, setCancellationPolicyText] = useState<string | null>(null);
   const [slotGoneMessage, setSlotGoneMessage] = useState<string | null>(null);
@@ -177,6 +176,7 @@ export default function BookSessionPage() {
           description: string | null;
           location_mode: string;
           length_minutes: number;
+          location_details: string | null;
         }[];
         const types: BookableSessionType[] = rows.map((row) => ({
           id: row.id,
@@ -184,6 +184,7 @@ export default function BookSessionPage() {
           description: row.description,
           locationMode: row.location_mode,
           lengthMinutes: row.length_minutes,
+          locationDetails: row.location_details,
         }));
         setSessionTypes(types);
         setIsLoadingTypes(false);
@@ -217,7 +218,6 @@ export default function BookSessionPage() {
       }
       setSlots(data.slots ?? []);
       setBookingWindowDays(data.bookingWindowDays ?? 30);
-      setInstitutionId(data.institutionId ?? null);
       setCancellationNoticeHours(data.cancellationNoticeHours ?? 24);
       setCancellationPolicyText(data.cancellationPolicyText ?? null);
       setSelectedClinicianName((prev) => prev ?? data.clinicianName ?? null);
@@ -236,27 +236,6 @@ export default function BookSessionPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step, selectedClinicianId, selectedType]);
 
-  // The clinic's own address (design brief step 4: "the clinic's
-  // address for in-person"). institutions' own SELECT policy is
-  // `using (true)` (0013) -- a direct client read, not a second RPC,
-  // once institutionId is known from the availability response.
-  useEffect(() => {
-    if (!institutionId) return;
-    let isMounted = true;
-    const supabase = createClient();
-    supabase
-      .from("institutions")
-      .select("address")
-      .eq("id", institutionId)
-      .maybeSingle()
-      .then(({ data }: { data: { address: string | null } | null }) => {
-        if (!isMounted) return;
-        setInstitutionAddress(data?.address ?? null);
-      });
-    return () => {
-      isMounted = false;
-    };
-  }, [institutionId]);
 
   function pickClinician(clinician: BookableClinician) {
     setSelectedClinicianId(clinician.clinicianId);
@@ -372,7 +351,7 @@ export default function BookSessionPage() {
           locationMode: selectedType.locationMode,
           startISO: selectedSlot.startISO,
           endISO: selectedSlot.endISO,
-          address: institutionAddress,
+          locationDetails: selectedType.locationDetails,
           meetLink: confirmedMeetLink,
         }
       : null;
@@ -500,7 +479,7 @@ export default function BookSessionPage() {
                   <p className="mt-2 font-sans text-body text-brand-neutral-black/80">{cancellationPolicyText}</p>
                 ) : (
                   <p className="mt-2 font-sans text-body text-brand-neutral-black/80">
-                    Please give at least {cancellationNoticeHours} hours&apos; notice to cancel or change this session.
+                    Please give at least {formatNoticePeriod(cancellationNoticeHours)} to cancel or change this session.
                   </p>
                 )}
               </div>
@@ -548,7 +527,7 @@ export default function BookSessionPage() {
                   Need to cancel?
                 </p>
                 <p className="mt-2 font-sans text-body text-brand-neutral-black/80">
-                  You can cancel from Home, under Upcoming. Please give at least {cancellationNoticeHours} hours&apos; notice.
+                  You can cancel from Home, under Upcoming. Please give at least {formatNoticePeriod(cancellationNoticeHours)}.
                 </p>
               </div>
 

@@ -4,6 +4,15 @@
 // "with the summary card repeated") rather than two near-identical
 // cards -- the only real difference between the two moments is
 // whether a real meetLink is known yet.
+//
+// WHERE follow-up (design brief, Sept 2026): the old "address" field
+// was always the clinic's own institutions.address, so every in-person
+// type read as "at the clinic" even for a home visit. locationDetails
+// is now the session TYPE's own director-written text (formatted via
+// formatLocationDetails(), the one place the by-mode fallback lives),
+// never re-derived here.
+
+import { formatLocationDetails } from "@/lib/scheduling/locationDetails";
 
 export interface BookingSummaryDetails {
   clinicianName: string;
@@ -11,7 +20,7 @@ export interface BookingSummaryDetails {
   locationMode: string;
   startISO: string;
   endISO: string;
-  address: string | null;
+  locationDetails: string | null;
   meetLink: string | null;
 }
 
@@ -20,8 +29,9 @@ function formatSlotTime(iso: string): string {
 }
 
 export function BookingSummaryCard({ details }: { details: BookingSummaryDetails }) {
-  const { clinicianName, sessionTypeName, locationMode, startISO, endISO, address, meetLink } = details;
+  const { clinicianName, sessionTypeName, locationMode, startISO, endISO, locationDetails, meetLink } = details;
   const isOnline = locationMode === "online";
+  const whereText = formatLocationDetails(locationMode, locationDetails);
 
   return (
     <div className="rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
@@ -55,9 +65,7 @@ export function BookingSummaryCard({ details }: { details: BookingSummaryDetails
           </p>
         )
       ) : (
-        <p className="mt-0.5 font-sans text-body font-semibold text-brand-neutral-black">
-          {address ?? "At the clinic -- please ask them for directions if you haven't visited before."}
-        </p>
+        <p className="mt-0.5 font-sans text-body font-semibold text-brand-neutral-black">{whereText}</p>
       )}
     </div>
   );

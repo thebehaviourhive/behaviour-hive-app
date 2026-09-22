@@ -77,7 +77,7 @@ export default function ClinicSessionTypesPage() {
     const { data: typeRows, error: typesError } = await supabase
       .from("session_types")
       .select(
-        "id, name, description, location_mode, length_minutes, travel_before_minutes, travel_after_minutes, is_parent_bookable, is_active"
+        "id, name, description, location_mode, length_minutes, travel_before_minutes, travel_after_minutes, is_parent_bookable, is_active, location_details"
       )
       .eq("institution_id", staffRow.institution_id)
       .order("sort_order")

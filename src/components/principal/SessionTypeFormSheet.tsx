@@ -24,6 +24,7 @@ export interface SessionTypeRow {
   travel_after_minutes: number;
   is_parent_bookable: boolean;
   is_active: boolean;
+  location_details: string | null;
 }
 
 const LOCATION_MODES: { value: string; label: string }[] = [
@@ -48,6 +49,7 @@ export function SessionTypeFormSheet({ isOpen, institutionId, existing, onClose,
   const [lengthMinutes, setLengthMinutes] = useState("60");
   const [travelBeforeMinutes, setTravelBeforeMinutes] = useState("0");
   const [travelAfterMinutes, setTravelAfterMinutes] = useState("0");
+  const [locationDetails, setLocationDetails] = useState("");
   const [isParentBookable, setIsParentBookable] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -62,6 +64,7 @@ export function SessionTypeFormSheet({ isOpen, institutionId, existing, onClose,
       setLengthMinutes(String(existing.length_minutes));
       setTravelBeforeMinutes(String(existing.travel_before_minutes));
       setTravelAfterMinutes(String(existing.travel_after_minutes));
+      setLocationDetails(existing.location_details ?? "");
       setIsParentBookable(existing.is_parent_bookable);
     } else {
       setName("");
@@ -70,6 +73,7 @@ export function SessionTypeFormSheet({ isOpen, institutionId, existing, onClose,
       setLengthMinutes("60");
       setTravelBeforeMinutes("0");
       setTravelAfterMinutes("0");
+      setLocationDetails("");
       setIsParentBookable(true);
     }
     setSubmitError(null);
@@ -107,6 +111,7 @@ export function SessionTypeFormSheet({ isOpen, institutionId, existing, onClose,
       length_minutes: length,
       travel_before_minutes: travelBefore,
       travel_after_minutes: travelAfter,
+      location_details: locationMode === "online" ? null : locationDetails.trim() || null,
       is_parent_bookable: isParentBookable,
     };
     const { error } = existing
@@ -157,6 +162,15 @@ export function SessionTypeFormSheet({ isOpen, institutionId, existing, onClose,
             })}
           </div>
         </div>
+
+        {locationMode !== "online" && (
+          <TextField
+            label="Location details (shown to parents)"
+            value={locationDetails}
+            onChange={(e) => setLocationDetails(e.target.value)}
+            placeholder="e.g. At your home -- your clinician will come to you"
+          />
+        )}
 
         <TextField label="Length (minutes)" type="number" min={1} value={lengthMinutes} onChange={(e) => setLengthMinutes(e.target.value)} />
 

@@ -11,12 +11,18 @@ export interface BookableSessionType {
   description: string | null;
   locationMode: string;
   lengthMinutes: number;
+  locationDetails: string | null;
 }
 
+// "at the clinic" was the same hardcoded assumption as the confirm/
+// Booked screens' own WHERE bug (design brief follow-up, Sept 2026) --
+// a mode-neutral phrase here, the real per-type location text lives in
+// the description line below (director-written) and the WHERE section
+// on later screens (formatLocationDetails()), never re-derived here.
 const LOCATION_PHRASE: Record<string, string> = {
   online: "by video call",
-  in_person: "at the clinic",
-  elsewhere: "away from the clinic",
+  in_person: "in person",
+  elsewhere: "elsewhere",
 };
 
 export function formatLengthAndLocation(type: BookableSessionType): string {
