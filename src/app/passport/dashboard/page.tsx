@@ -7,6 +7,7 @@ import { BottomNav } from "@/components/ui/BottomNav";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { InlineErrorState } from "@/components/ui/InlineErrorState";
 import { ShareBottomSheet } from "@/components/parent/ShareBottomSheet";
+import { ClaimCodeEntry } from "@/components/parent/ClaimCodeEntry";
 import { ReasonConfirmSheet } from "@/components/shared/ReasonConfirmSheet";
 import { ABCLogger } from "@/components/abc-logger/ABCLogger";
 import { ABCTimeline } from "@/components/abc-logger/ABCTimeline";
@@ -495,7 +496,7 @@ export default function PassportDashboardPage() {
 
   // Lets the dashboard's "ABC Log" quick action jump straight into the
   // logger instead of just landing here and requiring an extra tap on the
-  // existing "+ Log Incident" button below.
+  // existing "+ ABC Log" button below.
   useEffect(() => {
     if (!summary || searchParams.get("logIncident") !== "1") return;
     // Reacting to an external system (the URL query param) and performing
@@ -710,12 +711,19 @@ export default function PassportDashboardPage() {
       </header>
 
       <div className="px-4">
+        {/* Parent-track copy pass, 23 Sept 2026 -- "+ Log Entry" said
+            nothing, and "+ Log Incident" (the non-clinic-only case)
+            risked exactly the collision Daniel named: a parent's own
+            ABC log entry read as the school's own formal, signed,
+            countersigned incident record. One label, matching what
+            this app already calls it everywhere else a clinician reads
+            it -- no institution-mix branch needed any more. */}
         <button
           type="button"
           onClick={() => setIsAbcLoggerOpen(true)}
           className="w-full rounded-2xl border-2 border-brand-prussian-blue py-3.5 text-base font-semibold text-brand-prussian-blue"
         >
-          {allConnectedAreClinic ? "+ Log Entry" : "+ Log Incident"}
+          + ABC Log
         </button>
       </div>
 
@@ -867,6 +875,15 @@ export default function PassportDashboardPage() {
             </section>
           </ErrorBoundary>
         </div>
+
+        {/* Parent-track card swap, 23 Sept 2026, Part 4 -- code entry
+            for a SECOND child moves off the dashboard, quietly, onto
+            this screen instead: most parents have one child in the
+            system and it shouldn't take dashboard space. This is about
+            a DIFFERENT child than the one this whole page is showing,
+            so it sits outside both access cards above, not inside
+            either -- a standalone line, not another section. */}
+        <ClaimCodeEntry variant="quiet" />
 
         <div aria-hidden className="h-px bg-black/5" />
 

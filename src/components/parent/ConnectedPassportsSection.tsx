@@ -2,40 +2,39 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { ClaimCodeEntry } from "./ClaimCodeEntry";
 
 // A parent can no longer CREATE a passport -- the school or clinic
-// owns it (Stage 2, 15 Sept 2026, self-creation retired). This
-// replaces the old "Build your child's passport" entry point with the
-// real one: connecting to a record someone else already started, by
-// code. Multi-child, 21 Sept 2026 -- the entry box stays visible
-// regardless of how many passports are already connected, since a
-// parent can have more than one child, each with their own code, and
-// nothing here should ever look "finished" and stop offering it.
+// owns it (Stage 2, 15 Sept 2026, self-creation retired).
 //
-// Reuses redeem_passport_claim_code() exactly as /passport/claim
-// does -- same RPC, same server-side rate limiting, same refusal
-// text shown as-is. This is a new PLACE to enter a code, not a new
-// way to redeem one; /passport/claim itself is untouched and still
-// the first-time entry point reached from /passport/welcome before
-// any dashboard content exists.
+// Parent-track card swap, 23 Sept 2026 -- Daniel's own instruction:
+// once a parent has at least one passport connected, code entry is no
+// longer the thing this card should be selling dashboard space to --
+// most parents have one child in the system, and the code-entry box
+// (still the ONLY way in for a parent with zero passports) moves,
+// quietly, onto the passport screen itself (ClaimCodeEntry's own
+// "quiet" variant, wired into passport/dashboard/page.tsx). In its
+// place: a direct "+ ABC Log" action, since that's the thing a
+// connected parent actually reaches for day to day.
 //
-// Copy stays deliberately neutral -- never "your school", never "your
-// clinic" -- matching the onboarding restructure's own standing rule:
-// a code can come from either, and nothing here knows which until
-// it's redeemed.
+// WHICH CHILD IT LOGS FOR: one connected child, go straight there, no
+// question asked. More than one, ask -- but "ask" is this card's own
+// existing list of children, not a new picker component; tapping
+// "+ ABC Log" with more than one child simply reveals which of the
+// list entries below is clickable for logging, inline, rather than
+// opening a second sheet on top of a list that's already right there.
 interface ConnectedPassport {
   passportId: string;
   childName: string;
 }
 
 export function ConnectedPassportsSection() {
+  const router = useRouter();
   const [passports, setPassports] = useState<ConnectedPassport[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [code, setCode] = useState("");
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [justConnectedName, setJustConnectedName] = useState<string | null>(null);
+  const [isPickingChild, setIsPickingChild] = useState(false);
 
   const load = useCallback(async () => {
     setIsLoading(true);
@@ -60,96 +59,63 @@ export function ConnectedPassportsSection() {
     load();
   }, [load]);
 
-  async function handleConnect() {
-    if (!code.trim()) return;
-    setError(null);
-    setJustConnectedName(null);
-    setIsSubmitting(true);
-
-    const supabase = createClient();
-    const { data, error: claimError } = await supabase.rpc("redeem_passport_claim_code", {
-      p_code: code.trim(),
-    });
-
-    if (claimError) {
-      setIsSubmitting(false);
-      setError(claimError.message);
+  function handleLogClick() {
+    if (passports.length === 1) {
+      router.push(`/passport/dashboard?passportId=${passports[0].passportId}&logIncident=1`);
       return;
     }
+    setIsPickingChild(true);
+  }
 
-    const claimed = data?.[0] ?? null;
-    if (!claimed) {
-      setIsSubmitting(false);
-      setError("We couldn't find a passport with that code. Please check it and try again.");
-      return;
-    }
+  if (isLoading) {
+    return <div className="h-24 animate-pulse rounded-2xl bg-white" />;
+  }
 
-    setCode("");
-    setJustConnectedName(claimed.child_name);
-    setIsSubmitting(false);
-    await load();
+  if (passports.length === 0) {
+    return (
+      <section className="flex flex-col gap-3">
+        <ClaimCodeEntry variant="prominent" onConnected={load} />
+      </section>
+    );
   }
 
   return (
     <section className="flex flex-col gap-3">
-      <div className="rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
-        <p className="text-sm font-semibold text-brand-neutral-black">
-          Enter your child&apos;s passport code
-        </p>
-        <p className="mt-1 text-xs text-black/50">
-          You&apos;ll be given a code to link your account to your child&apos;s passport. Have a code for
-          another child? Enter it here too.
-        </p>
+      <button
+        type="button"
+        onClick={handleLogClick}
+        className="w-full rounded-2xl border-2 border-brand-prussian-blue py-3.5 text-base font-semibold text-brand-prussian-blue"
+      >
+        + ABC Log
+      </button>
 
-        <div className="mt-3 flex gap-2">
-          <input
-            type="text"
-            value={code}
-            onChange={(e) => {
-              setCode(e.target.value);
-              setError(null);
-            }}
-            placeholder="e.g. SAM4821"
-            autoCapitalize="characters"
-            className="min-w-0 flex-1 rounded-xl border border-black/10 bg-white px-3.5 py-2.5 text-sm uppercase tracking-widest text-brand-neutral-black placeholder:normal-case placeholder:tracking-normal placeholder:text-black/30 focus:border-brand-prussian-blue focus:outline-none focus:ring-2 focus:ring-brand-pastel-blue"
-          />
-          <button
-            type="button"
-            onClick={handleConnect}
-            disabled={!code.trim() || isSubmitting}
-            className="flex-shrink-0 rounded-xl bg-brand-prussian-blue px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-40"
+      <div className="flex flex-col gap-2">
+        {passports.map((p) => (
+          <Link
+            key={p.passportId}
+            href={
+              isPickingChild
+                ? `/passport/dashboard?passportId=${p.passportId}&logIncident=1`
+                : `/passport/dashboard?passportId=${p.passportId}`
+            }
+            className="flex items-center justify-between gap-3 rounded-2xl border border-black/5 bg-white p-4 shadow-sm transition-colors active:bg-black/[0.02]"
           >
-            {isSubmitting ? "Connecting…" : "Connect"}
-          </button>
-        </div>
-
-        {error && (
-          <p role="alert" className="mt-2.5 text-xs font-medium text-red-600">
-            {error}
-          </p>
-        )}
-        {justConnectedName && (
-          <p className="mt-2.5 text-xs font-medium text-green-700">
-            Connected to {justConnectedName}&apos;s passport.
-          </p>
-        )}
+            <span className="text-sm font-semibold text-brand-neutral-black">{p.childName}</span>
+            <span className="flex-shrink-0 rounded-full bg-brand-pastel-blue/40 px-4 py-1.5 text-xs font-semibold text-brand-prussian-blue">
+              {isPickingChild ? "Log for this child" : "View passport"}
+            </span>
+          </Link>
+        ))}
       </div>
 
-      {!isLoading && passports.length > 0 && (
-        <div className="flex flex-col gap-2">
-          {passports.map((p) => (
-            <Link
-              key={p.passportId}
-              href={`/passport/dashboard?passportId=${p.passportId}`}
-              className="flex items-center justify-between gap-3 rounded-2xl border border-black/5 bg-white p-4 shadow-sm transition-colors active:bg-black/[0.02]"
-            >
-              <span className="text-sm font-semibold text-brand-neutral-black">{p.childName}</span>
-              <span className="flex-shrink-0 rounded-full bg-brand-pastel-blue/40 px-4 py-1.5 text-xs font-semibold text-brand-prussian-blue">
-                View passport
-              </span>
-            </Link>
-          ))}
-        </div>
+      {isPickingChild && (
+        <button
+          type="button"
+          onClick={() => setIsPickingChild(false)}
+          className="self-start text-xs font-semibold text-black/50"
+        >
+          Cancel
+        </button>
       )}
     </section>
   );
