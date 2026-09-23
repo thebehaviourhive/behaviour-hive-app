@@ -285,16 +285,20 @@ grant execute on function public.revoke_institution_link_code(uuid) to authentic
 -- 6. get_institution_link_code_status() -- lets the parent's own card
 -- re-show an outstanding code after navigating away and back, matching
 -- get_passport_claim_code_status()'s own exact role for the school
--- side of the claim flow.
+-- side of the claim flow. Returns id, unlike that function's own
+-- FIRST version (0114) -- CLAUDE.md's own "one loose end" note about
+-- that gap is stale (0287 widened it to return id too, for exactly
+-- this reason, a standalone Revoke button needing something to call).
+-- Built with id from the start here rather than repeating the gap.
 -- =====================================================================
 create or replace function public.get_institution_link_code_status(p_passport_id uuid)
-returns table (code text, expires_at timestamptz)
+returns table (id uuid, code text, expires_at timestamptz)
 language sql
 security definer
 set search_path = public
 stable
 as $$
-  select lc.code, lc.expires_at
+  select lc.id, lc.code, lc.expires_at
   from public.passport_link_codes lc
   where lc.passport_id = p_passport_id
     and lc.revoked_at is null

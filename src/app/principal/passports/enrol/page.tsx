@@ -101,10 +101,158 @@ const EMPTY_CLINICAL: ClinicalFields = {
   additionalNotes: "",
 };
 
+// Cross-organisation link path -- CLAUDE.md's own "A SCHOOL CANNOT
+// LINK ITSELF TO A CHILD WHO ALREADY HAS A CLINIC-CREATED PASSPORT"
+// entry, and the migration that closes it (0294). SCHOOL-ONLY for now
+// (see that migration's own header on the reverse direction), which is
+// why the "Link an existing record" tile below only ever renders for
+// institutionType === "school" -- offering it at a clinic would be a
+// dead end nothing behind it can serve yet.
+//
+// Its own top-level mode, not folded into the existing form: "choose"
+// is the new first screen (this page's own entry point now, for every
+// one of the four hard-coded hrefs that land here), "new" is the
+// existing enrol/onboard form below, byte-identical, just gated behind
+// one extra tap; "link" is the new peek-then-commit flow.
+type EnrolMode = "choose" | "new" | "link";
+
+function LinkExistingPassportForm({
+  institutionId,
+  institutionName,
+  onBack,
+}: {
+  institutionId: string;
+  institutionName: string | null;
+  onBack: () => void;
+}) {
+  const router = useRouter();
+  const [code, setCode] = useState("");
+  const [isPeeking, setIsPeeking] = useState(false);
+  const [peekError, setPeekError] = useState<string | null>(null);
+  const [peeked, setPeeked] = useState<{ passportId: string; childName: string } | null>(null);
+  const [isCommitting, setIsCommitting] = useState(false);
+  const [commitError, setCommitError] = useState<string | null>(null);
+
+  async function handlePeek() {
+    if (!code.trim()) return;
+    setIsPeeking(true);
+    setPeekError(null);
+    const supabase = createClient();
+    const { data, error: peekErr } = await supabase.rpc("peek_institution_link_code", {
+      p_code: code.trim(),
+    });
+    setIsPeeking(false);
+
+    if (peekErr) {
+      setPeekError(peekErr.message);
+      return;
+    }
+    const rows = (data ?? []) as { passport_id: string; child_name: string }[];
+    if (rows.length === 0) {
+      setPeekError("We couldn't find a record with that code. Please check with the family and try again.");
+      return;
+    }
+    setPeeked({ passportId: rows[0].passport_id, childName: rows[0].child_name });
+  }
+
+  async function handleConfirm() {
+    setIsCommitting(true);
+    setCommitError(null);
+    const supabase = createClient();
+    const { data: passportId, error: redeemErr } = await supabase.rpc("redeem_institution_link_code", {
+      p_institution_id: institutionId,
+      p_code: code.trim(),
+    });
+    setIsCommitting(false);
+
+    if (redeemErr) {
+      setCommitError(redeemErr.message);
+      return;
+    }
+    router.push(`/principal/passports/${passportId}`);
+  }
+
+  if (peeked) {
+    return (
+      <>
+        <p className="text-sm text-brand-neutral-black/70">
+          Link <span className="font-semibold text-brand-neutral-black">{peeked.childName}</span> to{" "}
+          {institutionName ?? "your school"}?
+        </p>
+        <p className="mt-2 text-xs text-brand-neutral-black/50">
+          This gives your school the same record you&apos;d see if you enrolled this child yourself -- their
+          passport sections and enrolment. It never includes anything from a clinic they may also be connected to.
+        </p>
+
+        {commitError && (
+          <p role="alert" className="mt-3 text-sm font-medium text-brand-golden-brown">
+            {commitError}
+          </p>
+        )}
+
+        <Button type="button" onClick={handleConfirm} disabled={isCommitting} className="mt-6 lg:w-auto">
+          {isCommitting ? "Linking…" : `Link ${peeked.childName}`}
+        </Button>
+        <button
+          type="button"
+          onClick={() => {
+            setPeeked(null);
+            setCode("");
+            setCommitError(null);
+          }}
+          className="mt-2 block w-full lg:inline-block lg:w-auto rounded-2xl border border-black/10 px-6 py-3 text-center text-sm font-semibold text-black/60"
+        >
+          Not this child? Try a different code
+        </button>
+      </>
+    );
+  }
+
+  return (
+    <>
+      <p className="text-sm text-brand-neutral-black/70">
+        Ask the family for the code from their child&apos;s passport. This connects your school to a record that
+        already exists elsewhere -- it never creates a new one.
+      </p>
+
+      <label className="mt-6 block text-sm font-semibold text-brand-neutral-black" htmlFor="enrol-link-code">
+        Link code
+      </label>
+      <input
+        id="enrol-link-code"
+        type="text"
+        value={code}
+        onChange={(e) => setCode(e.target.value)}
+        placeholder="e.g. SAM-1234"
+        className="mt-1.5 w-full rounded-xl border border-black/10 bg-white px-4 py-3 text-base text-brand-neutral-black placeholder:text-black/30 focus:border-brand-prussian-blue focus:outline-none focus:ring-2 focus:ring-brand-pastel-blue"
+      />
+
+      {peekError && (
+        <p role="alert" className="mt-3 text-sm font-medium text-brand-golden-brown">
+          {peekError}
+        </p>
+      )}
+
+      <Button type="button" onClick={handlePeek} disabled={!code.trim() || isPeeking} className="mt-6 lg:w-auto">
+        {isPeeking ? "Looking up…" : "Look Up Code"}
+      </Button>
+      <button
+        type="button"
+        onClick={onBack}
+        className="mt-2 block w-full lg:inline-block lg:w-auto rounded-2xl border border-black/10 px-6 py-3 text-center text-sm font-semibold text-black/60"
+      >
+        Cancel
+      </button>
+    </>
+  );
+}
+
 export default function EnrolChildPage() {
   const router = useRouter();
   const { user, isReady } = useRequireRole(["principal", "clinic_admin", "clinician"]);
+  const [mode, setMode] = useState<EnrolMode>("choose");
   const [institutionId, setInstitutionId] = useState<string | null>(null);
+  const [institutionName, setInstitutionName] = useState<string | null>(null);
   const [callerRole, setCallerRole] = useState<CallerRole | null>(null);
   const [practitionerCanOnboard, setPractitionerCanOnboard] = useState(false);
   const [isResolvingCaller, setIsResolvingCaller] = useState(true);
@@ -132,7 +280,7 @@ export default function EnrolChildPage() {
 
     supabase
       .from("institution_staff")
-      .select("institution_id, role, institutions(type, practitioner_can_onboard)")
+      .select("institution_id, role, institutions(name, type, practitioner_can_onboard)")
       .eq("user_id", user.id)
       .in("role", ["principal", "clinic_admin", "clinician"])
       .is("deactivated_at", null)
@@ -142,7 +290,10 @@ export default function EnrolChildPage() {
         const rows = (data ?? []) as Array<{
           institution_id: string;
           role: CallerRole;
-          institutions: { type: string; practitioner_can_onboard: boolean } | { type: string; practitioner_can_onboard: boolean }[] | null;
+          institutions:
+            | { name: string; type: string; practitioner_can_onboard: boolean }
+            | { name: string; type: string; practitioner_can_onboard: boolean }[]
+            | null;
         }>;
 
         function resolveInstitution(row: (typeof rows)[number]) {
@@ -166,6 +317,7 @@ export default function EnrolChildPage() {
         if (chosen) {
           const inst = resolveInstitution(chosen);
           setInstitutionId(chosen.institution_id);
+          setInstitutionName(inst?.name ?? null);
           setCallerRole(chosen.role);
           setPractitionerCanOnboard(Boolean(inst?.practitioner_can_onboard));
         }
@@ -371,20 +523,78 @@ export default function EnrolChildPage() {
   return (
     <div className="flex min-h-full flex-1 flex-col bg-brand-off-white/40">
       <header className="flex items-center gap-3 px-4 pt-6 pb-4">
-        <Link
-          href="/principal/directory?segment=children"
-          aria-label="Back"
-          className="flex h-8 w-8 flex-shrink-0 items-center justify-center text-2xl leading-none text-brand-prussian-blue"
-        >
-          ‹
-        </Link>
+        {mode === "choose" ? (
+          <Link
+            href="/principal/directory?segment=children"
+            aria-label="Back"
+            className="flex h-8 w-8 flex-shrink-0 items-center justify-center text-2xl leading-none text-brand-prussian-blue"
+          >
+            ‹
+          </Link>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setMode("choose")}
+            aria-label="Back"
+            className="flex h-8 w-8 flex-shrink-0 items-center justify-center text-2xl leading-none text-brand-prussian-blue"
+          >
+            ‹
+          </button>
+        )}
         <h1 className="font-heading text-xl font-bold text-brand-prussian-blue">
-          {isClinic ? "Add a Client" : "Enrol a Child"}
+          {mode === "link" ? "Link an Existing Record" : isClinic ? "Add a Client" : "Enrol a Child"}
         </h1>
       </header>
 
       <main className="flex-1 px-4">
-        {!isResolvingCaller && !isInstitutionTypeLoading && !canOnboard ? (
+        {mode === "choose" ? (
+          <div className="flex flex-col gap-3">
+            <p className="text-sm text-brand-neutral-black/70">
+              {isClinic
+                ? "Add a client who has never been on this system before, or connect a record they already have elsewhere."
+                : "Enrol a child who has never been on this system before, or connect a record they already have elsewhere."}
+            </p>
+            <button
+              type="button"
+              onClick={() => setMode("new")}
+              className="rounded-2xl border-2 border-brand-prussian-blue bg-white px-5 py-4 text-left"
+            >
+              <p className="font-heading text-base font-bold text-brand-prussian-blue">
+                {isClinic ? "Add a New Client" : "Enrol a New Child"}
+              </p>
+              <p className="mt-1 text-sm text-brand-neutral-black/60">
+                {isClinic
+                  ? "Nothing exists for them here yet."
+                  : "Nothing exists for them here yet."}
+              </p>
+            </button>
+            {/* School-only for now -- see the migration's own header
+                (0294) on why the reverse direction (a school-created
+                record linking to a clinic) isn't offered here at all
+                rather than shown and refused. */}
+            {!isClinic && (
+              <button
+                type="button"
+                onClick={() => setMode("link")}
+                className="rounded-2xl border-2 border-brand-prussian-blue bg-white px-5 py-4 text-left"
+              >
+                <p className="font-heading text-base font-bold text-brand-prussian-blue">Link an Existing Record</p>
+                <p className="mt-1 text-sm text-brand-neutral-black/60">
+                  They already have a record from a clinic or another organisation, and a family member has given you
+                  a code.
+                </p>
+              </button>
+            )}
+          </div>
+        ) : mode === "link" ? (
+          institutionId ? (
+            <LinkExistingPassportForm
+              institutionId={institutionId}
+              institutionName={institutionName}
+              onBack={() => setMode("choose")}
+            />
+          ) : null
+        ) : !isResolvingCaller && !isInstitutionTypeLoading && !canOnboard ? (
           <p className="text-sm text-brand-neutral-black/60">
             You don&apos;t have permission to add a client here.
           </p>

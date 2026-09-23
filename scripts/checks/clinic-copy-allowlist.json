@@ -35,8 +35,8 @@
     "258:\"You'll see everything the school and clinical team have already added, and you can pick up wherever they left off.\"": "The school branch of an already-correct isClinicOnly ternary (the clinic branch reads \"your clinic's own team\")."
   },
   "src/app/passport/dashboard/page.tsx": {
-    "932:\"What sensory tools and de-escalation strategies work best? Build a quick-reference toolkit for the classroom.\"": "The school branch of an already-correct allConnectedAreClinic ternary.",
-    "1030:\"Incident Timeline\"": "CORRECTED 22 Sept 2026 -- the original reason here was wrong: this is not a rendered heading at all, it's inside a plain code COMMENT (`// ... was labelled \"Incident Timeline\" but only ever rendered ...`) describing this section's own history. It is never rendered to any user, in any state -- a stronger guarantee than the gated-heading claim this entry used to make, but the stated reason should describe the real one. Read directly at this line before writing this correction, not inferred from the file it was originally written against."
+    "933:\"What sensory tools and de-escalation strategies work best? Build a quick-reference toolkit for the classroom.\"": "The school branch of an already-correct allConnectedAreClinic ternary.",
+    "1031:\"Incident Timeline\"": "CORRECTED 22 Sept 2026 -- the original reason here was wrong: this is not a rendered heading at all, it's inside a plain code COMMENT (`// ... was labelled \"Incident Timeline\" but only ever rendered ...`) describing this section's own history. It is never rendered to any user, in any state -- a stronger guarantee than the gated-heading claim this entry used to make, but the stated reason should describe the real one. Read directly at this line before writing this correction, not inferred from the file it was originally written against."
   },
   "src/app/passport/section-e/page.tsx": {
     "116:\"This is what a teacher or SNA covering your child's class needs to know quickly — allergies, medical conditions, medication, and what to do in an emergency.\"": "Finding 1 fix -- the hasSchoolLink=true branch of an already-correct ternary.",
@@ -54,7 +54,9 @@
     "173:\"School Record Export\"": "The direction === 'clinic' ternary's own school branch -- clinic branch reads \"Clinical Record Export\"."
   },
   "src/app/principal/passports/enrol/page.tsx": {
-    "396:\"Creates a new passport for this child, started by your school. Their parent or guardian claims it later using a code you generate from their own passport page — this doesn't require them to do anything yet.\"": "The school branch of an already-correct institutionType ternary -- the clinic branch (line 395) reads \"Creates a new record for this client, started by your clinic...\"."
+    "606:\"Creates a new passport for this child, started by your school. Their parent or guardian claims it later using a code you generate from their own passport page — this doesn't require them to do anything yet.\"": "The school branch of an already-correct institutionType ternary -- the clinic branch (line 605) reads \"Creates a new record for this client, started by your clinic...\".",
+    "555:\"Enrol a child who has never been on this system before, or connect a record they already have elsewhere.\"": "The isClinic-false branch of the new choose-screen's own already-correct ternary -- the clinic branch reads \"Add a client who has never been on this system before...\".",
+    "563:\"Enrol a New Child\"": "The isClinic-false branch of an already-correct ternary (isClinic ? \"Add a New Client\" : \"Enrol a New Child\")."
   },
   "src/components/abc-logger/ABCLogger.tsx": {
     "824:\"Select any that applied around this incident.\"": "\"Incident\" is this app's own generic ABC-log-entry terminology throughout, not the formal Incident Log record type -- used identically by parent/teacher/clinician/SNA.",
@@ -126,5 +128,8 @@
   },
   "src/components/ui/PassportProgress.tsx": {
     "47:\"Everyone working with your child at school can read this.\"": "Finding 1 fix -- the hasSchoolLink=true branch of an already-correct ternary (the false branch reads \"...clinical team can read this.\")."
+  },
+  "src/components/parent/InstitutionLinkCodeSection.tsx": {
+    "101:\"Give This Code To A New School Or Clinic\"": "Not a leak -- this button renders identically for every parent regardless of institution type, and the copy itself names both \"school\" and \"clinic\" because the code genuinely works for either. A clinic-only parent reading the word \"school\" here learns nothing about their own connections; the button describes what the CODE can be given to, not what this family has."
   }
 }

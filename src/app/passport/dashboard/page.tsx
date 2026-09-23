@@ -32,6 +32,7 @@ import { ComposeMessageSheet } from "@/components/messages/ComposeMessageSheet";
 import { IMPORTANT_PEOPLE_TITLE } from "@/lib/passportCopy";
 import { PassportIncidentsSection } from "@/components/parent/PassportIncidentsSection";
 import { SharedSessionNotesSection } from "@/components/parent/SharedSessionNotesSection";
+import { InstitutionLinkCodeSection } from "@/components/parent/InstitutionLinkCodeSection";
 
 interface ApprovedInstitution {
   institutionId: string;
@@ -658,14 +659,15 @@ export default function PassportDashboardPage() {
             <section className={CARD_CLASSNAME}>
               <h2 className="mb-4 font-heading text-lg font-bold text-brand-prussian-blue">Manage Access</h2>
 
-              {/* Deliberately read-only and purely informational -- PRD 3
-                  Stage 2 resolved the open question this comment used to
-                  pose. The school connects itself to a child now
-                  (create_school_passport() at creation, or a claim code
-                  the school issues) -- there is no parent approve/revoke
-                  action here at all, and the heading and empty state say
-                  so plainly rather than implying the parent granted or
-                  could grant this link. */}
+              {/* PRD 3 Stage 2 resolved the original open question this
+                  comment used to pose: the school or clinic that CREATES
+                  a child's record connects itself, no parent action.
+                  The cross-organisation link path (migration 0294) adds
+                  the one real parent action that belongs here -- giving
+                  a NEW school or clinic a code to connect an EXISTING
+                  record, never approving or revoking a link an
+                  institution already has. The list itself stays exactly
+                  as read-only as before. */}
               <h3 className="mb-2 text-sm font-semibold text-brand-neutral-black/70">
                 {allConnectedAreClinic ? "Connected Organisations" : "Connected Schools"}
               </h3>
@@ -676,9 +678,7 @@ export default function PassportDashboardPage() {
                 />
               ) : approvedInstitutions.length === 0 ? (
                 <p className="text-center text-sm text-brand-neutral-black/60">
-                  No organisations connected yet. Your child&apos;s school or
-                  clinic connects itself once they add your child&apos;s
-                  record.
+                  No organisations connected yet.
                 </p>
               ) : (
                 <div>
@@ -694,6 +694,8 @@ export default function PassportDashboardPage() {
                   ))}
                 </div>
               )}
+
+              <InstitutionLinkCodeSection passportId={summary.passportId} />
             </section>
           </ErrorBoundary>
 
@@ -708,8 +710,7 @@ export default function PassportDashboardPage() {
                 />
               ) : connectedClinicians.length === 0 ? (
                 <p className="text-center text-sm text-brand-neutral-black/60">
-                  No clinicians connected yet. Tap the share button above to
-                  connect a clinician using their code.
+                  No clinicians connected yet.
                 </p>
               ) : (
                 <div>
