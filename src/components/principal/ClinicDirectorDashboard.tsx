@@ -136,6 +136,23 @@ interface PendingGrantRow {
   proposed_at: string;
 }
 
+// The director notification gap, closed -- team_linked already reaches
+// an engaged clinician's own activity feed (0294), but a director who
+// isn't personally on the case learned nothing at all. Not a
+// notification log (this schema's own "QUERY LIVE STATE" rule) -- the
+// same standing fact GrantManagementSection's own empty state now
+// states plainly on the client record itself, surfaced institution-
+// wide here too: a real school link exists and this clinic has
+// proposed nothing yet. Self-clears the moment ANY grant is proposed
+// for that passport, whatever its eventual status -- proposing is the
+// director having looked and acted, not the parent having confirmed.
+interface SchoolLinkPendingSharingRow {
+  passport_id: string;
+  child_name: string;
+  school_names: string;
+  linked_at: string;
+}
+
 interface CaseloadRow {
   clinician_id: string;
   full_name: string;
@@ -181,6 +198,7 @@ export function ClinicDirectorDashboard({
   const [incompleteAssessments, setIncompleteAssessments] = useState<IncompleteAssessmentRow[]>([]);
   const [pendingTagChanges, setPendingTagChanges] = useState<PendingTagChangeRow[]>([]);
   const [pendingGrants, setPendingGrants] = useState<PendingGrantRow[]>([]);
+  const [schoolLinksPendingSharing, setSchoolLinksPendingSharing] = useState<SchoolLinkPendingSharingRow[]>([]);
   const [caseloadSizes, setCaseloadSizes] = useState<CaseloadRow[]>([]);
   const [stagnationQueue, setStagnationQueue] = useState<StagnationQueueRow[]>([]);
   // Session types, fixed -> clinic-configurable catalogue (migration
@@ -208,6 +226,7 @@ export function ClinicDirectorDashboard({
       assessmentsResult,
       tagChangesResult,
       grantsResult,
+      schoolLinksResult,
       caseloadResult,
       stagnationResult,
       noBookableSessionTypesResult,
@@ -219,6 +238,7 @@ export function ClinicDirectorDashboard({
       supabase.rpc("get_institution_incomplete_assessments", { p_institution_id: institutionId }),
       supabase.rpc("get_pending_tag_change_requests", { p_institution_id: institutionId }),
       supabase.rpc("get_institution_pending_cross_org_grants", { p_institution_id: institutionId }),
+      supabase.rpc("get_institution_school_links_pending_sharing_decision", { p_institution_id: institutionId }),
       supabase.rpc("get_institution_caseload_sizes", { p_institution_id: institutionId }),
       supabase.rpc("get_institution_stagnation_queue", { p_institution_id: institutionId }),
       supabase.rpc("get_institution_has_no_bookable_session_types", { p_institution_id: institutionId }),
@@ -237,6 +257,7 @@ export function ClinicDirectorDashboard({
     if (!assessmentsResult.error) setIncompleteAssessments((assessmentsResult.data ?? []) as IncompleteAssessmentRow[]);
     if (!tagChangesResult.error) setPendingTagChanges((tagChangesResult.data ?? []) as PendingTagChangeRow[]);
     if (!grantsResult.error) setPendingGrants((grantsResult.data ?? []) as PendingGrantRow[]);
+    if (!schoolLinksResult.error) setSchoolLinksPendingSharing((schoolLinksResult.data ?? []) as SchoolLinkPendingSharingRow[]);
     if (!caseloadResult.error) setCaseloadSizes((caseloadResult.data ?? []) as CaseloadRow[]);
     if (!stagnationResult.error) setStagnationQueue((stagnationResult.data ?? []) as StagnationQueueRow[]);
     if (!noBookableSessionTypesResult.error) setHasNoBookableSessionTypes(Boolean(noBookableSessionTypesResult.data));
@@ -270,6 +291,7 @@ export function ClinicDirectorDashboard({
     incompleteAssessments.length +
     pendingTagChanges.length +
     pendingGrants.length +
+    schoolLinksPendingSharing.length +
     (hasNoBookableSessionTypes ? 1 : 0);
 
   const nothingOutstanding = !isLoading && !error && outstandingCount === 0;
@@ -426,6 +448,17 @@ export function ClinicDirectorDashboard({
                       entity={row.child_name}
                       exception={`Proposed to ${row.receiving_institution_name} — awaiting parent confirmation`}
                       context={formatWaitingSince(row.proposed_at)}
+                      actionLabel="Review"
+                      href={`/principal/passports/${row.passport_id}`}
+                    />
+                  ))}
+
+                  {schoolLinksPendingSharing.map((row) => (
+                    <WorkQueueRow
+                      key={row.passport_id}
+                      entity={row.child_name}
+                      exception={`Now also at ${row.school_names} — nothing shared yet`}
+                      context={formatWaitingSince(row.linked_at)}
                       actionLabel="Review"
                       href={`/principal/passports/${row.passport_id}`}
                     />

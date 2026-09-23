@@ -203,9 +203,32 @@ export function GrantManagementSection({ passportId }: { passportId: string }) {
       </div>
 
       {grants.length === 0 ? (
-        <p className="rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-center text-sm text-brand-neutral-black/60">
-          Nothing shared with another organisation yet.
-        </p>
+        // A correct empty section still has to say WHY -- "nothing
+        // shared" reads as broken, not as a real answer, when a school
+        // link exists and there's simply been no decision yet. The
+        // same failure shape as a dashboard quietly saying "All clear"
+        // when it can't actually see anything to be clear about.
+        linkedSchools.length > 0 ? (
+          <div className="rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-center">
+            <p className="text-sm text-brand-neutral-black/60">
+              This client is also at {linkedSchools.map((s) => s.institutionName).join(" and ")}. Nothing has been
+              shared yet.
+            </p>
+            {(fbaAvailable || bspAvailable) && (
+              <button
+                type="button"
+                onClick={openPropose}
+                className="mt-3 rounded-full bg-brand-prussian-blue px-5 py-2.5 text-sm font-bold text-white"
+              >
+                Propose Sharing
+              </button>
+            )}
+          </div>
+        ) : (
+          <p className="rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-center text-sm text-brand-neutral-black/60">
+            Nothing shared with another organisation yet.
+          </p>
+        )
       ) : (
         <div className="flex flex-col gap-2">
           {grants.map((g) => (

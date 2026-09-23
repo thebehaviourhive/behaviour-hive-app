@@ -19,6 +19,7 @@ import { ClinicalPlansSection } from "@/components/passport/clinical-team/Clinic
 import { DirectorSessionNotesTab } from "@/components/principal/directory/DirectorSessionNotesTab";
 import { EpisodeTagsSection } from "@/components/clinic/EpisodeTagsSection";
 import { GrantManagementSection } from "@/components/clinic/GrantManagementSection";
+import { LinkedSchoolsSection } from "@/components/clinic/LinkedSchoolsSection";
 import { ClientContactInfoSection } from "@/components/clinic/ClientContactInfoSection";
 import { ClientClinicalIntakeSection } from "@/components/clinic/ClientClinicalIntakeSection";
 import { PassportIdBadge } from "@/components/clinic/PassportIdBadge";
@@ -1415,6 +1416,8 @@ export function ChildDetail({
 
           {activeTab === "clinical" && (
             <>
+              {institutionType === "clinic" && <LinkedSchoolsSection passportId={passportId} />}
+
               <section className="mb-6">
                 <div className="mb-2 flex items-center justify-between">
                   <h2 className="font-heading text-sm font-bold uppercase tracking-wide text-brand-neutral-black/60">
