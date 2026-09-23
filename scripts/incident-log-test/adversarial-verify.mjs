@@ -12247,9 +12247,16 @@ async function main() {
       if (error) throw error;
     }
 
+    // create_school_passport() already inserts this passport's own
+    // passport_institution_links row internally (confirmed by reading
+    // its live 0140 body) -- this fixture's own second, manual insert
+    // for the identical (passport_id, institution_id) pair was always
+    // a pure duplicate, silently harmless only because no constraint
+    // caught it. Migration 0294 added
+    // passport_institution_links_passport_institution_unique, which
+    // correctly turned this into a real error the first time the suite
+    // ran against it. Removed rather than worked around.
     const { data: childFFFId } = await principalFFF.rpc("create_school_passport", { p_institution_id: institutionFFFId, p_child_name: "FFF Child" });
-    const { error: linkFFFErr } = await admin.from("passport_institution_links").insert({ passport_id: childFFFId, institution_id: institutionFFFId, approved_by_parent: true });
-    if (linkFFFErr) throw linkFFFErr;
 
     // ---- incidentFFF1: owned by teacherFFF, self-named as staff
     // alongside a genuine non-owner (teacherBFFF). ----
