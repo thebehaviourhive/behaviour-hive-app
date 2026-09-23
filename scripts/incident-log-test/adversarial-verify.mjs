@@ -14766,6 +14766,122 @@ async function main() {
     }
   }
 
+  console.log(`\n== CHECK WWW: a claim code redeemed with NO clinician ever assigned to the passport -- the first thing every clinic family does, and nothing covered it. Found live, 23 Sept 2026: a director reported a real claim code failing for a real family, and his own working theory ("it doesn't work until a clinician is connected") was investigated directly rather than assumed either way. clinician_access for that passport WAS granted in the same narrow window as the eventual successful redemption -- his own observation was a real, timestamped correlation, not imagined. A DELIBERATE, controlled reproduction (a fresh client via the real onboard_clinic_client(), explicitly confirmed zero clinician_access rows before generating or redeeming a code) did not reproduce a failure -- redemption succeeded cleanly with nobody assigned, and clinician_access stayed empty afterward too, proving nothing implicitly requires or creates one. Read directly: neither generate_passport_claim_code() nor redeem_passport_claim_code() reference clinician_access, is_verified_clinician, or clinician_id anywhere in their live bodies. The correlation was real; the causation wasn't -- most likely the SAME code having been regenerated in that identical window (confirmed separately, and unrelated to clinician assignment) is what actually differed. This check is the permanent version of that reproduction, both directions, so a future regression that DOES make redemption depend on clinician_access is caught immediately rather than argued about again: WWW-A proves it succeeds with nobody assigned (the real case, checked first); WWW-B is the regression control, proving it still succeeds once a clinician genuinely is assigned, so a fix in one direction can never silently break the other. ==`);
+  if (shouldRun("WWW")) {
+    const rand = () => Math.floor(Math.random() * 100000);
+
+    const { data: clinicWWW } = await admin.from("institutions").insert({ name: "WWW Clinic", institution_code: "WWWCLINIC" + rand(), status: "verified", type: "clinic" }).select("id").single();
+
+    const directorWWWId = await createUser("www.director@thebehaviourhive.com", "WWW Director", "principal");
+    const clinicianWWWId = await createUser("www.clinician@thebehaviourhive.com", "WWW Clinician", "clinician");
+    const parentAWWWId = await createUser("www.parenta@thebehaviourhive.com", "WWW Parent A", "parent");
+    const parentBWWWId = await createUser("www.parentb@thebehaviourhive.com", "WWW Parent B", "parent");
+
+    await admin.from("institution_staff").insert({ institution_id: clinicWWW.id, user_id: directorWWWId, role: "principal", approved_at: new Date().toISOString(), approval_source: "bootstrap" });
+
+    const directorWWW = await signedInClient("www.director@thebehaviourhive.com");
+    const parentAWWW = await signedInClient("www.parenta@thebehaviourhive.com");
+    const parentBWWW = await signedInClient("www.parentb@thebehaviourhive.com");
+
+    // -------------------------------------------------------------------
+    // WWW-A -- THE REAL CASE, CHECKED FIRST: a fresh client, the real
+    // onboard_clinic_client() path, ZERO clinician ever assigned,
+    // confirmed explicitly (not assumed) before either the code is
+    // generated or redeemed.
+    // -------------------------------------------------------------------
+    const { data: passportAId, error: onboardAErr } = await directorWWW.rpc("onboard_clinic_client", {
+      p_institution_id: clinicWWW.id, p_client_name: "WWW Child No Clinician",
+    });
+    record("WWW-A1 a real client is onboarded via the real production RPC", !onboardAErr && Boolean(passportAId), onboardAErr?.message);
+
+    const { data: caRowsBeforeA } = await admin.from("clinician_access").select("id").eq("passport_id", passportAId);
+    record(
+      "WWW-A2 THE PRECONDITION: zero clinician_access rows exist for this passport -- confirmed, not assumed, before doing anything else",
+      (caRowsBeforeA?.length ?? -1) === 0,
+      `rows=${caRowsBeforeA?.length}`
+    );
+
+    const { data: codeA, error: genAErr } = await directorWWW.rpc("generate_passport_claim_code", {
+      p_institution_id: clinicWWW.id, p_passport_id: passportAId,
+    });
+    record("WWW-A3 the director generates a real claim code with nobody assigned", !genAErr && typeof codeA === "string", genAErr?.message);
+
+    const { data: claimADat, error: claimAErr } = await parentAWWW.rpc("redeem_passport_claim_code", { p_code: codeA });
+    record(
+      "WWW-A4 THE ONE THAT MATTERS: a real parent redeems it successfully with NO clinician ever assigned",
+      !claimAErr && (claimADat?.length ?? 0) === 1,
+      claimAErr ? claimAErr.message : JSON.stringify(claimADat)
+    );
+
+    const { data: guardianRowsA } = await admin.from("passport_guardians").select("user_id").eq("passport_id", passportAId);
+    record(
+      "WWW-A5 the real guardian row persisted",
+      (guardianRowsA ?? []).some((g) => g.user_id === parentAWWWId),
+      JSON.stringify(guardianRowsA)
+    );
+
+    const { data: caRowsAfterA } = await admin.from("clinician_access").select("id").eq("passport_id", passportAId);
+    record(
+      "WWW-A6 clinician_access is STILL empty after a successful redemption -- nothing implicitly created one as a side effect",
+      (caRowsAfterA?.length ?? -1) === 0,
+      `rows=${caRowsAfterA?.length}`
+    );
+
+    // -------------------------------------------------------------------
+    // WWW-B -- REGRESSION CONTROL: the identical sequence, but a
+    // clinician IS assigned before the code is generated. Proves a fix
+    // aimed at WWW-A can never silently break the WITH-a-clinician case,
+    // and that a real, active grant doesn't itself interfere with
+    // redemption either.
+    // -------------------------------------------------------------------
+    const { data: passportBId, error: onboardBErr } = await directorWWW.rpc("onboard_clinic_client", {
+      p_institution_id: clinicWWW.id, p_client_name: "WWW Child With Clinician",
+    });
+    record("WWW-B1 a second real client is onboarded", !onboardBErr && Boolean(passportBId), onboardBErr?.message);
+
+    const { error: grantErr } = await admin.from("clinician_access").insert({
+      passport_id: passportBId,
+      clinician_id: clinicianWWWId,
+      is_active: true,
+      engaged_by: "institution",
+      engaged_by_institution_id: clinicWWW.id,
+    });
+    record("WWW-B2 a real clinician_access grant is created for this second passport", !grantErr, grantErr?.message);
+
+    const { data: codeB, error: genBErr } = await directorWWW.rpc("generate_passport_claim_code", {
+      p_institution_id: clinicWWW.id, p_passport_id: passportBId,
+    });
+    record("WWW-B3 the director generates a real claim code WITH a clinician already assigned", !genBErr && typeof codeB === "string", genBErr?.message);
+
+    const { data: claimBDat, error: claimBErr } = await parentBWWW.rpc("redeem_passport_claim_code", { p_code: codeB });
+    record(
+      "WWW-B4 REGRESSION CONTROL: a real parent redeems it successfully WITH a clinician already assigned -- the other direction still works",
+      !claimBErr && (claimBDat?.length ?? 0) === 1,
+      claimBErr ? claimBErr.message : JSON.stringify(claimBDat)
+    );
+
+    console.log("WWW summary complete.");
+
+    // -------------------------------------------------------------------
+    // Teardown -- everything this check created.
+    // -------------------------------------------------------------------
+    for (const pid of [passportAId, passportBId]) {
+      if (!pid) continue;
+      await admin.from("passport_claim_codes").delete().eq("passport_id", pid);
+      await admin.from("passport_guardians").delete().eq("passport_id", pid);
+      await admin.from("clinician_access").delete().eq("passport_id", pid);
+      await admin.from("episodes_of_care").delete().eq("passport_id", pid);
+      await admin.from("passport_institution_links").delete().eq("passport_id", pid);
+      await admin.from("passports").delete().eq("id", pid);
+    }
+    await admin.from("institution_staff").delete().eq("institution_id", clinicWWW.id);
+    await admin.from("institutions").delete().eq("id", clinicWWW.id);
+    for (const id of [directorWWWId, clinicianWWWId, parentAWWWId, parentBWWWId]) {
+      await admin.from("clinicians").delete().eq("user_id", id);
+      await admin.auth.admin.deleteUser(id);
+    }
+  }
+
   console.log(`\n== Summary ==`);
   const failed = results.filter((r) => !r.pass);
   console.log(`${results.length - failed.length}/${results.length} passed.`);
