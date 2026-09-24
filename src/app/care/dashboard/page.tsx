@@ -1,9 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
 import { useRequireRole } from "@/hooks/useRequireRole";
-import { createClient } from "@/lib/supabase/client";
+import { useInstitutionMembership } from "@/hooks/useInstitutionMembership";
 import { PendingApprovalState } from "@/components/clinic/PendingApprovalState";
+import { MembershipMissingState } from "@/components/clinic/MembershipMissingState";
 import { BrandMark } from "@/components/ui/BrandMark";
 
 // PRD 11 Stage 2, item 7: care staff's own landing, matching /centre's
@@ -25,64 +25,18 @@ import { BrandMark } from "@/components/ui/BrandMark";
 // waiting, never assert access nobody granted yet.
 export default function CareStaffDashboardPage() {
   const { user, isReady } = useRequireRole("care_staff");
-  const [isLoading, setIsLoading] = useState(true);
-  const [isPendingApproval, setIsPendingApproval] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const membership = useInstitutionMembership(user?.id, "care_staff");
 
-  const load = useCallback(async () => {
-    if (!user) return;
-    const supabase = createClient();
-
-    const { data: staffRow } = await supabase
-      .from("institution_staff")
-      .select("id")
-      .eq("user_id", user.id)
-      .eq("role", "care_staff")
-      .is("deactivated_at", null)
-      .not("approved_at", "is", null)
-      .maybeSingle();
-
-    if (staffRow) {
-      setIsLoading(false);
-      return;
-    }
-
-    const { data: pendingRow } = await supabase
-      .from("institution_staff")
-      .select("id")
-      .eq("user_id", user.id)
-      .eq("role", "care_staff")
-      .is("deactivated_at", null)
-      .is("approved_at", null)
-      .is("rejected_at", null)
-      .maybeSingle();
-
-    if (pendingRow) {
-      setIsPendingApproval(true);
-    } else {
-      setError("Could not find your centre.");
-    }
-    setIsLoading(false);
-  }, [user]);
-
-  useEffect(() => {
-    let isMounted = true;
-    async function run() {
-      if (!isMounted || !isReady) return;
-      await load();
-    }
-    run();
-    return () => {
-      isMounted = false;
-    };
-  }, [isReady, load]);
-
-  if (!isReady || isLoading) {
+  if (!isReady || membership.status === "checking") {
     return null;
   }
 
-  if (isPendingApproval) {
+  if (membership.status === "pending") {
     return <PendingApprovalState waitingFor="centre manager" />;
+  }
+
+  if (membership.status === "missing") {
+    return <MembershipMissingState noun="centre" />;
   }
 
   return (
@@ -93,18 +47,12 @@ export default function CareStaffDashboardPage() {
           <h1 className="font-heading text-2xl font-semibold text-brand-neutral-black">You&apos;re all set</h1>
         </div>
 
-        {error ? (
-          <p role="alert" className="text-sm font-medium text-red-600">
-            {error}
+        <div className="rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
+          <p className="text-sm leading-relaxed text-black/60">
+            Your account is ready. A child&apos;s record will appear here once one is active during a stay --
+            that part isn&apos;t built yet.
           </p>
-        ) : (
-          <div className="rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
-            <p className="text-sm leading-relaxed text-black/60">
-              Your account is ready. A child&apos;s record will appear here once one is active during a stay --
-              that part isn&apos;t built yet.
-            </p>
-          </div>
-        )}
+        </div>
       </div>
     </main>
   );

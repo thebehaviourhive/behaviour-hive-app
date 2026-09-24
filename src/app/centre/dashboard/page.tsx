@@ -2,10 +2,12 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRequireRole } from "@/hooks/useRequireRole";
+import { useInstitutionMembership } from "@/hooks/useInstitutionMembership";
 import { createClient } from "@/lib/supabase/client";
 import { WorkQueueRow } from "@/components/shared/WorkQueueRow";
 import { ReviewStaffJoinSheet } from "@/components/principal/ReviewStaffJoinSheet";
 import { PendingApprovalState } from "@/components/clinic/PendingApprovalState";
+import { MembershipMissingState } from "@/components/clinic/MembershipMissingState";
 import { BrandMark } from "@/components/ui/BrandMark";
 import type { InstitutionType } from "@/lib/institutionType";
 import type { VocabularyOverrides } from "@/lib/vocabulary";
@@ -44,60 +46,19 @@ interface StaffRosterRow {
 
 export default function CentreManagerDashboardPage() {
   const { user, isReady } = useRequireRole("centre_manager");
-  const [institutionId, setInstitutionId] = useState<string | null>(null);
-  const [institutionName, setInstitutionName] = useState<string | null>(null);
+  const membership = useInstitutionMembership(user?.id, "centre_manager");
+  const institutionId = membership.institutionId;
+  const institutionName = membership.institutionName;
   const [pendingStaff, setPendingStaff] = useState<StaffRosterRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [isPendingApproval, setIsPendingApproval] = useState(false);
   const [reviewTarget, setReviewTarget] = useState<StaffRosterRow | null>(null);
 
   const load = useCallback(async () => {
-    if (!user) return;
+    if (!institutionId) return;
     const supabase = createClient();
 
-    const { data: staffRow, error: staffError } = await supabase
-      .from("institution_staff")
-      .select("institution_id, institutions(name)")
-      .eq("user_id", user.id)
-      .eq("role", "centre_manager")
-      .is("deactivated_at", null)
-      .not("approved_at", "is", null)
-      .maybeSingle();
-
-    if (staffError || !staffRow) {
-      // Same misdiagnosis this codebase has already found and fixed
-      // twice (clinic_admin, clinical_lead): a genuinely PENDING join
-      // -- ordinary, expected, nothing wrong -- is not the same state
-      // as one that's missing or rejected, and showing the same scary
-      // generic error for both is exactly the bug PendingApprovalState
-      // exists to close. A second, narrower query distinguishes them.
-      const { data: pendingRow } = await supabase
-        .from("institution_staff")
-        .select("id")
-        .eq("user_id", user.id)
-        .eq("role", "centre_manager")
-        .is("deactivated_at", null)
-        .is("approved_at", null)
-        .is("rejected_at", null)
-        .maybeSingle();
-
-      if (pendingRow) {
-        setIsPendingApproval(true);
-      } else {
-        setError("Could not find your centre.");
-      }
-      setIsLoading(false);
-      return;
-    }
-
-    const institution = staffRow.institutions as unknown as { name: string } | { name: string }[] | null;
-    const name = Array.isArray(institution) ? institution[0]?.name : institution?.name;
-    setInstitutionId(staffRow.institution_id);
-    setInstitutionName(name ?? null);
-
     const { data: roster, error: rosterError } = await supabase.rpc("get_institution_staff_roster", {
-      p_institution_id: staffRow.institution_id,
+      p_institution_id: institutionId,
       p_include_pending: true,
     });
 
@@ -106,26 +67,34 @@ export default function CentreManagerDashboardPage() {
     }
 
     setIsLoading(false);
-  }, [user]);
+  }, [institutionId]);
 
   useEffect(() => {
     let isMounted = true;
     async function run() {
-      if (!isMounted || !isReady) return;
+      if (!isMounted || !institutionId) return;
       await load();
     }
     run();
     return () => {
       isMounted = false;
     };
-  }, [isReady, load]);
+  }, [institutionId, load]);
 
-  if (!isReady || isLoading) {
+  if (!isReady || membership.status === "checking") {
     return null;
   }
 
-  if (isPendingApproval) {
+  if (membership.status === "pending") {
     return <PendingApprovalState waitingFor="centre manager" />;
+  }
+
+  if (membership.status === "missing") {
+    return <MembershipMissingState noun="centre" />;
+  }
+
+  if (isLoading) {
+    return null;
   }
 
   const institutionType: InstitutionType = "respite_centre";
@@ -141,13 +110,7 @@ export default function CentreManagerDashboardPage() {
           </h1>
         </div>
 
-        {error && (
-          <p role="alert" className="mb-4 text-sm font-medium text-red-600">
-            {error}
-          </p>
-        )}
-
-        {!error && pendingStaff.length > 0 && (
+        {pendingStaff.length > 0 ? (
           <section className="mb-6">
             <h2 className="mb-2 font-accent text-eyebrow font-bold uppercase tracking-wide text-brand-neutral-black/50">
               Waiting for approval
@@ -164,9 +127,7 @@ export default function CentreManagerDashboardPage() {
               ))}
             </div>
           </section>
-        )}
-
-        {!error && pendingStaff.length === 0 && (
+        ) : (
           <div className="rounded-2xl border border-black/5 bg-white p-4 text-center shadow-sm">
             <p className="text-sm text-black/60">Nothing needs your attention right now.</p>
           </div>

@@ -3,9 +3,11 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { useRequireRole } from "@/hooks/useRequireRole";
+import { useInstitutionMembership } from "@/hooks/useInstitutionMembership";
 import { createClient } from "@/lib/supabase/client";
 import { MyTagChangeRequestsSection } from "@/components/clinic/MyTagChangeRequestsSection";
 import { PendingApprovalState } from "@/components/clinic/PendingApprovalState";
+import { MembershipMissingState } from "@/components/clinic/MembershipMissingState";
 
 // PRD 10 Stage 3, item 1 -- the admin's own real dashboard, replacing
 // the honest holding page. Four things, per section 5.3: the entire
@@ -45,68 +47,25 @@ interface GrantRow {
 
 export default function ClinicAdminDashboardPage() {
   const { user, isReady } = useRequireRole("clinic_admin");
-  const [institutionName, setInstitutionName] = useState<string | null>(null);
+  const membership = useInstitutionMembership(user?.id, "clinic_admin");
   const [grants, setGrants] = useState<GrantRow[]>([]);
   const [nameByPassport, setNameByPassport] = useState<Map<string, string>>(new Map());
   const [nameByInstitution, setNameByInstitution] = useState<Map<string, string>>(new Map());
   const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  // Found live, 21 Sept 2026: an admin who has joined by code but whose
-  // director hasn't approved them yet was shown "Could not find your
-  // clinic" -- a genuine error message on the very first screen a new
-  // admin ever sees, for a completely ordinary, expected state. Same
-  // failure this codebase already names elsewhere for a dashboard
-  // arriving at the front door misrepresenting itself. Distinguished
-  // from a genuinely missing/rejected staff row by a second, unfiltered
-  // query -- only reached when the first (approved-only) lookup found
-  // nothing, so it costs nothing for the common, already-approved case.
-  const [isPendingApproval, setIsPendingApproval] = useState(false);
+
+  const institutionId = membership.institutionId;
 
   const load = useCallback(async () => {
-    if (!user) return;
+    if (!institutionId) return;
     setIsLoading(true);
-    setError(null);
     const supabase = createClient();
 
-    const { data: staffRow } = await supabase
-      .from("institution_staff")
-      .select("institution_id, institutions(name)")
-      .eq("user_id", user.id)
-      .eq("role", "clinic_admin")
-      .is("deactivated_at", null)
-      .not("approved_at", "is", null)
-      .maybeSingle();
-
-    if (!staffRow) {
-      const { data: pendingRow } = await supabase
-        .from("institution_staff")
-        .select("id")
-        .eq("user_id", user.id)
-        .eq("role", "clinic_admin")
-        .is("deactivated_at", null)
-        .is("approved_at", null)
-        .is("rejected_at", null)
-        .maybeSingle();
-
-      if (pendingRow) {
-        setIsPendingApproval(true);
-        setIsLoading(false);
-        return;
-      }
-
-      setError("Could not find your clinic.");
-      setIsLoading(false);
-      return;
-    }
-    const inst = staffRow.institutions as unknown as { name: string } | { name: string }[] | null;
-    setInstitutionName(Array.isArray(inst) ? (inst[0]?.name ?? null) : (inst?.name ?? null));
-
     const [rosterResult, grantsResult] = await Promise.all([
-      supabase.rpc("get_institution_episode_roster", { p_institution_id: staffRow.institution_id, p_include_ended: true }),
+      supabase.rpc("get_institution_episode_roster", { p_institution_id: institutionId, p_include_ended: true }),
       supabase
         .from("cross_organisation_grants")
         .select("id, passport_id, receiving_institution_id, scope_items, status, decline_reason, revoke_reason")
-        .eq("granting_institution_id", staffRow.institution_id)
+        .eq("granting_institution_id", institutionId)
         .order("proposed_at", { ascending: false }),
     ]);
 
@@ -147,26 +106,33 @@ export default function ClinicAdminDashboardPage() {
     }
 
     setIsLoading(false);
-  }, [user]);
+  }, [institutionId]);
 
   useEffect(() => {
+    if (!institutionId) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
-  }, [load]);
+  }, [institutionId, load]);
 
-  if (!isReady) {
+  if (!isReady || membership.status === "checking") {
     return null;
   }
 
-  if (isPendingApproval) {
+  if (membership.status === "pending") {
     return <PendingApprovalState />;
+  }
+
+  if (membership.status === "missing") {
+    return <MembershipMissingState noun="clinic" />;
   }
 
   return (
     <div className="flex min-h-full flex-1 flex-col bg-brand-off-white/40 pb-24">
       <header className="px-4 pt-6 pb-4">
         <h1 className="font-heading text-h1 font-bold text-brand-prussian-blue">Dashboard</h1>
-        {institutionName && <p className="mt-0.5 font-sans text-body text-brand-neutral-black/60">{institutionName}</p>}
+        {membership.institutionName && (
+          <p className="mt-0.5 font-sans text-body text-brand-neutral-black/60">{membership.institutionName}</p>
+        )}
       </header>
 
       <main className="flex-1">
@@ -176,8 +142,6 @@ export default function ClinicAdminDashboardPage() {
               <div className="h-[80px] animate-pulse rounded-2xl bg-white" />
               <div className="h-[80px] animate-pulse rounded-2xl bg-white" />
             </div>
-          ) : error ? (
-            <p className="text-sm text-brand-neutral-black/60">{error}</p>
           ) : (
             <Link
               href="/clinic-admin/clients"
@@ -189,11 +153,11 @@ export default function ClinicAdminDashboardPage() {
           )}
         </div>
 
-        {!isLoading && !error && (
+        {!isLoading && (
           <MyTagChangeRequestsSection recordHref={(passportId) => `/clinic-admin/client/${passportId}`} />
         )}
 
-        {!isLoading && !error && (
+        {!isLoading && (
           <section className="mt-8 px-4 lg:max-w-[66.6667%]">
             <h2 className="mb-2 font-accent text-eyebrow font-bold uppercase tracking-wide text-brand-prussian-blue">
               Data Sharing

@@ -1,49 +1,50 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import type { Role } from "@/lib/vocabulary";
 
-// "clinician" was deliberately dropped here Sept 2026 (the onboarding
-// restructure's own model correction: no INDEPENDENT self-service
-// clinician -- every clinician belongs to an organisation, joins by
-// its code, same as class_teacher/sna/principal). That reasoning was
-// right; this list was just never widened for the case it was
-// describing. PRD 5 Stage 2 built exactly that organisation-code path
-// for clinics (institution_staff.role in ('clinician', 'clinical_lead',
-// 'clinic_admin', 'principal')), but SchoolStaffRoleSelectContent.tsx's
-// own clinic role picker sat behind a placeholder screen until 21 Sept
-// 2026, so nothing in the app's UI ever actually POSTed one of these
-// three roles here -- the gap in this allow-list was invisible until
-// the picker existed to hit it. The INDEPENDENT path (no institution
-// code at all, role-select/no-code/page.tsx) still never sends
-// "clinician" -- that correction stands unchanged; this widening only
-// covers the code-gated, institution_staff-backed path, same posture
-// as class_teacher/sna/principal always had.
-// centre_manager/care_staff added, PRD 11 Stage 2, 24 Sept 2026 --
-// found live, by the very first real signup attempt through the real
-// respite role picker, exactly the shape this file's own comment above
-// already warns about: a role-tile picker existing with no matching
-// entry here fails at the LAST step, after institution lookup, role
-// selection, and everything else already worked. Same lesson, same
-// mistake, made a second time -- recorded here rather than only
-// fixed, so a fourth institution type doesn't repeat it a third time.
-const SELF_SERVICE_ROLES = [
-  "parent",
-  "class_teacher",
-  "sna",
-  "principal",
-  "clinician",
-  "clinical_lead",
-  "clinic_admin",
-  "centre_manager",
-  "care_staff",
-] as const;
-type SelfServiceRole = (typeof SELF_SERVICE_ROLES)[number];
+// This allow-list has now missed a newly-added role TWICE -- once for
+// "clinician" (PRD 5 Stage 2's own clinic role picker sat behind a
+// placeholder for months, so nothing ever exercised the gap until the
+// placeholder was removed), once for "centre_manager"/"care_staff" (PRD
+// 11 Stage 2, found live by the very first real signup attempt through
+// the real respite role picker -- everything else worked, this was the
+// last step and it failed with a bare "Invalid role."). Both times the
+// role-tile picker that POSTs here was built and working before this
+// list was widened to match.
+//
+// Fixed as a class, not a third patch: SELF_SERVICE_ROLE is now built
+// FROM vocabulary.ts's own Role type via a Record<Role | "parent",
+// boolean> literal below, not a hand-typed array. TypeScript refuses to
+// compile this file the moment vocabulary.ts's Role union grows and
+// this literal doesn't have a matching key -- a build failure, not a
+// scan step, and it fires on the SAME PR that adds the role, before
+// anyone has to discover it live a third time. "parent" sits outside
+// Role (that type is institution_staff_role_check's own vocabulary
+// only) so it's added explicitly, not inferred.
+//
+// Every entry's value is a real decision, not a placeholder default:
+// `false` on institution_admin because that role's own self-service
+// onboarding is deliberately parked (CLAUDE.md's own "INSTITUTION
+// CREATION BEING MANUAL IS DELIBERATE" entry) -- no join screen exists
+// that could ever POST this role, and admitting it here would be a
+// dead allowance, not a fix. Every other role has a real, working
+// role-tile picker that needs it admitted.
+const SELF_SERVICE_ROLE: Record<Role | "parent", boolean> = {
+  parent: true,
+  class_teacher: true,
+  sna: true,
+  principal: true,
+  institution_admin: false,
+  clinician: true,
+  clinical_lead: true,
+  clinic_admin: true,
+  centre_manager: true,
+  care_staff: true,
+};
 
-function isSelfServiceRole(value: unknown): value is SelfServiceRole {
-  return (
-    typeof value === "string" &&
-    (SELF_SERVICE_ROLES as readonly string[]).includes(value)
-  );
+function isSelfServiceRole(value: unknown): value is Role | "parent" {
+  return typeof value === "string" && Boolean(SELF_SERVICE_ROLE[value as Role | "parent"]);
 }
 
 export async function POST(request: Request) {

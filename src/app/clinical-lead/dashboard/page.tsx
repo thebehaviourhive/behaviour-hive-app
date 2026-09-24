@@ -4,8 +4,10 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { useClinicalWorkSwitch } from "@/hooks/useClinicalWorkSwitch";
+import { useInstitutionMembership } from "@/hooks/useInstitutionMembership";
 import { createClient } from "@/lib/supabase/client";
 import { PendingApprovalState } from "@/components/clinic/PendingApprovalState";
+import { MembershipMissingState } from "@/components/clinic/MembershipMissingState";
 import { MyTagChangeRequestsSection } from "@/components/clinic/MyTagChangeRequestsSection";
 import { WorkQueueRow } from "@/components/shared/WorkQueueRow";
 import { ReasonConfirmSheet } from "@/components/shared/ReasonConfirmSheet";
@@ -47,10 +49,20 @@ import { formatWaitingSince } from "@/lib/workQueueFormatting";
 // reason to link there and couldn't reach it if it tried.
 export default function ClinicalLeadDashboardPage() {
   const { isReady, user } = useRequireRole("clinical_lead");
-  const [isPendingApproval, setIsPendingApproval] = useState(false);
-  const [isCheckingApproval, setIsCheckingApproval] = useState(true);
-  const [institutionId, setInstitutionId] = useState<string | null>(null);
-  const [institutionName, setInstitutionName] = useState<string | null>(null);
+  // Found retrofitting this page onto useInstitutionMembership.ts, not
+  // previously documented: the hand-rolled check this replaced used a
+  // SINGLE query with no `approved_at is not null` filter, then branched
+  // on the fetched row's own approved_at/rejected_at -- which meant a
+  // REJECTED lead fell through to the fully functioning dashboard below
+  // (their real scoped client list, their real approval queue), not an
+  // error and not a pending state, and a genuinely MISSING row (no
+  // institution_staff row at all) rendered a silently empty header with
+  // no explanation at all. See the hook's own header for the full
+  // account -- this page is now the same, single, correct two-query
+  // shape every other institution-scoped dashboard already uses.
+  const membership = useInstitutionMembership(user?.id, "clinical_lead");
+  const institutionId = membership.institutionId;
+  const institutionName = membership.institutionName;
 
   const [scopedClients, setScopedClients] = useState<
     { episodeId: string; passportId: string; childName: string; hasOwnCaseload: boolean }[]
@@ -62,36 +74,6 @@ export default function ClinicalLeadDashboardPage() {
   const [declineTarget, setDeclineTarget] = useState<PendingTagChangeRow | null>(null);
 
   const clinicalWork = useClinicalWorkSwitch(null);
-
-  useEffect(() => {
-    if (!user) return;
-    let isMounted = true;
-    const supabase = createClient();
-
-    supabase
-      .from("institution_staff")
-      .select("institution_id, approved_at, rejected_at, institutions(name)")
-      .eq("user_id", user.id)
-      .eq("role", "clinical_lead")
-      .is("deactivated_at", null)
-      .maybeSingle()
-      .then(({ data }) => {
-        if (!isMounted) return;
-        if (!data || (data.approved_at === null && data.rejected_at === null)) {
-          setIsPendingApproval(Boolean(data));
-          setIsCheckingApproval(false);
-          return;
-        }
-        setInstitutionId(data.institution_id);
-        const inst = data.institutions as unknown as { name: string } | { name: string }[] | null;
-        setInstitutionName(Array.isArray(inst) ? (inst[0]?.name ?? null) : (inst?.name ?? null));
-        setIsCheckingApproval(false);
-      });
-
-    return () => {
-      isMounted = false;
-    };
-  }, [user]);
 
   const loadDashboard = useCallback(async () => {
     if (!institutionId || !user) return;
@@ -130,9 +112,10 @@ export default function ClinicalLeadDashboardPage() {
   }, [institutionId, user]);
 
   useEffect(() => {
+    if (!institutionId) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect
     loadDashboard();
-  }, [loadDashboard]);
+  }, [institutionId, loadDashboard]);
 
   async function handleApprove(row: PendingTagChangeRow) {
     setApprovingRequestId(row.request_id);
@@ -147,12 +130,16 @@ export default function ClinicalLeadDashboardPage() {
     setPendingRequests((prev) => prev.filter((r) => r.request_id !== row.request_id));
   }
 
-  if (!isReady || isCheckingApproval) {
+  if (!isReady || membership.status === "checking") {
     return null;
   }
 
-  if (isPendingApproval) {
+  if (membership.status === "pending") {
     return <PendingApprovalState />;
+  }
+
+  if (membership.status === "missing") {
+    return <MembershipMissingState noun="clinic" />;
   }
 
   return (
