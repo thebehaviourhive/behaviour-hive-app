@@ -11,8 +11,10 @@ import { getRoleLabel } from "@/lib/vocabulary";
 // Onboarding restructure, Sept 2026: this used to be step two of
 // "who are you" (asked BEFORE any institution code existed). Now it's
 // the role picker AFTER a code has resolved -- reached only from
-// role-select/page.tsx's own successful lookup, carrying the resolved
-// institution forward via ?institutionId=. Tapping a real role tile
+// role-select/institution/page.tsx's own successful lookup (a plain
+// fork, /role-select, sits in front of that screen too, added later --
+// see its own header), carrying the resolved institution forward via
+// ?institutionId=. Tapping a real role tile
 // now does what teacher/join-institution/page.tsx's own handleJoin()
 // used to do as a separate later step: writes the role, then inserts
 // institution_staff directly, in one action -- there is no reason to
@@ -126,7 +128,7 @@ export function SchoolStaffRoleSelectContent() {
 
   useEffect(() => {
     if (!institutionId || !isInstitutionType(institutionTypeParam)) {
-      router.replace("/role-select");
+      router.replace("/role-select/institution");
     }
   }, [institutionId, institutionTypeParam, router]);
 
@@ -248,7 +250,7 @@ export function SchoolStaffRoleSelectContent() {
 
           <button
             type="button"
-            onClick={() => router.push("/role-select")}
+            onClick={() => router.push("/role-select/institution")}
             disabled={submittingRole !== null}
             className="mt-5 w-full text-center text-xs font-semibold text-brand-prussian-blue disabled:opacity-60"
           >
