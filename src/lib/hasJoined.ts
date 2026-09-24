@@ -24,6 +24,12 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 // picked a specialty yet (a separate, later, manual verification step
 // -- see CLAUDE.md's own "INSTITUTION-EMPLOYED CLINICIAN VERIFICATION"
 // entry). Either one being true means they've joined.
+//
+// 'centre_manager'/'care_staff' (PRD 11 Stage 2) are the same simple
+// shape as class_teacher/sna/principal -- always an institution code,
+// never permitted through the permissive "unrecognised role" fallback
+// below, which would otherwise have let either role skip the join
+// check entirely and reach consent before ever joining a centre.
 export async function hasJoined(
   supabase: SupabaseClient,
   userId: string,
@@ -34,7 +40,9 @@ export async function hasJoined(
     role === "sna" ||
     role === "principal" ||
     role === "clinical_lead" ||
-    role === "clinic_admin"
+    role === "clinic_admin" ||
+    role === "centre_manager" ||
+    role === "care_staff"
   ) {
     const { data, error } = await supabase
       .from("institution_staff")

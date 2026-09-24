@@ -105,6 +105,15 @@ const KNOWN_SCHOOL_ONLY_EXCEPTIONS = [
   // reachable by any clinic role, ever, by construction.
   "src/components/consent/TeacherAgreementScreen.tsx",
   "src/components/consent/SnaAgreementScreen.tsx",
+  // PRD 11 Stage 2 -- same reasoning, same switch: centre_manager/
+  // care_staff render only for their own two roles, never any clinic
+  // role. CentreManagerAgreementScreen's own lede uses "countersign"
+  // in its respite sense (finalising the post-stay report, per
+  // Daniel's own answer during Stage 2 scoping) -- a real match on
+  // this scanner's keyword list, and a genuine false positive, since
+  // the string can never reach a clinic-reachable screen at all.
+  "src/components/consent/CentreManagerAgreementScreen.tsx",
+  "src/components/consent/CareStaffAgreementScreen.tsx",
   // grant_passport_access() (0148) only ever admits a target with
   // role in ('class_teacher', 'sna') -- a clinic has neither. Finding
   // 1 (22 Sept 2026) hid the "Access" tab that was this sheet's only

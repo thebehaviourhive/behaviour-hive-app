@@ -18,11 +18,21 @@ import { useInstitutionType } from "@/hooks/useInstitutionType";
 // surface by a direct URL, a bookmark, or the back button -- Daniel's
 // own framing: "unreachable, not merely hidden."
 //
-// Redirects ONLY once institutionType has genuinely resolved to
-// 'clinic' -- never while still loading (institutionType's own null-
-// means-pending fix, 21 Sept 2026, is exactly what makes this safe: a
-// stale render frame here would wrongly bounce a real school principal
-// for one tick).
+// Redirects ONLY once institutionType has genuinely resolved to a
+// non-school value -- never while still loading (institutionType's own
+// null-means-pending fix, 21 Sept 2026, is exactly what makes this
+// safe: a stale render frame here would wrongly bounce a real school
+// principal for one tick).
+//
+// FAIL-CLOSED SWEEP, PRD 11 Stage 2: was `institutionType === "clinic"`
+// -- a genuine two-way branch, found in Stage 1 recon, that excluded
+// clinic but admitted anything else, including a future third type.
+// Belt and braces: this route is unreachable for a respite institution
+// regardless (centre_manager/care_staff never satisfy this page's own
+// useRequireRole("principal") in the first place), but the guard's own
+// job is to make the CPI/restraint incident log unreachable, and it
+// should say so for itself rather than lean on a role check living in
+// a different file.
 export function useGuardSchoolOnlyRoute(userId: string | null | undefined, redirectTo: string) {
   const router = useRouter();
   const [institutionId, setInstitutionId] = useState<string | null>(null);
@@ -53,12 +63,12 @@ export function useGuardSchoolOnlyRoute(userId: string | null | undefined, redir
 
   useEffect(() => {
     if (isResolvingInstitution || isLoading) return;
-    if (institutionType === "clinic") {
+    if (institutionType !== "school") {
       router.replace(redirectTo);
     }
   }, [isResolvingInstitution, isLoading, institutionType, redirectTo, router]);
 
-  const isBlocked = !isResolvingInstitution && !isLoading && institutionType === "clinic";
+  const isBlocked = !isResolvingInstitution && !isLoading && institutionType !== "school";
   const isChecking = isResolvingInstitution || isLoading;
 
   return { isChecking, isBlocked };

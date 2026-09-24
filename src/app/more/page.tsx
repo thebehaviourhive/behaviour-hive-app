@@ -104,6 +104,16 @@ export default function MorePage() {
         // dashboard, not this page's parent-shaped fallback.
         router.replace("/clinic-admin/dashboard");
         return;
+      } else if (userRole === "centre_manager" || userRole === "care_staff") {
+        // PRD 11 Stage 2 -- found live, same fallthrough family this
+        // file's own bottom-nav comment further down already names
+        // (SNA silently getting the generic parent BottomNav). Neither
+        // respite role has real /more content decided yet (Stage 3+,
+        // not this stage's), so the honest answer is the same one this
+        // branch already gives clinic_admin: their own dashboard, not
+        // this page's parent-shaped fallback.
+        router.replace(userRole === "centre_manager" ? "/centre/dashboard" : "/care/dashboard");
+        return;
       }
 
       if (isClinicalPractitioner) {

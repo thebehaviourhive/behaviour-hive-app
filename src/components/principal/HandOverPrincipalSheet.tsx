@@ -44,9 +44,17 @@ interface HandOverPrincipalSheetProps {
 
 type Outcome = "leaving" | "staying";
 
+// respite_centre: [] -- this sheet is structurally unreachable for a
+// respite institution (hand_over_principal() is principal-only, and
+// PRD 11 Stage 2's own centre_manager role can never hold "principal";
+// see institutionType.ts's own comment on why InstitutionType is a
+// full union rather than a partial one). Empty, not omitted -- an
+// honest "no valid staying roles here" rather than a value invented to
+// satisfy the compiler.
 const STAYING_ROLE_OPTIONS: Record<InstitutionType, StayingRole[]> = {
   school: ["class_teacher", "sna"],
   clinic: ["clinician", "clinical_lead", "clinic_admin"],
+  respite_centre: [],
 };
 
 export function HandOverPrincipalSheet({

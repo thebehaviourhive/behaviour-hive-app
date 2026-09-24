@@ -6,7 +6,7 @@
     "39:\"Couldn't load incident data.\"": "Same as useAbcFunctionData.ts's own identical line."
   },
   "src/components/principal/ReviewStaffJoinSheet.tsx": {
-    "139:\"e.g. Couldn't confirm they work at this school\"": "Finding 1 fix -- the institutionType!=='clinic' branch of a newly-added ternary (clinic branch reads \"...work at this clinic\")."
+    "34:\"e.g. Couldn't confirm they work at this school\"": "PRD 11 Stage 2: same string as before, moved from an inline ternary into REJECTION_REASON_PLACEHOLDER (a Record<InstitutionType, string>, compile-enforced now that InstitutionType has three members) -- the clinic branch reads \"...work at this clinic\", both are the school/clinic entries of a genuine 3-way lookup, the third being respite's own \"...work at this centre\"."
   },
   "src/app/clinician/plan/[planId]/page.tsx": {
     "229:\"The signed document, if there is one. Never visible to school staff — only this plan's own name, date and summary above are.\"": "clinical_plans (Silo 2) cross to a school by default regardless of institution type -- this states who a shared plan's file is never visible to, correct even when the child has no school link (nothing ever crosses in that case, but the statement itself stays true)."
@@ -99,7 +99,7 @@
     "315:\"Not enough incident history yet to say whether a current plan is working for any client.\"": "PRD 8 Stage 3's own deliberate cross-org feature -- the stagnation queue legitimately reads a clinic client's SCHOOL-authored incident history (via get_institution_incidents_for_director()) when a grant/engagement makes it visible. Not a leak; the word describes real, intended cross-domain content. Line renumbered 283->293 by the session-types dashboard bucket's own additions above it (22 Sept 2026) -- same string, confirmed unchanged, not re-verified beyond that."
   },
   "src/components/principal/HandOverPrincipalSheet.tsx": {
-    "202:\"e.g. Retiring at the end of term\"": "Finding 1 fix -- the institutionType!=='clinic' branch of an already-correct ternary; the clinic branch reads \"e.g. Stepping back from the clinic\"."
+    "210:\"e.g. Retiring at the end of term\"": "Finding 1 fix -- the institutionType!=='clinic' branch of an already-correct ternary; the clinic branch reads \"e.g. Stepping back from the clinic\". Line renumbered, PRD 11 Stage 2: STAYING_ROLE_OPTIONS gained a real respite_centre: [] entry earlier in this same file (this sheet is structurally unreachable for a respite institution, but Record<InstitutionType, ...> forced an explicit entry)."
   },
   "src/components/principal/directory/ChildDetail.tsx": {
     "317:\"Left the school\"": "END_REASON_LABEL, used only inside the institutionType !== 'clinic' branch of the Enrolment/Episode-of-Care tab.",

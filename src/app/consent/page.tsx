@@ -14,6 +14,8 @@ import { PrincipalAgreementScreen } from "@/components/consent/PrincipalAgreemen
 import { ClinicianAgreementScreen } from "@/components/consent/ClinicianAgreementScreen";
 import { ClinicalLeadAgreementScreen } from "@/components/consent/ClinicalLeadAgreementScreen";
 import { ClinicAdminAgreementScreen } from "@/components/consent/ClinicAdminAgreementScreen";
+import { CentreManagerAgreementScreen } from "@/components/consent/CentreManagerAgreementScreen";
+import { CareStaffAgreementScreen } from "@/components/consent/CareStaffAgreementScreen";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 import { PrivacyPolicyContent } from "@/components/PrivacyPolicyContent";
 import { Button } from "@/components/ui/Button";
@@ -30,7 +32,16 @@ import type { InstitutionType } from "@/lib/institutionType";
 // variant internally -- still no shared lookup table, each screen
 // still owns its own copy in full, for both variants.
 
-type ConsentRole = "parent" | "class_teacher" | "clinician" | "sna" | "principal" | "clinical_lead" | "clinic_admin";
+type ConsentRole =
+  | "parent"
+  | "class_teacher"
+  | "clinician"
+  | "sna"
+  | "principal"
+  | "clinical_lead"
+  | "clinic_admin"
+  | "centre_manager"
+  | "care_staff";
 
 export default function ConsentPage() {
   const router = useRouter();
@@ -72,7 +83,9 @@ export default function ConsentPage() {
         userRole !== "sna" &&
         userRole !== "principal" &&
         userRole !== "clinical_lead" &&
-        userRole !== "clinic_admin"
+        userRole !== "clinic_admin" &&
+        userRole !== "centre_manager" &&
+        userRole !== "care_staff"
       ) {
         router.replace("/");
         return;
@@ -88,7 +101,9 @@ export default function ConsentPage() {
       // as before this change. clinical_lead/clinic_admin always join
       // by institution code (PRD 5 Stage 2) -- no specialty-picker
       // equivalent exists for either, so both fall to /role-select,
-      // same as class_teacher/sna/principal already do.
+      // same as class_teacher/sna/principal already do. centre_manager/
+      // care_staff (PRD 11 Stage 2) are the same shape again -- always
+      // an institution code, always /role-select.
       if (!(await hasJoined(supabase, user.id, userRole))) {
         if (!isMounted) return;
         router.replace(userRole === "clinician" ? "/clinician/specialty" : "/role-select");
@@ -242,6 +257,30 @@ export default function ConsentPage() {
     case "clinic_admin":
       screen = <ClinicAdminAgreementScreen {...screenProps} />;
       break;
+    case "centre_manager":
+      screen = <CentreManagerAgreementScreen {...screenProps} />;
+      break;
+    case "care_staff":
+      screen = <CareStaffAgreementScreen {...screenProps} />;
+      break;
+    // Fail-closed sweep, PRD 11 Stage 2: this switch had no default
+    // case at all -- widening the allow-list above without also
+    // widening this switch (the exact trap Stage 1 recon named as the
+    // most likely mistake in the whole PRD) would have left `screen`
+    // undefined and rendered a blank consent page, no error, for
+    // whichever new role was added. A default belongs here regardless
+    // of whether every current case is handled -- the next role this
+    // switch doesn't yet know about gets an honest message instead.
+    default:
+      screen = (
+        <main className="flex min-h-full flex-1 items-center justify-center bg-brand-off-white/40 px-4 py-10">
+          <div className="w-full max-w-sm text-center">
+            <p className="text-sm leading-relaxed text-black/60">
+              Something went wrong preparing your account. Please contact Behaviour Hive.
+            </p>
+          </div>
+        </main>
+      );
   }
 
   return (

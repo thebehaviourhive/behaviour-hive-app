@@ -45,7 +45,8 @@ import { getRoleLabel } from "@/lib/vocabulary";
 // about whether anyone can ever reach it.
 type SchoolRole = "class_teacher" | "sna" | "principal";
 type ClinicRole = "principal" | "clinician" | "clinical_lead" | "clinic_admin";
-type StaffRole = SchoolRole | ClinicRole;
+type RespiteRole = "centre_manager" | "care_staff";
+type StaffRole = SchoolRole | ClinicRole | RespiteRole;
 
 const SCHOOL_ROLES: {
   value: SchoolRole;
@@ -113,8 +114,57 @@ const CLINIC_ROLES: {
   },
 ];
 
+// PRD 11 Stage 2. Titles through getRoleLabel(role, "respite_centre"),
+// same reason as the clinic tiles above. Subtitles quote PRD 11
+// section 2 directly rather than inventing new descriptive copy.
+const RESPITE_ROLES: {
+  value: RespiteRole;
+  icon: string;
+  title: string;
+  subtitle: string;
+}[] = [
+  {
+    value: "centre_manager",
+    icon: "🗝️",
+    title: getRoleLabel("centre_manager", "respite_centre"),
+    subtitle: "I activate a child's record for a stay, countersign, and finalise the post-stay report",
+  },
+  {
+    value: "care_staff",
+    icon: "🤝",
+    title: getRoleLabel("care_staff", "respite_centre"),
+    subtitle: "I read the child's record while they're on site, log ABC entries, write and read handovers",
+  },
+];
+
+interface RoleTile {
+  value: StaffRole;
+  icon: string;
+  title: string;
+  subtitle: string;
+}
+
+const ROLE_TILES_BY_TYPE: Record<InstitutionType, RoleTile[]> = {
+  school: SCHOOL_ROLES,
+  clinic: CLINIC_ROLES,
+  respite_centre: RESPITE_ROLES,
+};
+
+const HEADING_BY_TYPE: Record<InstitutionType, string> = {
+  school: "What's your role at school?",
+  clinic: "What's your role at the clinic?",
+  respite_centre: "What's your role at the centre?",
+};
+
+// Fail-closed sweep, PRD 11 Stage 2. Was `value === "school" || value
+// === "clinic"` -- a genuine two-way type guard that, on its own, was
+// what pre-empted the ternary below from ever seeing a respite value
+// at all (Stage 1 recon's own finding: this guard currently PROTECTS a
+// dangerous branch, so widening the guard without also widening the
+// branch is the single most likely mistake in this PRD). Both are
+// widened together, in the same edit, for exactly that reason.
 function isInstitutionType(value: string | null): value is InstitutionType {
-  return value === "school" || value === "clinic";
+  return value === "school" || value === "clinic" || value === "respite_centre";
 }
 
 export function SchoolStaffRoleSelectContent() {
@@ -137,9 +187,14 @@ export function SchoolStaffRoleSelectContent() {
   }
 
   const institutionType = getInstitutionType({ type: institutionTypeParam });
-  const roles = institutionType === "clinic" ? CLINIC_ROLES : SCHOOL_ROLES;
-  const heading =
-    institutionType === "clinic" ? "What's your role at the clinic?" : "What's your role at school?";
+  // Fail-closed sweep, PRD 11 Stage 2: was a plain ternary
+  // (institutionType === "clinic" ? CLINIC_ROLES : SCHOOL_ROLES), which
+  // is exactly the branch the guard above used to pre-empt respite
+  // from ever reaching -- a Record<InstitutionType, ...> makes this
+  // compile-checked instead: TypeScript itself refuses to build if a
+  // future institution type is added here without an entry.
+  const roles = ROLE_TILES_BY_TYPE[institutionType];
+  const heading = HEADING_BY_TYPE[institutionType];
 
   async function handleSelect(role: StaffRole) {
     if (submittingRole || !institutionId) return;

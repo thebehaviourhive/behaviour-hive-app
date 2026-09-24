@@ -18,6 +18,14 @@ import { createAdminClient } from "@/lib/supabase/admin";
 // "clinician" -- that correction stands unchanged; this widening only
 // covers the code-gated, institution_staff-backed path, same posture
 // as class_teacher/sna/principal always had.
+// centre_manager/care_staff added, PRD 11 Stage 2, 24 Sept 2026 --
+// found live, by the very first real signup attempt through the real
+// respite role picker, exactly the shape this file's own comment above
+// already warns about: a role-tile picker existing with no matching
+// entry here fails at the LAST step, after institution lookup, role
+// selection, and everything else already worked. Same lesson, same
+// mistake, made a second time -- recorded here rather than only
+// fixed, so a fourth institution type doesn't repeat it a third time.
 const SELF_SERVICE_ROLES = [
   "parent",
   "class_teacher",
@@ -26,6 +34,8 @@ const SELF_SERVICE_ROLES = [
   "clinician",
   "clinical_lead",
   "clinic_admin",
+  "centre_manager",
+  "care_staff",
 ] as const;
 type SelfServiceRole = (typeof SELF_SERVICE_ROLES)[number];
 

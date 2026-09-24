@@ -28,6 +28,14 @@ export function getPostAuthRedirect(role: string | null | undefined): string {
       return "/clinical-lead/dashboard";
     case "clinic_admin":
       return "/clinic-admin/dashboard";
+    // PRD 11 Stage 2 -- added from the start, deliberately, rather
+    // than found missing live the way clinical_lead/clinic_admin were
+    // (the entry immediately above is the standing lesson this follows
+    // now, not one this repeats).
+    case "centre_manager":
+      return "/centre/dashboard";
+    case "care_staff":
+      return "/care/dashboard";
     default:
       return "/role-select";
   }

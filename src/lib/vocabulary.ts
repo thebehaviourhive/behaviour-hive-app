@@ -21,6 +21,13 @@ import type { InstitutionType } from "@/lib/institutionType";
 // separate external/per-child clinician_access-only relationship a
 // school's own engaged clinician still uses. 'clinical_lead' and
 // 'clinic_admin' are the two genuinely new values Stage 2 introduced.
+//
+// 'centre_manager' and 'care_staff', PRD 11 Stage 2 (migration 0296):
+// genuinely new respite values, never a relabelled school/clinic role
+// -- institution_staff_one_principal_per_institution structurally caps
+// 'principal' at one per institution, and PRD 11 section 2 is explicit
+// a centre has SEVERAL managers, so centre_manager could never have
+// reused 'principal' the way clinic director reused it.
 export type Role =
   | "class_teacher"
   | "sna"
@@ -28,7 +35,9 @@ export type Role =
   | "institution_admin"
   | "clinician"
   | "clinical_lead"
-  | "clinic_admin";
+  | "clinic_admin"
+  | "centre_manager"
+  | "care_staff";
 
 export type VocabularyOverrides = Record<string, string>;
 
@@ -45,6 +54,8 @@ const ROLE_OVERRIDE_KEY: Record<Role, string> = {
   clinician: "role_clinician",
   clinical_lead: "role_clinical_lead",
   clinic_admin: "role_clinic_admin",
+  centre_manager: "role_centre_manager",
+  care_staff: "role_care_staff",
 };
 
 // The type-driven default. School labels are what every real
@@ -62,6 +73,13 @@ const ROLE_OVERRIDE_KEY: Record<Role, string> = {
 // intentionally left rather than special-cased. institution_admin
 // likewise has no clinic default (a legacy value with no clinic
 // equivalent named in the PRD) -- falls through to its school label.
+//
+// respite_centre, PRD 11 Stage 2: TypeScript itself forced this key
+// into existence the moment InstitutionType widened (institutionType.ts's
+// own comment on that widening is about exactly this) -- confirming
+// live that the compile-enforced shape works as designed, not just
+// claimed. Both of respite's own roles get real values, quoted
+// verbatim from PRD 11 section 2: "Centre manager" and "Care staff".
 const ROLE_LABEL_DEFAULT: Record<InstitutionType, Partial<Record<Role, string>>> = {
   school: {
     class_teacher: "Class Teacher",
@@ -75,6 +93,10 @@ const ROLE_LABEL_DEFAULT: Record<InstitutionType, Partial<Record<Role, string>>>
     clinician: "Practitioner",
     clinical_lead: "Clinical Lead",
     clinic_admin: "Admin",
+  },
+  respite_centre: {
+    centre_manager: "Centre Manager",
+    care_staff: "Care Staff",
   },
 };
 
@@ -132,7 +154,16 @@ const CATEGORY_LABEL_DEFAULT: Partial<Record<string, string>> = {
   "Class / Roster": "Caseload",
 };
 
+// Fail-closed sweep, PRD 11 Stage 2: was `institutionType !== "clinic"`,
+// a genuine two-way branch that conflated "school" and every future
+// third type into one "no translation" outcome -- found in Stage 1
+// recon, before respite ever reached a real staff-messaging screen to
+// expose it. Written explicitly per type now: 'clinic' gets its real
+// translation, 'school' and 'respite_centre' both correctly get none
+// (the stored label reads fine for a school unmodified, and no
+// respite-specific category vocabulary is decided yet -- Stage 3+,
+// not invented here), but as two named cases, not one catch-all else.
 export function getCategoryLabel(storedLabel: string, institutionType: InstitutionType): string {
-  if (institutionType !== "clinic") return storedLabel;
-  return CATEGORY_LABEL_DEFAULT[storedLabel] ?? storedLabel;
+  if (institutionType === "clinic") return CATEGORY_LABEL_DEFAULT[storedLabel] ?? storedLabel;
+  return storedLabel;
 }

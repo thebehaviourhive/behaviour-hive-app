@@ -15,6 +15,26 @@ import type { VocabularyOverrides } from "@/lib/vocabulary";
 // own bit of state rather than a single confirm button. No preview RPC
 // here unlike deactivation: a pending person has nothing behind them yet
 // (no grants, no incidents) for a principal to be warned about.
+//
+// Reused unmodified on /centre/dashboard, PRD 11 Stage 2 -- this
+// component was already institutionType-agnostic in its own plumbing
+// (takes the prop, doesn't assume), it just had two hand-written
+// institutionType ternaries with only two branches. Fixed as part of
+// making it genuinely reachable by a third type, per the fail-closed
+// sweep -- a centre manager approving someone was about to see
+// "immediate access to this school", the exact silent-wrong-landing
+// shape Stage 1 recon named.
+const INSTITUTION_NOUN: Record<InstitutionType, string> = {
+  school: "this school",
+  clinic: "your clinic",
+  respite_centre: "your centre",
+};
+
+const REJECTION_REASON_PLACEHOLDER: Record<InstitutionType, string> = {
+  school: "e.g. Couldn't confirm they work at this school",
+  clinic: "e.g. Couldn't confirm they work at this clinic",
+  respite_centre: "e.g. Couldn't confirm they work at this centre",
+};
 
 interface PendingStaffMember {
   id: string;
@@ -102,7 +122,7 @@ export function ReviewStaffJoinSheet({
       {mode === "choose" ? (
         <>
           <p className="mt-4 text-sm leading-relaxed text-brand-neutral-black/70">
-            Approving gives them immediate access to {institutionType === "clinic" ? "your clinic" : "this school"}.
+            Approving gives them immediate access to {INSTITUTION_NOUN[institutionType]}.
             Rejecting keeps them out -- they can request again later, and this decision stays on record either way.
           </p>
 
@@ -136,7 +156,7 @@ export function ReviewStaffJoinSheet({
               id="rejection-reason"
               value={reason}
               onChange={(e) => setReason(e.target.value)}
-              placeholder={institutionType === "clinic" ? "e.g. Couldn't confirm they work at this clinic" : "e.g. Couldn't confirm they work at this school"}
+              placeholder={REJECTION_REASON_PLACEHOLDER[institutionType]}
             />
           </div>
 
