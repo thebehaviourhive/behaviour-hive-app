@@ -59,7 +59,17 @@ export type ActivityEventType =
   // (SharedSessionNotesSection, passport/dashboard) is where you read
   // it. No href on either -- non-linking rows, matching that precedent.
   | "session_note_shared"
-  | "session_note_updated";
+  | "session_note_updated"
+  // Migration 0297 -- PRD 11 Stage 3's own "the parent is told, not
+  // asked" mechanism: redeem_institution_link_code()'s respite branch
+  // writes this the moment a centre redeems a link code, and it reaches
+  // a parent's own feed automatically (get_parent_activity_feed()'s
+  // exclusion list is a denylist, confirmed by reading it directly --
+  // nothing needed to add it there). A genuinely new type rather than
+  // reusing team_linked -- that one is clinician-facing by convention
+  // (get_clinician_activity_feed()'s own allow-list already includes
+  // it); this one has no clinician audience to reach, only a parent's.
+  | "respite_centre_linked";
 
 export interface ActivityLogEntry {
   id: string;
@@ -126,6 +136,9 @@ export const ACTIVITY_EVENT_ICON: Record<
   staff_join_rejected: LockIcon,
   principal_handover: KeyIcon,
   temporary_access_grant: KeyIcon,
+  // Migration 0297 -- same "a roster/team change" reading team_linked
+  // already uses this icon for.
+  respite_centre_linked: PeopleIcon,
 };
 
 export function formatActivityTimestamp(isoString: string): string {
