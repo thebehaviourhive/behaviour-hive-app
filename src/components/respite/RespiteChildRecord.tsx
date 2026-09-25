@@ -11,6 +11,7 @@ import { useRespiteCheckins } from "@/hooks/useRespiteCheckins";
 import { useAbcLogs } from "@/hooks/useAbcLogs";
 import { ABCLogger } from "@/components/abc-logger/ABCLogger";
 import { StaysSection } from "@/components/respite/StaysSection";
+import { CentrePageContent } from "@/components/respite/CentrePageContent";
 import type { MessageRole } from "@/types/messages";
 
 function calculateAge(dateOfBirth: string | null): number | null {
@@ -70,7 +71,7 @@ export function RespiteChildRecord({
 }) {
   const { data, isLoading, loadError } = useRespiteChildRecord(passportId, institutionId);
   const { checkins, recordCheckin, hasMorningToday, hasEndOfDayToday, error: checkinError } = useRespiteCheckins(
-    data.currentStayId
+    data.activeStayId
   );
   const thread = useMessageThread(passportId);
   const { categories } = useMessageCategories(viewerRole as MessageRole, "child");
@@ -100,18 +101,26 @@ export function RespiteChildRecord({
 
   return (
     <div className="pb-24">
-      {/* Pinned, outside the scroll -- one tap from anywhere on this screen. */}
+      {/* Pinned, outside the scroll -- one tap from anywhere on this
+          screen. The backdrop itself stays full-bleed (-mx-4 cancels
+          the page's own px-4) -- a blurred bar spanning the full width
+          is the intended look -- but the button inside it respects the
+          SAME container as everything below, per Respite UI Stage 1,
+          item 3: "including the child record's sticky bar." */}
       <div className="sticky top-0 z-10 -mx-4 mb-4 bg-brand-off-white/95 px-4 py-3 backdrop-blur">
-        <button
-          type="button"
-          onClick={() => setIsCrisisPlanOpen(true)}
-          disabled={!data.crisisPlan}
-          className="w-full rounded-full bg-brand-golden-brown px-4 py-3 text-center font-semibold text-white shadow-sm disabled:bg-black/10 disabled:text-black/40"
-        >
-          {data.crisisPlan ? "Crisis Plan" : "No crisis plan on file"}
-        </button>
+        <CentrePageContent>
+          <button
+            type="button"
+            onClick={() => setIsCrisisPlanOpen(true)}
+            disabled={!data.crisisPlan}
+            className="w-full rounded-full bg-brand-golden-brown px-4 py-3 text-center font-semibold text-white shadow-sm disabled:bg-black/10 disabled:text-black/40"
+          >
+            {data.crisisPlan ? "Crisis Plan" : "No crisis plan on file"}
+          </button>
+        </CentrePageContent>
       </div>
 
+      <CentrePageContent>
       {/* Who is this child -- thirty seconds of orientation, before any
           safety content. */}
       <div className="mb-4">
@@ -126,43 +135,65 @@ export function RespiteChildRecord({
 
       {viewerRole === "centre_manager" && data.episodeId && <StaysSection episodeId={data.episodeId} />}
 
-      {data.currentStayId && (
-        <StepSection title="Check-ins">
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={() => recordCheckin("morning")}
-              disabled={hasMorningToday}
-              className="flex-1 rounded-full bg-brand-prussian-blue px-3 py-2 text-sm font-semibold text-white disabled:bg-black/10 disabled:text-black/40"
-            >
-              {hasMorningToday ? "Morning done" : "Record morning"}
-            </button>
-            <button
-              type="button"
-              onClick={() => recordCheckin("end_of_day")}
-              disabled={hasEndOfDayToday}
-              className="flex-1 rounded-full bg-brand-prussian-blue px-3 py-2 text-sm font-semibold text-white disabled:bg-black/10 disabled:text-black/40"
-            >
-              {hasEndOfDayToday ? "End of day done" : "Record end of day"}
-            </button>
-          </div>
-          {checkinError && <p className="mt-2 text-sm text-red-600">{checkinError}</p>}
-          {checkins.length > 0 && (
-            <ul className="mt-3 space-y-1 text-xs text-black/50">
-              {checkins.slice(0, 6).map((c) => (
-                <li key={c.id}>
-                  {c.checkInType === "morning" ? "Morning" : "End of day"} --{" "}
-                  {new Date(`${c.checkInDate}T00:00:00`).toLocaleDateString(undefined, {
-                    weekday: "short",
-                    day: "numeric",
-                    month: "short",
-                  })}
-                </li>
-              ))}
-            </ul>
-          )}
-        </StepSection>
-      )}
+      {/* Respite UI Stage 1, item 2 -- gated on activeStayId (a
+          genuinely open respite_activations row), never on a stay's own
+          calendar dates. Writing a check-in against a stay the child
+          wasn't actually present for is a false entry in a care record
+          that a post-stay report later carries -- see
+          useRespiteChildRecord.ts's own header for the full reasoning.
+          When there's no open activation, this same space shows the
+          next scheduled stay instead of the section simply vanishing. */}
+      <StepSection title="Check-ins">
+        {data.activeStayId ? (
+          <>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => recordCheckin("morning")}
+                disabled={hasMorningToday}
+                className="flex-1 rounded-full bg-brand-prussian-blue px-3 py-2 text-sm font-semibold text-white disabled:bg-black/10 disabled:text-black/40"
+              >
+                {hasMorningToday ? "Morning done" : "Record morning"}
+              </button>
+              <button
+                type="button"
+                onClick={() => recordCheckin("end_of_day")}
+                disabled={hasEndOfDayToday}
+                className="flex-1 rounded-full bg-brand-prussian-blue px-3 py-2 text-sm font-semibold text-white disabled:bg-black/10 disabled:text-black/40"
+              >
+                {hasEndOfDayToday ? "End of day done" : "Record end of day"}
+              </button>
+            </div>
+            {checkinError && <p className="mt-2 text-sm text-red-600">{checkinError}</p>}
+            {checkins.length > 0 && (
+              <ul className="mt-3 space-y-1 text-xs text-black/50">
+                {checkins.slice(0, 6).map((c) => (
+                  <li key={c.id}>
+                    {c.checkInType === "morning" ? "Morning" : "End of day"} --{" "}
+                    {new Date(`${c.checkInDate}T00:00:00`).toLocaleDateString(undefined, {
+                      weekday: "short",
+                      day: "numeric",
+                      month: "short",
+                    })}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </>
+        ) : data.nextStay ? (
+          <p className="text-sm text-black/50">
+            No stay is active right now. The next stay starts{" "}
+            {new Date(data.nextStay.startsAt).toLocaleDateString(undefined, {
+              weekday: "long",
+              day: "numeric",
+              month: "long",
+            })}
+            .
+          </p>
+        ) : (
+          <p className="text-sm text-black/50">No stay is active right now, and none is scheduled.</p>
+        )}
+      </StepSection>
 
       <StepSection title="Triggers">
         <BulletList items={data.sectionB?.hard_triggers ?? null} other={data.sectionB?.hard_triggers_other} />
@@ -364,6 +395,7 @@ export function RespiteChildRecord({
           </div>
         )}
       </BottomSheet>
+      </CentrePageContent>
     </div>
   );
 }

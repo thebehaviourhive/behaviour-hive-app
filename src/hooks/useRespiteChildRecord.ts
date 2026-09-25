@@ -55,6 +55,26 @@ export interface RespiteChildRecordData {
   // trigger on currentStayId alone would show the button and then let
   // the insert fail with a bare RLS violation. Tier 3 item 4.
   currentStayIsLive: boolean;
+  // Respite UI Stage 1, item 2 -- record_respite_stay_checkin()'s own
+  // real gate is NOT a date window at all: it requires a genuinely OPEN
+  // respite_activations row (closed_at is null) for this passport at
+  // this institution -- a deliberate act, set by activate_respite_stay(),
+  // that CAN precede the stay's own scheduled starts_at (CLAUDE.md's own
+  // "activation can be set up in advance, structurally, not by
+  // convention"). currentStayIsLive is the wrong signal for check-ins
+  // for exactly that reason: it would wrongly show controls as
+  // unavailable for a child activated early, and -- the more dangerous
+  // direction -- wrongly show them as available the moment a stay's own
+  // calendar window opens, even if nobody has actually activated the
+  // record yet, which is precisely the "writes against nothing" failure
+  // this fix exists to close. activeStayId is the activation's own
+  // stay_id (null when no activation is open) -- the one, true signal
+  // for whether a check-in write will actually succeed.
+  activeStayId: string | null;
+  // The soonest stay with starts_at in the future, for the "no active
+  // stay" fallback -- shown in place of the check-in controls, per the
+  // brief's own instruction, rather than the section simply vanishing.
+  nextStay: { startsAt: string; endsAt: string } | null;
   priorStayEndsAt: string | null;
   sectionsChangedSinceLastStay: boolean;
   // Resolved for the manager's own StaysSection (Tier 1, items 2/3) --
@@ -75,6 +95,8 @@ const EMPTY: RespiteChildRecordData = {
   crisisPlan: null,
   currentStayId: null,
   currentStayIsLive: false,
+  activeStayId: null,
+  nextStay: null,
   priorStayEndsAt: null,
   sectionsChangedSinceLastStay: false,
   episodeId: null,
@@ -93,7 +115,7 @@ export function useRespiteChildRecord(passportId: string | null, institutionId: 
     setLoadError(null);
     const supabase = createClient();
 
-    const [summary, sectionB, sectionC, sectionD, sectionE, bsp, stays, episode] = await Promise.all([
+    const [summary, sectionB, sectionC, sectionD, sectionE, bsp, stays, episode, activation] = await Promise.all([
       supabase.rpc("get_respite_child_summary", { p_passport_id: passportId }),
       supabase
         .from("passport_section_b")
@@ -128,6 +150,16 @@ export function useRespiteChildRecord(passportId: string | null, institutionId: 
         .eq("passport_id", passportId)
         .eq("institution_id", institutionId)
         .is("ended_at", null)
+        .maybeSingle(),
+      // The real gate record_respite_stay_checkin() actually checks --
+      // see this hook's own header comment on activeStayId for why this
+      // is not the same thing as "a stay's own date window is current".
+      supabase
+        .from("respite_activations")
+        .select("stay_id")
+        .eq("passport_id", passportId)
+        .eq("institution_id", institutionId)
+        .is("closed_at", null)
         .maybeSingle(),
     ]);
 
@@ -177,6 +209,12 @@ export function useRespiteChildRecord(passportId: string | null, institutionId: 
     const priorStay = stayRows
       .filter((s) => s.id !== currentStay?.id && new Date(s.ends_at).getTime() < now)
       .sort((a, b) => new Date(b.ends_at).getTime() - new Date(a.ends_at).getTime())[0] ?? null;
+    // The soonest stay yet to start -- shown when there's no open
+    // activation, in place of the check-in controls.
+    const nextStay =
+      stayRows
+        .filter((s) => new Date(s.starts_at).getTime() > now)
+        .sort((a, b) => new Date(a.starts_at).getTime() - new Date(b.starts_at).getTime())[0] ?? null;
 
     const summaryRow = summary.data?.[0] ?? null;
     const sections = [sectionB.data, sectionC.data, sectionD.data, sectionE.data];
@@ -197,6 +235,8 @@ export function useRespiteChildRecord(passportId: string | null, institutionId: 
       crisisPlan: plan ?? null,
       currentStayId: currentStay?.id ?? null,
       currentStayIsLive: Boolean(liveStay),
+      activeStayId: activation.data?.stay_id ?? null,
+      nextStay: nextStay ? { startsAt: nextStay.starts_at, endsAt: nextStay.ends_at } : null,
       priorStayEndsAt: priorStay?.ends_at ?? null,
       sectionsChangedSinceLastStay,
       episodeId: episode.data?.id ?? null,

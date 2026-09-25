@@ -8,6 +8,7 @@ import { SetDefaultSnoozeDaysSheet } from "@/components/principal/SetDefaultSnoo
 import { PendingApprovalState } from "@/components/clinic/PendingApprovalState";
 import { MembershipMissingState } from "@/components/clinic/MembershipMissingState";
 import { CentreBottomNav } from "@/components/respite/CentreBottomNav";
+import { CentrePageContent } from "@/components/respite/CentrePageContent";
 
 // Outstanding-task snoozing, 25 Sept 2026 -- the centre's own first
 // settings screen, named directly in the brief ("the Centre screen
@@ -60,7 +61,7 @@ export default function CentreSettingsPage() {
   return (
     <>
       <main className="flex min-h-full flex-1 flex-col bg-brand-off-white/40 px-4 py-6 pb-24 lg:pb-6">
-        <div className="mx-auto w-full max-w-2xl">
+        <CentrePageContent>
           <h1 className="mb-1 font-heading text-2xl font-semibold text-brand-neutral-black">Settings</h1>
           {institutionName && <p className="mb-4 text-sm text-black/60">{institutionName}</p>}
 
@@ -85,7 +86,7 @@ export default function CentreSettingsPage() {
               </button>
             </div>
           </section>
-        </div>
+        </CentrePageContent>
       </main>
 
       <CentreBottomNav />

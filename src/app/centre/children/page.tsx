@@ -13,6 +13,7 @@ import { AddClientChoiceSheet } from "@/components/respite/AddClientChoiceSheet"
 import { EndPlacementSheet } from "@/components/respite/EndPlacementSheet";
 import { ReopenPlacementSheet } from "@/components/respite/ReopenPlacementSheet";
 import { CentreBottomNav } from "@/components/respite/CentreBottomNav";
+import { CentrePageContent } from "@/components/respite/CentrePageContent";
 import { InlineErrorState } from "@/components/ui/InlineErrorState";
 
 // The centre_manager dashboard build, 25 Sept 2026 -- the full
@@ -86,7 +87,7 @@ export default function CentreChildrenPage() {
   return (
     <>
       <main className="flex min-h-full flex-1 flex-col bg-brand-off-white/40 px-4 py-6 pb-24 lg:pb-6">
-        <div className="mx-auto w-full max-w-2xl">
+        <CentrePageContent>
           <div className="mb-4 flex items-center justify-between">
             <h1 className="font-heading text-2xl font-semibold text-brand-neutral-black">Children</h1>
             <button
@@ -154,7 +155,7 @@ export default function CentreChildrenPage() {
               ))}
             </div>
           )}
-        </div>
+        </CentrePageContent>
       </main>
 
       <CentreBottomNav />

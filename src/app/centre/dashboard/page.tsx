@@ -17,6 +17,7 @@ import { RedeemLinkCodeSheet } from "@/components/respite/RedeemLinkCodeSheet";
 import { OnboardRespiteClientSheet } from "@/components/respite/OnboardRespiteClientSheet";
 import { AddClientChoiceSheet } from "@/components/respite/AddClientChoiceSheet";
 import { CentreBottomNav } from "@/components/respite/CentreBottomNav";
+import { CentrePageContent } from "@/components/respite/CentrePageContent";
 import { BrandMark } from "@/components/ui/BrandMark";
 import { CheckIcon } from "@/components/ui/icons";
 import type { InstitutionType } from "@/lib/institutionType";
@@ -131,8 +132,8 @@ export default function CentreManagerDashboardPage() {
 
   return (
     <>
-      <main className="flex min-h-full flex-1 flex-col items-center bg-brand-off-white/40 px-4 py-10 pb-24 lg:pb-10">
-        <div className="w-full max-w-sm">
+      <main className="flex min-h-full flex-1 flex-col bg-brand-off-white/40 px-4 py-10 pb-24 lg:pb-10">
+        <CentrePageContent>
           <div className="mb-6 flex flex-col items-center gap-3 text-center lg:hidden">
             <BrandMark />
           </div>
@@ -213,7 +214,7 @@ export default function CentreManagerDashboardPage() {
           )}
 
           <ActiveChildrenSection institutionId={institutionId} />
-        </div>
+        </CentrePageContent>
       </main>
 
       <CentreBottomNav />

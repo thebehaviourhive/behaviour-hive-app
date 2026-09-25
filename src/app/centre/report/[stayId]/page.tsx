@@ -6,6 +6,7 @@ import { useRequireRole } from "@/hooks/useRequireRole";
 import { useInstitutionMembership } from "@/hooks/useInstitutionMembership";
 import { useRespiteReport } from "@/hooks/useRespiteReport";
 import { useMessageThread } from "@/hooks/useMessageThread";
+import { CentrePageContent } from "@/components/respite/CentrePageContent";
 
 // TIER 2 of the reachability pass -- a report-drafting surface for
 // finalize_respite_stay_report(), which had a real, verified RPC and
@@ -61,12 +62,13 @@ export default function RespiteReportPage() {
 
   return (
     <main className="min-h-full bg-brand-off-white/40 px-4 py-4 pb-24">
-      <h1 className="mb-1 font-heading text-2xl font-semibold text-brand-neutral-black">
-        Post-stay report -- {data.childName ?? "this child"}
-      </h1>
-      <p className="mb-6 text-sm text-black/60">
-        {new Date(data.startsAt).toLocaleDateString()} -- {new Date(data.endsAt).toLocaleDateString()}
-      </p>
+      <CentrePageContent>
+        <h1 className="mb-1 font-heading text-2xl font-semibold text-brand-neutral-black">
+          Post-stay report -- {data.childName ?? "this child"}
+        </h1>
+        <p className="mb-6 text-sm text-black/60">
+          {new Date(data.startsAt).toLocaleDateString()} -- {new Date(data.endsAt).toLocaleDateString()}
+        </p>
 
       <section className="mb-4 rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
         <h2 className="mb-2 font-accent text-eyebrow font-bold uppercase tracking-wide text-brand-neutral-black/50">
@@ -196,13 +198,14 @@ export default function RespiteReportPage() {
         )}
       </section>
 
-      <button
-        type="button"
-        onClick={() => router.push("/centre/dashboard")}
-        className="mt-4 w-full text-center text-sm font-semibold text-brand-prussian-blue"
-      >
-        Back to dashboard
-      </button>
+        <button
+          type="button"
+          onClick={() => router.push("/centre/dashboard")}
+          className="mt-4 w-full text-center text-sm font-semibold text-brand-prussian-blue"
+        >
+          Back to dashboard
+        </button>
+      </CentrePageContent>
     </main>
   );
 }

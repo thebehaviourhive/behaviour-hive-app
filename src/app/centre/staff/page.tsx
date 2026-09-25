@@ -8,6 +8,7 @@ import { ReviewStaffJoinSheet } from "@/components/principal/ReviewStaffJoinShee
 import { PendingApprovalState } from "@/components/clinic/PendingApprovalState";
 import { MembershipMissingState } from "@/components/clinic/MembershipMissingState";
 import { CentreBottomNav } from "@/components/respite/CentreBottomNav";
+import { CentrePageContent } from "@/components/respite/CentrePageContent";
 import { InlineErrorState } from "@/components/ui/InlineErrorState";
 import { getRoleLabel } from "@/lib/vocabulary";
 import type { InstitutionType } from "@/lib/institutionType";
@@ -24,6 +25,18 @@ import type { VocabularyOverrides } from "@/lib/vocabulary";
 // stays/activations a departing care_staff member leaves behind) is a
 // real, separate decision, not invented here. This page is the LIST
 // item 3 asked for -- who has joined, and who's waiting.
+//
+// Respite UI Stage 1, item 1 -- this page offered no way for anyone to
+// JOIN the roster above -- no invite, no code, anywhere. Every
+// care_staff capability shipped this week (check-ins, ABC logging
+// during a stay, Handover) was unreachable because no care_staff
+// account could ever exist. Fixed by matching School's own pattern
+// exactly (/principal/school's own "School Code" section): the
+// institution's real code, shown plainly, with a Copy button and the
+// same instruction to hand it to whoever's joining. institutions' own
+// SELECT policy has been `using (true)` since migration 0013, so a
+// centre_manager reads their own institution_code the same direct way
+// a principal does -- no new RPC needed.
 interface StaffRosterRow {
   id: string;
   user_id: string;
@@ -37,8 +50,11 @@ export default function CentreStaffPage() {
   const { user, isReady } = useRequireRole("centre_manager");
   const membership = useInstitutionMembership(user?.id, "centre_manager");
   const institutionId = membership.institutionId;
+  const institutionName = membership.institutionName;
 
   const [roster, setRoster] = useState<StaffRosterRow[]>([]);
+  const [institutionCode, setInstitutionCode] = useState<string | null>(null);
+  const [isCodeCopied, setIsCodeCopied] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [reviewTarget, setReviewTarget] = useState<StaffRosterRow | null>(null);
@@ -47,16 +63,20 @@ export default function CentreStaffPage() {
     if (!institutionId) return;
     setLoadError(null);
     const supabase = createClient();
-    const { data, error } = await supabase.rpc("get_institution_staff_roster", {
-      p_institution_id: institutionId,
-      p_include_pending: true,
-    });
+    const [{ data, error }, { data: institutionRow }] = await Promise.all([
+      supabase.rpc("get_institution_staff_roster", {
+        p_institution_id: institutionId,
+        p_include_pending: true,
+      }),
+      supabase.from("institutions").select("institution_code").eq("id", institutionId).maybeSingle(),
+    ]);
     if (error) {
       setLoadError(error.message);
       setIsLoading(false);
       return;
     }
     setRoster((data ?? []) as StaffRosterRow[]);
+    setInstitutionCode(institutionRow?.institution_code ?? null);
     setIsLoading(false);
   }, [institutionId]);
 
@@ -65,6 +85,13 @@ export default function CentreStaffPage() {
     setIsLoading(true);
     load();
   }, [load]);
+
+  async function handleCopyCode() {
+    if (!institutionCode) return;
+    await navigator.clipboard.writeText(institutionCode);
+    setIsCodeCopied(true);
+    setTimeout(() => setIsCodeCopied(false), 2000);
+  }
 
   if (!isReady || membership.status === "checking") {
     return null;
@@ -84,8 +111,35 @@ export default function CentreStaffPage() {
   return (
     <>
       <main className="flex min-h-full flex-1 flex-col bg-brand-off-white/40 px-4 py-6 pb-24 lg:pb-6">
-        <div className="mx-auto w-full max-w-2xl">
+        <CentrePageContent>
           <h1 className="mb-4 font-heading text-2xl font-semibold text-brand-neutral-black">Staff</h1>
+
+          <section className="mb-8">
+            <h2 className="mb-2 font-accent text-eyebrow font-bold uppercase tracking-wide text-brand-prussian-blue">
+              Centre Code
+            </h2>
+            <div className="flex items-center justify-between gap-3 rounded-2xl border border-dashed border-brand-golden-brown/40 bg-brand-safe-ivory/30 px-5 py-4">
+              {institutionCode ? (
+                <span className="font-heading text-2xl font-bold tracking-widest text-brand-neutral-black">
+                  {institutionCode}
+                </span>
+              ) : (
+                <span className="font-heading text-lg text-black/40">Not available</span>
+              )}
+              <button
+                type="button"
+                onClick={handleCopyCode}
+                disabled={!institutionCode}
+                className="flex-shrink-0 rounded-full bg-brand-golden-brown px-4 py-2 text-xs font-semibold text-white disabled:opacity-40"
+              >
+                {isCodeCopied ? "Copied!" : "Copy Code"}
+              </button>
+            </div>
+            <p className="mt-2 font-sans text-eyebrow text-brand-neutral-black/50">
+              Share this with a new centre manager or care staff member so they can join{" "}
+              {institutionName ?? "your centre"}. They&apos;ll enter it at sign-up.
+            </p>
+          </section>
 
           {loadError ? (
             <InlineErrorState message={loadError} onRetry={() => load()} />
@@ -150,7 +204,7 @@ export default function CentreStaffPage() {
               </section>
             </>
           )}
-        </div>
+        </CentrePageContent>
       </main>
 
       <CentreBottomNav />
