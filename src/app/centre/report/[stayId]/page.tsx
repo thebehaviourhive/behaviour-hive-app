@@ -7,6 +7,7 @@ import { useInstitutionMembership } from "@/hooks/useInstitutionMembership";
 import { useRespiteReport } from "@/hooks/useRespiteReport";
 import { useMessageThread } from "@/hooks/useMessageThread";
 import { CentrePageContent } from "@/components/respite/CentrePageContent";
+import { CentreBottomNav } from "@/components/respite/CentreBottomNav";
 
 // TIER 2 of the reachability pass -- a report-drafting surface for
 // finalize_respite_stay_report(), which had a real, verified RPC and
@@ -46,9 +47,12 @@ export default function RespiteReportPage() {
   if (isLoading) return null;
   if (loadError || !data) {
     return (
-      <main className="min-h-full bg-brand-off-white/40 px-4 py-4">
-        <p className="text-sm text-red-600">{loadError ?? "Couldn't load this stay."}</p>
-      </main>
+      <>
+        <main className="min-h-full bg-brand-off-white/40 px-4 py-4 pb-24">
+          <p className="text-sm text-red-600">{loadError ?? "Couldn't load this stay."}</p>
+        </main>
+        <CentreBottomNav />
+      </>
     );
   }
 
@@ -61,6 +65,7 @@ export default function RespiteReportPage() {
   }
 
   return (
+    <>
     <main className="min-h-full bg-brand-off-white/40 px-4 py-4 pb-24">
       <CentrePageContent>
         <h1 className="mb-1 font-heading text-2xl font-semibold text-brand-neutral-black">
@@ -207,5 +212,7 @@ export default function RespiteReportPage() {
         </button>
       </CentrePageContent>
     </main>
+    <CentreBottomNav />
+    </>
   );
 }

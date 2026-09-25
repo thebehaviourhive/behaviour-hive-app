@@ -9,6 +9,7 @@ import { RespiteChildRecord } from "@/components/respite/RespiteChildRecord";
 import { EndPlacementSheet } from "@/components/respite/EndPlacementSheet";
 import { ReopenPlacementSheet } from "@/components/respite/ReopenPlacementSheet";
 import { CentrePageContent } from "@/components/respite/CentrePageContent";
+import { CentreBottomNav } from "@/components/respite/CentreBottomNav";
 
 // PRD 11 Stage 5, item 4 -- the first-five-minutes screen, centre_
 // manager's own route. Placement-scoped read throughout, unaffected by
@@ -79,7 +80,8 @@ export default function CentreManagerPassportPage() {
   const isEnded = episode && episode.endedAt;
 
   return (
-    <main className="min-h-full bg-brand-off-white/40 px-4 py-4">
+    <>
+    <main className="min-h-full bg-brand-off-white/40 px-4 py-4 pb-24 lg:pb-4">
       {episode && (
         <CentrePageContent className="mb-4">
           <div className="flex items-center justify-between gap-3 rounded-2xl border border-black/5 bg-white p-3 shadow-sm">
@@ -142,5 +144,7 @@ export default function CentreManagerPassportPage() {
         }}
       />
     </main>
+    <CentreBottomNav />
+    </>
   );
 }

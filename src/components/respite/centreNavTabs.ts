@@ -1,20 +1,22 @@
-import { House, Users, UserCog, Settings } from "lucide-react";
+import { House, Users, Mail, UserCog, Settings } from "lucide-react";
 import type { NavTab } from "@/components/ui/AppBottomNav";
 
 // The centre_manager dashboard build, 25 Sept 2026 -- mirrors
 // principalNavTabs.ts's own shape exactly (one array, consumed by both
 // CentreSidebar and CentreBottomNav so neither hardcodes its own copy
-// of the same hrefs/isActive matchers), sized to what a respite centre
-// actually has: three destinations, not five. No Incidents (a centre
-// never produces one -- can_own_incident()/create_incident_stamp()
-// stay untouched and out of reach, per 0296's own confirmed scoping).
-// No Messages tab: general staff-to-staff messaging for centre_manager/
-// care_staff was deliberately left unbuilt at 0296 ("no respite
-// messaging UI exists yet to consume it" -- confirmed by reading that
-// migration's own header directly before deciding this) -- a tab
-// pointing at a screen with nothing to send under is worse than no tab.
-// Child-scoped Handover messaging is unaffected; it lives inside
-// RespiteChildRecord, reached via Children -> a child's own record.
+// of the same hrefs/isActive matchers). No Incidents (a centre never
+// produces one -- can_own_incident()/create_incident_stamp() stay
+// untouched and out of reach, per 0296's own confirmed scoping).
+//
+// Respite UI Stage 2b -- Messages added. General staff-to-staff
+// messaging for centre_manager/care_staff is STILL out of scope
+// (confirmed again by re-grepping every message_categories insert
+// before building this -- no applies_to 'staff' category has ever been
+// widened to admit either role) -- this tab is specifically the
+// handover inbox (migration 0311's get_my_handover_messages()), not a
+// general inbox. Composing still lives on a child's own record
+// (RespiteChildRecord, reached via Children); this tab is where
+// reading them across every child now happens.
 export const CENTRE_NAV_TABS: NavTab[] = [
   {
     key: "dashboard",
@@ -29,6 +31,13 @@ export const CENTRE_NAV_TABS: NavTab[] = [
     icon: Users,
     href: "/centre/children",
     isActive: (pathname) => pathname.startsWith("/centre/children") || pathname.startsWith("/centre/passport"),
+  },
+  {
+    key: "messages",
+    label: "Messages",
+    icon: Mail,
+    href: "/centre/messages",
+    isActive: (pathname) => pathname.startsWith("/centre/messages"),
   },
   {
     key: "staff",

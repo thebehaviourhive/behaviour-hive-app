@@ -7,6 +7,8 @@ import { useRespiteActiveChildren } from "@/hooks/useRespiteActiveChildren";
 import { PendingApprovalState } from "@/components/clinic/PendingApprovalState";
 import { MembershipMissingState } from "@/components/clinic/MembershipMissingState";
 import { OnCallCard } from "@/components/respite/OnCallCard";
+import { CareBottomNav } from "@/components/respite/CareBottomNav";
+import { CentrePageContent } from "@/components/respite/CentrePageContent";
 import { BrandMark } from "@/components/ui/BrandMark";
 
 // PRD 11 Stage 5, item 4: the "not built yet" placeholder is replaced
@@ -16,6 +18,13 @@ import { BrandMark } from "@/components/ui/BrandMark";
 // card sits above it, readable before any child's record is activated
 // at all -- migration 0302's own institution-scoped, role-agnostic read
 // policy.
+//
+// Respite UI Stage 2b -- given the real nav shell /care/* never had
+// (CareSidebar/CareBottomNav/careNavTabs.ts) and the same shared
+// content container every /centre screen already uses, matching Stage
+// 1's own "one content container, one max-width, one alignment rule"
+// instruction rather than leaving care_staff's own screens as the one
+// place it doesn't apply.
 export default function CareStaffDashboardPage() {
   const { user, isReady } = useRequireRole("care_staff");
   const membership = useInstitutionMembership(user?.id, "care_staff");
@@ -34,14 +43,15 @@ export default function CareStaffDashboardPage() {
   }
 
   return (
-    <main className="flex min-h-full flex-1 flex-col items-center bg-brand-off-white/40 px-4 py-10">
-      <div className="w-full max-w-sm">
-        <div className="mb-6 flex flex-col items-center gap-3 text-center">
+    <>
+    <main className="flex min-h-full flex-1 flex-col bg-brand-off-white/40 px-4 py-10 pb-24 lg:pb-10">
+      <CentrePageContent>
+        <div className="mb-6 flex flex-col items-center gap-3 text-center lg:hidden">
           <BrandMark />
-          <h1 className="font-heading text-2xl font-semibold text-brand-neutral-black">
-            {membership.institutionName ?? "Your centre"}
-          </h1>
         </div>
+        <h1 className="mb-6 text-center font-heading text-2xl font-semibold text-brand-neutral-black lg:text-left">
+          {membership.institutionName ?? "Your centre"}
+        </h1>
 
         <OnCallCard institutionId={membership.institutionId} canSet={false} />
 
@@ -70,7 +80,9 @@ export default function CareStaffDashboardPage() {
             </div>
           )}
         </section>
-      </div>
+      </CentrePageContent>
     </main>
+    <CareBottomNav />
+    </>
   );
 }
