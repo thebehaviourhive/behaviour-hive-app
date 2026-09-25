@@ -6,8 +6,10 @@ import { useRequireRole } from "@/hooks/useRequireRole";
 import { useInstitutionMembership } from "@/hooks/useInstitutionMembership";
 import { useRespiteActiveChildren } from "@/hooks/useRespiteActiveChildren";
 import { createClient } from "@/lib/supabase/client";
-import { WorkQueueRow } from "@/components/shared/WorkQueueRow";
+import { SnoozableWorkQueueRow } from "@/components/shared/SnoozableWorkQueueRow";
 import { ReviewStaffJoinSheet } from "@/components/principal/ReviewStaffJoinSheet";
+import { useOutstandingTaskSnoozes } from "@/hooks/useOutstandingTaskSnoozes";
+import { OUTSTANDING_TASK_QUEUES as Q } from "@/lib/outstandingTaskQueues";
 import { PendingApprovalState } from "@/components/clinic/PendingApprovalState";
 import { MembershipMissingState } from "@/components/clinic/MembershipMissingState";
 import { OnCallCard } from "@/components/respite/OnCallCard";
@@ -62,6 +64,7 @@ export default function CentreManagerDashboardPage() {
   const membership = useInstitutionMembership(user?.id, "centre_manager");
   const institutionId = membership.institutionId;
   const institutionName = membership.institutionName;
+  const snoozes = useOutstandingTaskSnoozes(institutionId);
   const [pendingStaff, setPendingStaff] = useState<StaffRosterRow[]>([]);
   const [awaitingReport, setAwaitingReport] = useState<AwaitingReportRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -122,7 +125,9 @@ export default function CentreManagerDashboardPage() {
 
   const institutionType: InstitutionType = "respite_centre";
   const overrides: VocabularyOverrides = {};
-  const outstandingCount = awaitingReport.length + pendingStaff.length;
+  const awaitingReportVisible = snoozes.filterVisible(awaitingReport, Q.CENTRE_NEEDS_REPORT, (r) => r.stay_id);
+  const pendingStaffVisible = snoozes.filterVisible(pendingStaff, Q.PENDING_STAFF_JOIN, (r) => r.id);
+  const outstandingCount = awaitingReportVisible.length + pendingStaffVisible.length;
 
   return (
     <>
@@ -145,7 +150,17 @@ export default function CentreManagerDashboardPage() {
             + Add a client
           </button>
 
-          {outstandingCount === 0 ? (
+          <div className="mb-3 flex justify-end">
+            <button
+              type="button"
+              onClick={() => snoozes.setShowSnoozed((v) => !v)}
+              className="font-sans text-eyebrow font-semibold text-brand-prussian-blue underline underline-offset-2"
+            >
+              {snoozes.showSnoozed ? "Hide snoozed" : "Show snoozed"}
+            </button>
+          </div>
+
+          {outstandingCount === 0 && !snoozes.showSnoozed ? (
             <div className="mb-6 flex flex-col items-center gap-1 rounded-2xl bg-white p-8 text-center shadow-sm">
               <CheckIcon className="mb-2 h-6 w-6 text-brand-prussian-blue/40" />
               <p className="font-heading text-h2 font-semibold text-brand-neutral-black">All clear.</p>
@@ -159,26 +174,40 @@ export default function CentreManagerDashboardPage() {
                 Outstanding Work
               </h2>
               <div className="flex flex-col gap-3">
-                {awaitingReport.map((stay) => (
-                  <WorkQueueRow
-                    key={stay.stay_id}
-                    entity={stay.child_name ?? "This child"}
-                    exception="Stay ended, no report yet"
-                    context={`Ended ${new Date(stay.ends_at).toLocaleDateString()}`}
-                    actionLabel="Write report"
-                    href={`/centre/report/${stay.stay_id}`}
-                    urgent
-                  />
-                ))}
-                {pendingStaff.map((member) => (
-                  <WorkQueueRow
-                    key={member.id}
-                    entity={member.full_name}
-                    exception="Waiting for approval"
-                    actionLabel="Approve"
-                    onAction={() => setReviewTarget(member)}
-                  />
-                ))}
+                {institutionId &&
+                  (snoozes.showSnoozed ? awaitingReport : awaitingReportVisible).map((stay) => (
+                    <SnoozableWorkQueueRow
+                      key={stay.stay_id}
+                      institutionId={institutionId}
+                      queueKey={Q.CENTRE_NEEDS_REPORT}
+                      itemId={stay.stay_id}
+                      defaultSnoozeDays={snoozes.defaultSnoozeDays}
+                      snoozeMeta={snoozes.getMeta(Q.CENTRE_NEEDS_REPORT, stay.stay_id)}
+                      onSnoozed={snoozes.refresh}
+                      entity={stay.child_name ?? "This child"}
+                      exception="Stay ended, no report yet"
+                      context={`Ended ${new Date(stay.ends_at).toLocaleDateString()}`}
+                      actionLabel="Write report"
+                      href={`/centre/report/${stay.stay_id}`}
+                      urgent
+                    />
+                  ))}
+                {institutionId &&
+                  (snoozes.showSnoozed ? pendingStaff : pendingStaffVisible).map((member) => (
+                    <SnoozableWorkQueueRow
+                      key={member.id}
+                      institutionId={institutionId}
+                      queueKey={Q.PENDING_STAFF_JOIN}
+                      itemId={member.id}
+                      defaultSnoozeDays={snoozes.defaultSnoozeDays}
+                      snoozeMeta={snoozes.getMeta(Q.PENDING_STAFF_JOIN, member.id)}
+                      onSnoozed={snoozes.refresh}
+                      entity={member.full_name}
+                      exception="Waiting for approval"
+                      actionLabel="Approve"
+                      onAction={() => setReviewTarget(member)}
+                    />
+                  ))}
               </div>
             </section>
           )}

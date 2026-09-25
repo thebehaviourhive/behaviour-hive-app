@@ -17,6 +17,7 @@ import { SetBookingBufferSheet } from "@/components/principal/SetBookingBufferSh
 import { SetBookingWindowSheet } from "@/components/principal/SetBookingWindowSheet";
 import { SetCancellationNoticeSheet } from "@/components/principal/SetCancellationNoticeSheet";
 import { SetCancellationPolicySheet } from "@/components/principal/SetCancellationPolicySheet";
+import { SetDefaultSnoozeDaysSheet } from "@/components/principal/SetDefaultSnoozeDaysSheet";
 import { ToggleConfirmSheet } from "@/components/principal/ToggleConfirmSheet";
 import { formatTimeOfDay } from "@/lib/temporaryAccessTime";
 import { BottomSheet } from "@/components/ui/BottomSheet";
@@ -141,6 +142,8 @@ export default function PrincipalClinicPage() {
   const [clinicHoursEnd, setClinicHoursEnd] = useState<string>("17:00:00");
   const [workingDays, setWorkingDays] = useState<number[]>([1, 2, 3, 4, 5]);
   const [bookingBufferMinutes, setBookingBufferMinutes] = useState<number>(15);
+  const [defaultSnoozeDays, setDefaultSnoozeDays] = useState<number>(5);
+  const [isSnoozeDaysOpen, setIsSnoozeDaysOpen] = useState(false);
   const [bookingWindowDays, setBookingWindowDays] = useState<number>(30);
   const [cancellationNoticeHours, setCancellationNoticeHours] = useState<number>(24);
   const [cancellationPolicyText, setCancellationPolicyText] = useState<string | null>(null);
@@ -190,7 +193,7 @@ export default function PrincipalClinicPage() {
     const { data: staffRow, error: staffError } = await supabase
       .from("institution_staff")
       .select(
-        "institution_id, institutions(name, institution_code, clinic_hours_start_time, clinic_hours_end_time, working_days, booking_buffer_minutes, booking_window_days, cancellation_notice_hours, cancellation_policy_text, address)"
+        "institution_id, institutions(name, institution_code, clinic_hours_start_time, clinic_hours_end_time, working_days, booking_buffer_minutes, booking_window_days, cancellation_notice_hours, cancellation_policy_text, address, default_snooze_days)"
       )
       .eq("user_id", user.id)
       .eq("role", "principal")
@@ -215,6 +218,7 @@ export default function PrincipalClinicPage() {
       cancellation_notice_hours: number | null;
       cancellation_policy_text: string | null;
       address: string | null;
+      default_snooze_days: number | null;
     }
     const institutionRecord = staffRow.institutions as unknown as ClinicSettingsRecord | ClinicSettingsRecord[] | null;
     const record = Array.isArray(institutionRecord) ? institutionRecord[0] : institutionRecord;
@@ -229,6 +233,9 @@ export default function PrincipalClinicPage() {
     }
     if (record?.booking_window_days !== null && record?.booking_window_days !== undefined) {
       setBookingWindowDays(record.booking_window_days);
+    }
+    if (record?.default_snooze_days !== null && record?.default_snooze_days !== undefined) {
+      setDefaultSnoozeDays(record.default_snooze_days);
     }
     if (record?.cancellation_notice_hours !== null && record?.cancellation_notice_hours !== undefined) {
       setCancellationNoticeHours(record.cancellation_notice_hours);
@@ -460,6 +467,23 @@ export default function PrincipalClinicPage() {
                       Change
                     </button>
                   </div>
+
+                  <div className="flex items-center justify-between rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
+                    <div>
+                      <p className="font-sans text-body font-semibold text-brand-neutral-black">Default snooze length</p>
+                      <p className="mt-0.5 font-sans text-eyebrow text-brand-neutral-black/50">
+                        An outstanding task snoozed with no day count picked stays hidden for {defaultSnoozeDays} day
+                        {defaultSnoozeDays === 1 ? "" : "s"}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setIsSnoozeDaysOpen(true)}
+                      className="flex-shrink-0 font-sans text-body font-semibold text-brand-prussian-blue"
+                    >
+                      Change
+                    </button>
+                  </div>
                 </div>
               </section>
 
@@ -677,6 +701,19 @@ export default function PrincipalClinicPage() {
           onSaved={(newWorkingDays) => {
             setWorkingDays(newWorkingDays);
             setIsWorkingDaysOpen(false);
+          }}
+        />
+      )}
+
+      {institutionId && (
+        <SetDefaultSnoozeDaysSheet
+          isOpen={isSnoozeDaysOpen}
+          institutionId={institutionId}
+          currentDays={defaultSnoozeDays}
+          onClose={() => setIsSnoozeDaysOpen(false)}
+          onSaved={(newDays) => {
+            setDefaultSnoozeDays(newDays);
+            setIsSnoozeDaysOpen(false);
           }}
         />
       )}

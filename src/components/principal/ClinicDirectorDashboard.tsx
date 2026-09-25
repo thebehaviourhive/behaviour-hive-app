@@ -4,11 +4,13 @@ import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useInstitutionType } from "@/hooks/useInstitutionType";
 import { getRoleLabel } from "@/lib/vocabulary";
-import { WorkQueueRow } from "@/components/shared/WorkQueueRow";
+import { SnoozableWorkQueueRow } from "@/components/shared/SnoozableWorkQueueRow";
 import { formatWaitingSince } from "@/lib/workQueueFormatting";
 import { ReasonConfirmSheet } from "@/components/shared/ReasonConfirmSheet";
 import { ReviewStaffJoinSheet } from "@/components/principal/ReviewStaffJoinSheet";
 import { CheckIcon } from "@/components/ui/icons";
+import { useOutstandingTaskSnoozes } from "@/hooks/useOutstandingTaskSnoozes";
+import { OUTSTANDING_TASK_QUEUES as Q } from "@/lib/outstandingTaskQueues";
 
 // Clinical director's dashboard -- PRD 5 section 9/10, built now that
 // Stage 7 delivered the RPC layer (0227) and this PRD's own recon named
@@ -187,6 +189,7 @@ export function ClinicDirectorDashboard({
   institutionName: string | null;
 }) {
   const { institutionType, overrides } = useInstitutionType(institutionId);
+  const snoozes = useOutstandingTaskSnoozes(institutionId);
 
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -283,16 +286,53 @@ export function ClinicDirectorDashboard({
     setPendingTagChanges((prev) => prev.filter((r) => r.request_id !== row.request_id));
   }
 
+  // Outstanding-task snoozing, 25 Sept 2026 -- every bucket filtered
+  // through the clinic's own current snooze state before either
+  // counting or rendering, same discipline as the school dashboard.
+  const episodesWithoutPractitionerVisible = snoozes.filterVisible(
+    episodesWithoutPractitioner,
+    Q.CLINIC_EPISODE_NO_ACTIVE_PRACTITIONER,
+    (r) => r.episode_id
+  );
+  const pendingStaffJoinsVisible = snoozes.filterVisible(
+    pendingStaffJoins,
+    Q.PENDING_STAFF_JOIN,
+    (r) => r.institution_staff_id
+  );
+  const draftFbasVisible = snoozes.filterVisible(draftFbas, Q.CLINIC_DRAFT_FBA, (r) => r.fba_id);
+  const draftBspsVisible = snoozes.filterVisible(draftBsps, Q.CLINIC_DRAFT_BSP, (r) => r.bsp_id);
+  const incompleteAssessmentsVisible = snoozes.filterVisible(
+    incompleteAssessments,
+    Q.CLINIC_INCOMPLETE_ASSESSMENT,
+    (r) => r.assessment_id
+  );
+  const pendingTagChangesVisible = snoozes.filterVisible(
+    pendingTagChanges,
+    Q.PENDING_TAG_CHANGE_REQUEST,
+    (r) => r.request_id
+  );
+  const pendingGrantsVisible = snoozes.filterVisible(pendingGrants, Q.CLINIC_PENDING_CROSS_ORG_GRANT, (r) => r.grant_id);
+  const schoolLinksPendingSharingVisible = snoozes.filterVisible(
+    schoolLinksPendingSharing,
+    Q.CLINIC_SCHOOL_LINK_PENDING_SHARING,
+    (r) => r.passport_id
+  );
+  const noBookableSessionTypesSnoozed = Boolean(
+    hasNoBookableSessionTypes &&
+      !snoozes.showSnoozed &&
+      snoozes.getMeta(Q.CLINIC_NO_BOOKABLE_SESSION_TYPES, institutionId)?.isCurrentlySnoozed
+  );
+
   const outstandingCount =
-    episodesWithoutPractitioner.length +
-    pendingStaffJoins.length +
-    draftFbas.length +
-    draftBsps.length +
-    incompleteAssessments.length +
-    pendingTagChanges.length +
-    pendingGrants.length +
-    schoolLinksPendingSharing.length +
-    (hasNoBookableSessionTypes ? 1 : 0);
+    episodesWithoutPractitionerVisible.length +
+    pendingStaffJoinsVisible.length +
+    draftFbasVisible.length +
+    draftBspsVisible.length +
+    incompleteAssessmentsVisible.length +
+    pendingTagChangesVisible.length +
+    pendingGrantsVisible.length +
+    schoolLinksPendingSharingVisible.length +
+    (hasNoBookableSessionTypes && !noBookableSessionTypesSnoozed ? 1 : 0);
 
   const nothingOutstanding = !isLoading && !error && outstandingCount === 0;
 
@@ -304,7 +344,8 @@ export function ClinicDirectorDashboard({
   // in the summary text below so a 'no_signed_plan' or
   // 'insufficient_evidence' client is stated plainly, never silently
   // absent (Decision 3).
-  const risingClients = stagnationQueue.filter((row) => row.queue_status === "rising");
+  const risingClientsAll = stagnationQueue.filter((row) => row.queue_status === "rising");
+  const risingClients = snoozes.filterVisible(risingClientsAll, Q.CLINIC_STAGNATION_RISING, (r) => r.passport_id);
   const stableWithEvidenceCount = stagnationQueue.filter((row) => row.queue_status === "not_rising").length;
   const insufficientEvidenceCount = stagnationQueue.filter((row) => row.queue_status === "insufficient_evidence").length;
   const noSignedPlanCount = stagnationQueue.filter((row) => row.queue_status === "no_signed_plan").length;
@@ -350,7 +391,17 @@ export function ClinicDirectorDashboard({
           <p className="font-sans text-body text-brand-neutral-black/60">{error}</p>
         ) : (
           <>
-            {nothingOutstanding ? (
+            <div className="mb-3 flex justify-end">
+              <button
+                type="button"
+                onClick={() => snoozes.setShowSnoozed((v) => !v)}
+                className="font-sans text-eyebrow font-semibold text-brand-prussian-blue underline underline-offset-2"
+              >
+                {snoozes.showSnoozed ? "Hide snoozed" : "Show snoozed"}
+              </button>
+            </div>
+
+            {nothingOutstanding && !snoozes.showSnoozed ? (
               <div className="flex flex-col items-center gap-1 rounded-2xl bg-white p-8 text-center shadow-sm">
                 <CheckIcon className="mb-2 h-6 w-6 text-brand-prussian-blue/40" />
                 <p className="font-heading text-h2 font-semibold text-brand-neutral-black">All clear.</p>
@@ -364,8 +415,14 @@ export function ClinicDirectorDashboard({
                   Outstanding Work
                 </h2>
                 <div className="flex flex-col gap-2">
-                  {hasNoBookableSessionTypes && (
-                    <WorkQueueRow
+                  {hasNoBookableSessionTypes && (!noBookableSessionTypesSnoozed || snoozes.showSnoozed) && (
+                    <SnoozableWorkQueueRow
+                      institutionId={institutionId}
+                      queueKey={Q.CLINIC_NO_BOOKABLE_SESSION_TYPES}
+                      itemId={institutionId}
+                      defaultSnoozeDays={snoozes.defaultSnoozeDays}
+                      snoozeMeta={snoozes.getMeta(Q.CLINIC_NO_BOOKABLE_SESSION_TYPES, institutionId)}
+                      onSnoozed={snoozes.refresh}
                       entity={institutionName ?? "Your clinic"}
                       exception="No bookable session types -- parents cannot book anything yet"
                       actionLabel="Set up"
@@ -373,9 +430,15 @@ export function ClinicDirectorDashboard({
                     />
                   )}
 
-                  {episodesWithoutPractitioner.map((row) => (
-                    <WorkQueueRow
+                  {(snoozes.showSnoozed ? episodesWithoutPractitioner : episodesWithoutPractitionerVisible).map((row) => (
+                    <SnoozableWorkQueueRow
                       key={row.episode_id}
+                      institutionId={institutionId}
+                      queueKey={Q.CLINIC_EPISODE_NO_ACTIVE_PRACTITIONER}
+                      itemId={row.episode_id}
+                      defaultSnoozeDays={snoozes.defaultSnoozeDays}
+                      snoozeMeta={snoozes.getMeta(Q.CLINIC_EPISODE_NO_ACTIVE_PRACTITIONER, row.episode_id)}
+                      onSnoozed={snoozes.refresh}
                       entity={row.child_name}
                       exception="No practitioner currently assigned"
                       context={formatWaitingSince(row.started_at)}
@@ -384,9 +447,15 @@ export function ClinicDirectorDashboard({
                     />
                   ))}
 
-                  {pendingStaffJoins.map((row) => (
-                    <WorkQueueRow
+                  {(snoozes.showSnoozed ? pendingStaffJoins : pendingStaffJoinsVisible).map((row) => (
+                    <SnoozableWorkQueueRow
                       key={row.institution_staff_id}
+                      institutionId={institutionId}
+                      queueKey={Q.PENDING_STAFF_JOIN}
+                      itemId={row.institution_staff_id}
+                      defaultSnoozeDays={snoozes.defaultSnoozeDays}
+                      snoozeMeta={snoozes.getMeta(Q.PENDING_STAFF_JOIN, row.institution_staff_id)}
+                      onSnoozed={snoozes.refresh}
                       entity={row.full_name}
                       exception={`Requesting to join as ${getRoleLabel(row.role, "clinic", overrides)}`}
                       context={formatWaitingSince(row.requested_at)}
@@ -395,9 +464,15 @@ export function ClinicDirectorDashboard({
                     />
                   ))}
 
-                  {draftFbas.map((row) => (
-                    <WorkQueueRow
+                  {(snoozes.showSnoozed ? draftFbas : draftFbasVisible).map((row) => (
+                    <SnoozableWorkQueueRow
                       key={row.fba_id}
+                      institutionId={institutionId}
+                      queueKey={Q.CLINIC_DRAFT_FBA}
+                      itemId={row.fba_id}
+                      defaultSnoozeDays={snoozes.defaultSnoozeDays}
+                      snoozeMeta={snoozes.getMeta(Q.CLINIC_DRAFT_FBA, row.fba_id)}
+                      onSnoozed={snoozes.refresh}
                       entity={row.child_name}
                       exception={`FBA still in draft — ${row.clinician_name ?? "a practitioner"}`}
                       context={formatWaitingSince(row.created_at)}
@@ -406,9 +481,15 @@ export function ClinicDirectorDashboard({
                     />
                   ))}
 
-                  {draftBsps.map((row) => (
-                    <WorkQueueRow
+                  {(snoozes.showSnoozed ? draftBsps : draftBspsVisible).map((row) => (
+                    <SnoozableWorkQueueRow
                       key={row.bsp_id}
+                      institutionId={institutionId}
+                      queueKey={Q.CLINIC_DRAFT_BSP}
+                      itemId={row.bsp_id}
+                      defaultSnoozeDays={snoozes.defaultSnoozeDays}
+                      snoozeMeta={snoozes.getMeta(Q.CLINIC_DRAFT_BSP, row.bsp_id)}
+                      onSnoozed={snoozes.refresh}
                       entity={row.child_name}
                       exception={`Behaviour Support Plan still in draft — ${row.clinician_name ?? "a practitioner"}`}
                       context={formatWaitingSince(row.created_at)}
@@ -417,9 +498,15 @@ export function ClinicDirectorDashboard({
                     />
                   ))}
 
-                  {incompleteAssessments.map((row) => (
-                    <WorkQueueRow
+                  {(snoozes.showSnoozed ? incompleteAssessments : incompleteAssessmentsVisible).map((row) => (
+                    <SnoozableWorkQueueRow
                       key={row.assessment_id}
+                      institutionId={institutionId}
+                      queueKey={Q.CLINIC_INCOMPLETE_ASSESSMENT}
+                      itemId={row.assessment_id}
+                      defaultSnoozeDays={snoozes.defaultSnoozeDays}
+                      snoozeMeta={snoozes.getMeta(Q.CLINIC_INCOMPLETE_ASSESSMENT, row.assessment_id)}
+                      onSnoozed={snoozes.refresh}
                       entity={row.child_name}
                       exception={`${row.instrument_name} not yet completed — ${row.clinician_name ?? "a practitioner"}`}
                       context={formatWaitingSince(row.created_at)}
@@ -428,9 +515,15 @@ export function ClinicDirectorDashboard({
                     />
                   ))}
 
-                  {pendingTagChanges.map((row) => (
-                    <WorkQueueRow
+                  {(snoozes.showSnoozed ? pendingTagChanges : pendingTagChangesVisible).map((row) => (
+                    <SnoozableWorkQueueRow
                       key={row.request_id}
+                      institutionId={institutionId}
+                      queueKey={Q.PENDING_TAG_CHANGE_REQUEST}
+                      itemId={row.request_id}
+                      defaultSnoozeDays={snoozes.defaultSnoozeDays}
+                      snoozeMeta={snoozes.getMeta(Q.PENDING_TAG_CHANGE_REQUEST, row.request_id)}
+                      onSnoozed={snoozes.refresh}
                       entity={row.child_name}
                       exception={row.reason ? `"${row.reason}"` : "Tag change requested"}
                       context={formatWaitingSince(row.requested_at)}
@@ -442,9 +535,15 @@ export function ClinicDirectorDashboard({
                     />
                   ))}
 
-                  {pendingGrants.map((row) => (
-                    <WorkQueueRow
+                  {(snoozes.showSnoozed ? pendingGrants : pendingGrantsVisible).map((row) => (
+                    <SnoozableWorkQueueRow
                       key={row.grant_id}
+                      institutionId={institutionId}
+                      queueKey={Q.CLINIC_PENDING_CROSS_ORG_GRANT}
+                      itemId={row.grant_id}
+                      defaultSnoozeDays={snoozes.defaultSnoozeDays}
+                      snoozeMeta={snoozes.getMeta(Q.CLINIC_PENDING_CROSS_ORG_GRANT, row.grant_id)}
+                      onSnoozed={snoozes.refresh}
                       entity={row.child_name}
                       exception={`Proposed to ${row.receiving_institution_name} — awaiting parent confirmation`}
                       context={formatWaitingSince(row.proposed_at)}
@@ -453,9 +552,15 @@ export function ClinicDirectorDashboard({
                     />
                   ))}
 
-                  {schoolLinksPendingSharing.map((row) => (
-                    <WorkQueueRow
+                  {(snoozes.showSnoozed ? schoolLinksPendingSharing : schoolLinksPendingSharingVisible).map((row) => (
+                    <SnoozableWorkQueueRow
                       key={row.passport_id}
+                      institutionId={institutionId}
+                      queueKey={Q.CLINIC_SCHOOL_LINK_PENDING_SHARING}
+                      itemId={row.passport_id}
+                      defaultSnoozeDays={snoozes.defaultSnoozeDays}
+                      snoozeMeta={snoozes.getMeta(Q.CLINIC_SCHOOL_LINK_PENDING_SHARING, row.passport_id)}
+                      onSnoozed={snoozes.refresh}
                       entity={row.child_name}
                       exception={`Now also at ${row.school_names} — nothing shared yet`}
                       context={formatWaitingSince(row.linked_at)}
@@ -487,9 +592,9 @@ export function ClinicDirectorDashboard({
                 <h2 className="mb-2 font-accent text-eyebrow font-bold uppercase tracking-wide text-brand-prussian-blue">
                   Worth A Look
                 </h2>
-                {risingClients.length > 0 ? (
+                {(snoozes.showSnoozed ? risingClientsAll : risingClients).length > 0 ? (
                   <div className="flex flex-col gap-2">
-                    {risingClients.map((row) => {
+                    {(snoozes.showSnoozed ? risingClientsAll : risingClients).map((row) => {
                       const useRestraintCopy = row.restraints_rising;
                       const exception = useRestraintCopy
                         ? "Physical intervention has increased since their plan began — worth checking in on."
@@ -501,8 +606,14 @@ export function ClinicDirectorDashboard({
                           ? `${beforeRate}/wk before their plan → ${afterRate}/wk since`
                           : undefined;
                       return (
-                        <WorkQueueRow
+                        <SnoozableWorkQueueRow
                           key={row.passport_id}
+                          institutionId={institutionId}
+                          queueKey={Q.CLINIC_STAGNATION_RISING}
+                          itemId={row.passport_id}
+                          defaultSnoozeDays={snoozes.defaultSnoozeDays}
+                          snoozeMeta={snoozes.getMeta(Q.CLINIC_STAGNATION_RISING, row.passport_id)}
+                          onSnoozed={snoozes.refresh}
                           entity={row.child_name}
                           exception={exception}
                           context={context}

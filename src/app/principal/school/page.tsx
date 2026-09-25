@@ -11,6 +11,7 @@ import { HandOverPrincipalSheet } from "@/components/principal/HandOverPrincipal
 import { SetCutoffSheet } from "@/components/principal/SetCutoffSheet";
 import { SetStartTimeSheet } from "@/components/principal/SetStartTimeSheet";
 import { IncidentLocationsCard } from "@/components/principal/IncidentLocationsCard";
+import { SetDefaultSnoozeDaysSheet } from "@/components/principal/SetDefaultSnoozeDaysSheet";
 import { formatTimeOfDay } from "@/lib/temporaryAccessTime";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 import { Button } from "@/components/ui/Button";
@@ -80,6 +81,8 @@ export default function PrincipalSchoolPage() {
   const [isStartTimeOpen, setIsStartTimeOpen] = useState(false);
   const [isCutoffOpen, setIsCutoffOpen] = useState(false);
   const [institutionId, setInstitutionId] = useState<string | null>(null);
+  const [defaultSnoozeDays, setDefaultSnoozeDays] = useState<number>(5);
+  const [isSnoozeDaysOpen, setIsSnoozeDaysOpen] = useState(false);
 
   // Tier 1 item 4, 21 Sept 2026 -- the reciprocal of /principal/clinic's
   // own existing school-redirect guard (that page's own header comment
@@ -115,7 +118,7 @@ export default function PrincipalSchoolPage() {
     const { data: staffRow, error: staffError } = await supabase
       .from("institution_staff")
       .select(
-        "institution_id, institutions(name, institution_code, temporary_access_start_time, temporary_access_cutoff_time)"
+        "institution_id, institutions(name, institution_code, temporary_access_start_time, temporary_access_cutoff_time, default_snooze_days)"
       )
       .eq("user_id", user.id)
       .eq("role", "principal")
@@ -135,12 +138,14 @@ export default function PrincipalSchoolPage() {
           institution_code: string;
           temporary_access_start_time: string | null;
           temporary_access_cutoff_time: string | null;
+          default_snooze_days: number | null;
         }
       | {
           name: string;
           institution_code: string;
           temporary_access_start_time: string | null;
           temporary_access_cutoff_time: string | null;
+          default_snooze_days: number | null;
         }[]
       | null;
     const record = Array.isArray(institutionRecord) ? institutionRecord[0] : institutionRecord;
@@ -152,6 +157,9 @@ export default function PrincipalSchoolPage() {
     }
     if (record?.temporary_access_cutoff_time) {
       setCutoffTime(record.temporary_access_cutoff_time);
+    }
+    if (record?.default_snooze_days) {
+      setDefaultSnoozeDays(record.default_snooze_days);
     }
 
     const { data: rosterRows, error: rosterError } = await supabase.rpc("get_institution_staff_roster", {
@@ -278,6 +286,23 @@ export default function PrincipalSchoolPage() {
                     </button>
                   </div>
 
+                  <div className="flex items-center justify-between rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
+                    <div>
+                      <p className="font-sans text-body font-semibold text-brand-neutral-black">Default snooze length</p>
+                      <p className="mt-0.5 font-sans text-eyebrow text-brand-neutral-black/50">
+                        An outstanding task snoozed with no day count picked stays hidden for {defaultSnoozeDays} day
+                        {defaultSnoozeDays === 1 ? "" : "s"}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setIsSnoozeDaysOpen(true)}
+                      className="flex-shrink-0 font-sans text-body font-semibold text-brand-prussian-blue"
+                    >
+                      Change
+                    </button>
+                  </div>
+
                   <IncidentLocationsCard institutionId={institutionId} />
                 </div>
               </section>
@@ -389,6 +414,19 @@ export default function PrincipalSchoolPage() {
           onSaved={(newCutoff) => {
             setCutoffTime(newCutoff);
             setIsCutoffOpen(false);
+          }}
+        />
+      )}
+
+      {institutionId && (
+        <SetDefaultSnoozeDaysSheet
+          isOpen={isSnoozeDaysOpen}
+          institutionId={institutionId}
+          currentDays={defaultSnoozeDays}
+          onClose={() => setIsSnoozeDaysOpen(false)}
+          onSaved={(newDays) => {
+            setDefaultSnoozeDays(newDays);
+            setIsSnoozeDaysOpen(false);
           }}
         />
       )}

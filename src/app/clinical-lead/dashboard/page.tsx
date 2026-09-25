@@ -9,9 +9,11 @@ import { createClient } from "@/lib/supabase/client";
 import { PendingApprovalState } from "@/components/clinic/PendingApprovalState";
 import { MembershipMissingState } from "@/components/clinic/MembershipMissingState";
 import { MyTagChangeRequestsSection } from "@/components/clinic/MyTagChangeRequestsSection";
-import { WorkQueueRow } from "@/components/shared/WorkQueueRow";
+import { SnoozableWorkQueueRow } from "@/components/shared/SnoozableWorkQueueRow";
 import { ReasonConfirmSheet } from "@/components/shared/ReasonConfirmSheet";
 import { formatWaitingSince } from "@/lib/workQueueFormatting";
+import { useOutstandingTaskSnoozes } from "@/hooks/useOutstandingTaskSnoozes";
+import { OUTSTANDING_TASK_QUEUES as Q } from "@/lib/outstandingTaskQueues";
 
 // PRD 10 Stage 5, item 1 -- the lead's own real screen, replacing the
 // bare holding page. Three things, per Daniel's own instruction, and
@@ -63,6 +65,7 @@ export default function ClinicalLeadDashboardPage() {
   const membership = useInstitutionMembership(user?.id, "clinical_lead");
   const institutionId = membership.institutionId;
   const institutionName = membership.institutionName;
+  const snoozes = useOutstandingTaskSnoozes(institutionId);
 
   const [scopedClients, setScopedClients] = useState<
     { episodeId: string; passportId: string; childName: string; hasOwnCaseload: boolean }[]
@@ -162,15 +165,33 @@ export default function ClinicalLeadDashboardPage() {
           </div>
         )}
 
-        {!isLoadingDashboard && pendingRequests.length > 0 && (
+        {!isLoadingDashboard && institutionId && (pendingRequests.length > 0 || snoozes.showSnoozed) && (
           <section className="mt-8 px-4 lg:max-w-[66.6667%]">
-            <h2 className="mb-2 font-accent text-eyebrow font-bold uppercase tracking-wide text-brand-prussian-blue">
-              Awaiting Your Decision
-            </h2>
+            <div className="mb-2 flex items-center justify-between">
+              <h2 className="font-accent text-eyebrow font-bold uppercase tracking-wide text-brand-prussian-blue">
+                Awaiting Your Decision
+              </h2>
+              <button
+                type="button"
+                onClick={() => snoozes.setShowSnoozed((v) => !v)}
+                className="font-sans text-eyebrow font-semibold text-brand-prussian-blue underline underline-offset-2"
+              >
+                {snoozes.showSnoozed ? "Hide snoozed" : "Show snoozed"}
+              </button>
+            </div>
             <div className="flex flex-col gap-2">
-              {pendingRequests.map((row) => (
-                <WorkQueueRow
+              {(snoozes.showSnoozed
+                ? pendingRequests
+                : snoozes.filterVisible(pendingRequests, Q.PENDING_TAG_CHANGE_REQUEST, (r) => r.request_id)
+              ).map((row) => (
+                <SnoozableWorkQueueRow
                   key={row.request_id}
+                  institutionId={institutionId}
+                  queueKey={Q.PENDING_TAG_CHANGE_REQUEST}
+                  itemId={row.request_id}
+                  defaultSnoozeDays={snoozes.defaultSnoozeDays}
+                  snoozeMeta={snoozes.getMeta(Q.PENDING_TAG_CHANGE_REQUEST, row.request_id)}
+                  onSnoozed={snoozes.refresh}
                   entity={row.child_name}
                   exception={row.reason ? `"${row.reason}"` : "Tag change requested"}
                   context={formatWaitingSince(row.requested_at)}

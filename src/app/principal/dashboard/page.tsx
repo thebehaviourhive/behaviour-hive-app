@@ -14,8 +14,10 @@ import { PrincipalActivityCard } from "@/components/principal/PrincipalActivityC
 import { ClinicDirectorDashboard } from "@/components/principal/ClinicDirectorDashboard";
 import { useInstitutionType } from "@/hooks/useInstitutionType";
 import { IncidentCard, type InstitutionIncidentRow } from "@/components/principal/IncidentCard";
-import { WorkQueueRow } from "@/components/shared/WorkQueueRow";
+import { SnoozableWorkQueueRow } from "@/components/shared/SnoozableWorkQueueRow";
 import { formatWaitingSince } from "@/lib/workQueueFormatting";
+import { useOutstandingTaskSnoozes } from "@/hooks/useOutstandingTaskSnoozes";
+import { OUTSTANDING_TASK_QUEUES as Q } from "@/lib/outstandingTaskQueues";
 
 // Minimal principal surface, per the brief: "a sign-off queue and
 // access to incidents" -- nothing more. The full principal daily
@@ -183,6 +185,7 @@ export default function PrincipalDashboardPage() {
   const [institutionName, setInstitutionName] = useState<string | null>(null);
   const [institutionId, setInstitutionId] = useState<string | null>(null);
   const { institutionType, overrides: vocabularyOverrides } = useInstitutionType(institutionId);
+  const snoozes = useOutstandingTaskSnoozes(institutionId);
   const [incidents, setIncidents] = useState<InstitutionIncidentRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -399,26 +402,74 @@ export default function PrincipalDashboardPage() {
     ) : null;
   }
 
-  const awaitingSignoff = incidents.filter((i) => i.teacher_signed_at && !i.countersigned_at);
+  const awaitingSignoffAll = incidents.filter((i) => i.teacher_signed_at && !i.countersigned_at);
   const rest = incidents.filter((i) => !(i.teacher_signed_at && !i.countersigned_at));
   // Outstanding = still blocking the teacher's own sign-off -- 0077's
   // trigger guarantees a completed debrief exists the moment teacher_
   // signed_at is set, so debrief_required alone (without this second
   // condition) would be provably false on every signed-off incident,
   // exactly the reason IncidentCard's own old pill was removed.
-  const outstandingDebriefs = incidents.filter((i) => i.debrief_required && !i.teacher_signed_at);
-  const inherited = incidents.filter((i) => i.is_inherited);
+  const outstandingDebriefsAll = incidents.filter((i) => i.debrief_required && !i.teacher_signed_at);
+  const inheritedAll = incidents.filter((i) => i.is_inherited);
+
+  // Outstanding-task snoozing, 25 Sept 2026 -- every bucket is filtered
+  // through the institution's own current snooze state before either
+  // counting or rendering, so "All clear." genuinely means clear once
+  // everything remaining has been snoozed, not "clear except for the
+  // things nobody could do anything about yet."
+  const parentCallsVisible = snoozes.filterVisible(parentCalls, Q.PRINCIPAL_PARENT_CALL, (r) => r.incident_children_id);
+  const withdrawnAttestationsVisible = snoozes.filterVisible(
+    withdrawnAttestations,
+    Q.PRINCIPAL_WITHDRAWN_ATTESTATION,
+    (r) => r.incident_staff_id
+  );
+  const inherited = snoozes.filterVisible(inheritedAll, Q.PRINCIPAL_INHERITED_INCIDENT, (r) => r.incident_id);
+  const outstandingSupportAlertsVisible = snoozes.filterVisible(
+    outstandingSupportAlerts,
+    Q.PRINCIPAL_SUPPORT_ALERT,
+    (r) => r.id
+  );
+  const awaitingSignoff = snoozes.filterVisible(awaitingSignoffAll, Q.PRINCIPAL_AWAITING_COUNTERSIGN, (r) => r.incident_id);
+  const pendingStaffVisible = snoozes.filterVisible(pendingStaff, Q.PENDING_STAFF_JOIN, (r) => r.id);
+  const unassignedChildrenVisible = snoozes.filterVisible(
+    unassignedChildren,
+    Q.PRINCIPAL_UNASSIGNED_CHILD,
+    (r) => r.passport_id
+  );
+  const passportCompletionsOutstandingVisible = snoozes.filterVisible(
+    passportCompletionsOutstanding,
+    Q.PRINCIPAL_PASSPORT_COMPLETION,
+    (r) => r.id
+  );
+  const outstandingDebriefs = snoozes.filterVisible(
+    outstandingDebriefsAll,
+    Q.PRINCIPAL_DEBRIEF_OUTSTANDING,
+    (r) => r.incident_id
+  );
+  const signedOffWithOutstandingAttestationsVisible = snoozes.filterVisible(
+    signedOffWithOutstandingAttestations,
+    Q.PRINCIPAL_SIGNED_OFF_OUTSTANDING_ATTESTATIONS,
+    (r) => r.incident_id
+  );
+  const declinedParentCallsVisible = snoozes.filterVisible(
+    declinedParentCalls,
+    Q.PRINCIPAL_DECLINED_PARENT_CALL,
+    (r) => r.incident_children_id
+  );
 
   const needsActionCount =
-    parentCalls.length + withdrawnAttestations.length + inherited.length + outstandingSupportAlerts.length;
+    parentCallsVisible.length +
+    withdrawnAttestationsVisible.length +
+    inherited.length +
+    outstandingSupportAlertsVisible.length;
   const routineCount =
     awaitingSignoff.length +
-    pendingStaff.length +
-    unassignedChildren.length +
+    pendingStaffVisible.length +
+    unassignedChildrenVisible.length +
     outstandingDebriefs.length +
-    passportCompletionsOutstanding.length +
-    signedOffWithOutstandingAttestations.length +
-    declinedParentCalls.length;
+    passportCompletionsOutstandingVisible.length +
+    signedOffWithOutstandingAttestationsVisible.length +
+    declinedParentCallsVisible.length;
 
   const nothingOutstanding = !isLoading && !error && needsActionCount === 0 && routineCount === 0;
 
@@ -491,72 +542,118 @@ export default function PrincipalDashboardPage() {
           </div>
         ) : error ? (
           <p className="font-sans text-body text-brand-neutral-black/60">{error}</p>
-        ) : nothingOutstanding ? (
-          <div className="flex flex-col items-center gap-1 rounded-2xl bg-white p-8 text-center shadow-sm">
-            <CheckIcon className="mb-2 h-6 w-6 text-brand-prussian-blue/40" />
-            <p className="font-heading text-h2 font-semibold text-brand-neutral-black">All clear.</p>
-            <p className="font-sans text-body text-brand-neutral-black/60">
-              There are no outstanding actions requiring your attention today.
-            </p>
-          </div>
         ) : (
           <>
-            {needsActionCount > 0 && (
+            {/* Outstanding-task snoozing, 25 Sept 2026 -- reachable even
+                when the queue reads "All clear.", not just once there's
+                something visibly outstanding, so a snoozed item is
+                never a dead end with no way back. */}
+            {institutionId && (
+              <div className="mb-3 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => snoozes.setShowSnoozed((v) => !v)}
+                  className="font-sans text-eyebrow font-semibold text-brand-prussian-blue underline underline-offset-2"
+                >
+                  {snoozes.showSnoozed ? "Hide snoozed" : "Show snoozed"}
+                </button>
+              </div>
+            )}
+
+            {nothingOutstanding && !snoozes.showSnoozed ? (
+              <div className="flex flex-col items-center gap-1 rounded-2xl bg-white p-8 text-center shadow-sm">
+                <CheckIcon className="mb-2 h-6 w-6 text-brand-prussian-blue/40" />
+                <p className="font-heading text-h2 font-semibold text-brand-neutral-black">All clear.</p>
+                <p className="font-sans text-body text-brand-neutral-black/60">
+                  There are no outstanding actions requiring your attention today.
+                </p>
+              </div>
+            ) : null}
+
+            {(needsActionCount > 0 || (snoozes.showSnoozed && institutionId)) && (
               <section className="mb-6">
                 <h2 className="mb-2 font-accent text-eyebrow font-bold uppercase tracking-wide text-brand-golden-brown">
                   Needs action now
                 </h2>
                 <div className="flex flex-col gap-2">
-                  {parentCalls.map((row) => (
-                    <WorkQueueRow
-                      key={row.incident_children_id}
-                      urgent
-                      entity={row.child_name ?? `Child ${row.child_index}`}
-                      exception="Parent still to be called"
-                      context={formatWaitingSince(row.occurred_at)}
-                      actionLabel={markingCalledId === row.incident_children_id ? "Marking…" : "Mark called"}
-                      isActionPending={markingCalledId === row.incident_children_id}
-                      onAction={() => handleMarkCalled(row)}
-                    />
-                  ))}
-                  {withdrawnAttestations.map((row) => (
-                    <WorkQueueRow
-                      key={row.incident_staff_id}
-                      urgent
-                      entity={row.staff_name ?? "A staff member"}
-                      exception={`"${row.withdrawal_reason}" — withdrawn by ${row.withdrawn_by_name ?? "a colleague"}`}
-                      context={formatWaitingSince(row.withdrawn_at)}
-                      actionLabel="Review"
-                      href={`/teacher/incidents/${row.incident_id}`}
-                    />
-                  ))}
-                  {inherited.map((incident) => (
-                    <WorkQueueRow
-                      key={incident.incident_id}
-                      urgent
-                      entity={incident.location}
-                      exception={`Inherited from ${incident.inherited_from_name ?? "a departed supply teacher"}${
-                        incident.created_by_name ? ` · originally recorded by ${incident.created_by_name}` : ""
-                      }`}
-                      context={incident.inherited_transferred_at ? formatWaitingSince(incident.inherited_transferred_at) : undefined}
-                      actionLabel="Review"
-                      href={`/teacher/incidents/${incident.incident_id}`}
-                    />
-                  ))}
-                  {outstandingSupportAlerts.map((alert) => (
-                    <WorkQueueRow
-                      key={alert.id}
-                      urgent
-                      entity={alert.raised_by_name ?? "A staff member"}
-                      exception={`Alert triggered at ${new Date(alert.raised_at).toLocaleTimeString([], {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}${alert.room_names.length > 0 ? ` - ${alert.room_names.join(", ")}` : ""}`}
-                      context={formatWaitingSince(alert.raised_at)}
-                      actionLabel="Mark Followed Up"
-                      onAction={() => setFollowUpTarget(alert)}
-                    />
-                  ))}
+                  {institutionId &&
+                    (snoozes.showSnoozed ? parentCalls : parentCallsVisible).map((row) => (
+                      <SnoozableWorkQueueRow
+                        key={row.incident_children_id}
+                        institutionId={institutionId}
+                        queueKey={Q.PRINCIPAL_PARENT_CALL}
+                        itemId={row.incident_children_id}
+                        defaultSnoozeDays={snoozes.defaultSnoozeDays}
+                        snoozeMeta={snoozes.getMeta(Q.PRINCIPAL_PARENT_CALL, row.incident_children_id)}
+                        onSnoozed={snoozes.refresh}
+                        urgent
+                        entity={row.child_name ?? `Child ${row.child_index}`}
+                        exception="Parent still to be called"
+                        context={formatWaitingSince(row.occurred_at)}
+                        actionLabel={markingCalledId === row.incident_children_id ? "Marking…" : "Mark called"}
+                        isActionPending={markingCalledId === row.incident_children_id}
+                        onAction={() => handleMarkCalled(row)}
+                      />
+                    ))}
+                  {institutionId &&
+                    (snoozes.showSnoozed ? withdrawnAttestations : withdrawnAttestationsVisible).map((row) => (
+                      <SnoozableWorkQueueRow
+                        key={row.incident_staff_id}
+                        institutionId={institutionId}
+                        queueKey={Q.PRINCIPAL_WITHDRAWN_ATTESTATION}
+                        itemId={row.incident_staff_id}
+                        defaultSnoozeDays={snoozes.defaultSnoozeDays}
+                        snoozeMeta={snoozes.getMeta(Q.PRINCIPAL_WITHDRAWN_ATTESTATION, row.incident_staff_id)}
+                        onSnoozed={snoozes.refresh}
+                        urgent
+                        entity={row.staff_name ?? "A staff member"}
+                        exception={`"${row.withdrawal_reason}" — withdrawn by ${row.withdrawn_by_name ?? "a colleague"}`}
+                        context={formatWaitingSince(row.withdrawn_at)}
+                        actionLabel="Review"
+                        href={`/teacher/incidents/${row.incident_id}`}
+                      />
+                    ))}
+                  {institutionId &&
+                    (snoozes.showSnoozed ? inheritedAll : inherited).map((incident) => (
+                      <SnoozableWorkQueueRow
+                        key={incident.incident_id}
+                        institutionId={institutionId}
+                        queueKey={Q.PRINCIPAL_INHERITED_INCIDENT}
+                        itemId={incident.incident_id}
+                        defaultSnoozeDays={snoozes.defaultSnoozeDays}
+                        snoozeMeta={snoozes.getMeta(Q.PRINCIPAL_INHERITED_INCIDENT, incident.incident_id)}
+                        onSnoozed={snoozes.refresh}
+                        urgent
+                        entity={incident.location}
+                        exception={`Inherited from ${incident.inherited_from_name ?? "a departed supply teacher"}${
+                          incident.created_by_name ? ` · originally recorded by ${incident.created_by_name}` : ""
+                        }`}
+                        context={incident.inherited_transferred_at ? formatWaitingSince(incident.inherited_transferred_at) : undefined}
+                        actionLabel="Review"
+                        href={`/teacher/incidents/${incident.incident_id}`}
+                      />
+                    ))}
+                  {institutionId &&
+                    (snoozes.showSnoozed ? outstandingSupportAlerts : outstandingSupportAlertsVisible).map((alert) => (
+                      <SnoozableWorkQueueRow
+                        key={alert.id}
+                        institutionId={institutionId}
+                        queueKey={Q.PRINCIPAL_SUPPORT_ALERT}
+                        itemId={alert.id}
+                        defaultSnoozeDays={snoozes.defaultSnoozeDays}
+                        snoozeMeta={snoozes.getMeta(Q.PRINCIPAL_SUPPORT_ALERT, alert.id)}
+                        onSnoozed={snoozes.refresh}
+                        urgent
+                        entity={alert.raised_by_name ?? "A staff member"}
+                        exception={`Alert triggered at ${new Date(alert.raised_at).toLocaleTimeString([], {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}${alert.room_names.length > 0 ? ` - ${alert.room_names.join(", ")}` : ""}`}
+                        context={formatWaitingSince(alert.raised_at)}
+                        actionLabel="Mark Followed Up"
+                        onAction={() => setFollowUpTarget(alert)}
+                      />
+                    ))}
                   {markCalledError && (
                     <p role="alert" className="font-sans text-eyebrow font-medium text-brand-golden-brown">
                       {markCalledError}
@@ -566,92 +663,146 @@ export default function PrincipalDashboardPage() {
               </section>
             )}
 
-            {routineCount > 0 && (
+            {(routineCount > 0 || (snoozes.showSnoozed && institutionId)) && (
               <section>
                 <h2 className="mb-2 font-accent text-eyebrow font-bold uppercase tracking-wide text-brand-prussian-blue">
                   Routine
                 </h2>
                 <div className="flex flex-col gap-2">
-                  {awaitingSignoff.map((incident) => (
-                    <WorkQueueRow
-                      key={incident.incident_id}
-                      entity={incident.location}
-                      exception={`${childCountLabel(incident.child_indices)} · awaiting your sign-off`}
-                      context={incident.teacher_signed_at ? formatWaitingSince(incident.teacher_signed_at) : undefined}
-                      actionLabel="Countersign"
-                      href={`/teacher/incidents/${incident.incident_id}`}
-                    />
-                  ))}
-                  {pendingStaff.map((member) => (
-                    <WorkQueueRow
-                      key={member.id}
-                      entity={member.full_name}
-                      exception="Waiting for approval"
-                      actionLabel="Approve"
-                      onAction={() => setReviewTarget(member)}
-                    />
-                  ))}
-                  {unassignedChildren.map((child) => (
-                    <WorkQueueRow
-                      key={child.passport_id}
-                      entity={child.child_name}
-                      exception="Enrolled, not yet assigned to a class"
-                      actionLabel="Review"
-                      href={`/principal/passports/${child.passport_id}`}
-                    />
-                  ))}
-                  {passportCompletionsOutstanding.map((row) => (
-                    <WorkQueueRow
-                      key={row.id}
-                      entity={row.child_name}
-                      exception={`Asked of ${row.recipient_name ?? "a guardian"}`}
-                      context={formatWaitingSince(row.created_at)}
-                      actionLabel="Review"
-                      href={`/principal/passports/${row.passport_id}`}
-                    />
-                  ))}
-                  {outstandingDebriefs.map((incident) => (
-                    <WorkQueueRow
-                      key={incident.incident_id}
-                      entity={incident.location}
-                      exception={`${childCountLabel(incident.child_indices)} · debrief outstanding`}
-                      context={formatWaitingSince(incident.occurred_at)}
-                      actionLabel="Review"
-                      href={`/teacher/incidents/${incident.incident_id}`}
-                    />
-                  ))}
+                  {institutionId &&
+                    (snoozes.showSnoozed ? awaitingSignoffAll : awaitingSignoff).map((incident) => (
+                      <SnoozableWorkQueueRow
+                        key={incident.incident_id}
+                        institutionId={institutionId}
+                        queueKey={Q.PRINCIPAL_AWAITING_COUNTERSIGN}
+                        itemId={incident.incident_id}
+                        defaultSnoozeDays={snoozes.defaultSnoozeDays}
+                        snoozeMeta={snoozes.getMeta(Q.PRINCIPAL_AWAITING_COUNTERSIGN, incident.incident_id)}
+                        onSnoozed={snoozes.refresh}
+                        entity={incident.location}
+                        exception={`${childCountLabel(incident.child_indices)} · awaiting your sign-off`}
+                        context={incident.teacher_signed_at ? formatWaitingSince(incident.teacher_signed_at) : undefined}
+                        actionLabel="Countersign"
+                        href={`/teacher/incidents/${incident.incident_id}`}
+                      />
+                    ))}
+                  {institutionId &&
+                    (snoozes.showSnoozed ? pendingStaff : pendingStaffVisible).map((member) => (
+                      <SnoozableWorkQueueRow
+                        key={member.id}
+                        institutionId={institutionId}
+                        queueKey={Q.PENDING_STAFF_JOIN}
+                        itemId={member.id}
+                        defaultSnoozeDays={snoozes.defaultSnoozeDays}
+                        snoozeMeta={snoozes.getMeta(Q.PENDING_STAFF_JOIN, member.id)}
+                        onSnoozed={snoozes.refresh}
+                        entity={member.full_name}
+                        exception="Waiting for approval"
+                        actionLabel="Approve"
+                        onAction={() => setReviewTarget(member)}
+                      />
+                    ))}
+                  {institutionId &&
+                    (snoozes.showSnoozed ? unassignedChildren : unassignedChildrenVisible).map((child) => (
+                      <SnoozableWorkQueueRow
+                        key={child.passport_id}
+                        institutionId={institutionId}
+                        queueKey={Q.PRINCIPAL_UNASSIGNED_CHILD}
+                        itemId={child.passport_id}
+                        defaultSnoozeDays={snoozes.defaultSnoozeDays}
+                        snoozeMeta={snoozes.getMeta(Q.PRINCIPAL_UNASSIGNED_CHILD, child.passport_id)}
+                        onSnoozed={snoozes.refresh}
+                        entity={child.child_name}
+                        exception="Enrolled, not yet assigned to a class"
+                        actionLabel="Review"
+                        href={`/principal/passports/${child.passport_id}`}
+                      />
+                    ))}
+                  {institutionId &&
+                    (snoozes.showSnoozed ? passportCompletionsOutstanding : passportCompletionsOutstandingVisible).map(
+                      (row) => (
+                        <SnoozableWorkQueueRow
+                          key={row.id}
+                          institutionId={institutionId}
+                          queueKey={Q.PRINCIPAL_PASSPORT_COMPLETION}
+                          itemId={row.id}
+                          defaultSnoozeDays={snoozes.defaultSnoozeDays}
+                          snoozeMeta={snoozes.getMeta(Q.PRINCIPAL_PASSPORT_COMPLETION, row.id)}
+                          onSnoozed={snoozes.refresh}
+                          entity={row.child_name}
+                          exception={`Asked of ${row.recipient_name ?? "a guardian"}`}
+                          context={formatWaitingSince(row.created_at)}
+                          actionLabel="Review"
+                          href={`/principal/passports/${row.passport_id}`}
+                        />
+                      )
+                    )}
+                  {institutionId &&
+                    (snoozes.showSnoozed ? outstandingDebriefsAll : outstandingDebriefs).map((incident) => (
+                      <SnoozableWorkQueueRow
+                        key={incident.incident_id}
+                        institutionId={institutionId}
+                        queueKey={Q.PRINCIPAL_DEBRIEF_OUTSTANDING}
+                        itemId={incident.incident_id}
+                        defaultSnoozeDays={snoozes.defaultSnoozeDays}
+                        snoozeMeta={snoozes.getMeta(Q.PRINCIPAL_DEBRIEF_OUTSTANDING, incident.incident_id)}
+                        onSnoozed={snoozes.refresh}
+                        entity={incident.location}
+                        exception={`${childCountLabel(incident.child_indices)} · debrief outstanding`}
+                        context={formatWaitingSince(incident.occurred_at)}
+                        actionLabel="Review"
+                        href={`/teacher/incidents/${incident.incident_id}`}
+                      />
+                    ))}
                   {/* Migration 0176 -- THE ATTESTATION SIGN-OFF RACE
                       (CLAUDE.md). A fact, not an instruction: the
                       owning teacher already made the decision to
                       proceed; this is discovery, not a task. */}
-                  {signedOffWithOutstandingAttestations.map((incident) => (
-                    <WorkQueueRow
-                      key={incident.incident_id}
-                      entity={incident.location}
-                      exception={`Signed off with ${incident.outstanding_count} attestation${
-                        incident.outstanding_count === 1 ? "" : "s"
-                      } outstanding${incident.outstanding_names ? ` — ${incident.outstanding_names}` : ""}`}
-                      context={formatWaitingSince(incident.teacher_signed_at)}
-                      actionLabel="Review"
-                      href={`/teacher/incidents/${incident.incident_id}`}
-                    />
-                  ))}
+                  {institutionId &&
+                    (snoozes.showSnoozed
+                      ? signedOffWithOutstandingAttestations
+                      : signedOffWithOutstandingAttestationsVisible
+                    ).map((incident) => (
+                      <SnoozableWorkQueueRow
+                        key={incident.incident_id}
+                        institutionId={institutionId}
+                        queueKey={Q.PRINCIPAL_SIGNED_OFF_OUTSTANDING_ATTESTATIONS}
+                        itemId={incident.incident_id}
+                        defaultSnoozeDays={snoozes.defaultSnoozeDays}
+                        snoozeMeta={snoozes.getMeta(Q.PRINCIPAL_SIGNED_OFF_OUTSTANDING_ATTESTATIONS, incident.incident_id)}
+                        onSnoozed={snoozes.refresh}
+                        entity={incident.location}
+                        exception={`Signed off with ${incident.outstanding_count} attestation${
+                          incident.outstanding_count === 1 ? "" : "s"
+                        } outstanding${incident.outstanding_names ? ` — ${incident.outstanding_names}` : ""}`}
+                        context={formatWaitingSince(incident.teacher_signed_at)}
+                        actionLabel="Review"
+                        href={`/teacher/incidents/${incident.incident_id}`}
+                      />
+                    ))}
                   {/* Migration 0177 -- PARENT CALL, THE EXPLICIT NO
                       (CLAUDE.md). Worded as a fact to review -- the
                       teacher already decided not to call; this is not
                       an instruction to call the parent. */}
-                  {declinedParentCalls.map((row) => (
-                    <WorkQueueRow
-                      key={row.incident_children_id}
-                      entity={row.child_name ?? `Child ${row.child_index}`}
-                      exception={`Restraint or injury recorded — ${
-                        row.owning_teacher_name ?? "the reporting teacher"
-                      } answered No to a parent call`}
-                      context={formatWaitingSince(row.parent_call_answered_at)}
-                      actionLabel="Review"
-                      href={`/teacher/incidents/${row.incident_id}`}
-                    />
-                  ))}
+                  {institutionId &&
+                    (snoozes.showSnoozed ? declinedParentCalls : declinedParentCallsVisible).map((row) => (
+                      <SnoozableWorkQueueRow
+                        key={row.incident_children_id}
+                        institutionId={institutionId}
+                        queueKey={Q.PRINCIPAL_DECLINED_PARENT_CALL}
+                        itemId={row.incident_children_id}
+                        defaultSnoozeDays={snoozes.defaultSnoozeDays}
+                        snoozeMeta={snoozes.getMeta(Q.PRINCIPAL_DECLINED_PARENT_CALL, row.incident_children_id)}
+                        onSnoozed={snoozes.refresh}
+                        entity={row.child_name ?? `Child ${row.child_index}`}
+                        exception={`Restraint or injury recorded — ${
+                          row.owning_teacher_name ?? "the reporting teacher"
+                        } answered No to a parent call`}
+                        context={formatWaitingSince(row.parent_call_answered_at)}
+                        actionLabel="Review"
+                        href={`/teacher/incidents/${row.incident_id}`}
+                      />
+                    ))}
                 </div>
               </section>
             )}

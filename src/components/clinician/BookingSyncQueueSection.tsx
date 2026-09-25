@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { WorkQueueRow } from "@/components/shared/WorkQueueRow";
+import { SnoozableWorkQueueRow } from "@/components/shared/SnoozableWorkQueueRow";
+import { OUTSTANDING_TASK_QUEUES as Q } from "@/lib/outstandingTaskQueues";
 
 // PRD 9, section 7 -- get_my_bookings_needing_attention()'s own first
 // real client caller. A clinician who moved or deleted a booked
@@ -23,6 +24,15 @@ interface QueueRow {
   sessionTypeName: string;
   sessionStartAt: string;
   syncStatus: string;
+  institutionId: string;
+}
+
+interface SnoozeStatusRow {
+  queue_key: string;
+  item_id: string;
+  is_currently_snoozed: boolean;
+  snoozed_until: string;
+  snooze_count: number;
 }
 
 const STATUS_COPY: Record<string, { exception: string; primaryLabel: string; secondaryLabel: string; primaryAction: string; secondaryAction: string }> = {
@@ -60,28 +70,76 @@ export function BookingSyncQueueSection() {
   const [isLoading, setIsLoading] = useState(true);
   const [pendingBookingId, setPendingBookingId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  // Outstanding-task snoozing, 25 Sept 2026. Deliberately NOT the shared
+  // useOutstandingTaskSnoozes hook -- that hook is built for one
+  // institution per page. A clinician's own sync-issues queue can
+  // genuinely span more than one clinic (a real, if rare, shape this
+  // schema already supports -- a practitioner working across clinics),
+  // so this fetches snooze status and each institution's own default
+  // separately, per distinct institution_id actually present in the
+  // rows, and merges them into one lookup map keyed the same way the
+  // shared hook keys its own.
+  const [snoozeStatus, setSnoozeStatus] = useState<Map<string, SnoozeStatusRow>>(new Map());
+  const [defaultDaysByInstitution, setDefaultDaysByInstitution] = useState<Map<string, number>>(new Map());
+  const [showSnoozed, setShowSnoozed] = useState(false);
 
   const load = useCallback(async () => {
     const supabase = createClient();
     const { data, error } = await supabase.rpc("get_my_bookings_needing_attention");
-    if (!error) {
-      setRows(
-        (
-          (data ?? []) as {
-            booking_id: string;
-            child_name: string;
-            session_type_name: string;
-            session_start_at: string;
-            google_sync_status: string;
-          }[]
-        ).map((row) => ({
-          bookingId: row.booking_id,
-          childName: row.child_name,
-          sessionTypeName: row.session_type_name,
-          sessionStartAt: row.session_start_at,
-          syncStatus: row.google_sync_status,
-        }))
-      );
+    if (error) {
+      setIsLoading(false);
+      return;
+    }
+    const loadedRows = (
+      (data ?? []) as {
+        booking_id: string;
+        child_name: string;
+        session_type_name: string;
+        session_start_at: string;
+        google_sync_status: string;
+        institution_id: string;
+      }[]
+    ).map((row) => ({
+      bookingId: row.booking_id,
+      childName: row.child_name,
+      sessionTypeName: row.session_type_name,
+      sessionStartAt: row.session_start_at,
+      syncStatus: row.google_sync_status,
+      institutionId: row.institution_id,
+    }));
+    setRows(loadedRows);
+
+    const distinctInstitutionIds = Array.from(new Set(loadedRows.map((r) => r.institutionId)));
+    if (distinctInstitutionIds.length > 0) {
+      const [statusResults, institutionResults] = await Promise.all([
+        Promise.all(
+          distinctInstitutionIds.map((id) =>
+            supabase.rpc("get_institution_snooze_status", {
+              p_institution_id: id,
+              p_queue_key: Q.BOOKING_NEEDS_ATTENTION,
+            })
+          )
+        ),
+        Promise.all(
+          distinctInstitutionIds.map((id) =>
+            supabase.from("institutions").select("id, default_snooze_days").eq("id", id).maybeSingle()
+          )
+        ),
+      ]);
+      const statusMap = new Map<string, SnoozeStatusRow>();
+      for (const result of statusResults) {
+        for (const row of (result.data ?? []) as SnoozeStatusRow[]) {
+          statusMap.set(`${row.queue_key}:${row.item_id}`, row);
+        }
+      }
+      setSnoozeStatus(statusMap);
+      const daysMap = new Map<string, number>();
+      for (const result of institutionResults) {
+        if (result.data?.id && result.data.default_snooze_days) {
+          daysMap.set(result.data.id, result.data.default_snooze_days);
+        }
+      }
+      setDefaultDaysByInstitution(daysMap);
     }
     setIsLoading(false);
   }, []);
@@ -113,27 +171,74 @@ export function BookingSyncQueueSection() {
     }
   }
 
-  if (isLoading || rows.length === 0) {
+  const visibleRows = showSnoozed
+    ? rows
+    : rows.filter((row) => !snoozeStatus.get(`${Q.BOOKING_NEEDS_ATTENTION}:${row.bookingId}`)?.is_currently_snoozed);
+
+  if (isLoading || (rows.length === 0)) {
     return null;
+  }
+  if (visibleRows.length === 0 && !showSnoozed) {
+    // Everything here has been snoozed -- still offer the way back,
+    // per the brief's own "if they disappear with no way back, this is
+    // a delete, not a snooze."
+    return (
+      <section className="mb-6 px-4">
+        <button
+          type="button"
+          onClick={() => setShowSnoozed(true)}
+          className="font-sans text-eyebrow font-semibold text-brand-prussian-blue underline underline-offset-2"
+        >
+          Show snoozed
+        </button>
+      </section>
+    );
   }
 
   return (
     <section className="mb-6 px-4">
-      <h2 className="mb-2 font-accent text-eyebrow font-bold uppercase tracking-wide text-brand-golden-brown">
-        Needs Your Attention
-      </h2>
+      <div className="mb-2 flex items-center justify-between">
+        <h2 className="font-accent text-eyebrow font-bold uppercase tracking-wide text-brand-golden-brown">
+          Needs Your Attention
+        </h2>
+        <button
+          type="button"
+          onClick={() => setShowSnoozed((v) => !v)}
+          className="font-sans text-eyebrow font-semibold text-brand-prussian-blue underline underline-offset-2"
+        >
+          {showSnoozed ? "Hide snoozed" : "Show snoozed"}
+        </button>
+      </div>
       {actionError && (
         <p role="alert" className="mb-2 rounded-xl bg-brand-golden-brown/10 px-4 py-3 font-sans text-body font-medium text-brand-golden-brown">
           {actionError}
         </p>
       )}
       <div className="flex flex-col gap-2">
-        {rows.map((row) => {
+        {visibleRows.map((row) => {
           const copy = STATUS_COPY[row.syncStatus] ?? STATUS_COPY.sync_failed;
           const isPending = pendingBookingId === row.bookingId;
+          const statusRow = snoozeStatus.get(`${Q.BOOKING_NEEDS_ATTENTION}:${row.bookingId}`);
           return (
-            <WorkQueueRow
+            <SnoozableWorkQueueRow
               key={row.bookingId}
+              institutionId={row.institutionId}
+              queueKey={Q.BOOKING_NEEDS_ATTENTION}
+              itemId={row.bookingId}
+              defaultSnoozeDays={defaultDaysByInstitution.get(row.institutionId) ?? 5}
+              snoozeMeta={
+                statusRow
+                  ? {
+                      isCurrentlySnoozed: statusRow.is_currently_snoozed,
+                      snoozedUntil: statusRow.snoozed_until,
+                      snoozeCount: statusRow.snooze_count,
+                      lastReason: "",
+                      lastSnoozedByName: null,
+                      lastSnoozedAt: "",
+                    }
+                  : undefined
+              }
+              onSnoozed={load}
               entity={row.childName}
               exception={`${copy.exception} — ${row.sessionTypeName}`}
               context={formatWhen(row.sessionStartAt)}

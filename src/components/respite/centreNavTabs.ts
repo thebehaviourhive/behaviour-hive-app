@@ -1,4 +1,4 @@
-import { House, Users, UserCog } from "lucide-react";
+import { House, Users, UserCog, Settings } from "lucide-react";
 import type { NavTab } from "@/components/ui/AppBottomNav";
 
 // The centre_manager dashboard build, 25 Sept 2026 -- mirrors
@@ -36,5 +36,16 @@ export const CENTRE_NAV_TABS: NavTab[] = [
     icon: UserCog,
     href: "/centre/staff",
     isActive: (pathname) => pathname.startsWith("/centre/staff"),
+  },
+  // Outstanding-task snoozing, 25 Sept 2026 -- the brief's own words:
+  // "N is configurable per institution, on that institution's own
+  // settings screen -- School, Clinic, and the Centre screen WHEN IT
+  // EXISTS." It didn't; this is that screen's first real setting.
+  {
+    key: "settings",
+    label: "Settings",
+    icon: Settings,
+    href: "/centre/settings",
+    isActive: (pathname) => pathname.startsWith("/centre/settings"),
   },
 ];

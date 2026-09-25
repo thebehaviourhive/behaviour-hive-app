@@ -16,10 +16,13 @@ import { TeacherActivityCard } from "@/components/teacher/TeacherActivityCard";
 import { QuestionnairePromptCard } from "@/components/questionnaire/QuestionnairePromptCard";
 import { AssessmentRequestPromptCard } from "@/components/questionnaire/AssessmentRequestPromptCard";
 import { WorkQueueRow } from "@/components/shared/WorkQueueRow";
+import { SnoozableWorkQueueRow } from "@/components/shared/SnoozableWorkQueueRow";
 import { formatWaitingSince } from "@/lib/workQueueFormatting";
 import { formatTimeOfDay } from "@/lib/temporaryAccessTime";
 import { resolveTeacherEodQueue } from "@/lib/teacherEodQueue";
 import { CheckIcon } from "@/components/ui/icons";
+import { useOutstandingTaskSnoozes } from "@/hooks/useOutstandingTaskSnoozes";
+import { OUTSTANDING_TASK_QUEUES as Q } from "@/lib/outstandingTaskQueues";
 
 const GRID_CAP = 6;
 
@@ -151,6 +154,7 @@ export default function TeacherDashboardPage() {
     institutionId,
     passports,
   } = useTeacherPassports(user?.id ?? null);
+  const snoozes = useOutstandingTaskSnoozes(institutionId);
 
   const { isLoading: isLoadingCheckins, pupils, redAlertCount } = useTeacherMorningCheckins(
     user?.id ?? null
@@ -302,25 +306,46 @@ export default function TeacherDashboardPage() {
   const gridPupils = pupils.slice(0, GRID_CAP);
   const overflowCount = pupils.length - GRID_CAP;
 
-  const owed = attestationsOwed.filter((r) => !r.is_closed && (r.status === "not_attested" || r.status === "stale"));
-  const notSignedOff = myIncidents.filter((i) => !i.teacher_signed_at);
+  const owedAll = attestationsOwed.filter((r) => !r.is_closed && (r.status === "not_attested" || r.status === "stale"));
+  const notSignedOffAll = myIncidents.filter((i) => !i.teacher_signed_at);
   // Split by whether anything has actually been written yet -- see
   // isUnstartedStub()'s own comment. Same underlying bucket
   // (get_my_incidents(), !teacher_signed_at), different copy: "Sign
   // off" only makes sense once there's a record to sign off on.
-  const unstartedStubs = notSignedOff.filter(isUnstartedStub);
-  const writtenNotSignedOff = notSignedOff.filter((i) => !isUnstartedStub(i));
-  const debriefOwed = myIncidents.filter((i) => i.debrief_required && !i.debrief_completed);
+  const unstartedStubsAll = notSignedOffAll.filter(isUnstartedStub);
+  const writtenNotSignedOffAll = notSignedOffAll.filter((i) => !isUnstartedStub(i));
+  const debriefOwedAll = myIncidents.filter((i) => i.debrief_required && !i.debrief_completed);
+
+  // Outstanding-task snoozing, 25 Sept 2026. EOD-bulk and cover-
+  // expiring-today deliberately excluded (see outstandingTaskQueues.ts's
+  // own header for why) -- neither is filtered below, both stay exactly
+  // as they were.
+  const owed = snoozes.filterVisible(owedAll, Q.ATTESTATION_OWED, (r) => r.incident_staff_id);
+  const unstartedStubs = snoozes.filterVisible(unstartedStubsAll, Q.TEACHER_UNSTARTED_INCIDENT, (r) => r.incident_id);
+  const writtenNotSignedOff = snoozes.filterVisible(
+    writtenNotSignedOffAll,
+    Q.TEACHER_WRITTEN_NOT_SIGNED_OFF,
+    (r) => r.incident_id
+  );
+  const debriefOwed = snoozes.filterVisible(debriefOwedAll, Q.TEACHER_DEBRIEF_OWED, (r) => r.incident_id);
+  const attestationIssuesVisible = snoozes.filterVisible(
+    attestationIssues,
+    Q.TEACHER_ATTESTATION_ISSUE,
+    (r) => r.incident_staff_id
+  );
+  const coverGrantsVisible = coverGrants; // excluded from snoozing -- same-day only, see outstandingTaskQueues.ts
+  const snaGapsVisible = snoozes.filterVisible(snaGaps, Q.TEACHER_NO_SNA_ASSIGNED, (r) => r.passport_id);
 
   const actionItemsReady = !isLoadingActionItems;
   const nothingOutstanding =
     actionItemsReady &&
     owed.length === 0 &&
-    notSignedOff.length === 0 &&
+    unstartedStubs.length === 0 &&
+    writtenNotSignedOff.length === 0 &&
     debriefOwed.length === 0 &&
-    attestationIssues.length === 0 &&
-    coverGrants.length === 0 &&
-    snaGaps.length === 0 &&
+    attestationIssuesVisible.length === 0 &&
+    coverGrantsVisible.length === 0 &&
+    snaGapsVisible.length === 0 &&
     !eodRemainingCount;
 
   return (
@@ -346,116 +371,173 @@ export default function TeacherDashboardPage() {
               </div>
             ))}
           </div>
-        ) : nothingOutstanding ? (
-          <div className="flex flex-col items-center gap-1 rounded-2xl bg-white p-8 text-center shadow-sm">
-            <CheckIcon className="mb-2 h-6 w-6 text-brand-prussian-blue/40" />
-            <p className="font-heading text-h2 font-semibold text-brand-neutral-black">All clear.</p>
-            <p className="font-sans text-body text-brand-neutral-black/60">
-              There are no outstanding actions requiring your attention today.
-            </p>
-          </div>
         ) : (
-          <div className="flex flex-col gap-2">
-            {/* Item 3 -- time-sensitive, same as the afternoon-only gate
-                it shares with the single-child button, so it's only
-                ever non-null (and only ever rendered) after 13:00.
-                Disappears the moment the count reaches 0, same as every
-                other bucket here -- it isn't tracked separately, it's
-                just what eodRemainingCount becomes once
-                resolveTeacherEodQueue() next resolves nothing left. */}
-            {eodRemainingCount !== null && eodRemainingCount > 0 && (
-              <WorkQueueRow
-                key="eod-bulk"
-                urgent
-                entity="End of day updates"
-                exception={`${eodRemainingCount} ${eodRemainingCount === 1 ? "child" : "children"} remaining`}
-                actionLabel="Start"
-                href="/teacher/eod/bulk"
-              />
+          <>
+            {institutionId && (
+              <div className="mb-2 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => snoozes.setShowSnoozed((v) => !v)}
+                  className="font-sans text-eyebrow font-semibold text-brand-prussian-blue underline underline-offset-2"
+                >
+                  {snoozes.showSnoozed ? "Hide snoozed" : "Show snoozed"}
+                </button>
+              </div>
             )}
 
-            {owed.map((row) => (
-              <WorkQueueRow
-                key={row.incident_staff_id}
-                urgent
-                entity={row.location}
-                exception={`${row.status_label} attestation`}
-                context={formatWaitingSince(row.occurred_at)}
-                actionLabel="Review"
-                href={`/teacher/incidents/${row.incident_id}`}
-              />
-            ))}
+            {nothingOutstanding && !snoozes.showSnoozed ? (
+              <div className="flex flex-col items-center gap-1 rounded-2xl bg-white p-8 text-center shadow-sm">
+                <CheckIcon className="mb-2 h-6 w-6 text-brand-prussian-blue/40" />
+                <p className="font-heading text-h2 font-semibold text-brand-neutral-black">All clear.</p>
+                <p className="font-sans text-body text-brand-neutral-black/60">
+                  There are no outstanding actions requiring your attention today.
+                </p>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-2">
+                {/* Item 3 -- time-sensitive, same as the afternoon-only
+                    gate it shares with the single-child button.
+                    Deliberately never snoozable -- see
+                    outstandingTaskQueues.ts's own header for why. */}
+                {eodRemainingCount !== null && eodRemainingCount > 0 && (
+                  <WorkQueueRow
+                    key="eod-bulk"
+                    urgent
+                    entity="End of day updates"
+                    exception={`${eodRemainingCount} ${eodRemainingCount === 1 ? "child" : "children"} remaining`}
+                    actionLabel="Start"
+                    href="/teacher/eod/bulk"
+                  />
+                )}
 
-            {unstartedStubs.map((incident) => (
-              <WorkQueueRow
-                key={incident.incident_id}
-                urgent
-                entity={`Incident Log ${formatStampDate(incident.occurred_at)}`}
-                exception={`${childCountLabel(incident.child_indices)} · not yet written`}
-                context={formatWaitingSince(incident.occurred_at)}
-                actionLabel="Continue Log"
-                href={`/teacher/incidents/${incident.incident_id}`}
-              />
-            ))}
+                {institutionId &&
+                  (snoozes.showSnoozed ? owedAll : owed).map((row) => (
+                    <SnoozableWorkQueueRow
+                      key={row.incident_staff_id}
+                      institutionId={institutionId}
+                      queueKey={Q.ATTESTATION_OWED}
+                      itemId={row.incident_staff_id}
+                      defaultSnoozeDays={snoozes.defaultSnoozeDays}
+                      snoozeMeta={snoozes.getMeta(Q.ATTESTATION_OWED, row.incident_staff_id)}
+                      onSnoozed={snoozes.refresh}
+                      urgent
+                      entity={row.location}
+                      exception={`${row.status_label} attestation`}
+                      context={formatWaitingSince(row.occurred_at)}
+                      actionLabel="Review"
+                      href={`/teacher/incidents/${row.incident_id}`}
+                    />
+                  ))}
 
-            {writtenNotSignedOff.map((incident) => (
-              <WorkQueueRow
-                key={incident.incident_id}
-                urgent
-                entity={incident.location}
-                exception={`${childCountLabel(incident.child_indices)} · not signed off`}
-                context={formatWaitingSince(incident.occurred_at)}
-                actionLabel="Sign off"
-                href={`/teacher/incidents/${incident.incident_id}`}
-              />
-            ))}
+                {institutionId &&
+                  (snoozes.showSnoozed ? unstartedStubsAll : unstartedStubs).map((incident) => (
+                    <SnoozableWorkQueueRow
+                      key={incident.incident_id}
+                      institutionId={institutionId}
+                      queueKey={Q.TEACHER_UNSTARTED_INCIDENT}
+                      itemId={incident.incident_id}
+                      defaultSnoozeDays={snoozes.defaultSnoozeDays}
+                      snoozeMeta={snoozes.getMeta(Q.TEACHER_UNSTARTED_INCIDENT, incident.incident_id)}
+                      onSnoozed={snoozes.refresh}
+                      urgent
+                      entity={`Incident Log ${formatStampDate(incident.occurred_at)}`}
+                      exception={`${childCountLabel(incident.child_indices)} · not yet written`}
+                      context={formatWaitingSince(incident.occurred_at)}
+                      actionLabel="Continue Log"
+                      href={`/teacher/incidents/${incident.incident_id}`}
+                    />
+                  ))}
 
-            {debriefOwed.map((incident) => (
-              <WorkQueueRow
-                key={incident.incident_id}
-                entity={incident.location}
-                exception={`${childCountLabel(incident.child_indices)} · debrief owed`}
-                context={formatWaitingSince(incident.occurred_at)}
-                actionLabel="Complete debrief"
-                href={`/teacher/incidents/${incident.incident_id}`}
-              />
-            ))}
+                {institutionId &&
+                  (snoozes.showSnoozed ? writtenNotSignedOffAll : writtenNotSignedOff).map((incident) => (
+                    <SnoozableWorkQueueRow
+                      key={incident.incident_id}
+                      institutionId={institutionId}
+                      queueKey={Q.TEACHER_WRITTEN_NOT_SIGNED_OFF}
+                      itemId={incident.incident_id}
+                      defaultSnoozeDays={snoozes.defaultSnoozeDays}
+                      snoozeMeta={snoozes.getMeta(Q.TEACHER_WRITTEN_NOT_SIGNED_OFF, incident.incident_id)}
+                      onSnoozed={snoozes.refresh}
+                      urgent
+                      entity={incident.location}
+                      exception={`${childCountLabel(incident.child_indices)} · not signed off`}
+                      context={formatWaitingSince(incident.occurred_at)}
+                      actionLabel="Sign off"
+                      href={`/teacher/incidents/${incident.incident_id}`}
+                    />
+                  ))}
 
-            {attestationIssues.map((row) => (
-              <WorkQueueRow
-                key={row.incident_staff_id}
-                entity={row.staff_name ?? "A staff member"}
-                exception={row.status_label}
-                context={formatWaitingSince(row.occurred_at)}
-                actionLabel="Review"
-                href={`/teacher/incidents/${row.incident_id}`}
-              />
-            ))}
+                {institutionId &&
+                  (snoozes.showSnoozed ? debriefOwedAll : debriefOwed).map((incident) => (
+                    <SnoozableWorkQueueRow
+                      key={incident.incident_id}
+                      institutionId={institutionId}
+                      queueKey={Q.TEACHER_DEBRIEF_OWED}
+                      itemId={incident.incident_id}
+                      defaultSnoozeDays={snoozes.defaultSnoozeDays}
+                      snoozeMeta={snoozes.getMeta(Q.TEACHER_DEBRIEF_OWED, incident.incident_id)}
+                      onSnoozed={snoozes.refresh}
+                      entity={incident.location}
+                      exception={`${childCountLabel(incident.child_indices)} · debrief owed`}
+                      context={formatWaitingSince(incident.occurred_at)}
+                      actionLabel="Complete debrief"
+                      href={`/teacher/incidents/${incident.incident_id}`}
+                    />
+                  ))}
 
-            {coverGrants.map((row) => (
-              <WorkQueueRow
-                key={row.grant_id}
-                entity={row.class_name}
-                exception={`Covered by ${row.granted_to_name ?? "someone"}`}
-                context={cutoffTime ? `Ends ${formatTimeOfDay(cutoffTime)}` : undefined}
-                actionLabel="Review"
-                href="/teacher/class"
-              />
-            ))}
+                {institutionId &&
+                  (snoozes.showSnoozed ? attestationIssues : attestationIssuesVisible).map((row) => (
+                    <SnoozableWorkQueueRow
+                      key={row.incident_staff_id}
+                      institutionId={institutionId}
+                      queueKey={Q.TEACHER_ATTESTATION_ISSUE}
+                      itemId={row.incident_staff_id}
+                      defaultSnoozeDays={snoozes.defaultSnoozeDays}
+                      snoozeMeta={snoozes.getMeta(Q.TEACHER_ATTESTATION_ISSUE, row.incident_staff_id)}
+                      onSnoozed={snoozes.refresh}
+                      entity={row.staff_name ?? "A staff member"}
+                      exception={row.status_label}
+                      context={formatWaitingSince(row.occurred_at)}
+                      actionLabel="Review"
+                      href={`/teacher/incidents/${row.incident_id}`}
+                    />
+                  ))}
 
-            {snaGaps.map((row) => (
-              <WorkQueueRow
-                key={row.passport_id}
-                entity={row.child_name}
-                exception={`No SNA assigned · ${row.class_name}`}
-                actionLabel="Review"
-                href="/teacher/class"
-                secondaryActionLabel="No SNA required"
-                onSecondaryAction={() => handleNoSnaRequired(row)}
-                isSecondaryActionPending={snaNotRequiredPendingId === row.passport_id}
-              />
-            ))}
-          </div>
+                {/* Deliberately never snoozable -- resolves by
+                    definition at end of day regardless. */}
+                {coverGrants.map((row) => (
+                  <WorkQueueRow
+                    key={row.grant_id}
+                    entity={row.class_name}
+                    exception={`Covered by ${row.granted_to_name ?? "someone"}`}
+                    context={cutoffTime ? `Ends ${formatTimeOfDay(cutoffTime)}` : undefined}
+                    actionLabel="Review"
+                    href="/teacher/class"
+                  />
+                ))}
+
+                {institutionId &&
+                  (snoozes.showSnoozed ? snaGaps : snaGapsVisible).map((row) => (
+                    <SnoozableWorkQueueRow
+                      key={row.passport_id}
+                      institutionId={institutionId}
+                      queueKey={Q.TEACHER_NO_SNA_ASSIGNED}
+                      itemId={row.passport_id}
+                      defaultSnoozeDays={snoozes.defaultSnoozeDays}
+                      snoozeMeta={snoozes.getMeta(Q.TEACHER_NO_SNA_ASSIGNED, row.passport_id)}
+                      onSnoozed={snoozes.refresh}
+                      entity={row.child_name}
+                      exception={`No SNA assigned · ${row.class_name}`}
+                      actionLabel="Review"
+                      href="/teacher/class"
+                      secondaryActionLabel="No SNA required"
+                      onSecondaryAction={() => handleNoSnaRequired(row)}
+                      isSecondaryActionPending={snaNotRequiredPendingId === row.passport_id}
+                    />
+                  ))}
+              </div>
+            )}
+          </>
         )}
       </section>
 

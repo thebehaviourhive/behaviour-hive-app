@@ -43,11 +43,11 @@
     "140:\"Include anything given during the school day\"": "Finding 1 fix -- the hasSchoolLink=true branch of an already-correct ternary."
   },
   "src/app/principal/dashboard/page.tsx": {
-    "439:\"View Term Overview\"": "Dead code for a clinic: institutionType === 'clinic' returns <ClinicDirectorDashboard /> early, well before this line.",
-    "453:\"Record incident\"": "Same -- dead code after the clinic early return.",
-    "538:\"a departed supply teacher\"": "Same -- dead code after the clinic early return.",
-    "598:\"Enrolled, not yet assigned to a class\"": "Same -- dead code after the clinic early return.",
-    "648:\"the reporting teacher\"": "Same -- dead code after the clinic early return."
+    "490:\"View Term Overview\"": "Dead code for a clinic: institutionType === 'clinic' returns <ClinicDirectorDashboard /> early, well before this line. (Line renumbered by the outstanding-task snoozing build, 25 Sept 2026 -- new snooze-filtering/toggle lines inserted above this point. Content and reasoning unchanged.)",
+    "504:\"Record incident\"": "Same -- dead code after the clinic early return. (Line renumbered by the outstanding-task snoozing build, 25 Sept 2026 -- new snooze-filtering/toggle lines inserted above this point. Content and reasoning unchanged.)",
+    "628:\"a departed supply teacher\"": "Same -- dead code after the clinic early return. (Line renumbered by the outstanding-task snoozing build, 25 Sept 2026 -- new snooze-filtering/toggle lines inserted above this point. Content and reasoning unchanged.)",
+    "716:\"Enrolled, not yet assigned to a class\"": "Same -- dead code after the clinic early return. (Line renumbered by the outstanding-task snoozing build, 25 Sept 2026 -- new snooze-filtering/toggle lines inserted above this point. Content and reasoning unchanged.)",
+    "799:\"the reporting teacher\"": "Same -- dead code after the clinic early return. (Line renumbered by the outstanding-task snoozing build, 25 Sept 2026 -- new snooze-filtering/toggle lines inserted above this point. Content and reasoning unchanged.)"
   },
   "src/app/principal/passports/[passportId]/export/page.tsx": {
     "103:\"this child's school record\"": "The institution.type === 'clinic' ternary's own school branch (p_scope) -- clinic branch reads \"this child's clinical record\".",
@@ -96,7 +96,7 @@
     "93:\"The school has completed this record.\"": "Same as IncidentNoticeCard's own identical line -- and this whole component is only ever mounted when !allConnectedAreClinic (passport/dashboard/page.tsx)."
   },
   "src/components/principal/ClinicDirectorDashboard.tsx": {
-    "315:\"Not enough incident history yet to say whether a current plan is working for any client.\"": "PRD 8 Stage 3's own deliberate cross-org feature -- the stagnation queue legitimately reads a clinic client's SCHOOL-authored incident history (via get_institution_incidents_for_director()) when a grant/engagement makes it visible. Not a leak; the word describes real, intended cross-domain content. Line renumbered 283->293 by the session-types dashboard bucket's own additions above it (22 Sept 2026) -- same string, confirmed unchanged, not re-verified beyond that."
+    "356:\"Not enough incident history yet to say whether a current plan is working for any client.\"": "PRD 8 Stage 3's own deliberate cross-org feature -- the stagnation queue legitimately reads a clinic client's SCHOOL-authored incident history (via get_institution_incidents_for_director()) when a grant/engagement makes it visible. Not a leak; the word describes real, intended cross-domain content. Line renumbered 283->293 by the session-types dashboard bucket's own additions above it (22 Sept 2026) -- same string, confirmed unchanged, not re-verified beyond that. (Line renumbered by the outstanding-task snoozing build, 25 Sept 2026 -- new snooze-filtering lines inserted above this point. Content and reasoning unchanged.)"
   },
   "src/components/principal/HandOverPrincipalSheet.tsx": {
     "210:\"e.g. Retiring at the end of term\"": "Finding 1 fix -- the institutionType!=='clinic' branch of an already-correct ternary; the clinic branch reads \"e.g. Stepping back from the clinic\". Line renumbered, PRD 11 Stage 2: STAYING_ROLE_OPTIONS gained a real respite_centre: [] entry earlier in this same file (this sheet is structurally unreachable for a respite institution, but Record<InstitutionType, ...> forced an explicit entry)."
