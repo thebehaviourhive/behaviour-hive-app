@@ -14,7 +14,19 @@
 // CHILD threads is a separate, deliberately deferred piece (see
 // CLAUDE.md). MessageRole doesn't distinguish the two; can_view_message()
 // and send_message() do, server-side, via messages.institution_id.
-export type MessageRole = "parent" | "class_teacher" | "clinician" | "principal" | "sna";
+//
+// "centre_manager"/"care_staff" added -- PRD 11 Stage 5 (migration
+// 0302), a respite worker's own child-scoped Handover category, gated
+// activation-scoped on both send and read -- see this migration's own
+// header for the full reasoning.
+export type MessageRole =
+  | "parent"
+  | "class_teacher"
+  | "clinician"
+  | "principal"
+  | "sna"
+  | "centre_manager"
+  | "care_staff";
 
 export type MessageStatus = "open" | "acknowledged" | "in_discussion" | "closed";
 

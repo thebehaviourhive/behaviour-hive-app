@@ -1,13 +1,16 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { useInstitutionMembership } from "@/hooks/useInstitutionMembership";
+import { useRespiteActiveChildren } from "@/hooks/useRespiteActiveChildren";
 import { createClient } from "@/lib/supabase/client";
 import { WorkQueueRow } from "@/components/shared/WorkQueueRow";
 import { ReviewStaffJoinSheet } from "@/components/principal/ReviewStaffJoinSheet";
 import { PendingApprovalState } from "@/components/clinic/PendingApprovalState";
 import { MembershipMissingState } from "@/components/clinic/MembershipMissingState";
+import { OnCallCard } from "@/components/respite/OnCallCard";
 import { BrandMark } from "@/components/ui/BrandMark";
 import type { InstitutionType } from "@/lib/institutionType";
 import type { VocabularyOverrides } from "@/lib/vocabulary";
@@ -110,6 +113,8 @@ export default function CentreManagerDashboardPage() {
           </h1>
         </div>
 
+        <OnCallCard institutionId={institutionId} canSet={true} />
+
         {pendingStaff.length > 0 ? (
           <section className="mb-6">
             <h2 className="mb-2 font-accent text-eyebrow font-bold uppercase tracking-wide text-brand-neutral-black/50">
@@ -128,10 +133,12 @@ export default function CentreManagerDashboardPage() {
             </div>
           </section>
         ) : (
-          <div className="rounded-2xl border border-black/5 bg-white p-4 text-center shadow-sm">
+          <div className="mb-6 rounded-2xl border border-black/5 bg-white p-4 text-center shadow-sm">
             <p className="text-sm text-black/60">Nothing needs your attention right now.</p>
           </div>
         )}
+
+        <ActiveChildrenSection institutionId={institutionId} />
       </div>
 
       {reviewTarget && institutionId && (
@@ -148,5 +155,39 @@ export default function CentreManagerDashboardPage() {
         />
       )}
     </main>
+  );
+}
+
+// get_my_centre_active_children()'s own centre_manager branch -- every
+// child with an ACTIVE PLACEMENT, activated or not, matching the
+// manager's own placement-scoped reach everywhere else in this PRD.
+function ActiveChildrenSection({ institutionId }: { institutionId: string | null }) {
+  const { children, isLoading } = useRespiteActiveChildren(institutionId);
+
+  if (isLoading) return null;
+
+  return (
+    <section>
+      <h2 className="mb-2 font-accent text-eyebrow font-bold uppercase tracking-wide text-brand-neutral-black/50">
+        Current clients
+      </h2>
+      {children.length === 0 ? (
+        <div className="rounded-2xl border border-black/5 bg-white p-4 text-center shadow-sm">
+          <p className="text-sm text-black/60">No children currently placed at your centre.</p>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-2">
+          {children.map((child) => (
+            <Link
+              key={child.passportId}
+              href={`/centre/passport/${child.passportId}`}
+              className="block rounded-2xl border border-black/5 bg-white p-4 shadow-sm"
+            >
+              <p className="font-semibold text-brand-neutral-black">{child.childName ?? "This child"}</p>
+            </Link>
+          ))}
+        </div>
+      )}
+    </section>
   );
 }
