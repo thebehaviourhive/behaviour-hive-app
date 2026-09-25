@@ -159,7 +159,14 @@ function LinkExistingPassportForm({
     setIsCommitting(true);
     setCommitError(null);
     const supabase = createClient();
-    const { data: passportId, error: redeemErr } = await supabase.rpc("redeem_institution_link_code", {
+    // redeem_institution_link_code() now returns table (passport_id)
+    // -- matching peek_institution_link_code()'s own zero-rows-means-
+    // not-found shape three lines above -- so a wrong/already-gone
+    // code succeeds with an empty result rather than throwing. Checked
+    // explicitly, same as handlePeek()'s own not-found branch: a caller
+    // that only checked `error` here would silently treat a failed
+    // redemption as success once the RPC stopped raising for it.
+    const { data, error: redeemErr } = await supabase.rpc("redeem_institution_link_code", {
       p_institution_id: institutionId,
       p_code: code.trim(),
     });
@@ -169,7 +176,12 @@ function LinkExistingPassportForm({
       setCommitError(redeemErr.message);
       return;
     }
-    router.push(`/principal/passports/${passportId}`);
+    const rows = (data ?? []) as { passport_id: string }[];
+    if (rows.length === 0) {
+      setCommitError("We couldn't find a record with that code. Please check with the family and try again.");
+      return;
+    }
+    router.push(`/principal/passports/${rows[0].passport_id}`);
   }
 
   if (peeked) {
