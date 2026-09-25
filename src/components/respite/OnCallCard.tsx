@@ -17,7 +17,20 @@ function formatUntil(iso: string): { text: string; isStale: boolean } {
   return { text: `until ${time} ${day}`, isStale };
 }
 
-export function OnCallCard({ institutionId, canSet }: { institutionId: string | null; canSet: boolean }) {
+export function OnCallCard({
+  institutionId,
+  canSet,
+  showHeading = true,
+}: {
+  institutionId: string | null;
+  canSet: boolean;
+  // Respite UI Stage 2a -- the dashboard's own "Who is On" block wraps
+  // this card with its own section heading (matching the other three
+  // blocks), which would otherwise duplicate this card's built-in "On
+  // call" heading. Settings keeps the default (true) -- it has no
+  // section heading of its own for this card to sit under.
+  showHeading?: boolean;
+}) {
   const { current, isLoading, error, setOnCall } = useRespiteOnCall(institutionId);
   const [isEditing, setIsEditing] = useState(false);
   const [name, setName] = useState("");
@@ -43,9 +56,11 @@ export function OnCallCard({ institutionId, canSet }: { institutionId: string | 
 
   return (
     <div className="mb-4 rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
-      <h2 className="mb-2 font-accent text-eyebrow font-bold uppercase tracking-wide text-brand-neutral-black/50">
-        On call
-      </h2>
+      {showHeading && (
+        <h2 className="mb-2 font-accent text-eyebrow font-bold uppercase tracking-wide text-brand-neutral-black/50">
+          On call
+        </h2>
+      )}
 
       {current ? (
         (() => {

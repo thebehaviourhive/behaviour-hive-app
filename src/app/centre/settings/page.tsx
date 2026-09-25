@@ -9,6 +9,7 @@ import { PendingApprovalState } from "@/components/clinic/PendingApprovalState";
 import { MembershipMissingState } from "@/components/clinic/MembershipMissingState";
 import { CentreBottomNav } from "@/components/respite/CentreBottomNav";
 import { CentrePageContent } from "@/components/respite/CentrePageContent";
+import { OnCallCard } from "@/components/respite/OnCallCard";
 
 // Outstanding-task snoozing, 25 Sept 2026 -- the centre's own first
 // settings screen, named directly in the brief ("the Centre screen
@@ -19,6 +20,12 @@ import { CentrePageContent } from "@/components/respite/CentrePageContent";
 // join this page later; this is its real home now rather than folding
 // a settings concept into /centre/dashboard or /centre/staff, neither
 // of which is about configuration.
+//
+// Respite UI Stage 2a -- "Set on-call" moved here from the dashboard,
+// per the brief's own instruction: the dashboard shows who is on call
+// (read-only, WhoIsOnSection), Centre/Settings is where you change it.
+// OnCallCard is the identical component, canSet=true here is the only
+// difference from the dashboard's own read-only use of it.
 export default function CentreSettingsPage() {
   const { user, isReady } = useRequireRole("centre_manager");
   const membership = useInstitutionMembership(user?.id, "centre_manager");
@@ -64,6 +71,13 @@ export default function CentreSettingsPage() {
         <CentrePageContent>
           <h1 className="mb-1 font-heading text-2xl font-semibold text-brand-neutral-black">Settings</h1>
           {institutionName && <p className="mb-4 text-sm text-black/60">{institutionName}</p>}
+
+          <section className="mb-8">
+            <h2 className="mb-2 font-accent text-eyebrow font-bold uppercase tracking-wide text-brand-neutral-black/50">
+              On Call
+            </h2>
+            <OnCallCard institutionId={institutionId} canSet={true} showHeading={false} />
+          </section>
 
           <section>
             <h2 className="mb-2 font-accent text-eyebrow font-bold uppercase tracking-wide text-brand-neutral-black/50">
