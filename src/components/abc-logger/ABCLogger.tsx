@@ -53,6 +53,12 @@ interface ABCLoggerProps {
   // fresh prefill, and repurposing it would show a "Resume/Discard"
   // banner instead of silently prefilling.
   initialPrefill?: Partial<Pick<ABCDraft, "behaviours">>;
+  // care_staff only -- 0297's own abc_logs_care_staff_requires_stay CHECK
+  // constraint requires a non-null stay_id on every care_staff-authored
+  // row, tied to a respite_stays window that's genuinely current right
+  // now. Every other role passes null here and abc_logs.stay_id stays
+  // null, exactly as it always has.
+  stayId?: string;
 }
 
 // Must derive from local date components, not toISOString() (always UTC) --
@@ -121,6 +127,7 @@ export function ABCLogger({
   onDismiss,
   onOfferMessage,
   initialPrefill,
+  stayId,
 }: ABCLoggerProps) {
   const config = ABC_ROLE_CONFIG[role];
   const { institutionType, overrides: vocabularyOverrides } = usePassportInstitutionVocabulary(passportId);
@@ -324,6 +331,7 @@ export function ABCLogger({
         passport_id: passportId,
         logged_by: user.id,
         logged_by_role: role,
+        stay_id: stayId ?? null,
         incident_date: draft.incidentDate,
         incident_time: draft.incidentTime,
         duration_minutes: draft.durationMinutes ? Number(draft.durationMinutes) : null,

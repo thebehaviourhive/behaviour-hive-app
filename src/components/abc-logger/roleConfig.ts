@@ -17,7 +17,20 @@
 // <RoleLabel> instead, once this file's own ABC_ROLE_DISPLAY_LABEL was
 // found to be one of nine independent copies of the same map -- deleted
 // from here, not left importable alongside the shared one.
-export type ABCLoggerRole = "parent" | "class_teacher" | "clinician" | "sna" | "principal" | "clinical_lead";
+// "care_staff" added -- PRD 11 Stage 5 reachability pass. A care worker
+// is the PRIMARY author of this data during a stay (0297's own INSERT
+// policy: stay-scoped, requiring a genuinely current respite_stays
+// window, not just an open activation). Omitting this from the union
+// meant <ABCLogger role="care_staff" /> would not even typecheck --
+// found during the respite reachability audit, not by review.
+export type ABCLoggerRole =
+  | "parent"
+  | "class_teacher"
+  | "clinician"
+  | "sna"
+  | "principal"
+  | "clinical_lead"
+  | "care_staff";
 
 // Vocabulary refresh (2026-08): every chip step's "Other" option is now
 // literally labelled "Other (please describe)" rather than a bare
@@ -153,6 +166,14 @@ export const ABC_ROLE_CONFIG: Record<ABCLoggerRole, ABCRoleConfig> = {
   // Live since 0277, same reasoning as principal above -- a clinical
   // lead is the same kind of practitioner.
   clinical_lead: {
+    intensityLabel: "Intensity Level",
+    antecedent: UNIFIED_ANTECEDENT,
+    behaviour: UNIFIED_BEHAVIOUR,
+    consequence: UNIFIED_CONSEQUENCE,
+  },
+  // care_staff reuses the class_teacher/sna config verbatim -- same
+  // "extend, don't fork" reasoning already applied to sna above.
+  care_staff: {
     intensityLabel: "Intensity Level",
     antecedent: UNIFIED_ANTECEDENT,
     behaviour: UNIFIED_BEHAVIOUR,

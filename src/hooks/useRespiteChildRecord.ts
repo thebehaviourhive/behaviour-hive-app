@@ -46,8 +46,21 @@ export interface RespiteChildRecordData {
   calmCards: { id: string; title: string; steps: string[]; door_type: "prevention" | "deescalation" }[];
   crisisPlan: { id: string; name: string; body: string | null; plan_date: string } | null;
   currentStayId: string | null;
+  // True only when currentStayId satisfies starts_at <= now <= ends_at
+  // -- distinct from currentStayId itself, which falls back to the
+  // most recently STARTED stay (upcoming or completed) so Check-ins/
+  // Since-Last-Time always have something to anchor on. care_staff's
+  // own abc_logs INSERT policy (0297) requires a genuinely time-current
+  // stay window, not just "the latest one" -- gating the Log ABC Entry
+  // trigger on currentStayId alone would show the button and then let
+  // the insert fail with a bare RLS violation. Tier 3 item 4.
+  currentStayIsLive: boolean;
   priorStayEndsAt: string | null;
   sectionsChangedSinceLastStay: boolean;
+  // Resolved for the manager's own StaysSection (Tier 1, items 2/3) --
+  // get_respite_stays_for_placement() takes an episode id, not a
+  // passport id, and nothing else on this screen needed one until now.
+  episodeId: string | null;
 }
 
 const EMPTY: RespiteChildRecordData = {
@@ -61,8 +74,10 @@ const EMPTY: RespiteChildRecordData = {
   calmCards: [],
   crisisPlan: null,
   currentStayId: null,
+  currentStayIsLive: false,
   priorStayEndsAt: null,
   sectionsChangedSinceLastStay: false,
+  episodeId: null,
 };
 
 export function useRespiteChildRecord(passportId: string | null, institutionId: string | null) {
@@ -78,7 +93,7 @@ export function useRespiteChildRecord(passportId: string | null, institutionId: 
     setLoadError(null);
     const supabase = createClient();
 
-    const [summary, sectionB, sectionC, sectionD, sectionE, bsp, stays] = await Promise.all([
+    const [summary, sectionB, sectionC, sectionD, sectionE, bsp, stays, episode] = await Promise.all([
       supabase.rpc("get_respite_child_summary", { p_passport_id: passportId }),
       supabase
         .from("passport_section_b")
@@ -107,6 +122,13 @@ export function useRespiteChildRecord(passportId: string | null, institutionId: 
         .eq("passport_id", passportId)
         .eq("institution_id", institutionId)
         .order("starts_at", { ascending: false }),
+      supabase
+        .from("episodes_of_care")
+        .select("id")
+        .eq("passport_id", passportId)
+        .eq("institution_id", institutionId)
+        .is("ended_at", null)
+        .maybeSingle(),
     ]);
 
     if (summary.error) {
@@ -148,10 +170,10 @@ export function useRespiteChildRecord(passportId: string | null, institutionId: 
 
     const stayRows = stays.data ?? [];
     const now = Date.now();
-    const currentStay =
-      stayRows.find((s) => new Date(s.starts_at).getTime() <= now && now <= new Date(s.ends_at).getTime()) ??
-      stayRows[0] ??
-      null;
+    const liveStay = stayRows.find(
+      (s) => new Date(s.starts_at).getTime() <= now && now <= new Date(s.ends_at).getTime()
+    );
+    const currentStay = liveStay ?? stayRows[0] ?? null;
     const priorStay = stayRows
       .filter((s) => s.id !== currentStay?.id && new Date(s.ends_at).getTime() < now)
       .sort((a, b) => new Date(b.ends_at).getTime() - new Date(a.ends_at).getTime())[0] ?? null;
@@ -174,8 +196,10 @@ export function useRespiteChildRecord(passportId: string | null, institutionId: 
       calmCards,
       crisisPlan: plan ?? null,
       currentStayId: currentStay?.id ?? null,
+      currentStayIsLive: Boolean(liveStay),
       priorStayEndsAt: priorStay?.ends_at ?? null,
       sectionsChangedSinceLastStay,
+      episodeId: episode.data?.id ?? null,
     });
     setIsLoading(false);
   }, [passportId, institutionId]);

@@ -8,6 +8,9 @@ import { useMessageThread } from "@/hooks/useMessageThread";
 import { useMessageCategories } from "@/hooks/useMessageCategories";
 import { useRespiteChildRecord } from "@/hooks/useRespiteChildRecord";
 import { useRespiteCheckins } from "@/hooks/useRespiteCheckins";
+import { useAbcLogs } from "@/hooks/useAbcLogs";
+import { ABCLogger } from "@/components/abc-logger/ABCLogger";
+import { StaysSection } from "@/components/respite/StaysSection";
 import type { MessageRole } from "@/types/messages";
 
 function calculateAge(dateOfBirth: string | null): number | null {
@@ -71,9 +74,11 @@ export function RespiteChildRecord({
   );
   const thread = useMessageThread(passportId);
   const { categories } = useMessageCategories(viewerRole as MessageRole, "child");
+  const { logs: abcLogs, isLoading: isAbcLoading, refresh: refreshAbcLogs } = useAbcLogs(passportId);
 
   const [isCrisisPlanOpen, setIsCrisisPlanOpen] = useState(false);
   const [isComposeOpen, setIsComposeOpen] = useState(false);
+  const [isAbcLoggerOpen, setIsAbcLoggerOpen] = useState(false);
 
   const handoverCategory = categories.find((c) => c.label === "Handover") ?? null;
   const handoverMessages = useMemo(
@@ -118,6 +123,8 @@ export function RespiteChildRecord({
           {primaryCommunication ? ` -- communicates via ${primaryCommunication}` : ""}
         </p>
       </div>
+
+      {viewerRole === "centre_manager" && data.episodeId && <StaysSection episodeId={data.episodeId} />}
 
       {data.currentStayId && (
         <StepSection title="Check-ins">
@@ -255,6 +262,57 @@ export function RespiteChildRecord({
           <p className="text-sm text-black/40">No prior stay at this centre to compare against.</p>
         )}
       </StepSection>
+
+      <StepSection title="ABC Logs">
+        {viewerRole === "care_staff" && (
+          <button
+            type="button"
+            onClick={() => setIsAbcLoggerOpen(true)}
+            disabled={!data.currentStayIsLive}
+            className="mb-3 w-full rounded-full bg-brand-golden-brown px-4 py-2 text-sm font-semibold text-white disabled:bg-black/10 disabled:text-black/40"
+          >
+            {data.currentStayIsLive ? "+ Log ABC Entry" : "No stay currently in progress"}
+          </button>
+        )}
+        {isAbcLoading ? (
+          <p className="text-sm text-black/40">Loading…</p>
+        ) : abcLogs.length === 0 ? (
+          <p className="text-sm text-black/40">No ABC entries recorded.</p>
+        ) : (
+          <ul className="flex flex-col gap-2">
+            {abcLogs.slice(0, 10).map((log) => (
+              <li key={log.id} className="rounded-lg bg-brand-off-white/60 p-3 text-sm">
+                <p className="text-xs font-semibold uppercase tracking-wide text-black/50">
+                  {new Date(log.incidentDate).toLocaleDateString(undefined, {
+                    weekday: "short",
+                    day: "numeric",
+                    month: "short",
+                  })}{" "}
+                  -- {log.loggedByName ?? log.loggedByRole}
+                </p>
+                <p className="mt-1 text-brand-neutral-black">
+                  {[...(log.behaviours ?? []), ...(log.behaviourOther ? [log.behaviourOther] : [])].join(", ") ||
+                    "No behaviours recorded."}
+                </p>
+              </li>
+            ))}
+          </ul>
+        )}
+      </StepSection>
+
+      {isAbcLoggerOpen && (
+        <ABCLogger
+          passportId={passportId}
+          childName={data.childName ?? "this child"}
+          role="care_staff"
+          stayId={data.currentStayId ?? undefined}
+          onComplete={() => {
+            setIsAbcLoggerOpen(false);
+            refreshAbcLogs();
+          }}
+          onDismiss={() => setIsAbcLoggerOpen(false)}
+        />
+      )}
 
       <StepSection title="Handover">
         <button

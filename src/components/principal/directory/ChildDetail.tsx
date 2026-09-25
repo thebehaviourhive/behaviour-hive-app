@@ -21,6 +21,7 @@ import { EpisodeTagsSection } from "@/components/clinic/EpisodeTagsSection";
 import { GrantManagementSection } from "@/components/clinic/GrantManagementSection";
 import { LinkedSchoolsSection } from "@/components/clinic/LinkedSchoolsSection";
 import { ClientContactInfoSection } from "@/components/clinic/ClientContactInfoSection";
+import { ClinicLinkCodeSection } from "@/components/principal/ClinicLinkCodeSection";
 import { ClientClinicalIntakeSection } from "@/components/clinic/ClientClinicalIntakeSection";
 import { PassportIdBadge } from "@/components/clinic/PassportIdBadge";
 import { PassportCompletionSection } from "@/components/passport/PassportCompletionSection";
@@ -1277,6 +1278,7 @@ export function ChildDetail({
               )}
               <ClientContactInfoSection passportId={passportId} />
               <ClientClinicalIntakeSection passportId={passportId} />
+              <ClinicLinkCodeSection passportId={passportId} />
             </>
           )}
 

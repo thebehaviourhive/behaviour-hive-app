@@ -11,6 +11,7 @@ import { ReviewStaffJoinSheet } from "@/components/principal/ReviewStaffJoinShee
 import { PendingApprovalState } from "@/components/clinic/PendingApprovalState";
 import { MembershipMissingState } from "@/components/clinic/MembershipMissingState";
 import { OnCallCard } from "@/components/respite/OnCallCard";
+import { RedeemLinkCodeSheet } from "@/components/respite/RedeemLinkCodeSheet";
 import { BrandMark } from "@/components/ui/BrandMark";
 import type { InstitutionType } from "@/lib/institutionType";
 import type { VocabularyOverrides } from "@/lib/vocabulary";
@@ -47,26 +48,41 @@ interface StaffRosterRow {
   is_pending: boolean;
 }
 
+interface AwaitingReportRow {
+  stay_id: string;
+  passport_id: string;
+  child_name: string | null;
+  ends_at: string;
+}
+
 export default function CentreManagerDashboardPage() {
   const { user, isReady } = useRequireRole("centre_manager");
   const membership = useInstitutionMembership(user?.id, "centre_manager");
   const institutionId = membership.institutionId;
   const institutionName = membership.institutionName;
   const [pendingStaff, setPendingStaff] = useState<StaffRosterRow[]>([]);
+  const [awaitingReport, setAwaitingReport] = useState<AwaitingReportRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [reviewTarget, setReviewTarget] = useState<StaffRosterRow | null>(null);
+  const [isRedeemOpen, setIsRedeemOpen] = useState(false);
 
   const load = useCallback(async () => {
     if (!institutionId) return;
     const supabase = createClient();
 
-    const { data: roster, error: rosterError } = await supabase.rpc("get_institution_staff_roster", {
-      p_institution_id: institutionId,
-      p_include_pending: true,
-    });
+    const [{ data: roster, error: rosterError }, { data: awaiting, error: awaitingError }] = await Promise.all([
+      supabase.rpc("get_institution_staff_roster", {
+        p_institution_id: institutionId,
+        p_include_pending: true,
+      }),
+      supabase.rpc("get_respite_stays_awaiting_report", { p_institution_id: institutionId }),
+    ]);
 
     if (!rosterError) {
       setPendingStaff(((roster ?? []) as StaffRosterRow[]).filter((s) => s.is_pending));
+    }
+    if (!awaitingError) {
+      setAwaitingReport((awaiting ?? []) as AwaitingReportRow[]);
     }
 
     setIsLoading(false);
@@ -115,6 +131,35 @@ export default function CentreManagerDashboardPage() {
 
         <OnCallCard institutionId={institutionId} canSet={true} />
 
+        <button
+          type="button"
+          onClick={() => setIsRedeemOpen(true)}
+          className="mb-6 w-full rounded-full bg-brand-golden-brown px-4 py-3 text-center text-sm font-semibold text-white shadow-sm"
+        >
+          + Add a client
+        </button>
+
+        {awaitingReport.length > 0 && (
+          <section className="mb-6">
+            <h2 className="mb-2 font-accent text-eyebrow font-bold uppercase tracking-wide text-brand-golden-brown">
+              Needs a report
+            </h2>
+            <div className="flex flex-col gap-3">
+              {awaitingReport.map((stay) => (
+                <WorkQueueRow
+                  key={stay.stay_id}
+                  entity={stay.child_name ?? "This child"}
+                  exception="Stay ended, no report yet"
+                  context={`Ended ${new Date(stay.ends_at).toLocaleDateString()}`}
+                  actionLabel="Write report"
+                  href={`/centre/report/${stay.stay_id}`}
+                  urgent
+                />
+              ))}
+            </div>
+          </section>
+        )}
+
         {pendingStaff.length > 0 ? (
           <section className="mb-6">
             <h2 className="mb-2 font-accent text-eyebrow font-bold uppercase tracking-wide text-brand-neutral-black/50">
@@ -133,9 +178,11 @@ export default function CentreManagerDashboardPage() {
             </div>
           </section>
         ) : (
-          <div className="mb-6 rounded-2xl border border-black/5 bg-white p-4 text-center shadow-sm">
-            <p className="text-sm text-black/60">Nothing needs your attention right now.</p>
-          </div>
+          awaitingReport.length === 0 && (
+            <div className="mb-6 rounded-2xl border border-black/5 bg-white p-4 text-center shadow-sm">
+              <p className="text-sm text-black/60">Nothing needs your attention right now.</p>
+            </div>
+          )
         )}
 
         <ActiveChildrenSection institutionId={institutionId} />
@@ -154,6 +201,15 @@ export default function CentreManagerDashboardPage() {
           overrides={overrides}
         />
       )}
+
+      {institutionId && (
+        <RedeemLinkCodeSheet
+          isOpen={isRedeemOpen}
+          onClose={() => setIsRedeemOpen(false)}
+          institutionId={institutionId}
+          institutionName={institutionName}
+        />
+      )}
     </main>
   );
 }
@@ -161,13 +217,17 @@ export default function CentreManagerDashboardPage() {
 // get_my_centre_active_children()'s own centre_manager branch -- every
 // child with an ACTIVE PLACEMENT, activated or not, matching the
 // manager's own placement-scoped reach everywhere else in this PRD.
+// Previously indistinguishable in the UI (both "placed" and "on-site"
+// rendered identically); isOnSite (useRespiteActiveChildren, resolved
+// against respite_activations directly) now shows both states plainly
+// -- Tier 1's own "fix the Current Clients list" item.
 function ActiveChildrenSection({ institutionId }: { institutionId: string | null }) {
   const { children, isLoading } = useRespiteActiveChildren(institutionId);
 
   if (isLoading) return null;
 
   return (
-    <section>
+    <section className="mb-6">
       <h2 className="mb-2 font-accent text-eyebrow font-bold uppercase tracking-wide text-brand-neutral-black/50">
         Current clients
       </h2>
@@ -181,9 +241,18 @@ function ActiveChildrenSection({ institutionId }: { institutionId: string | null
             <Link
               key={child.passportId}
               href={`/centre/passport/${child.passportId}`}
-              className="block rounded-2xl border border-black/5 bg-white p-4 shadow-sm"
+              className="flex items-center justify-between rounded-2xl border border-black/5 bg-white p-4 shadow-sm"
             >
               <p className="font-semibold text-brand-neutral-black">{child.childName ?? "This child"}</p>
+              {child.isOnSite ? (
+                <span className="shrink-0 rounded-full bg-brand-golden-brown/15 px-2.5 py-1 text-xs font-semibold text-brand-golden-brown">
+                  On-site
+                </span>
+              ) : (
+                <span className="shrink-0 rounded-full bg-black/5 px-2.5 py-1 text-xs font-semibold text-black/50">
+                  Placed
+                </span>
+              )}
             </Link>
           ))}
         </div>

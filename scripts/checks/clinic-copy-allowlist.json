@@ -59,8 +59,8 @@
     "563:\"Enrol a New Child\"": "The isClinic-false branch of an already-correct ternary (isClinic ? \"Add a New Client\" : \"Enrol a New Child\")."
   },
   "src/components/abc-logger/ABCLogger.tsx": {
-    "824:\"Select any that applied around this incident.\"": "\"Incident\" is this app's own generic ABC-log-entry terminology throughout, not the formal Incident Log record type -- used identically by parent/teacher/clinician/SNA.",
-    "834:\"Select any that applied around this incident.\"": "Same as above."
+    "832:\"Select any that applied around this incident.\"": "\"Incident\" is this app's own generic ABC-log-entry terminology throughout, not the formal Incident Log record type -- used identically by parent/teacher/clinician/SNA/care_staff. Line renumbered 824->832, PRD 11 Stage 5 reachability pass: an optional stayId prop (care_staff's own stay-scoped abc_logs.stay_id) threaded through the props interface and insert payload above this line.",
+    "842:\"Select any that applied around this incident.\"": "Same as above."
   },
   "src/components/abc-logger/ABCTimeline.tsx": {
     "162:\"We couldn't load the incident timeline. Please try again.\"": "Same generic ABC-log terminology as ABCLogger.tsx's own identical usage."
@@ -102,15 +102,15 @@
     "210:\"e.g. Retiring at the end of term\"": "Finding 1 fix -- the institutionType!=='clinic' branch of an already-correct ternary; the clinic branch reads \"e.g. Stepping back from the clinic\". Line renumbered, PRD 11 Stage 2: STAYING_ROLE_OPTIONS gained a real respite_centre: [] entry earlier in this same file (this sheet is structurally unreachable for a respite institution, but Record<InstitutionType, ...> forced an explicit entry)."
   },
   "src/components/principal/directory/ChildDetail.tsx": {
-    "317:\"Left the school\"": "END_REASON_LABEL, used only inside the institutionType !== 'clinic' branch of the Enrolment/Episode-of-Care tab.",
-    "318:\"Transferred to another school\"": "Same -- END_REASON_LABEL, school-branch only.",
-    "623:\"Failed to load this child's school incidents:\"": "console.error, fires only within the clinic-only get_institution_incidents_for_director() branch -- correctly describes the child's SCHOOL incidents as read by their clinic, cross-org content, not a leak.",
-    "624:\"Couldn't load this child's school incidents.\"": "Same -- user-facing pair of the line above, same reasoning.",
-    "700:\"Failed to load enrolment:\"": "console.error only, dev-facing variable name, never shown to a user.",
-    "1023:\"School Incidents\"": "The tab's own deliberate relabelling for institutionType === 'clinic' (tab.key === 'incidents' ? 'School Incidents' : tab.label) -- correct, not a leak.",
-    "1054:\"This child isn't on your school's roster.\"": "The institutionType-false branch of an already-correct ternary.",
-    "1713:\"No school incidents shared with this clinic yet.\"": "Deliberate clinic-specific empty state, correctly describing cross-org content.",
-    "1727:\"School incidents are visible only while this client has an active episode. Reopen the episode of care to see them again.\"": "Same -- deliberate clinic-specific copy about cross-org content."
+    "318:\"Left the school\"": "END_REASON_LABEL, used only inside the institutionType !== 'clinic' branch of the Enrolment/Episode-of-Care tab. Line renumbered +1, PRD 11 reachability pass: one new import (ClinicLinkCodeSection) added above.",
+    "319:\"Transferred to another school\"": "Same -- END_REASON_LABEL, school-branch only. Line renumbered +1, same reason.",
+    "624:\"Failed to load this child's school incidents:\"": "console.error, fires only within the clinic-only get_institution_incidents_for_director() branch -- correctly describes the child's SCHOOL incidents as read by their clinic, cross-org content, not a leak. Line renumbered +1.",
+    "625:\"Couldn't load this child's school incidents.\"": "Same -- user-facing pair of the line above, same reasoning. Line renumbered +1.",
+    "701:\"Failed to load enrolment:\"": "console.error only, dev-facing variable name, never shown to a user. Line renumbered +1.",
+    "1024:\"School Incidents\"": "The tab's own deliberate relabelling for institutionType === 'clinic' (tab.key === 'incidents' ? 'School Incidents' : tab.label) -- correct, not a leak. Line renumbered +1.",
+    "1055:\"This child isn't on your school's roster.\"": "The institutionType-false branch of an already-correct ternary. Line renumbered +1.",
+    "1715:\"No school incidents shared with this clinic yet.\"": "Deliberate clinic-specific empty state, correctly describing cross-org content. Line renumbered +2, PRD 11 reachability pass: <ClinicLinkCodeSection> added inside the clientInfo tab body above this line, in addition to the +1 import shift.",
+    "1729:\"School incidents are visible only while this client has an active episode. Reopen the episode of care to see them again.\"": "Same -- deliberate clinic-specific copy about cross-org content. Line renumbered +2, same reason."
   },
   "src/components/principal/directory/ChildrenList.tsx": {
     "263:\"Could not load the school roster.\"": "Finding 1 fix -- the isClinic-false branch of a newly-added ternary (isClinic branch reads \"Could not load the clinic roster.\").",
