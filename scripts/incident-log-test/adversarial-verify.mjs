@@ -20,7 +20,7 @@
 // stage development. Every check from V onward is independently
 // self-contained (own institution, own accounts, own cleanup) and
 // individually selectable: V, W, X, Y, Z, AA, BB, CC, DD, EE, FF, GG,
-// HH, II, JJ, KK, LL, MM, NN, OO, PP, QQ, RR, SS, TT, UU, VV, WW, XX, YY, ZZ, AAA, BBB, CCC, DDD, EEE, FFF, GGG, HHH, III, JJJ, KKK, LLL, MMM, NNN, OOO, PPP, QQQ, RRR, SSS, TTT, UUU, VVV. Selecting none of these (ONLY_CHECKS unset) is the full run --
+// HH, II, JJ, KK, LL, MM, NN, OO, PP, QQ, RR, SS, TT, UU, VV, WW, XX, YY, ZZ, AAA, BBB, CCC, DDD, EEE, FFF, GGG, HHH, III, JJJ, KKK, LLL, MMM, NNN, OOO, PPP, QQQ, RRR, SSS, TTT, UUU, VVV, WWW, XXX. Selecting none of these (ONLY_CHECKS unset) is the full run --
 // the one that gates deploys -- and its behavior is unchanged: same
 // checks, same order, same pass/fail counts. The only observable
 // difference is where the top-level fixture's own cleanup log line
@@ -14880,6 +14880,112 @@ async function main() {
       await admin.from("clinicians").delete().eq("user_id", id);
       await admin.auth.admin.deleteUser(id);
     }
+  }
+
+  console.log(`\n== CHECK XXX: THE RATE LIMIT ITSELF, FOR ALL THREE CODE-LOOKUP FUNCTIONS -- not that a failed attempt is recorded, that recording it actually caps the caller at 10 within the hour. Follow-up to the item-2 sweep and migration 0305's own fix: lookup_clinician_by_code() and redeem_institution_link_code() both inserted into code_lookup_attempts immediately before raising on a not-found code, so the insert was rolled back by the very exception that followed it, every time -- the rate limit this table exists to feed was permanently inert for both functions since the day each shipped, the same bug 0116 already fixed once for redeem_passport_claim_code(). 0305 changes the not-found branch from raise to a plain return, matching 0116's own pattern exactly -- but a fix that makes the insert land is not proof the LIMIT engages, only that the insert survives. This check proves both halves, separately, for all three functions: ten wrong-code attempts each succeed with zero rows (not an exception) and each genuinely adds a row; the eleventh is refused with the real rate-limit exception, not a not-found result; and the eleventh's own refusal does NOT add an eleventh row -- confirmed by reading all three functions directly, the rate-limit check runs BEFORE the lookup/insert in every one of them. redeem_passport_claim_code() is included here too, not because 0305 touches it, but because Daniel's own instruction was explicit: do not assume 0116's fix survived without a real test, given this is the third confirmed instance of a migration silently dropping an established fix by rebuilding from an old version. ==`);
+  if (shouldRun("XXX")) {
+    const rand = () => Math.floor(Math.random() * 100000);
+
+    const { data: schoolXXX } = await admin.from("institutions").insert({
+      name: "XXX Rate Limit School", institution_code: "XXXRATE" + rand(), status: "verified", type: "school",
+    }).select("id").single();
+
+    const principalXXXId = await createUser("xxx.principal@thebehaviourhive.com", "XXX Principal", "principal");
+    await admin.from("institution_staff").insert({
+      institution_id: schoolXXX.id, user_id: principalXXXId, role: "principal",
+      approved_at: new Date().toISOString(), approval_source: "bootstrap",
+    });
+
+    const principalXXX = await signedInClient("xxx.principal@thebehaviourhive.com");
+
+    // -------------------------------------------------------------------
+    // A shared shape for all three functions: 10 wrong-code attempts,
+    // each a real call, each asserted to succeed with zero rows (the
+    // fix -- proving the not-found branch no longer raises) and each
+    // asserted to have actually landed a row in code_lookup_attempts
+    // (the point -- proving the insert two lines earlier in the same
+    // branch survives instead of being rolled back). Then an 11th
+    // attempt, asserted to be REFUSED with the real rate-limit
+    // exception rather than a plain not-found result, and asserted NOT
+    // to have added an 11th row -- the rate-limit check runs before the
+    // lookup/insert in all three functions, confirmed by reading each
+    // one's live body directly before writing this, not assumed.
+    // -------------------------------------------------------------------
+    async function proveRateLimitEngages({ label, lookupType, wrongCode, callFn, limitMessage }) {
+      const { data: beforeRows } = await admin
+        .from("code_lookup_attempts").select("id")
+        .eq("user_id", principalXXXId).eq("lookup_type", lookupType);
+      record(`${label}0 baseline is zero before this run`, (beforeRows?.length ?? -1) === 0, `rows=${beforeRows?.length}`);
+
+      for (let i = 1; i <= 10; i++) {
+        const { data, error } = await callFn(wrongCode);
+        record(
+          `${label}${i} attempt ${i}/10: succeeds with zero rows, not an exception`,
+          !error && (data?.length ?? 0) === 0,
+          error ? error.message : `rows=${data?.length}`
+        );
+      }
+
+      const { data: afterTenRows } = await admin
+        .from("code_lookup_attempts").select("id")
+        .eq("user_id", principalXXXId).eq("lookup_type", lookupType);
+      record(
+        `${label}11 THE INSERT SURVIVES: exactly 10 rows recorded after 10 failed attempts, not 0`,
+        afterTenRows?.length === 10,
+        `rows=${afterTenRows?.length}`
+      );
+
+      const { data: eleventhData, error: eleventhErr } = await callFn(wrongCode);
+      record(
+        `${label}12 THE LIMIT ENGAGES: the 11th attempt is refused with the real rate-limit exception, not a not-found result`,
+        Boolean(eleventhErr) && eleventhErr.message === limitMessage,
+        eleventhErr ? eleventhErr.message : JSON.stringify(eleventhData)
+      );
+
+      const { data: afterElevenRows } = await admin
+        .from("code_lookup_attempts").select("id")
+        .eq("user_id", principalXXXId).eq("lookup_type", lookupType);
+      record(
+        `${label}13 the refused 11th attempt does NOT add an 11th row -- the limit check runs before the lookup/insert in this function`,
+        afterElevenRows?.length === 10,
+        `rows=${afterElevenRows?.length}`
+      );
+    }
+
+    await proveRateLimitEngages({
+      label: "XXX-clinician-",
+      lookupType: "clinician",
+      wrongCode: "XXXNOTREAL" + rand(),
+      callFn: (code) => principalXXX.rpc("lookup_clinician_by_code", { code }),
+      limitMessage: "Too many failed lookups. Please try again later.",
+    });
+
+    await proveRateLimitEngages({
+      label: "XXX-link-",
+      lookupType: "institution_link",
+      wrongCode: "XXXNOTREAL" + rand(),
+      callFn: (code) => principalXXX.rpc("redeem_institution_link_code", { p_institution_id: schoolXXX.id, p_code: code }),
+      limitMessage: "Too many failed attempts. Please try again later.",
+    });
+
+    await proveRateLimitEngages({
+      label: "XXX-claim-",
+      lookupType: "claim",
+      wrongCode: "XXXNOTREAL" + rand(),
+      callFn: (code) => principalXXX.rpc("redeem_passport_claim_code", { p_code: code }),
+      limitMessage: "Too many failed attempts. Please try again later.",
+    });
+
+    console.log("XXX summary complete.");
+
+    // -------------------------------------------------------------------
+    // Teardown.
+    // -------------------------------------------------------------------
+    await admin.from("code_lookup_attempts").delete().eq("user_id", principalXXXId);
+    await admin.from("institution_staff").delete().eq("institution_id", schoolXXX.id);
+    await admin.from("institutions").delete().eq("id", schoolXXX.id);
+    await admin.from("clinicians").delete().eq("user_id", principalXXXId);
+    await admin.auth.admin.deleteUser(principalXXXId);
   }
 
   console.log(`\n== Summary ==`);
