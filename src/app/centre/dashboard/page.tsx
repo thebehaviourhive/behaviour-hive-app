@@ -12,33 +12,35 @@ import { PendingApprovalState } from "@/components/clinic/PendingApprovalState";
 import { MembershipMissingState } from "@/components/clinic/MembershipMissingState";
 import { OnCallCard } from "@/components/respite/OnCallCard";
 import { RedeemLinkCodeSheet } from "@/components/respite/RedeemLinkCodeSheet";
+import { OnboardRespiteClientSheet } from "@/components/respite/OnboardRespiteClientSheet";
+import { AddClientChoiceSheet } from "@/components/respite/AddClientChoiceSheet";
+import { CentreBottomNav } from "@/components/respite/CentreBottomNav";
 import { BrandMark } from "@/components/ui/BrandMark";
+import { CheckIcon } from "@/components/ui/icons";
 import type { InstitutionType } from "@/lib/institutionType";
 import type { VocabularyOverrides } from "@/lib/vocabulary";
 
-// PRD 11 Stage 2, item 7: "/centre as a minimal route tree -- a
-// manager signs in and lands somewhere real, even if it is only an
-// empty dashboard." Deliberately NOT the fuller /clinical-lead or
-// /clinic-admin dashboards (client lists, scoped records) -- there is
-// no placement, no stay, no access model yet (all Stage 3+). This is
-// the honest equivalent of what those two roles landed on the day
-// their own consent screens shipped, before their real dashboards
-// existed: a real screen, not a redirect loop, showing exactly what
-// exists today and nothing invented to look fuller than it is.
-//
-// The one real, working thing this stage gives a centre manager:
-// approving the SECOND manager (and any care_staff) who joins after
-// them -- Daniel's own explicit verification case ("a second manager
-// joins the same centre and is accepted"). Built as a genuine review
-// action here rather than proven only at the RPC layer, matching this
-// whole PRD's own standing lesson: a mechanism unreachable through a
-// real screen is unproven, whatever the database says.
+// REBUILT, 25 Sept 2026 -- the original PRD 11 reachability version
+// (own header comment, kept below in spirit) was deliberately minimal:
+// "a manager signs in and lands somewhere real, even if it is only an
+// empty dashboard." That was correct FOR ITS STAGE. It stopped being
+// correct the moment a real capability inventory found a centre_manager
+// is the same authority tier as a principal or a clinical director --
+// verified at the database (onboard/reopen/discharge a placement, the
+// full staff roster) with no surface a human could reach, the identical
+// shape CLAUDE.md's own standing rule already names for PRD 10. This
+// pass mirrors PrincipalDashboard/ClinicDirectorDashboard's own
+// structure directly: a real nav shell (CentreSidebar/CentreBottomNav,
+// centreNavTabs.ts), one "Outstanding Work" section (a respite centre's
+// own bucket set has no genuine urgent/routine split the way a school's
+// does -- matching ClinicDirectorDashboard's single-tier shape, not the
+// school dashboard's two-tier one), and the same "All clear." empty
+// state both existing dashboards use -- the old "Nothing needs your
+// attention right now." copy was already flagged as superseded.
 //
 // get_institution_staff_roster() and ReviewStaffJoinSheet are both
-// reused verbatim from the principal dashboard's own identical bucket
-// (src/app/principal/dashboard/page.tsx) -- both were already role-
-// and (once fixed, this same stage) institutionType-agnostic; nothing
-// here re-derives the pattern.
+// reused verbatim from the principal dashboard's own identical bucket,
+// unchanged from the original build.
 interface StaffRosterRow {
   id: string;
   user_id: string;
@@ -65,6 +67,8 @@ export default function CentreManagerDashboardPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [reviewTarget, setReviewTarget] = useState<StaffRosterRow | null>(null);
   const [isRedeemOpen, setIsRedeemOpen] = useState(false);
+  const [isOnboardOpen, setIsOnboardOpen] = useState(false);
+  const [isAddChoiceOpen, setIsAddChoiceOpen] = useState(false);
 
   const load = useCallback(async () => {
     if (!institutionId) return;
@@ -118,75 +122,72 @@ export default function CentreManagerDashboardPage() {
 
   const institutionType: InstitutionType = "respite_centre";
   const overrides: VocabularyOverrides = {};
+  const outstandingCount = awaitingReport.length + pendingStaff.length;
 
   return (
-    <main className="flex min-h-full flex-1 flex-col items-center bg-brand-off-white/40 px-4 py-10">
-      <div className="w-full max-w-sm">
-        <div className="mb-6 flex flex-col items-center gap-3 text-center">
-          <BrandMark />
-          <h1 className="font-heading text-2xl font-semibold text-brand-neutral-black">
+    <>
+      <main className="flex min-h-full flex-1 flex-col items-center bg-brand-off-white/40 px-4 py-10 pb-24 lg:pb-10">
+        <div className="w-full max-w-sm">
+          <div className="mb-6 flex flex-col items-center gap-3 text-center lg:hidden">
+            <BrandMark />
+          </div>
+          <h1 className="mb-6 text-center font-heading text-2xl font-semibold text-brand-neutral-black lg:text-left">
             {institutionName ?? "Your centre"}
           </h1>
+
+          <OnCallCard institutionId={institutionId} canSet={true} />
+
+          <button
+            type="button"
+            onClick={() => setIsAddChoiceOpen(true)}
+            className="mb-6 w-full rounded-full bg-brand-golden-brown px-4 py-3 text-center text-sm font-semibold text-white shadow-sm"
+          >
+            + Add a client
+          </button>
+
+          {outstandingCount === 0 ? (
+            <div className="mb-6 flex flex-col items-center gap-1 rounded-2xl bg-white p-8 text-center shadow-sm">
+              <CheckIcon className="mb-2 h-6 w-6 text-brand-prussian-blue/40" />
+              <p className="font-heading text-h2 font-semibold text-brand-neutral-black">All clear.</p>
+              <p className="font-sans text-body text-brand-neutral-black/60">
+                There are no outstanding actions requiring your attention today.
+              </p>
+            </div>
+          ) : (
+            <section className="mb-6">
+              <h2 className="mb-2 font-accent text-eyebrow font-bold uppercase tracking-wide text-brand-neutral-black/50">
+                Outstanding Work
+              </h2>
+              <div className="flex flex-col gap-3">
+                {awaitingReport.map((stay) => (
+                  <WorkQueueRow
+                    key={stay.stay_id}
+                    entity={stay.child_name ?? "This child"}
+                    exception="Stay ended, no report yet"
+                    context={`Ended ${new Date(stay.ends_at).toLocaleDateString()}`}
+                    actionLabel="Write report"
+                    href={`/centre/report/${stay.stay_id}`}
+                    urgent
+                  />
+                ))}
+                {pendingStaff.map((member) => (
+                  <WorkQueueRow
+                    key={member.id}
+                    entity={member.full_name}
+                    exception="Waiting for approval"
+                    actionLabel="Approve"
+                    onAction={() => setReviewTarget(member)}
+                  />
+                ))}
+              </div>
+            </section>
+          )}
+
+          <ActiveChildrenSection institutionId={institutionId} />
         </div>
+      </main>
 
-        <OnCallCard institutionId={institutionId} canSet={true} />
-
-        <button
-          type="button"
-          onClick={() => setIsRedeemOpen(true)}
-          className="mb-6 w-full rounded-full bg-brand-golden-brown px-4 py-3 text-center text-sm font-semibold text-white shadow-sm"
-        >
-          + Add a client
-        </button>
-
-        {awaitingReport.length > 0 && (
-          <section className="mb-6">
-            <h2 className="mb-2 font-accent text-eyebrow font-bold uppercase tracking-wide text-brand-golden-brown">
-              Needs a report
-            </h2>
-            <div className="flex flex-col gap-3">
-              {awaitingReport.map((stay) => (
-                <WorkQueueRow
-                  key={stay.stay_id}
-                  entity={stay.child_name ?? "This child"}
-                  exception="Stay ended, no report yet"
-                  context={`Ended ${new Date(stay.ends_at).toLocaleDateString()}`}
-                  actionLabel="Write report"
-                  href={`/centre/report/${stay.stay_id}`}
-                  urgent
-                />
-              ))}
-            </div>
-          </section>
-        )}
-
-        {pendingStaff.length > 0 ? (
-          <section className="mb-6">
-            <h2 className="mb-2 font-accent text-eyebrow font-bold uppercase tracking-wide text-brand-neutral-black/50">
-              Waiting for approval
-            </h2>
-            <div className="flex flex-col gap-3">
-              {pendingStaff.map((member) => (
-                <WorkQueueRow
-                  key={member.id}
-                  entity={member.full_name}
-                  exception="Waiting for approval"
-                  actionLabel="Approve"
-                  onAction={() => setReviewTarget(member)}
-                />
-              ))}
-            </div>
-          </section>
-        ) : (
-          awaitingReport.length === 0 && (
-            <div className="mb-6 rounded-2xl border border-black/5 bg-white p-4 text-center shadow-sm">
-              <p className="text-sm text-black/60">Nothing needs your attention right now.</p>
-            </div>
-          )
-        )}
-
-        <ActiveChildrenSection institutionId={institutionId} />
-      </div>
+      <CentreBottomNav />
 
       {reviewTarget && institutionId && (
         <ReviewStaffJoinSheet
@@ -210,34 +211,65 @@ export default function CentreManagerDashboardPage() {
           institutionName={institutionName}
         />
       )}
-    </main>
+
+      {institutionId && (
+        <OnboardRespiteClientSheet
+          isOpen={isOnboardOpen}
+          onClose={() => setIsOnboardOpen(false)}
+          institutionId={institutionId}
+        />
+      )}
+
+      {isAddChoiceOpen && (
+        <AddClientChoiceSheet
+          onClose={() => setIsAddChoiceOpen(false)}
+          onPickRedeem={() => {
+            setIsAddChoiceOpen(false);
+            setIsRedeemOpen(true);
+          }}
+          onPickOnboard={() => {
+            setIsAddChoiceOpen(false);
+            setIsOnboardOpen(true);
+          }}
+        />
+      )}
+    </>
   );
 }
 
 // get_my_centre_active_children()'s own centre_manager branch -- every
 // child with an ACTIVE PLACEMENT, activated or not, matching the
 // manager's own placement-scoped reach everywhere else in this PRD.
-// Previously indistinguishable in the UI (both "placed" and "on-site"
-// rendered identically); isOnSite (useRespiteActiveChildren, resolved
-// against respite_activations directly) now shows both states plainly
-// -- Tier 1's own "fix the Current Clients list" item.
+// isOnSite (useRespiteActiveChildren, resolved against respite_
+// activations directly) shows both "placed" and "on-site" plainly.
+// Trimmed to a short preview (first 5) with a "View all" link now that
+// /centre/children exists as the full directory-equivalent page --
+// this section is a quick glance from the dashboard, not the only way
+// to reach a child's record.
 function ActiveChildrenSection({ institutionId }: { institutionId: string | null }) {
   const { children, isLoading } = useRespiteActiveChildren(institutionId);
 
   if (isLoading) return null;
 
+  const preview = children.slice(0, 5);
+
   return (
     <section className="mb-6">
-      <h2 className="mb-2 font-accent text-eyebrow font-bold uppercase tracking-wide text-brand-neutral-black/50">
-        Current clients
-      </h2>
-      {children.length === 0 ? (
+      <div className="mb-2 flex items-center justify-between">
+        <h2 className="font-accent text-eyebrow font-bold uppercase tracking-wide text-brand-neutral-black/50">
+          Current clients
+        </h2>
+        <Link href="/centre/children" className="text-xs font-semibold text-brand-prussian-blue">
+          View all
+        </Link>
+      </div>
+      {preview.length === 0 ? (
         <div className="rounded-2xl border border-black/5 bg-white p-4 text-center shadow-sm">
           <p className="text-sm text-black/60">No children currently placed at your centre.</p>
         </div>
       ) : (
         <div className="flex flex-col gap-2">
-          {children.map((child) => (
+          {preview.map((child) => (
             <Link
               key={child.passportId}
               href={`/centre/passport/${child.passportId}`}

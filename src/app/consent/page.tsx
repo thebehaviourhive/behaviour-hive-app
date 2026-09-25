@@ -144,11 +144,28 @@ export default function ConsentPage() {
       // genuinely empty) falls through to the 'school' default above
       // -- the copy that's actually right for the overwhelming
       // majority of real accounts today, and never worse than what
-      // shipped before this fix. A parent linked to BOTH a school and
-      // a clinic also keeps the school copy -- the specific harm
-      // reported was a CLINIC-ONLY parent reading false claims about a
-      // school, not a mixed-organisation parent seeing the school half
-      // of their own true situation.
+      // shipped before this fix.
+      //
+      // The centre_manager dashboard build's own ternary sweep, 25
+      // Sept 2026 -- widened from a single `types.has("clinic") &&
+      // !types.has("school")` check to a real, ordered precedence over
+      // all three institution types, because a THIRD type now exists
+      // and a two-way check for "clinic" silently left a respite-only
+      // parent on the 'school' default -- reading "your child's school
+      // creates and keeps their record" for a family with no school at
+      // all, the identical shape of false claim this fix was originally
+      // built to close for clinic. Precedence, deliberate, not
+      // alphabetical or arbitrary: school first (the majority case,
+      // and the one ParentConsentScreen's own school copy was written
+      // and signed off for -- a school link should never be
+      // overridden by a co-occurring clinic or respite link, matching
+      // this fix's own original "a mixed-organisation parent keeps the
+      // school copy" decision, restated rather than silently dropped),
+      // then clinic (the second-oldest, already-reviewed branch), then
+      // respite last -- a parent linked to a respite centre AND either
+      // of the other two keeps whichever of those more established
+      // branches already describes their situation; respite's own
+      // branch is reached only when it is the SOLE type present.
       if (userRole === "parent") {
         const { data: guardianRows } = await supabase
           .from("passport_guardians")
@@ -167,8 +184,14 @@ export default function ConsentPage() {
               .select("type")
               .in("id", institutionIds);
             const types = new Set((institutionRows ?? []).map((r) => r.type as InstitutionType));
-            if (types.has("clinic") && !types.has("school") && isMounted) {
-              setInstitutionType("clinic");
+            if (isMounted) {
+              if (types.has("school")) {
+                setInstitutionType("school");
+              } else if (types.has("clinic")) {
+                setInstitutionType("clinic");
+              } else if (types.has("respite_centre")) {
+                setInstitutionType("respite_centre");
+              }
             }
           }
         }

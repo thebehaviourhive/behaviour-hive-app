@@ -33,11 +33,21 @@ import { IMPORTANT_PEOPLE_TITLE } from "@/lib/passportCopy";
 import { PassportIncidentsSection } from "@/components/parent/PassportIncidentsSection";
 import { SharedSessionNotesSection } from "@/components/parent/SharedSessionNotesSection";
 import { InstitutionLinkCodeSection } from "@/components/parent/InstitutionLinkCodeSection";
+import type { InstitutionType } from "@/lib/institutionType";
 
 interface ApprovedInstitution {
   institutionId: string;
   institutionName: string;
-  institutionType: "school" | "clinic";
+  // The centre_manager dashboard build's own ternary sweep, 25 Sept
+  // 2026 -- this was hardcoded to "school" | "clinic" and predates
+  // respite_centre as a real institutions.type value entirely. A
+  // genuinely respite-linked parent's own connected institution would
+  // have been silently coerced to "school" by the `?? "school"`
+  // fallback below (the cast at the query site claimed the DB result
+  // could only ever be "school" | "clinic", TypeScript trusted it, and
+  // nothing ever surfaced the mismatch until this sweep). Widened to
+  // the real, shared institution-type union.
+  institutionType: InstitutionType;
   approvedAt: string | null;
 }
 
@@ -264,7 +274,7 @@ export default function PassportDashboardPage() {
 
     setApprovedInstitutions(
       (linkRows ?? []).map((row) => {
-        const institution = row.institutions as unknown as { name: string; type: "school" | "clinic" } | null;
+        const institution = row.institutions as unknown as { name: string; type: InstitutionType } | null;
         return {
           institutionId: row.institution_id,
           institutionName: institution?.name ?? "Unknown organisation",
@@ -537,6 +547,29 @@ export default function PassportDashboardPage() {
   // fetch -- a passport can link to more than one organisation, so
   // this is "is EVERY link a clinic," not a single yes/no.
   const allConnectedAreClinic = approvedInstitutions.length > 0 && approvedInstitutions.every((i) => i.institutionType === "clinic");
+  // The centre_manager dashboard build's own ternary sweep, 25 Sept
+  // 2026 -- found two DIFFERENT real bugs sharing this one flag, not
+  // one. `allConnectedAreClinic` correctly answers "is every link a
+  // clinic" for the clinic-only copy below, but four other call sites
+  // in this file were using its NEGATION as a stand-in for "is there a
+  // school" -- true only by coincidence, back when clinic and school
+  // were the only two types that could ever appear. A respite-only
+  // family (no school, no clinic) makes `!allConnectedAreClinic` true
+  // even though there is no school connection at all: it showed a
+  // phantom, school-only "Incidents" section (this file's own Tier 1
+  // item 3 already documents incidents as school-only, structurally),
+  // enabled school-only ABC role filters, and rendered "teachers"/
+  // "classroom" copy for a centre that has neither. `hasSchoolLink` is
+  // the genuine fact those four sites actually need; `allConnectedAreRespite`
+  // gives the two "who is this for" prompts their own real wording
+  // instead of a false claim about a classroom that doesn't exist.
+  const hasSchoolLink = approvedInstitutions.some((i) => i.institutionType === "school");
+  const allConnectedAreRespite = approvedInstitutions.length > 0 && approvedInstitutions.every((i) => i.institutionType === "respite_centre");
+  // Preserves the pre-respite default exactly: nothing connected yet
+  // rendered the incidents section and school role filters before this
+  // fix (a reasonable default for a brand-new, unlinked parent), and
+  // still does.
+  const showSchoolFacingIncidents = hasSchoolLink || approvedInstitutions.length === 0;
 
   const hasOkay = (summary.okaySignals?.length ?? 0) > 0;
   const hasHard = (summary.hardSignals?.length ?? 0) > 0;
@@ -669,7 +702,7 @@ export default function PassportDashboardPage() {
                   institution already has. The list itself stays exactly
                   as read-only as before. */}
               <h3 className="mb-2 text-sm font-semibold text-brand-neutral-black/70">
-                {allConnectedAreClinic ? "Connected Organisations" : "Connected Schools"}
+                {allConnectedAreClinic || allConnectedAreRespite ? "Connected Organisations" : "Connected Schools"}
               </h3>
               {institutionsError ? (
                 <InlineErrorState
@@ -839,7 +872,9 @@ export default function PassportDashboardPage() {
                   prompt={
                     allConnectedAreClinic
                       ? `Help ${summary.childName}'s clinical team recognise when they are feeling regulated, and spot the early signs when they are finding things hard.`
-                      : `Help teachers recognise when ${summary.childName} is feeling regulated, and spot the early signs when they are finding things hard.`
+                      : allConnectedAreRespite
+                        ? `Help the staff who care for ${summary.childName} during a stay recognise when they are feeling regulated, and spot the early signs when they are finding things hard.`
+                        : `Help teachers recognise when ${summary.childName} is feeling regulated, and spot the early signs when they are finding things hard.`
                   }
                   ctaLabel="Add Signals and Triggers"
                   ctaHref="/passport/section-b/1"
@@ -930,7 +965,9 @@ export default function PassportDashboardPage() {
                   prompt={
                     allConnectedAreClinic
                       ? "What sensory tools and de-escalation strategies work best? Build a quick-reference toolkit for their clinical team."
-                      : "What sensory tools and de-escalation strategies work best? Build a quick-reference toolkit for the classroom."
+                      : allConnectedAreRespite
+                        ? "What sensory tools and de-escalation strategies work best? Build a quick-reference toolkit for their care team during a stay."
+                        : "What sensory tools and de-escalation strategies work best? Build a quick-reference toolkit for the classroom."
                   }
                   ctaLabel="Add Support Strategies"
                   ctaHref="/passport/section-d/1"
@@ -1038,18 +1075,22 @@ export default function PassportDashboardPage() {
               passportId={summary.passportId}
               viewerRole="parent"
               highlightLogId={highlightAbcLogId}
-              allowSchoolRoleFilters={!allConnectedAreClinic}
+              allowSchoolRoleFilters={showSchoolFacingIncidents}
             />
           </section>
         </ErrorBoundary>
 
         {/* Tier 1 item 3 -- incidents are a school-only concept; a
-            clinic-only child (no school link at all) has none,
-            structurally, ever. Shown for a child who also attends a
-            school (allConnectedAreClinic is false whenever any
-            connected institution is a school, or none are connected
-            yet), hidden for a clinic-only child. */}
-        {!allConnectedAreClinic && (
+            clinic-only or respite-only child (no school link at all)
+            has none, structurally, ever. Shown for a child who has a
+            real school link (or none are connected yet -- the
+            original, preserved default), hidden otherwise. Was
+            `!allConnectedAreClinic`, which coincidentally meant the
+            same thing while clinic and school were the only two
+            institution types; a respite-only family broke that
+            coincidence (see hasSchoolLink's own header comment
+            above). */}
+        {showSchoolFacingIncidents && (
           <ErrorBoundary fallback={fallbackCard}>
             <PassportIncidentsSection passportId={summary.passportId} />
           </ErrorBoundary>

@@ -73,7 +73,17 @@ export function RedeemLinkCodeSheet({
     setIsCommitting(true);
     setCommitError(null);
     const supabase = createClient();
-    const { data: passportId, error: redeemErr } = await supabase.rpc("redeem_institution_link_code", {
+    // redeem_institution_link_code() returns table (passport_id), not a
+    // scalar (migration 0305) -- found live, 25 Sept 2026, building the
+    // centre_manager dashboard: this caller was missed when that fix
+    // shipped (the grep for "every real client caller" only found
+    // principal/passports/enrol/page.tsx's own handleConfirm(), which
+    // this file's own real, separate copy of the identical mistake
+    // proves was incomplete). Before this fix, `passportId` was the raw
+    // returned array, and router.push() built the literal URL
+    // `/centre/passport/[object Object]` -- confirmed live, caught by
+    // this build's own verification pass, not assumed.
+    const { data, error: redeemErr } = await supabase.rpc("redeem_institution_link_code", {
       p_institution_id: institutionId,
       p_code: code.trim(),
     });
@@ -83,9 +93,14 @@ export function RedeemLinkCodeSheet({
       setCommitError(redeemErr.message);
       return;
     }
+    const rows = (data ?? []) as { passport_id: string }[];
+    if (rows.length === 0) {
+      setCommitError("We couldn't find a record with that code. Please check with the clinic and try again.");
+      return;
+    }
     reset();
     onClose();
-    router.push(`/centre/passport/${passportId}`);
+    router.push(`/centre/passport/${rows[0].passport_id}`);
   }
 
   return (

@@ -1,0 +1,22 @@
+{
+  "copy": {
+    "src/components/consent/ParentConsentScreen.tsx": {
+      "66:\"Your child's school creates and keeps their record. You can add what you know from home, and you choose what you share.\"": "The default/else branch of a real three-way isClinic/isRespite/school split (verified by reading the live source, 25 Sept 2026, not assumed from the surrounding comment) -- only rendered when neither isClinic nor isRespite is true, i.e. for a genuine school-linked parent, matching consent/page.tsx's own school-first resolution order.",
+      "80:\"What you add - how your child slept, what works at home, what to watch for - goes to the people supporting them at school. What the school records about incidents at school is their own record, kept under their own obligations, and stays with them.\"": "Same branch as line 66 -- school-only copy, correctly guarded.",
+      "81:\"Anything you write is kept in line with your school's own retention policy.\"": "Same branch as line 66 -- school-only copy, correctly guarded.",
+      "90:\"I understand what this is, and I agree to share what I add here with my child's school and any clinician I connect.\"": "Same branch as line 66 -- school-only copy, correctly guarded."
+    }
+  },
+  "ternary": {
+    "src/components/consent/ParentConsentScreen.tsx": {
+      "51:institutionType === \"clinic\"": "One arm of a real three-way branch, verified by reading the live source: `isClinic = institutionType === \"clinic\"` and `isRespite = institutionType === \"respite_centre\"` are both declared and used together (lede/body/ticks all check isClinic, then isRespite, then fall to the school default) -- no institution type falls through unhandled. Fixed in the same session that added this check, 25 Sept 2026."
+    },
+    "src/components/messages/ComposeMessageSheet.tsx": {
+      "22:institutionType === \"clinic\"": "One arm of `institutionNoun()`, a real three-way function verified by reading the live source: returns \"clinic\" for clinic, \"centre\" for respite_centre, \"school\" for everything else (an explicit named default, not a silent fallthrough). This is the exact function written to fix the original incident this scanner exists to prevent."
+    },
+    "src/hooks/useGuardSchoolOnlyRoute.ts": {
+      "66:institutionType !== \"school\"": "A genuine fail-closed one-vs-rest gate, matching CLAUDE.md's own \"FAIL-CLOSED SWEEP, PRD 11 Stage 2\" entry for this exact file: every non-school type (clinic AND respite_centre) is deliberately blocked identically -- this is the safe form of the pattern, not the unsafe two-way one.",
+      "71:institutionType !== \"school\"": "Same gate as line 66, restated a second time in the same function (isBlocked derivation) -- identical reasoning."
+    }
+  }
+}

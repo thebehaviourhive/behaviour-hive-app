@@ -9,6 +9,21 @@ import { useMessageInstitutionVocabulary } from "@/hooks/useMessageInstitutionVo
 
 const BODY_MAX = 200;
 
+// The centre_manager dashboard build, 25 Sept 2026 -- found live,
+// through this exact sheet's real "Write a handover" flow: both call
+// sites below were a two-way `institutionType === "clinic" ? X : Y`
+// ternary, the exact shape this codebase's own standing rule warns
+// against (see CLAUDE.md's PRD 11 Stage 2 entry) -- 'school' and
+// 'respite_centre' both silently collapsed into the same "school"
+// copy. A respite centre's own Handover screen said "phone the
+// school" and "No other active staff at your school yet." One small
+// helper, three real outcomes, not two.
+function institutionNoun(institutionType: string): string {
+  if (institutionType === "clinic") return "clinic";
+  if (institutionType === "respite_centre") return "centre";
+  return "school";
+}
+
 // Shared compose sheet -- one implementation for every sending role
 // (constraint: "no duplicate implementations"). A ticket, not a chat
 // starter: recipient(s) + category are required, the body is optional
@@ -147,7 +162,7 @@ export function ComposeMessageSheet({
       {candidates.length === 0 ? (
         <p className="mt-1.5 text-sm text-brand-neutral-black/60">
           {isStaffMode
-            ? `No other active staff at your ${institutionType === "clinic" ? "clinic" : "school"} yet.`
+            ? `No other active staff at your ${institutionNoun(institutionType)} yet.`
             : `No one else is linked to ${childName}'s passport yet.`}
         </p>
       ) : (
@@ -263,12 +278,10 @@ export function ComposeMessageSheet({
         Messages are checked when people have time. For anything urgent today,{" "}
         {institutionPhone ? (
           <a href={`tel:${institutionPhone}`} className="font-semibold text-brand-prussian-blue underline underline-offset-2">
-            phone {institutionType === "clinic" ? "the clinic" : "the school"}
+            phone the {institutionNoun(institutionType)}
           </a>
-        ) : institutionType === "clinic" ? (
-          "phone the clinic"
         ) : (
-          "phone the school"
+          `phone the ${institutionNoun(institutionType)}`
         )}
         .
       </p>
