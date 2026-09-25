@@ -87,6 +87,13 @@ const parentId = await createUser(parentEmail, "parent");
 
 await admin.from("institution_staff").insert({ institution_id: clinic.id, user_id: directorId, role: "principal", approved_at: new Date().toISOString(), approval_source: "bootstrap" }).throwOnError();
 await admin.from("institution_staff").insert({ institution_id: clinic.id, user_id: clinicianId, role: "clinician", approved_at: new Date().toISOString(), approval_source: "bootstrap" }).throwOnError();
+// A real approve_staff_join() clinic-branch call would also create this
+// row (verification_status='verified', verification_route='organisation')
+// -- inserting institution_staff alone leaves is_verified_clinician()
+// false, which silently empties the "clinician" candidate arm's own
+// `authorized` gate for this account. Found live: the first run of this
+// fixture produced 6 false FAILs, all traced to this one missing row.
+await admin.from("clinicians").insert({ user_id: clinicianId, full_name: "ZZ 0303 Clinician", specialty: "behavioural_psychologist", verification_status: "verified", verification_route: "organisation" }).throwOnError();
 await admin.from("institution_staff").insert({ institution_id: centre.id, user_id: managerId, role: "centre_manager", approved_at: new Date().toISOString(), approval_source: "bootstrap" }).throwOnError();
 await admin.from("institution_staff").insert({ institution_id: centre.id, user_id: careAId, role: "care_staff", approved_at: new Date().toISOString(), approval_source: "bootstrap" }).throwOnError();
 await admin.from("institution_staff").insert({ institution_id: centre.id, user_id: careBId, role: "care_staff", approved_at: new Date().toISOString(), approval_source: "bootstrap" }).throwOnError();
