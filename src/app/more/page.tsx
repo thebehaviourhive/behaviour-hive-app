@@ -10,6 +10,8 @@ import { TeacherBottomNav } from "@/components/teacher/TeacherBottomNav";
 import { ClinicianBottomNav } from "@/components/clinician/ClinicianBottomNav";
 import { ClinicianSidebar } from "@/components/clinician/ClinicianSidebar";
 import { SnaBottomNav } from "@/components/sna/SnaBottomNav";
+import { CareSidebar } from "@/components/respite/CareSidebar";
+import { CareBottomNav } from "@/components/respite/CareBottomNav";
 import { TrendUpIcon } from "@/components/ui/icons";
 import { getChildFirstName } from "@/lib/childDisplayName";
 import { useRegions } from "@/hooks/useRegions";
@@ -104,15 +106,27 @@ export default function MorePage() {
         // dashboard, not this page's parent-shaped fallback.
         router.replace("/clinic-admin/dashboard");
         return;
-      } else if (userRole === "centre_manager" || userRole === "care_staff") {
-        // PRD 11 Stage 2 -- found live, same fallthrough family this
-        // file's own bottom-nav comment further down already names
-        // (SNA silently getting the generic parent BottomNav). Neither
-        // respite role has real /more content decided yet (Stage 3+,
-        // not this stage's), so the honest answer is the same one this
-        // branch already gives clinic_admin: their own dashboard, not
-        // this page's parent-shaped fallback.
-        router.replace(userRole === "centre_manager" ? "/centre/dashboard" : "/care/dashboard");
+      } else if (userRole === "centre_manager") {
+        // PRD 11 Stage 2's own reasoning still holds for this ONE role:
+        // centre_manager has its own real settings destination now
+        // (/centre/settings, Respite UI Stage 1) -- Log out lives there,
+        // matching principal's own pattern (a dedicated Account
+        // Administration section) rather than here.
+        //
+        // care_staff is DELIBERATELY no longer redirected away --
+        // Priority fix, 26 Sept 2026: a shared centre device left signed
+        // in as care_staff was a real safeguarding gap with no logout
+        // reachable anywhere, because care_staff has no settings
+        // destination of its own to hold one. This page is where every
+        // other role with the same shape (clinician, class_teacher, sna,
+        // parent) already keeps Log out -- care_staff falls through to
+        // it below, the same way they do, rather than a new pattern
+        // invented for one role. Every OTHER section on this page is
+        // already gated by role === "parent" / "clinician" / etc., so a
+        // care_staff caller sees none of them -- just the header and Log
+        // out, which is the honest, currently-true state of their own
+        // /more page, not a placeholder pretending to be more.
+        router.replace("/centre/dashboard");
         return;
       }
 
@@ -245,9 +259,10 @@ export default function MorePage() {
   return (
     <div className="flex min-h-full flex-1">
       {(role === "clinician" || isVerifiedClinicalPractitioner) && <ClinicianSidebar />}
+      {role === "care_staff" && <CareSidebar />}
       <div
         className={`flex min-h-full min-w-0 flex-1 flex-col bg-brand-off-white/40 pb-24 ${
-          role === "clinician" || isVerifiedClinicalPractitioner ? "lg:pl-64" : ""
+          role === "clinician" || isVerifiedClinicalPractitioner || role === "care_staff" ? "lg:pl-64" : ""
         }`}
       >
       <header className="px-4 pt-8 pb-2">
@@ -506,13 +521,17 @@ export default function MorePage() {
       {/* FIX: sna previously fell through to the generic parent
           <BottomNav /> (Home/Passport/More, none of which resolve
           correctly for an SNA) since this was an if/else chain with no
-          sna branch at all. */}
+          sna branch at all. care_staff would fall into the exact same
+          trap the moment this page stopped redirecting them away --
+          given its own branch here for the same reason. */}
       {role === "class_teacher" ? (
         <TeacherBottomNav />
       ) : role === "clinician" || isVerifiedClinicalPractitioner ? (
         <ClinicianBottomNav />
       ) : role === "sna" ? (
         <SnaBottomNav />
+      ) : role === "care_staff" ? (
+        <CareBottomNav />
       ) : (
         <BottomNav />
       )}
