@@ -42,6 +42,11 @@ export default function CentreChildrenPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [showEnded, setShowEnded] = useState(false);
+  // Baseline audit, 26 Sept 2026 -- same query/filter shape as
+  // ChildrenList.tsx's own Directory search: this file's own comment
+  // already anticipates the same scale ("two families today, thirty on
+  // the system tomorrow") principal's list was built for.
+  const [query, setQuery] = useState("");
 
   const [isAddChoiceOpen, setIsAddChoiceOpen] = useState(false);
   const [isRedeemOpen, setIsRedeemOpen] = useState(false);
@@ -82,7 +87,10 @@ export default function CentreChildrenPage() {
     return <MembershipMissingState noun="centre" />;
   }
 
-  const visible = showEnded ? episodes : episodes.filter((e) => !e.ended_at);
+  const byEndedState = showEnded ? episodes : episodes.filter((e) => !e.ended_at);
+  const visible = query.trim()
+    ? byEndedState.filter((e) => (e.child_name ?? "").toLowerCase().includes(query.trim().toLowerCase()))
+    : byEndedState;
 
   return (
     <>
@@ -107,12 +115,30 @@ export default function CentreChildrenPage() {
             {showEnded ? "Hide ended placements" : "Show ended placements"}
           </button>
 
+          {episodes.length > 0 && (
+            <input
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search by name"
+              className="mb-4 w-full rounded-xl border border-brand-off-white bg-white px-4 py-2 font-sans text-body text-brand-neutral-black placeholder:text-brand-neutral-black/40 focus:outline-none focus:ring-2 focus:ring-brand-pastel-blue"
+            />
+          )}
+
           {loadError ? (
             <InlineErrorState message={loadError} onRetry={() => load()} />
-          ) : isLoading ? null : visible.length === 0 ? (
+          ) : isLoading ? (
+            <div className="flex flex-col gap-2">
+              <div className="h-16 animate-pulse rounded-2xl bg-white" />
+              <div className="h-16 animate-pulse rounded-2xl bg-white" />
+              <div className="h-16 animate-pulse rounded-2xl bg-white" />
+            </div>
+          ) : visible.length === 0 ? (
             <div className="rounded-2xl border border-black/5 bg-white p-6 text-center shadow-sm">
               <p className="text-sm text-black/60">
-                {showEnded
+                {query.trim()
+                  ? `No ${showEnded ? "placements" : "children on placement"} match "${query}".`
+                  : showEnded
                   ? "No placements recorded yet."
                   : "No children on placement yet. Redeem a link code, or start a new record, to get started."}
               </p>

@@ -44,6 +44,7 @@ export default function CareMessagesPage() {
             groups={inbox.groups}
             isLoading={inbox.isLoading}
             loadError={inbox.loadError}
+            onRetry={inbox.refresh}
             onOpenMessage={(m) => {
               setOpenMessage(m);
               if (!m.isRead) inbox.markRead(m.messageId);

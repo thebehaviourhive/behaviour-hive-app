@@ -1,7 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { BottomSheet } from "@/components/ui/BottomSheet";
+import { InlineErrorState } from "@/components/ui/InlineErrorState";
 import { ComposeMessageSheet } from "@/components/messages/ComposeMessageSheet";
 import { MessageList } from "@/components/messages/MessageList";
 import { useMessageThread } from "@/hooks/useMessageThread";
@@ -63,13 +64,21 @@ export function RespiteChildRecord({
   institutionId,
   currentUserId,
   viewerRole,
+  onChildNameChange,
 }: {
   passportId: string;
   institutionId: string;
   currentUserId: string;
   viewerRole: "centre_manager" | "care_staff";
+  // Baseline audit, 26 Sept 2026 -- lifted up so each page's own header
+  // can show the child's name beside its back-chevron, the same shape
+  // principal/passports/[passportId]/page.tsx already uses with
+  // ChildDetail's own onChildNameChange (this component has no header
+  // of its own to put a back-chevron in -- the sticky crisis-plan bar
+  // sits where one would go).
+  onChildNameChange?: (childName: string | null) => void;
 }) {
-  const { data, isLoading, loadError } = useRespiteChildRecord(passportId, institutionId);
+  const { data, isLoading, loadError, refresh } = useRespiteChildRecord(passportId, institutionId);
   const { checkins, recordCheckin, hasMorningToday, hasEndOfDayToday, error: checkinError } = useRespiteCheckins(
     data.activeStayId
   );
@@ -87,12 +96,33 @@ export function RespiteChildRecord({
     [thread.messages]
   );
 
-  if (isLoading) return null;
+  useEffect(() => {
+    onChildNameChange?.(isLoading || loadError ? null : data.childName);
+  }, [data.childName, isLoading, loadError, onChildNameChange]);
+
+  // Baseline audit, 26 Sept 2026 -- this was `if (isLoading) return
+  // null;`, a blank flash on the single densest screen in the product
+  // (read "standing up... with a child in the room"), and a plain red
+  // paragraph with no retry on failure. Matches the shared skeleton/
+  // InlineErrorState pattern every other list/detail screen in this app
+  // uses.
+  if (isLoading) {
+    return (
+      <CentrePageContent>
+        <div className="flex flex-col gap-3 pt-2">
+          <div className="h-8 w-48 animate-pulse rounded-lg bg-white" />
+          <div className="h-24 animate-pulse rounded-2xl bg-white" />
+          <div className="h-24 animate-pulse rounded-2xl bg-white" />
+          <div className="h-24 animate-pulse rounded-2xl bg-white" />
+        </div>
+      </CentrePageContent>
+    );
+  }
   if (loadError) {
     return (
-      <div className="p-4">
-        <p className="text-sm text-red-600">{loadError}</p>
-      </div>
+      <CentrePageContent>
+        <InlineErrorState message={loadError} onRetry={() => refresh()} />
+      </CentrePageContent>
     );
   }
 

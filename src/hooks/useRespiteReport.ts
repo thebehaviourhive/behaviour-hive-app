@@ -155,5 +155,5 @@ export function useRespiteReport(stayId: string | null) {
     [stayId, refresh]
   );
 
-  return { data, isLoading, loadError, finalize, isFinalizing, finalizeError };
+  return { data, isLoading, loadError, refresh, finalize, isFinalizing, finalizeError };
 }

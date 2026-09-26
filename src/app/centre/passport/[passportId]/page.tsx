@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { useInstitutionMembership } from "@/hooks/useInstitutionMembership";
@@ -47,24 +48,34 @@ export default function CentreManagerPassportPage() {
   // remount the tree.
   const [recordKey, setRecordKey] = useState(0);
 
+  // Baseline audit, 26 Sept 2026 -- this used to ALSO run its own direct
+  // `.from("passports").select("child_name")`, which this schema's own
+  // standing rule already names as unsafe: a roster-scoped child name
+  // must resolve through a dedicated RPC, never a direct passports read
+  // (RLS-silent, not RLS-erroring). Confirmed live: this query genuinely
+  // returned no row for a real centre_manager session, so childName
+  // silently stayed null forever -- invisible before this pass because
+  // nothing rendered it prominently (only EndPlacementSheet/
+  // ReopenPlacementSheet's "this child" fallback), and surfaced the
+  // moment the new back-chevron header put it at the top of the screen.
+  // Fixed by dropping the query outright and sourcing childName from
+  // RespiteChildRecord's own onChildNameChange -- the same correctly
+  // RPC-resolved name already used elsewhere -- instead of re-deriving
+  // it a second, broken way.
   const loadEpisode = useCallback(async () => {
     if (!institutionId || !passportId) return;
     const supabase = createClient();
-    const [{ data: episodeRow }, { data: passportRow }] = await Promise.all([
-      supabase
-        .from("episodes_of_care")
-        .select("id, ended_at")
-        .eq("passport_id", passportId)
-        .eq("institution_id", institutionId)
-        .order("started_at", { ascending: false })
-        .limit(1)
-        .maybeSingle(),
-      supabase.from("passports").select("child_name").eq("id", passportId).maybeSingle(),
-    ]);
+    const { data: episodeRow } = await supabase
+      .from("episodes_of_care")
+      .select("id, ended_at")
+      .eq("passport_id", passportId)
+      .eq("institution_id", institutionId)
+      .order("started_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
     if (episodeRow) {
       setEpisode({ episodeId: episodeRow.id, endedAt: episodeRow.ended_at });
     }
-    setChildName(passportRow?.child_name ?? null);
   }, [institutionId, passportId]);
 
   useEffect(() => {
@@ -82,6 +93,22 @@ export default function CentreManagerPassportPage() {
   return (
     <>
     <main className="min-h-full bg-brand-off-white/40 px-4 py-4 pb-24 lg:pb-4">
+      {/* Baseline audit, 26 Sept 2026 -- this was the single densest
+          screen in the product with zero back-chevron matches anywhere
+          in the respite track. Same component and aria-label as
+          principal/passports/[passportId]/page.tsx's own header, back
+          to the list this route is always reached from. */}
+      <header className="flex items-center gap-3 pb-4">
+        <Link
+          href="/centre/children"
+          aria-label="Back"
+          className="flex h-8 w-8 flex-shrink-0 items-center justify-center text-2xl leading-none text-brand-prussian-blue"
+        >
+          ‹
+        </Link>
+        <h1 className="flex-1 font-heading text-xl font-bold text-brand-prussian-blue">{childName ?? "Child"}</h1>
+      </header>
+
       {episode && (
         <CentrePageContent className="mb-4">
           <div className="flex items-center justify-between gap-3 rounded-2xl border border-black/5 bg-white p-3 shadow-sm">
@@ -114,6 +141,7 @@ export default function CentreManagerPassportPage() {
         institutionId={institutionId}
         currentUserId={user.id}
         viewerRole="centre_manager"
+        onChildNameChange={setChildName}
       />
 
       {episode && (

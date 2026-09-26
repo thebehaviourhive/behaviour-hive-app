@@ -1,5 +1,6 @@
 "use client";
 
+import { InlineErrorState } from "@/components/ui/InlineErrorState";
 import type { HandoverGroup, HandoverMessage } from "@/hooks/useHandoverInbox";
 
 // Respite UI Stage 2b -- the Messages screen's own body. Grouped by
@@ -72,11 +73,13 @@ export function HandoverInboxSection({
   groups,
   isLoading,
   loadError,
+  onRetry,
   onOpenMessage,
 }: {
   groups: HandoverGroup[];
   isLoading: boolean;
   loadError: string | null;
+  onRetry: () => void;
   onOpenMessage: (message: HandoverMessage) => void;
 }) {
   if (isLoading) {
@@ -88,8 +91,10 @@ export function HandoverInboxSection({
     );
   }
 
+  // Baseline audit, 26 Sept 2026 -- was plain red text, no retry, the
+  // one outlier against every other list screen in the app.
   if (loadError) {
-    return <p className="text-sm text-red-600">{loadError}</p>;
+    return <InlineErrorState message={loadError} onRetry={onRetry} />;
   }
 
   if (groups.length === 0) {

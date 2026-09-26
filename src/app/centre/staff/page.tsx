@@ -143,7 +143,13 @@ export default function CentreStaffPage() {
 
           {loadError ? (
             <InlineErrorState message={loadError} onRetry={() => load()} />
-          ) : isLoading ? null : (
+          ) : isLoading ? (
+            <div className="flex flex-col gap-2">
+              <div className="h-16 animate-pulse rounded-2xl bg-white" />
+              <div className="h-16 animate-pulse rounded-2xl bg-white" />
+              <div className="h-16 animate-pulse rounded-2xl bg-white" />
+            </div>
+          ) : (
             <>
               {pending.length > 0 && (
                 <section className="mb-6">

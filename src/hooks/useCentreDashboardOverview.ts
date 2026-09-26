@@ -51,9 +51,17 @@ export function useCentreDashboardOverview(institutionId: string | null) {
   const [awaitingReport, setAwaitingReport] = useState<AwaitingReportRow[]>([]);
   const [pendingStaff, setPendingStaff] = useState<PendingStaffRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  // Baseline audit, 26 Sept 2026 -- none of these seven queries' own
+  // `error` was ever read; a failure just left every section holding
+  // whatever it already had (empty, on a first load), rendering
+  // identically to a genuinely quiet day. error is checked across all
+  // seven before any state is set, so a partial failure never produces
+  // a partially-updated, seemingly-consistent dashboard.
+  const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!institutionId) return;
+    setError(null);
     const supabase = createClient();
     const todayStr = new Date().toISOString().slice(0, 10);
     const windowEnd = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
@@ -95,6 +103,16 @@ export function useCentreDashboardOverview(institutionId: string | null) {
           p_include_pending: true,
         }),
       ]);
+
+    const firstError = [activeChildrenRes, activationsRes, checkinsRes, abcRes, staysRes, awaitingRes, rosterRes]
+      .map((r) => r.error)
+      .find((e) => e);
+    if (firstError) {
+      console.error("Failed to load centre dashboard overview:", firstError);
+      setError("Couldn't load your dashboard. Please try again.");
+      setIsLoading(false);
+      return;
+    }
 
     const nameByPassportId = new Map<string, string>();
     const activeChildren = (activeChildrenRes.data ?? []) as { passport_id: string; child_name: string | null }[];
@@ -166,6 +184,7 @@ export function useCentreDashboardOverview(institutionId: string | null) {
     awaitingReport,
     pendingStaff,
     isLoading,
+    error,
     refresh: load,
   };
 }

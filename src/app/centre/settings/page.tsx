@@ -13,6 +13,7 @@ import { CentrePageContent } from "@/components/respite/CentrePageContent";
 import { OnCallCard } from "@/components/respite/OnCallCard";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 import { Button } from "@/components/ui/Button";
+import { InlineErrorState } from "@/components/ui/InlineErrorState";
 
 // Outstanding-task snoozing, 25 Sept 2026 -- the centre's own first
 // settings screen, named directly in the brief ("the Centre screen
@@ -39,17 +40,28 @@ export default function CentreSettingsPage() {
   const [defaultSnoozeDays, setDefaultSnoozeDays] = useState(5);
   const [isSnoozeDaysOpen, setIsSnoozeDaysOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  // Baseline audit, 26 Sept 2026 -- this query's own `error` was never
+  // read at all; a failure left the page silently showing defaults
+  // (5-day snooze, no on-call contact) as if that were the real,
+  // fetched state.
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [isLogOutOpen, setIsLogOutOpen] = useState(false);
   const [isSigningOut, setIsSigningOut] = useState(false);
 
   const load = useCallback(async () => {
     if (!institutionId) return;
+    setLoadError(null);
     const supabase = createClient();
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("institutions")
       .select("default_snooze_days")
       .eq("id", institutionId)
       .maybeSingle();
+    if (error) {
+      setLoadError(error.message);
+      setIsLoading(false);
+      return;
+    }
     if (data?.default_snooze_days) {
       setDefaultSnoozeDays(data.default_snooze_days);
     }
@@ -58,6 +70,7 @@ export default function CentreSettingsPage() {
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
+    setIsLoading(true);
     load();
   }, [load]);
 
@@ -76,7 +89,7 @@ export default function CentreSettingsPage() {
     router.replace("/login");
   }
 
-  if (!isReady || membership.status === "checking" || isLoading) {
+  if (!isReady || membership.status === "checking") {
     return null;
   }
   if (membership.status === "pending") {
@@ -93,41 +106,65 @@ export default function CentreSettingsPage() {
           <h1 className="mb-1 font-heading text-2xl font-semibold text-brand-neutral-black">Settings</h1>
           {institutionName && <p className="mb-4 text-sm text-black/60">{institutionName}</p>}
 
-          <section className="mb-8">
-            <h2 className="mb-2 font-accent text-eyebrow font-bold uppercase tracking-wide text-brand-neutral-black/50">
-              On Call
-            </h2>
-            <OnCallCard institutionId={institutionId} canSet={true} showHeading={false} />
-          </section>
-
-          <section>
-            <h2 className="mb-2 font-accent text-eyebrow font-bold uppercase tracking-wide text-brand-neutral-black/50">
-              Outstanding Work
-            </h2>
-            <div className="flex items-center justify-between rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
-              <div>
-                <p className="font-sans text-body font-semibold text-brand-neutral-black">Default snooze length</p>
-                <p className="mt-0.5 font-sans text-eyebrow text-brand-neutral-black/50">
-                  An outstanding task snoozed with no day count picked stays hidden for {defaultSnoozeDays} day
-                  {defaultSnoozeDays === 1 ? "" : "s"}
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsSnoozeDaysOpen(true)}
-                className="flex-shrink-0 font-sans text-body font-semibold text-brand-prussian-blue"
-              >
-                Change
-              </button>
+          {/* Baseline audit, 26 Sept 2026 -- previously `if (!isReady ||
+              ... || isLoading) return null;` at the top of this
+              component, a blank flash with no skeleton, and no error
+              path at all. Restructured so the header renders
+              immediately, and this branches on load state for the two
+              data-dependent sections -- skeleton, then error with retry,
+              then the real content. */}
+          {isLoading ? (
+            <div className="flex flex-col gap-2">
+              <div className="h-[120px] animate-pulse rounded-2xl bg-white" />
+              <div className="h-[120px] animate-pulse rounded-2xl bg-white" />
             </div>
-          </section>
+          ) : loadError ? (
+            <InlineErrorState message={loadError} onRetry={() => load()} />
+          ) : (
+            <>
+              <section className="mb-8">
+                <h2 className="mb-2 font-accent text-eyebrow font-bold uppercase tracking-wide text-brand-neutral-black/50">
+                  On Call
+                </h2>
+                <OnCallCard institutionId={institutionId} canSet={true} showHeading={false} />
+              </section>
+
+              <section>
+                <h2 className="mb-2 font-accent text-eyebrow font-bold uppercase tracking-wide text-brand-neutral-black/50">
+                  Outstanding Work
+                </h2>
+                <div className="flex items-center justify-between rounded-2xl border border-black/5 bg-white p-4 shadow-sm">
+                  <div>
+                    <p className="font-sans text-body font-semibold text-brand-neutral-black">Default snooze length</p>
+                    <p className="mt-0.5 font-sans text-eyebrow text-brand-neutral-black/50">
+                      An outstanding task snoozed with no day count picked stays hidden for {defaultSnoozeDays} day
+                      {defaultSnoozeDays === 1 ? "" : "s"}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsSnoozeDaysOpen(true)}
+                    className="flex-shrink-0 font-sans text-body font-semibold text-brand-prussian-blue"
+                  >
+                    Change
+                  </button>
+                </div>
+              </section>
+            </>
+          )}
 
           {/* PRIORITY FIX, 26 Sept 2026 -- matches principal/school's own
               "Account Administration" section exactly: same heading, same
               plain white-card button shape, same confirm sheet below,
               copied rather than invented. A shared respite centre building
               has staff changing shift on the same device; nowhere in
-              /centre offered a way to log out before this. */}
+              /centre offered a way to log out before this.
+              Baseline audit, 26 Sept 2026 -- deliberately kept OUTSIDE the
+              isLoading/loadError branch above, unlike principal/school's
+              own all-or-nothing gate: a failed snooze-days fetch must
+              never also take Log out down with it. The one thing this
+              screen exists to guarantee stays reachable regardless of
+              whether anything else on it loaded. */}
           <section className="mt-16">
             <h2 className="mb-2 font-accent text-eyebrow font-bold uppercase tracking-wide text-brand-neutral-black/50">
               Account Administration

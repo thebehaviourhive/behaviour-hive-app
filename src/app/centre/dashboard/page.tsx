@@ -13,6 +13,7 @@ import { WhoIsOnSection } from "@/components/respite/WhoIsOnSection";
 import { CentreBottomNav } from "@/components/respite/CentreBottomNav";
 import { CentrePageContent } from "@/components/respite/CentrePageContent";
 import { BrandMark } from "@/components/ui/BrandMark";
+import { InlineErrorState } from "@/components/ui/InlineErrorState";
 
 // REBUILT AGAIN, Respite UI Stage 2a -- the previous version (25 Sept
 // 2026, kept in spirit below) mirrored PrincipalDashboard/
@@ -79,23 +80,27 @@ export default function CentreManagerDashboardPage() {
             {institutionName ?? "Your centre"}
           </h1>
 
-          <div className="lg:grid lg:grid-cols-2 lg:gap-x-10">
-            <div className="flex flex-col gap-8">
-              <TodaySection onSiteChildren={overview.onSiteChildren} isLoading={overview.isLoading} />
-              <ComingAndGoingSection schedule={overview.schedule} isLoading={overview.isLoading} />
+          {overview.error ? (
+            <InlineErrorState message={overview.error} onRetry={() => overview.refresh()} />
+          ) : (
+            <div className="lg:grid lg:grid-cols-2 lg:gap-x-10">
+              <div className="flex flex-col gap-8">
+                <TodaySection onSiteChildren={overview.onSiteChildren} isLoading={overview.isLoading} />
+                <ComingAndGoingSection schedule={overview.schedule} isLoading={overview.isLoading} />
+              </div>
+              <div className="mt-8 flex flex-col gap-8 lg:mt-0">
+                <NeedsDoingSection
+                  institutionId={institutionId}
+                  awaitingReport={overview.awaitingReport}
+                  pendingStaff={overview.pendingStaff}
+                  snoozes={snoozes}
+                  isLoading={overview.isLoading}
+                  onResolved={overview.refresh}
+                />
+                <WhoIsOnSection institutionId={institutionId} />
+              </div>
             </div>
-            <div className="mt-8 flex flex-col gap-8 lg:mt-0">
-              <NeedsDoingSection
-                institutionId={institutionId}
-                awaitingReport={overview.awaitingReport}
-                pendingStaff={overview.pendingStaff}
-                snoozes={snoozes}
-                isLoading={overview.isLoading}
-                onResolved={overview.refresh}
-              />
-              <WhoIsOnSection institutionId={institutionId} />
-            </div>
-          </div>
+          )}
         </CentrePageContent>
       </main>
 

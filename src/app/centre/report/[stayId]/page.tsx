@@ -1,13 +1,15 @@
 "use client";
 
 import { useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import Link from "next/link";
+import { useParams } from "next/navigation";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { useInstitutionMembership } from "@/hooks/useInstitutionMembership";
 import { useRespiteReport } from "@/hooks/useRespiteReport";
 import { useMessageThread } from "@/hooks/useMessageThread";
 import { CentrePageContent } from "@/components/respite/CentrePageContent";
 import { CentreBottomNav } from "@/components/respite/CentreBottomNav";
+import { InlineErrorState } from "@/components/ui/InlineErrorState";
 
 // TIER 2 of the reachability pass -- a report-drafting surface for
 // finalize_respite_stay_report(), which had a real, verified RPC and
@@ -32,9 +34,8 @@ export default function RespiteReportPage() {
   const stayId = params.stayId;
   const { user, isReady } = useRequireRole("centre_manager");
   const membership = useInstitutionMembership(user?.id, "centre_manager");
-  const router = useRouter();
 
-  const { data, isLoading, loadError, finalize, isFinalizing, finalizeError } = useRespiteReport(stayId);
+  const { data, isLoading, loadError, refresh, finalize, isFinalizing, finalizeError } = useRespiteReport(stayId);
   const thread = useMessageThread(data?.passportId ?? null);
   const handoverMessages = thread.messages.filter((m) => m.categoryLabel === "Handover");
 
@@ -44,12 +45,53 @@ export default function RespiteReportPage() {
   if (!isReady || membership.status !== "approved" || !user || !membership.institutionId) {
     return null;
   }
-  if (isLoading) return null;
+
+  // Baseline audit, 26 Sept 2026 -- rendered in all three branches
+  // (loading/error/success) below, not just success -- a manager who
+  // hits an error here still needs the same way back as everyone else,
+  // not just the sidebar/bottom-nav.
+  const backHeader = (
+    <header className="mb-1 flex items-center gap-3">
+      <Link
+        href="/centre/dashboard"
+        aria-label="Back"
+        className="flex h-8 w-8 flex-shrink-0 items-center justify-center text-2xl leading-none text-brand-prussian-blue"
+      >
+        ‹
+      </Link>
+    </header>
+  );
+
+  // Baseline audit, 26 Sept 2026 -- both of these were blank/plain-text
+  // with no retry, and the page had no back-chevron anywhere -- only a
+  // bottom "Back to dashboard" text link, replaced below by the same
+  // header pattern every other detail screen in the app uses.
+  if (isLoading) {
+    return (
+      <>
+        <main className="min-h-full bg-brand-off-white/40 px-4 py-4 pb-24">
+          <CentrePageContent>
+            {backHeader}
+            <div className="flex flex-col gap-3 pt-2">
+              <div className="h-8 w-48 animate-pulse rounded-lg bg-white" />
+              <div className="h-24 animate-pulse rounded-2xl bg-white" />
+              <div className="h-24 animate-pulse rounded-2xl bg-white" />
+              <div className="h-24 animate-pulse rounded-2xl bg-white" />
+            </div>
+          </CentrePageContent>
+        </main>
+        <CentreBottomNav />
+      </>
+    );
+  }
   if (loadError || !data) {
     return (
       <>
         <main className="min-h-full bg-brand-off-white/40 px-4 py-4 pb-24">
-          <p className="text-sm text-red-600">{loadError ?? "Couldn't load this stay."}</p>
+          <CentrePageContent>
+            {backHeader}
+            <InlineErrorState message={loadError ?? "Couldn't load this stay."} onRetry={() => refresh()} />
+          </CentrePageContent>
         </main>
         <CentreBottomNav />
       </>
@@ -68,9 +110,18 @@ export default function RespiteReportPage() {
     <>
     <main className="min-h-full bg-brand-off-white/40 px-4 py-4 pb-24">
       <CentrePageContent>
-        <h1 className="mb-1 font-heading text-2xl font-semibold text-brand-neutral-black">
-          Post-stay report -- {data.childName ?? "this child"}
-        </h1>
+        <header className="mb-1 flex items-center gap-3">
+          <Link
+            href="/centre/dashboard"
+            aria-label="Back"
+            className="flex h-8 w-8 flex-shrink-0 items-center justify-center text-2xl leading-none text-brand-prussian-blue"
+          >
+            ‹
+          </Link>
+          <h1 className="flex-1 font-heading text-xl font-bold text-brand-prussian-blue">
+            Post-stay report -- {data.childName ?? "this child"}
+          </h1>
+        </header>
         <p className="mb-6 text-sm text-black/60">
           {new Date(data.startsAt).toLocaleDateString()} -- {new Date(data.endsAt).toLocaleDateString()}
         </p>
@@ -202,14 +253,6 @@ export default function RespiteReportPage() {
           </>
         )}
       </section>
-
-        <button
-          type="button"
-          onClick={() => router.push("/centre/dashboard")}
-          className="mt-4 w-full text-center text-sm font-semibold text-brand-prussian-blue"
-        >
-          Back to dashboard
-        </button>
       </CentrePageContent>
     </main>
     <CentreBottomNav />

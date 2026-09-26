@@ -10,6 +10,7 @@ import { OnCallCard } from "@/components/respite/OnCallCard";
 import { CareBottomNav } from "@/components/respite/CareBottomNav";
 import { CentrePageContent } from "@/components/respite/CentrePageContent";
 import { BrandMark } from "@/components/ui/BrandMark";
+import { InlineErrorState } from "@/components/ui/InlineErrorState";
 
 // PRD 11 Stage 5, item 4: the "not built yet" placeholder is replaced
 // with a real list -- get_my_centre_active_children()'s own care_staff
@@ -28,7 +29,12 @@ import { BrandMark } from "@/components/ui/BrandMark";
 export default function CareStaffDashboardPage() {
   const { user, isReady } = useRequireRole("care_staff");
   const membership = useInstitutionMembership(user?.id, "care_staff");
-  const { children, isLoading: childrenLoading } = useRespiteActiveChildren(membership.institutionId);
+  const {
+    children,
+    isLoading: childrenLoading,
+    loadError: childrenLoadError,
+    refresh: refreshChildren,
+  } = useRespiteActiveChildren(membership.institutionId);
 
   if (!isReady || membership.status === "checking") {
     return null;
@@ -59,7 +65,14 @@ export default function CareStaffDashboardPage() {
           <h2 className="mb-2 font-accent text-eyebrow font-bold uppercase tracking-wide text-brand-neutral-black/50">
             Active for you
           </h2>
-          {childrenLoading ? null : children.length === 0 ? (
+          {childrenLoadError ? (
+            <InlineErrorState message={childrenLoadError} onRetry={() => refreshChildren()} />
+          ) : childrenLoading ? (
+            <div className="flex flex-col gap-2">
+              <div className="h-16 animate-pulse rounded-2xl bg-white" />
+              <div className="h-16 animate-pulse rounded-2xl bg-white" />
+            </div>
+          ) : children.length === 0 ? (
             <div className="rounded-2xl border border-black/5 bg-white p-4 text-center shadow-sm">
               <p className="text-sm text-black/60">
                 Nothing&apos;s been activated for you yet. A centre manager activates a child&apos;s record when
