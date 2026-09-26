@@ -2,7 +2,6 @@
 
 import { AppBottomNav, type NavTab } from "@/components/ui/AppBottomNav";
 import { useCurrentUserId } from "@/hooks/useCurrentUserId";
-import { useMessagesAwaitingActionCount } from "@/hooks/useMessagesAwaitingActionCount";
 import { useHasUnreadMessages } from "@/hooks/useHasUnreadMessages";
 import { CENTRE_NAV_TABS } from "./centreNavTabs";
 
@@ -12,14 +11,16 @@ import { CENTRE_NAV_TABS } from "./centreNavTabs";
 // CentreSidebar.tsx's own header for why). lg:hidden, matching every
 // other bottom-nav caller in this app.
 //
-// Baseline audit, 26 Sept 2026 -- Messages badge/dot added, same
-// tab-mapping shape PrincipalBottomNav already uses for its own.
+// Baseline audit, 26 Sept 2026 -- unread dot only, deliberately no
+// badgeCount -- see CentreSidebar.tsx's own header for the full
+// reasoning (the "awaiting action" count tracks acknowledged_at, which
+// nothing in this track's own UI ever sets, so the number could only
+// ever grow).
 export function CentreBottomNav() {
   const userId = useCurrentUserId();
-  const messagesAwaitingCount = useMessagesAwaitingActionCount(userId);
   const hasUnreadMessages = useHasUnreadMessages(userId);
   const tabs: NavTab[] = CENTRE_NAV_TABS.map((tab) =>
-    tab.key === "messages" ? { ...tab, badgeCount: messagesAwaitingCount, showUnreadDot: hasUnreadMessages } : tab
+    tab.key === "messages" ? { ...tab, showUnreadDot: hasUnreadMessages } : tab
   );
 
   return (

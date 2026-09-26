@@ -3,9 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { BrandMark } from "@/components/ui/BrandMark";
-import { CountBadge } from "@/components/ui/CountBadge";
 import { useCurrentUserId } from "@/hooks/useCurrentUserId";
-import { useMessagesAwaitingActionCount } from "@/hooks/useMessagesAwaitingActionCount";
 import { useHasUnreadMessages } from "@/hooks/useHasUnreadMessages";
 import { CENTRE_NAV_TABS } from "./centreNavTabs";
 
@@ -19,14 +17,32 @@ import { CENTRE_NAV_TABS } from "./centreNavTabs";
 // own header used to say didn't apply ("no staff-to-staff messaging
 // surface exists yet") was written before Respite UI Stage 2b shipped
 // get_my_handover_messages() and this same file's own Messages tab.
-// useMessagesAwaitingActionCount/useHasUnreadMessages are both already
-// fully generic (self-scoped to auth.uid(), no role check, no
-// centre-specific RPC needed) -- matching PrincipalSidebar's own usage
-// exactly, same CountBadge, same golden-brown dot, same size="small".
+//
+// DOT ONLY, deliberately NOT the numbered CountBadge principal/teacher/
+// clinician/sna carry -- Daniel's own correction, 26 Sept 2026. That
+// count (useMessagesAwaitingActionCount, get_messages_awaiting_action_
+// count()) tracks message_recipients.acknowledged_at, and nothing in
+// the respite track ever calls acknowledge_message() -- HandoverInboxSection/
+// HandoverDetailSheet only ever call mark_message_read(), which sets
+// read_at, a genuinely separate column (0170's own header: "seen it"
+// vs "dealt with it"). Every handover a centre_manager/care_staff
+// receives would count toward that badge forever, with literally no
+// action in this track's own UI that could ever clear it -- confirmed
+// live during the baseline audit (a real careA session with 2 unread
+// handovers showed "2 awaiting your action", and there is no
+// Acknowledge control anywhere in HandoverDetailSheet to make that
+// number ever go back down). A badge that never clears is worse than
+// no badge -- it trains people to stop trusting every badge in the
+// app, not just this one. useHasUnreadMessages (read_at is null) has
+// no such problem: reading a handover via HandoverInboxSection's own
+// onOpenMessage already calls markRead, so the dot clears correctly,
+// same as it always has. Only this track's own badge is affected --
+// useMessagesAwaitingActionCount stays exactly as it is everywhere
+// else (principal, teacher, clinician, sna), and no message semantics
+// changed.
 export function CentreSidebar() {
   const pathname = usePathname();
   const userId = useCurrentUserId();
-  const messagesAwaitingCount = useMessagesAwaitingActionCount(userId);
   const hasUnreadMessages = useHasUnreadMessages(userId);
 
   return (
@@ -55,16 +71,11 @@ export function CentreSidebar() {
             >
               <span className="relative flex">
                 <Icon aria-hidden size={20} strokeWidth={2} />
-                {tab.key === "messages" && (
-                  <>
-                    <CountBadge count={messagesAwaitingCount} size="small" />
-                    {hasUnreadMessages && (
-                      <span
-                        aria-label="New messages"
-                        className="absolute -left-1 -top-1 h-2 w-2 rounded-full bg-brand-golden-brown shadow-sm"
-                      />
-                    )}
-                  </>
+                {tab.key === "messages" && hasUnreadMessages && (
+                  <span
+                    aria-label="New messages"
+                    className="absolute -left-1 -top-1 h-2 w-2 rounded-full bg-brand-golden-brown shadow-sm"
+                  />
                 )}
               </span>
               {tab.label}

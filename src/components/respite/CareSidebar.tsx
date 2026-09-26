@@ -3,9 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { BrandMark } from "@/components/ui/BrandMark";
-import { CountBadge } from "@/components/ui/CountBadge";
 import { useCurrentUserId } from "@/hooks/useCurrentUserId";
-import { useMessagesAwaitingActionCount } from "@/hooks/useMessagesAwaitingActionCount";
 import { useHasUnreadMessages } from "@/hooks/useHasUnreadMessages";
 import { CARE_NAV_TABS } from "./careNavTabs";
 
@@ -13,13 +11,13 @@ import { CARE_NAV_TABS } from "./careNavTabs";
 // exactly (same lg-only fixed rail, same active-pill styling), sized to
 // care_staff's own two destinations rather than copying centre's four.
 //
-// Baseline audit, 26 Sept 2026 -- Messages badge/dot added, same shape
-// as CentreSidebar's own (see that file's header for the full
-// reasoning): both hooks are already fully generic and self-scoped.
+// Baseline audit, 26 Sept 2026 -- unread dot only, deliberately no
+// numbered badge -- see CentreSidebar.tsx's own header for the full
+// reasoning (the "awaiting action" count tracks acknowledged_at, which
+// nothing in this track's own UI ever sets, so it could only ever grow).
 export function CareSidebar() {
   const pathname = usePathname();
   const userId = useCurrentUserId();
-  const messagesAwaitingCount = useMessagesAwaitingActionCount(userId);
   const hasUnreadMessages = useHasUnreadMessages(userId);
 
   return (
@@ -48,16 +46,11 @@ export function CareSidebar() {
             >
               <span className="relative flex">
                 <Icon aria-hidden size={20} strokeWidth={2} />
-                {tab.key === "messages" && (
-                  <>
-                    <CountBadge count={messagesAwaitingCount} size="small" />
-                    {hasUnreadMessages && (
-                      <span
-                        aria-label="New messages"
-                        className="absolute -left-1 -top-1 h-2 w-2 rounded-full bg-brand-golden-brown shadow-sm"
-                      />
-                    )}
-                  </>
+                {tab.key === "messages" && hasUnreadMessages && (
+                  <span
+                    aria-label="New messages"
+                    className="absolute -left-1 -top-1 h-2 w-2 rounded-full bg-brand-golden-brown shadow-sm"
+                  />
                 )}
               </span>
               {tab.label}
